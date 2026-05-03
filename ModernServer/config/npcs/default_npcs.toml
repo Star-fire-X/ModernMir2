@@ -1,0 +1,4 @@
+npcs = [
+  { id = "merchant_1", map_id = "0", name = "Trader", x = 313, y = 271, script = "merchant_1.txt", service = "sell_repair" },
+  { id = "guard_1", map_id = "3", name = "CastleGuard", x = 669, y = 338, script = "guard_1.txt", service = "none" }
+]

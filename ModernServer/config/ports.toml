@@ -1,0 +1,15 @@
+[login_gateway]
+address = "127.0.0.1"
+port = 5500
+
+[game_gateway]
+address = "127.0.0.1"
+port = 7000
+
+[client_v1_login_gateway]
+address = "127.0.0.1"
+port = 5600
+
+[client_v1_game_gateway]
+address = "127.0.0.1"
+port = 7100

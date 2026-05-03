@@ -1,0 +1,1362 @@
+{
+    "schema_version":  1,
+    "artifact":  "skill_phase0.magic_db",
+    "status":  "extracted",
+    "generated_at_local":  "2026-04-30T00:00:00+08:00",
+    "extraction":  {
+                       "source_path":  "Release\\Mir200\\Data.mdb",
+                       "source_sha256":  "2BB9385B12760A64211D016C2E427A4A87E946B3CAC494B150CA549F58337C39",
+                       "provider":  "Microsoft.Jet.OLEDB.4.0",
+                       "table":  "Magic",
+                       "order_by":  "ID",
+                       "row_count":  33,
+                       "required_fields":  [
+                                               "ID",
+                                               "Name",
+                                               "EffectType",
+                                               "Effect",
+                                               "Spell",
+                                               "Power",
+                                               "MaxPower",
+                                               "Job",
+                                               "NeedL1",
+                                               "NeedL2",
+                                               "NeedL3",
+                                               "L1Train",
+                                               "L2Train",
+                                               "L3Train",
+                                               "DELAY",
+                                               "DefSpell",
+                                               "DefPower",
+                                               "DefMaxPower",
+                                               "Descr"
+                                           ],
+                       "placeholder_sources_rejected_as_authority":  [
+                                                                         "ModernServer\\config\\magic\\imported_magic.toml",
+                                                                         "ModernServer\\config\\magic\\default_magic.toml"
+                                                                     ]
+                   },
+    "delphi_load_transform":  {
+                                  "evidence":  [
+                                                   "Source\\M2Server\\LocalDB.pas:274",
+                                                   "Source\\M2Server\\LocalDB.pas:291",
+                                                   "Source\\M2Server\\LocalDB.pas:308"
+                                               ],
+                                  "MagicId":  "ID",
+                                  "MagicName":  "Name",
+                                  "MinPower":  "Power",
+                                  "DelayTime":  "DELAY * 10",
+                                  "NeedLevel":  "NeedL1, NeedL2, NeedL3, NeedL3",
+                                  "MaxTrain":  "L1Train, L2Train, L3Train, L3Train",
+                                  "MaxTrainLevel":  3,
+                                  "DefMinPower":  "DefPower"
+                              },
+    "source_only_magic_ids":  [
+                                  {
+                                      "id":  34,
+                                      "reason":  "IsSwordSkill and SpellXY reference SWD_CROSSHIT, but Release Magic table has no row 34"
+                                  },
+                                  {
+                                      "id":  35,
+                                      "reason":  "SpellNow groups with 11, but Release Magic table has no row 35"
+                                  },
+                                  {
+                                      "id":  36,
+                                      "reason":  "SpellNow bujuk group references 36, but Release Magic table has no row 36"
+                                  },
+                                  {
+                                      "id":  37,
+                                      "reason":  "SpellNow groups with 8, but Release Magic table has no row 37"
+                                  }
+                              ],
+    "rows":  [
+                 {
+                     "ID":  1,
+                     "Name":  "火球术",
+                     "EffectType":  1,
+                     "Effect":  1,
+                     "Spell":  4,
+                     "Power":  8,
+                     "MaxPower":  8,
+                     "Job":  0,
+                     "NeedL1":  7,
+                     "NeedL2":  11,
+                     "NeedL3":  16,
+                     "L1Train":  500,
+                     "L2Train":  1500,
+                     "L3Train":  3000,
+                     "DELAY":  60,
+                     "DefSpell":  1,
+                     "DefPower":  2,
+                     "DefMaxPower":  2,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  600,
+                                      "delphi_throttle_delay_ms":  1400,
+                                      "need_level":  [
+                                                         7,
+                                                         11,
+                                                         16,
+                                                         16
+                                                     ],
+                                      "max_train":  [
+                                                        500,
+                                                        1500,
+                                                        3000,
+                                                        3000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  2,
+                     "Name":  "治愈术",
+                     "EffectType":  2,
+                     "Effect":  2,
+                     "Spell":  7,
+                     "Power":  14,
+                     "MaxPower":  20,
+                     "Job":  0,
+                     "NeedL1":  7,
+                     "NeedL2":  11,
+                     "NeedL3":  16,
+                     "L1Train":  500,
+                     "L2Train":  1500,
+                     "L3Train":  3000,
+                     "DELAY":  40,
+                     "DefSpell":  0,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  400,
+                                      "delphi_throttle_delay_ms":  1200,
+                                      "need_level":  [
+                                                         7,
+                                                         11,
+                                                         16,
+                                                         16
+                                                     ],
+                                      "max_train":  [
+                                                        500,
+                                                        1500,
+                                                        3000,
+                                                        3000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  3,
+                     "Name":  "基本剑术",
+                     "EffectType":  0,
+                     "Effect":  0,
+                     "Spell":  0,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  7,
+                     "NeedL2":  11,
+                     "NeedL3":  16,
+                     "L1Train":  1000,
+                     "L2Train":  4000,
+                     "L3Train":  8000,
+                     "DELAY":  0,
+                     "DefSpell":  0,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  0,
+                                      "delphi_throttle_delay_ms":  800,
+                                      "need_level":  [
+                                                         7,
+                                                         11,
+                                                         16,
+                                                         16
+                                                     ],
+                                      "max_train":  [
+                                                        1000,
+                                                        4000,
+                                                        8000,
+                                                        8000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  true
+                                  }
+                 },
+                 {
+                     "ID":  4,
+                     "Name":  "精神力战法",
+                     "EffectType":  0,
+                     "Effect":  0,
+                     "Spell":  0,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  9,
+                     "NeedL2":  13,
+                     "NeedL3":  19,
+                     "L1Train":  1000,
+                     "L2Train":  4000,
+                     "L3Train":  8000,
+                     "DELAY":  0,
+                     "DefSpell":  0,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  0,
+                                      "delphi_throttle_delay_ms":  800,
+                                      "need_level":  [
+                                                         9,
+                                                         13,
+                                                         19,
+                                                         19
+                                                     ],
+                                      "max_train":  [
+                                                        1000,
+                                                        4000,
+                                                        8000,
+                                                        8000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  true
+                                  }
+                 },
+                 {
+                     "ID":  5,
+                     "Name":  "大火球",
+                     "EffectType":  1,
+                     "Effect":  3,
+                     "Spell":  3,
+                     "Power":  6,
+                     "MaxPower":  6,
+                     "Job":  0,
+                     "NeedL1":  19,
+                     "NeedL2":  23,
+                     "NeedL3":  25,
+                     "L1Train":  8000,
+                     "L2Train":  14000,
+                     "L3Train":  25000,
+                     "DELAY":  60,
+                     "DefSpell":  5,
+                     "DefPower":  10,
+                     "DefMaxPower":  10,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  600,
+                                      "delphi_throttle_delay_ms":  1400,
+                                      "need_level":  [
+                                                         19,
+                                                         23,
+                                                         25,
+                                                         25
+                                                     ],
+                                      "max_train":  [
+                                                        8000,
+                                                        14000,
+                                                        25000,
+                                                        25000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  6,
+                     "Name":  "施毒术",
+                     "EffectType":  2,
+                     "Effect":  4,
+                     "Spell":  4,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  14,
+                     "NeedL2":  17,
+                     "NeedL3":  20,
+                     "L1Train":  1000,
+                     "L2Train":  2000,
+                     "L3Train":  4000,
+                     "DELAY":  40,
+                     "DefSpell":  0,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  400,
+                                      "delphi_throttle_delay_ms":  1200,
+                                      "need_level":  [
+                                                         14,
+                                                         17,
+                                                         20,
+                                                         20
+                                                     ],
+                                      "max_train":  [
+                                                        1000,
+                                                        2000,
+                                                        4000,
+                                                        4000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  7,
+                     "Name":  "攻杀剑术",
+                     "EffectType":  0,
+                     "Effect":  5,
+                     "Spell":  0,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  19,
+                     "NeedL2":  22,
+                     "NeedL3":  24,
+                     "L1Train":  4000,
+                     "L2Train":  8000,
+                     "L3Train":  16000,
+                     "DELAY":  0,
+                     "DefSpell":  0,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  0,
+                                      "delphi_throttle_delay_ms":  800,
+                                      "need_level":  [
+                                                         19,
+                                                         22,
+                                                         24,
+                                                         24
+                                                     ],
+                                      "max_train":  [
+                                                        4000,
+                                                        8000,
+                                                        16000,
+                                                        16000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  true
+                                  }
+                 },
+                 {
+                     "ID":  8,
+                     "Name":  "抗拒火环",
+                     "EffectType":  4,
+                     "Effect":  6,
+                     "Spell":  8,
+                     "Power":  1,
+                     "MaxPower":  1,
+                     "Job":  0,
+                     "NeedL1":  12,
+                     "NeedL2":  15,
+                     "NeedL3":  19,
+                     "L1Train":  800,
+                     "L2Train":  2400,
+                     "L3Train":  4000,
+                     "DELAY":  30,
+                     "DefSpell":  0,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  300,
+                                      "delphi_throttle_delay_ms":  1100,
+                                      "need_level":  [
+                                                         12,
+                                                         15,
+                                                         19,
+                                                         19
+                                                     ],
+                                      "max_train":  [
+                                                        800,
+                                                        2400,
+                                                        4000,
+                                                        4000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  9,
+                     "Name":  "地狱火",
+                     "EffectType":  5,
+                     "Effect":  7,
+                     "Spell":  10,
+                     "Power":  14,
+                     "MaxPower":  14,
+                     "Job":  0,
+                     "NeedL1":  16,
+                     "NeedL2":  21,
+                     "NeedL3":  26,
+                     "L1Train":  1000,
+                     "L2Train":  4000,
+                     "L3Train":  8000,
+                     "DELAY":  60,
+                     "DefSpell":  10,
+                     "DefPower":  6,
+                     "DefMaxPower":  6,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  600,
+                                      "delphi_throttle_delay_ms":  1400,
+                                      "need_level":  [
+                                                         16,
+                                                         21,
+                                                         26,
+                                                         26
+                                                     ],
+                                      "max_train":  [
+                                                        1000,
+                                                        4000,
+                                                        8000,
+                                                        8000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  10,
+                     "Name":  "疾光电影",
+                     "EffectType":  6,
+                     "Effect":  8,
+                     "Spell":  30,
+                     "Power":  12,
+                     "MaxPower":  12,
+                     "Job":  0,
+                     "NeedL1":  26,
+                     "NeedL2":  29,
+                     "NeedL3":  32,
+                     "L1Train":  3000,
+                     "L2Train":  6000,
+                     "L3Train":  12000,
+                     "DELAY":  100,
+                     "DefSpell":  30,
+                     "DefPower":  12,
+                     "DefMaxPower":  12,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  1000,
+                                      "delphi_throttle_delay_ms":  1800,
+                                      "need_level":  [
+                                                         26,
+                                                         29,
+                                                         32,
+                                                         32
+                                                     ],
+                                      "max_train":  [
+                                                        3000,
+                                                        6000,
+                                                        12000,
+                                                        12000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  11,
+                     "Name":  "雷电术",
+                     "EffectType":  7,
+                     "Effect":  9,
+                     "Spell":  12,
+                     "Power":  14,
+                     "MaxPower":  30,
+                     "Job":  0,
+                     "NeedL1":  17,
+                     "NeedL2":  20,
+                     "NeedL3":  23,
+                     "L1Train":  1200,
+                     "L2Train":  3000,
+                     "L3Train":  5000,
+                     "DELAY":  100,
+                     "DefSpell":  6,
+                     "DefPower":  10,
+                     "DefMaxPower":  12,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  1000,
+                                      "delphi_throttle_delay_ms":  1800,
+                                      "need_level":  [
+                                                         17,
+                                                         20,
+                                                         23,
+                                                         23
+                                                     ],
+                                      "max_train":  [
+                                                        1200,
+                                                        3000,
+                                                        5000,
+                                                        5000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  12,
+                     "Name":  "刺杀剑术",
+                     "EffectType":  0,
+                     "Effect":  13,
+                     "Spell":  0,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  25,
+                     "NeedL2":  27,
+                     "NeedL3":  29,
+                     "L1Train":  6000,
+                     "L2Train":  12000,
+                     "L3Train":  18000,
+                     "DELAY":  0,
+                     "DefSpell":  0,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  0,
+                                      "delphi_throttle_delay_ms":  800,
+                                      "need_level":  [
+                                                         25,
+                                                         27,
+                                                         29,
+                                                         29
+                                                     ],
+                                      "max_train":  [
+                                                        6000,
+                                                        12000,
+                                                        18000,
+                                                        18000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  true
+                                  }
+                 },
+                 {
+                     "ID":  13,
+                     "Name":  "灵魂火符",
+                     "EffectType":  8,
+                     "Effect":  10,
+                     "Spell":  5,
+                     "Power":  8,
+                     "MaxPower":  10,
+                     "Job":  0,
+                     "NeedL1":  18,
+                     "NeedL2":  21,
+                     "NeedL3":  24,
+                     "L1Train":  2000,
+                     "L2Train":  4000,
+                     "L3Train":  6000,
+                     "DELAY":  60,
+                     "DefSpell":  2,
+                     "DefPower":  3,
+                     "DefMaxPower":  3,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  600,
+                                      "delphi_throttle_delay_ms":  1400,
+                                      "need_level":  [
+                                                         18,
+                                                         21,
+                                                         24,
+                                                         24
+                                                     ],
+                                      "max_train":  [
+                                                        2000,
+                                                        4000,
+                                                        6000,
+                                                        6000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  14,
+                     "Name":  "幽灵盾",
+                     "EffectType":  9,
+                     "Effect":  11,
+                     "Spell":  15,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  22,
+                     "NeedL2":  24,
+                     "NeedL3":  26,
+                     "L1Train":  5000,
+                     "L2Train":  10000,
+                     "L3Train":  15000,
+                     "DELAY":  40,
+                     "DefSpell":  0,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  400,
+                                      "delphi_throttle_delay_ms":  1200,
+                                      "need_level":  [
+                                                         22,
+                                                         24,
+                                                         26,
+                                                         26
+                                                     ],
+                                      "max_train":  [
+                                                        5000,
+                                                        10000,
+                                                        15000,
+                                                        15000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  15,
+                     "Name":  "神圣战甲术",
+                     "EffectType":  9,
+                     "Effect":  12,
+                     "Spell":  15,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  25,
+                     "NeedL2":  27,
+                     "NeedL3":  29,
+                     "L1Train":  5000,
+                     "L2Train":  10000,
+                     "L3Train":  15000,
+                     "DELAY":  40,
+                     "DefSpell":  0,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  400,
+                                      "delphi_throttle_delay_ms":  1200,
+                                      "need_level":  [
+                                                         25,
+                                                         27,
+                                                         29,
+                                                         29
+                                                     ],
+                                      "max_train":  [
+                                                        5000,
+                                                        10000,
+                                                        15000,
+                                                        15000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  16,
+                     "Name":  "困魔咒",
+                     "EffectType":  10,
+                     "Effect":  14,
+                     "Spell":  10,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  28,
+                     "NeedL2":  30,
+                     "NeedL3":  32,
+                     "L1Train":  3000,
+                     "L2Train":  6000,
+                     "L3Train":  12000,
+                     "DELAY":  50,
+                     "DefSpell":  5,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  500,
+                                      "delphi_throttle_delay_ms":  1300,
+                                      "need_level":  [
+                                                         28,
+                                                         30,
+                                                         32,
+                                                         32
+                                                     ],
+                                      "max_train":  [
+                                                        3000,
+                                                        6000,
+                                                        12000,
+                                                        12000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  17,
+                     "Name":  "召唤骷髅",
+                     "EffectType":  4,
+                     "Effect":  15,
+                     "Spell":  16,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  19,
+                     "NeedL2":  23,
+                     "NeedL3":  26,
+                     "L1Train":  2000,
+                     "L2Train":  4000,
+                     "L3Train":  8000,
+                     "DELAY":  50,
+                     "DefSpell":  8,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  500,
+                                      "delphi_throttle_delay_ms":  1300,
+                                      "need_level":  [
+                                                         19,
+                                                         23,
+                                                         26,
+                                                         26
+                                                     ],
+                                      "max_train":  [
+                                                        2000,
+                                                        4000,
+                                                        8000,
+                                                        8000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  18,
+                     "Name":  "隐身术",
+                     "EffectType":  4,
+                     "Effect":  16,
+                     "Spell":  5,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  20,
+                     "NeedL2":  23,
+                     "NeedL3":  26,
+                     "L1Train":  3000,
+                     "L2Train":  6000,
+                     "L3Train":  9000,
+                     "DELAY":  50,
+                     "DefSpell":  0,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  500,
+                                      "delphi_throttle_delay_ms":  1300,
+                                      "need_level":  [
+                                                         20,
+                                                         23,
+                                                         26,
+                                                         26
+                                                     ],
+                                      "max_train":  [
+                                                        3000,
+                                                        6000,
+                                                        9000,
+                                                        9000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  19,
+                     "Name":  "集体隐身术",
+                     "EffectType":  8,
+                     "Effect":  17,
+                     "Spell":  10,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  21,
+                     "NeedL2":  25,
+                     "NeedL3":  29,
+                     "L1Train":  2000,
+                     "L2Train":  4000,
+                     "L3Train":  8000,
+                     "DELAY":  50,
+                     "DefSpell":  0,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  500,
+                                      "delphi_throttle_delay_ms":  1300,
+                                      "need_level":  [
+                                                         21,
+                                                         25,
+                                                         29,
+                                                         29
+                                                     ],
+                                      "max_train":  [
+                                                        2000,
+                                                        4000,
+                                                        8000,
+                                                        8000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  20,
+                     "Name":  "诱惑之光",
+                     "EffectType":  2,
+                     "Effect":  18,
+                     "Spell":  3,
+                     "Power":  3,
+                     "MaxPower":  3,
+                     "Job":  0,
+                     "NeedL1":  13,
+                     "NeedL2":  18,
+                     "NeedL3":  24,
+                     "L1Train":  1000,
+                     "L2Train":  2000,
+                     "L3Train":  4000,
+                     "DELAY":  60,
+                     "DefSpell":  3,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  600,
+                                      "delphi_throttle_delay_ms":  1400,
+                                      "need_level":  [
+                                                         13,
+                                                         18,
+                                                         24,
+                                                         24
+                                                     ],
+                                      "max_train":  [
+                                                        1000,
+                                                        2000,
+                                                        4000,
+                                                        4000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  21,
+                     "Name":  "瞬息移动",
+                     "EffectType":  4,
+                     "Effect":  19,
+                     "Spell":  10,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  19,
+                     "NeedL2":  22,
+                     "NeedL3":  25,
+                     "L1Train":  1000,
+                     "L2Train":  2000,
+                     "L3Train":  4000,
+                     "DELAY":  50,
+                     "DefSpell":  8,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  500,
+                                      "delphi_throttle_delay_ms":  1300,
+                                      "need_level":  [
+                                                         19,
+                                                         22,
+                                                         25,
+                                                         25
+                                                     ],
+                                      "max_train":  [
+                                                        1000,
+                                                        2000,
+                                                        4000,
+                                                        4000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  22,
+                     "Name":  "火墙",
+                     "EffectType":  4,
+                     "Effect":  20,
+                     "Spell":  20,
+                     "Power":  3,
+                     "MaxPower":  3,
+                     "Job":  0,
+                     "NeedL1":  24,
+                     "NeedL2":  29,
+                     "NeedL3":  33,
+                     "L1Train":  4000,
+                     "L2Train":  12000,
+                     "L3Train":  24000,
+                     "DELAY":  120,
+                     "DefSpell":  25,
+                     "DefPower":  3,
+                     "DefMaxPower":  3,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  1200,
+                                      "delphi_throttle_delay_ms":  2000,
+                                      "need_level":  [
+                                                         24,
+                                                         29,
+                                                         33,
+                                                         33
+                                                     ],
+                                      "max_train":  [
+                                                        4000,
+                                                        12000,
+                                                        24000,
+                                                        24000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  23,
+                     "Name":  "爆裂火焰",
+                     "EffectType":  2,
+                     "Effect":  21,
+                     "Spell":  15,
+                     "Power":  8,
+                     "MaxPower":  8,
+                     "Job":  0,
+                     "NeedL1":  22,
+                     "NeedL2":  27,
+                     "NeedL3":  31,
+                     "L1Train":  3000,
+                     "L2Train":  6000,
+                     "L3Train":  18000,
+                     "DELAY":  60,
+                     "DefSpell":  10,
+                     "DefPower":  6,
+                     "DefMaxPower":  6,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  600,
+                                      "delphi_throttle_delay_ms":  1400,
+                                      "need_level":  [
+                                                         22,
+                                                         27,
+                                                         31,
+                                                         31
+                                                     ],
+                                      "max_train":  [
+                                                        3000,
+                                                        6000,
+                                                        18000,
+                                                        18000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  24,
+                     "Name":  "地狱雷光",
+                     "EffectType":  4,
+                     "Effect":  22,
+                     "Spell":  35,
+                     "Power":  10,
+                     "MaxPower":  30,
+                     "Job":  0,
+                     "NeedL1":  30,
+                     "NeedL2":  32,
+                     "NeedL3":  34,
+                     "L1Train":  4000,
+                     "L2Train":  8000,
+                     "L3Train":  12000,
+                     "DELAY":  60,
+                     "DefSpell":  20,
+                     "DefPower":  10,
+                     "DefMaxPower":  30,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  600,
+                                      "delphi_throttle_delay_ms":  1400,
+                                      "need_level":  [
+                                                         30,
+                                                         32,
+                                                         34,
+                                                         34
+                                                     ],
+                                      "max_train":  [
+                                                        4000,
+                                                        8000,
+                                                        12000,
+                                                        12000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  25,
+                     "Name":  "半月弯刀",
+                     "EffectType":  0,
+                     "Effect":  23,
+                     "Spell":  0,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  28,
+                     "NeedL2":  31,
+                     "NeedL3":  34,
+                     "L1Train":  8000,
+                     "L2Train":  16000,
+                     "L3Train":  24000,
+                     "DELAY":  0,
+                     "DefSpell":  3,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  0,
+                                      "delphi_throttle_delay_ms":  800,
+                                      "need_level":  [
+                                                         28,
+                                                         31,
+                                                         34,
+                                                         34
+                                                     ],
+                                      "max_train":  [
+                                                        8000,
+                                                        16000,
+                                                        24000,
+                                                        24000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  true
+                                  }
+                 },
+                 {
+                     "ID":  26,
+                     "Name":  "烈火剑法",
+                     "EffectType":  0,
+                     "Effect":  24,
+                     "Spell":  0,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  35,
+                     "NeedL2":  37,
+                     "NeedL3":  40,
+                     "L1Train":  2000,
+                     "L2Train":  4000,
+                     "L3Train":  6000,
+                     "DELAY":  0,
+                     "DefSpell":  7,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  0,
+                                      "delphi_throttle_delay_ms":  800,
+                                      "need_level":  [
+                                                         35,
+                                                         37,
+                                                         40,
+                                                         40
+                                                     ],
+                                      "max_train":  [
+                                                        2000,
+                                                        4000,
+                                                        6000,
+                                                        6000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  true
+                                  }
+                 },
+                 {
+                     "ID":  27,
+                     "Name":  "野蛮冲撞",
+                     "EffectType":  0,
+                     "Effect":  25,
+                     "Spell":  15,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  30,
+                     "NeedL2":  34,
+                     "NeedL3":  39,
+                     "L1Train":  3000,
+                     "L2Train":  6000,
+                     "L3Train":  9000,
+                     "DELAY":  0,
+                     "DefSpell":  0,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  0,
+                                      "delphi_throttle_delay_ms":  800,
+                                      "need_level":  [
+                                                         30,
+                                                         34,
+                                                         39,
+                                                         39
+                                                     ],
+                                      "max_train":  [
+                                                        3000,
+                                                        6000,
+                                                        9000,
+                                                        9000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  true
+                                  }
+                 },
+                 {
+                     "ID":  28,
+                     "Name":  "心灵启示",
+                     "EffectType":  2,
+                     "Effect":  26,
+                     "Spell":  16,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  26,
+                     "NeedL2":  30,
+                     "NeedL3":  35,
+                     "L1Train":  4000,
+                     "L2Train":  8000,
+                     "L3Train":  12000,
+                     "DELAY":  40,
+                     "DefSpell":  0,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  400,
+                                      "delphi_throttle_delay_ms":  1200,
+                                      "need_level":  [
+                                                         26,
+                                                         30,
+                                                         35,
+                                                         35
+                                                     ],
+                                      "max_train":  [
+                                                        4000,
+                                                        8000,
+                                                        12000,
+                                                        12000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  29,
+                     "Name":  "群体治愈术",
+                     "EffectType":  2,
+                     "Effect":  27,
+                     "Spell":  12,
+                     "Power":  10,
+                     "MaxPower":  10,
+                     "Job":  0,
+                     "NeedL1":  33,
+                     "NeedL2":  35,
+                     "NeedL3":  38,
+                     "L1Train":  4000,
+                     "L2Train":  8000,
+                     "L3Train":  12000,
+                     "DELAY":  40,
+                     "DefSpell":  30,
+                     "DefPower":  4,
+                     "DefMaxPower":  4,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  400,
+                                      "delphi_throttle_delay_ms":  1200,
+                                      "need_level":  [
+                                                         33,
+                                                         35,
+                                                         38,
+                                                         38
+                                                     ],
+                                      "max_train":  [
+                                                        4000,
+                                                        8000,
+                                                        12000,
+                                                        12000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  30,
+                     "Name":  "召唤神兽",
+                     "EffectType":  4,
+                     "Effect":  28,
+                     "Spell":  16,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  35,
+                     "NeedL2":  37,
+                     "NeedL3":  40,
+                     "L1Train":  2000,
+                     "L2Train":  4000,
+                     "L3Train":  8000,
+                     "DELAY":  120,
+                     "DefSpell":  24,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  1200,
+                                      "delphi_throttle_delay_ms":  2000,
+                                      "need_level":  [
+                                                         35,
+                                                         37,
+                                                         40,
+                                                         40
+                                                     ],
+                                      "max_train":  [
+                                                        2000,
+                                                        4000,
+                                                        8000,
+                                                        8000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  31,
+                     "Name":  "魔法盾",
+                     "EffectType":  4,
+                     "Effect":  29,
+                     "Spell":  20,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  31,
+                     "NeedL2":  34,
+                     "NeedL3":  38,
+                     "L1Train":  4000,
+                     "L2Train":  8000,
+                     "L3Train":  12000,
+                     "DELAY":  0,
+                     "DefSpell":  30,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  0,
+                                      "delphi_throttle_delay_ms":  800,
+                                      "need_level":  [
+                                                         31,
+                                                         34,
+                                                         38,
+                                                         38
+                                                     ],
+                                      "max_train":  [
+                                                        4000,
+                                                        8000,
+                                                        12000,
+                                                        12000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  32,
+                     "Name":  "圣言术",
+                     "EffectType":  2,
+                     "Effect":  30,
+                     "Spell":  50,
+                     "Power":  0,
+                     "MaxPower":  0,
+                     "Job":  0,
+                     "NeedL1":  32,
+                     "NeedL2":  35,
+                     "NeedL3":  39,
+                     "L1Train":  4000,
+                     "L2Train":  8000,
+                     "L3Train":  12000,
+                     "DELAY":  120,
+                     "DefSpell":  40,
+                     "DefPower":  0,
+                     "DefMaxPower":  0,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  1200,
+                                      "delphi_throttle_delay_ms":  2000,
+                                      "need_level":  [
+                                                         32,
+                                                         35,
+                                                         39,
+                                                         39
+                                                     ],
+                                      "max_train":  [
+                                                        4000,
+                                                        8000,
+                                                        12000,
+                                                        12000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 },
+                 {
+                     "ID":  33,
+                     "Name":  "冰咆哮",
+                     "EffectType":  2,
+                     "Effect":  31,
+                     "Spell":  12,
+                     "Power":  12,
+                     "MaxPower":  14,
+                     "Job":  0,
+                     "NeedL1":  35,
+                     "NeedL2":  37,
+                     "NeedL3":  40,
+                     "L1Train":  4000,
+                     "L2Train":  8000,
+                     "L3Train":  12000,
+                     "DELAY":  60,
+                     "DefSpell":  30,
+                     "DefPower":  14,
+                     "DefMaxPower":  14,
+                     "Descr":  "",
+                     "computed":  {
+                                      "delphi_delay_time_ms":  600,
+                                      "delphi_throttle_delay_ms":  1400,
+                                      "need_level":  [
+                                                         35,
+                                                         37,
+                                                         40,
+                                                         40
+                                                     ],
+                                      "max_train":  [
+                                                        4000,
+                                                        8000,
+                                                        12000,
+                                                        12000
+                                                    ],
+                                      "max_train_level":  3,
+                                      "is_sword_skill_from_source":  false
+                                  }
+                 }
+             ]
+}
+

@@ -1,0 +1,130 @@
+CREATE TABLE IF NOT EXISTS accounts (
+  account_id TEXT PRIMARY KEY,
+  password TEXT NOT NULL DEFAULT '',
+  display_name TEXT NOT NULL DEFAULT '',
+  user_name TEXT NOT NULL DEFAULT '',
+  ss_no TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  quiz TEXT NOT NULL DEFAULT '',
+  answer TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  quiz2 TEXT NOT NULL DEFAULT '',
+  answer2 TEXT NOT NULL DEFAULT '',
+  birthday TEXT NOT NULL DEFAULT '',
+  mobile_phone TEXT NOT NULL DEFAULT '',
+  memo1 TEXT NOT NULL DEFAULT '',
+  memo2 TEXT NOT NULL DEFAULT '',
+  server_index INTEGER NOT NULL DEFAULT 0,
+  passwd_fail INTEGER NOT NULL DEFAULT 0,
+  passwd_fail_time_ms INTEGER NOT NULL DEFAULT 0,
+  is_banned INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS characters (
+  account_id TEXT NOT NULL,
+  character_name TEXT NOT NULL,
+  map_id TEXT NOT NULL,
+  x INTEGER NOT NULL,
+  y INTEGER NOT NULL,
+  dir INTEGER NOT NULL DEFAULT 0,
+  light INTEGER NOT NULL DEFAULT 0,
+  job INTEGER NOT NULL DEFAULT 0,
+  sex INTEGER NOT NULL DEFAULT 0,
+  hair INTEGER NOT NULL DEFAULT 0,
+  gold INTEGER NOT NULL DEFAULT 0,
+  feature INTEGER NOT NULL DEFAULT 0,
+  status INTEGER NOT NULL DEFAULT 0,
+  level INTEGER NOT NULL,
+  hp INTEGER NOT NULL,
+  mp INTEGER NOT NULL,
+  max_hp INTEGER NOT NULL DEFAULT 15,
+  max_mp INTEGER NOT NULL DEFAULT 15,
+  ac INTEGER NOT NULL DEFAULT 0,
+  mac INTEGER NOT NULL DEFAULT 0,
+  dc INTEGER NOT NULL DEFAULT 0,
+  mc INTEGER NOT NULL DEFAULT 0,
+  sc INTEGER NOT NULL DEFAULT 0,
+  exp INTEGER NOT NULL DEFAULT 0,
+  max_exp INTEGER NOT NULL DEFAULT 100,
+  weight INTEGER NOT NULL DEFAULT 0,
+  max_weight INTEGER NOT NULL DEFAULT 30,
+  wear_weight INTEGER NOT NULL DEFAULT 0,
+  max_wear_weight INTEGER NOT NULL DEFAULT 100,
+  hand_weight INTEGER NOT NULL DEFAULT 0,
+  max_hand_weight INTEGER NOT NULL DEFAULT 100,
+  equipped_blob BLOB NOT NULL,
+  bag_blob BLOB NOT NULL,
+  storage_blob BLOB NOT NULL,
+  magic_blob BLOB NOT NULL,
+  guild_name TEXT NOT NULL DEFAULT '',
+  guild_title TEXT NOT NULL DEFAULT '',
+  attack_mode INTEGER NOT NULL DEFAULT 1,
+  pk_point INTEGER NOT NULL DEFAULT 0,
+  death_time_ms INTEGER NOT NULL DEFAULT 0,
+  quest_blob BLOB NOT NULL DEFAULT X'',
+  quest_open_blob BLOB NOT NULL DEFAULT X'',
+  quest_unit_blob BLOB NOT NULL DEFAULT X'',
+  script_param_blob BLOB NOT NULL DEFAULT X'',
+  daily_quest INTEGER NOT NULL DEFAULT 0,
+  slave_blob BLOB NOT NULL DEFAULT X'',
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (account_id, character_name),
+  FOREIGN KEY (account_id) REFERENCES accounts(account_id)
+);
+
+CREATE TABLE IF NOT EXISTS guilds (
+  guild_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  guild_name TEXT NOT NULL UNIQUE,
+  payload_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS castle_state (
+  castle_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  castle_name TEXT NOT NULL UNIQUE,
+  payload_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS merchant_state (
+  merchant_key TEXT PRIMARY KEY,
+  npc_id TEXT NOT NULL DEFAULT '',
+  map_id TEXT NOT NULL DEFAULT '',
+  goods_blob BLOB NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS merchant_prices (
+  merchant_key TEXT NOT NULL,
+  item_id INTEGER NOT NULL,
+  sell_price INTEGER NOT NULL,
+  PRIMARY KEY (merchant_key, item_id),
+  FOREIGN KEY (merchant_key) REFERENCES merchant_state(merchant_key) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS login_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category TEXT NOT NULL,
+  message TEXT NOT NULL,
+  session_key TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS legacy_import_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_file TEXT NOT NULL,
+  record_index INTEGER NOT NULL,
+  account_id TEXT NOT NULL DEFAULT '',
+  character_name TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL,
+  message TEXT NOT NULL DEFAULT '',
+  raw_record BLOB NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

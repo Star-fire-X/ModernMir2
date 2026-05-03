@@ -1,0 +1,6 @@
+tick_ms = 20
+player_budget_ms = 30
+monster_budget_ms = 30
+spawn_budget_ms = 30
+npc_budget_ms = 5
+net_flush_budget_ms = 30

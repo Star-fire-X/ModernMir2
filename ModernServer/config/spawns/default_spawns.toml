@@ -1,0 +1,5 @@
+spawns = [
+  { map_id = "0", actor_type = "monster", name = "Chicken", x = 318, y = 244, respawn_ms = 30000 },
+  { map_id = "0", actor_type = "monster", name = "Deer", x = 300, y = 207, respawn_ms = 30000 },
+  { map_id = "3", actor_type = "monster", name = "GuardDummy", x = 669, y = 338, respawn_ms = 45000 }
+]

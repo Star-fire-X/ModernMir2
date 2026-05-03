@@ -1,0 +1,218 @@
+{
+    "schema_version":  1,
+    "artifact":  "skill_phase0.formula_cases",
+    "status":  "evidence_cases_not_runtime_tests",
+    "generated_at_local":  "2026-04-30T00:00:00+08:00",
+    "authority":  {
+                      "code_source":  "Source\\M2Server",
+                      "data_source":  "Release\\Mir200\\Data.mdb",
+                      "notes":  [
+                                    "Random(N) cases record explicit chosen random values; they do not implement RNG compatibility.",
+                                    "Delphi Round uses banker rounding under default Delphi/FPU behavior; C++ std::lround is not compatible."
+                                ]
+                  },
+    "cases":  [
+                  {
+                      "id":  "round_half_to_even_positive",
+                      "formula":  "Delphi Round",
+                      "source":  "Delphi RTL default Round semantics",
+                      "input":  {
+                                    "value":  2.5
+                                },
+                      "expected":  2,
+                      "compatibility_risk":  "std::lround/std::round would return 3"
+                  },
+                  {
+                      "id":  "round_half_to_even_odd_neighbor",
+                      "formula":  "Delphi Round",
+                      "source":  "Delphi RTL default Round semantics",
+                      "input":  {
+                                    "value":  3.5
+                                },
+                      "expected":  4,
+                      "compatibility_risk":  "tie goes to even integer"
+                  },
+                  {
+                      "id":  "round_half_to_even_negative",
+                      "formula":  "Delphi Round",
+                      "source":  "Delphi RTL default Round semantics",
+                      "input":  {
+                                    "value":  -2.5
+                                },
+                      "expected":  -2,
+                      "compatibility_risk":  "away-from-zero would return -3"
+                  },
+                  {
+                      "id":  "get_spell_point_level1",
+                      "formula":  "Round(Spell/(MaxTrainLevel+1)*(Level+1)) + DefSpell",
+                      "source":  "Source\\M2Server\\ObjBase.pas:7106",
+                      "input":  {
+                                    "Spell":  10,
+                                    "MaxTrainLevel":  3,
+                                    "Level":  1,
+                                    "DefSpell":  2
+                                },
+                      "expected":  7
+                  },
+                  {
+                      "id":  "mpow_excludes_max_power",
+                      "formula":  "MinPower + Random(MaxPower-MinPower)",
+                      "source":  "Source\\M2Server\\Magic.pas:55",
+                      "input":  {
+                                    "MinPower":  5,
+                                    "MaxPower":  9,
+                                    "Random_MaxMinusMin":  3
+                                },
+                      "expected":  8,
+                      "boundary":  "Maximum possible output is 8, not 9"
+                  },
+                  {
+                      "id":  "get_power_level1_random2",
+                      "formula":  "Round(pw/(MaxTrainLevel+1)*(Level+1)) + DefMinPower + Random(DefMaxPower-DefMinPower)",
+                      "source":  "Source\\M2Server\\Magic.pas:449",
+                      "input":  {
+                                    "pw":  10,
+                                    "MaxTrainLevel":  3,
+                                    "Level":  1,
+                                    "DefMinPower":  2,
+                                    "DefMaxPower":  5,
+                                    "Random_DefRange":  2
+                                },
+                      "expected":  9
+                  },
+                  {
+                      "id":  "get_power13_level1",
+                      "formula":  "Round(pw/3 + (pw-pw/3)/(MaxTrainLevel+1)*(Level+1) + DefMinPower + Random(DefMaxPower-DefMinPower))",
+                      "source":  "Source\\M2Server\\Magic.pas:454",
+                      "input":  {
+                                    "pw":  30,
+                                    "MaxTrainLevel":  3,
+                                    "Level":  1,
+                                    "DefMinPower":  0,
+                                    "DefMaxPower":  1,
+                                    "Random_DefRange":  0
+                                },
+                      "expected":  20
+                  },
+                  {
+                      "id":  "get_attack_power_luck0_random3",
+                      "formula":  "damage + Random(ranval+1)",
+                      "source":  "Source\\M2Server\\ObjBase.pas:5236",
+                      "input":  {
+                                    "damage":  10,
+                                    "ranval":  5,
+                                    "Luck":  0,
+                                    "Random_RanvalPlusOne":  3
+                                },
+                      "expected":  13,
+                      "random_call_order":  [
+                                                "Random(ranval+1)"
+                                            ]
+                  },
+                  {
+                      "id":  "get_attack_power_positive_luck_maxhit",
+                      "formula":  "if Random(10-min(9,Luck))=0 then damage+ranval else damage+Random(ranval+1)",
+                      "source":  "Source\\M2Server\\ObjBase.pas:5236",
+                      "input":  {
+                                    "damage":  10,
+                                    "ranval":  5,
+                                    "Luck":  2,
+                                    "Random_LuckGate":  0
+                                },
+                      "expected":  15,
+                      "random_call_order":  [
+                                                "Random(8)"
+                                            ]
+                  },
+                  {
+                      "id":  "get_mag_struck_damage_no_shield",
+                      "formula":  "max(0, damage - (MACLo + Random(MACHi-MACLo+1)))",
+                      "source":  "Source\\M2Server\\ObjBase.pas:3452",
+                      "input":  {
+                                    "damage":  20,
+                                    "MACLo":  2,
+                                    "MACHi":  5,
+                                    "Random_MACRange":  2,
+                                    "LifeAttrib":  "normal",
+                                    "Bubble":  false
+                                },
+                      "expected":  16
+                  },
+                  {
+                      "id":  "get_mag_struck_damage_undead_bonus",
+                      "formula":  "max(0, damage - armor) + hiter.AddAbil.UndeadPower",
+                      "source":  "Source\\M2Server\\ObjBase.pas:3458",
+                      "input":  {
+                                    "damage":  20,
+                                    "MACLo":  2,
+                                    "MACHi":  5,
+                                    "Random_MACRange":  2,
+                                    "LifeAttrib":  "LA_UNDEAD",
+                                    "HiterUndeadPower":  3,
+                                    "Bubble":  false
+                                },
+                      "expected":  19
+                  },
+                  {
+                      "id":  "get_mag_struck_damage_magic_shield",
+                      "formula":  "Round(reduced_damage / 100 * (MagBubbleDefenceLevel + 2) * 8)",
+                      "source":  "Source\\M2Server\\ObjBase.pas:3461",
+                      "input":  {
+                                    "damage":  20,
+                                    "MACLo":  2,
+                                    "MACHi":  5,
+                                    "Random_MACRange":  2,
+                                    "Bubble":  true,
+                                    "MagBubbleDefenceLevel":  1
+                                },
+                      "expected":  4,
+                      "side_effect":  "DamageBubbleDefence reduces shield duration"
+                  },
+                  {
+                      "id":  "anti_magic_miss_boundary",
+                      "formula":  "target.AntiMagic \u003c= Random(10)",
+                      "source":  "Source\\M2Server\\Magic.pas:552",
+                      "input":  {
+                                    "AntiMagic":  1,
+                                    "Random10":  0
+                                },
+                      "expected":  false
+                  },
+                  {
+                      "id":  "anti_magic_hit_boundary",
+                      "formula":  "target.AntiMagic \u003c= Random(10)",
+                      "source":  "Source\\M2Server\\Magic.pas:552",
+                      "input":  {
+                                    "AntiMagic":  1,
+                                    "Random10":  1
+                                },
+                      "expected":  true
+                  },
+                  {
+                      "id":  "delay_time_load_and_spell_throttle",
+                      "formula":  "DelayTime=DB.DELAY*10; LatestSpellDelay=DelayTime+800",
+                      "source":  [
+                                     "Source\\M2Server\\LocalDB.pas:308",
+                                     "Source\\M2Server\\ObjBase.pas:9433"
+                                 ],
+                      "input":  {
+                                    "MagicDB_DELAY":  60
+                                },
+                      "expected":  {
+                                       "DelayTime":  600,
+                                       "LatestSpellDelay":  1400
+                                   }
+                  }
+              ],
+    "blocked_or_needs_capture":  [
+                                     {
+                                         "id":  "runtime_rng_seed_sequence",
+                                         "reason":  "Requires Delphi runtime capture to verify process-wide Random seed and exact call interleaving across messages."
+                                     },
+                                     {
+                                         "id":  "float_control_word",
+                                         "reason":  "Delphi Round cases are frozen from default semantics; native executable capture should verify the deployed FPU control word before replacing formulas."
+                                     }
+                                 ]
+}
+

@@ -1,0 +1,191 @@
+{
+    "schema_version":  1,
+    "artifact":  "skill_phase0.spell_sequence_cases",
+    "status":  "frozen_expectations_with_capture_gaps",
+    "generated_at_local":  "2026-04-30T00:00:00+08:00",
+    "shared_evidence":  [
+                            "Source\\M2Server\\ObjBase.pas:9418",
+                            "Source\\M2Server\\ObjBase.pas:9538",
+                            "Source\\M2Server\\ObjBase.pas:7113",
+                            "Source\\M2Server\\Magic.pas:537",
+                            "Source\\M2Server\\ObjBase.pas:12555"
+                        ],
+    "cases":  [
+                  {
+                      "id":  "fireball_success_magic1",
+                      "status":  "source_evidence_complete_runtime_timing_capture_recommended",
+                      "magic_id":  1,
+                      "preconditions":  [
+                                            "Magic learned",
+                                            "WAbil.MP \u003e= GetSpellPoint",
+                                            "GetTickCount-LatestSpellTime \u003e LatestSpellDelay or SpellTimeOverCount\u003c2",
+                                            "target alive and in path",
+                                            "AntiMagic \u003c= Random(10)",
+                                            "abs(target.CX-xx)\u003c=1 and abs(target.CY-yy)\u003c=1"
+                                        ],
+                      "expected_order":  [
+                                             {
+                                                 "step":  1,
+                                                 "event":  "SpellXY accepts request",
+                                                 "source":  "Source\\M2Server\\ObjBase.pas:9418",
+                                                 "note":  "normal magic sets LatestSpellDelay=pum.pDef.DelayTime+800"
+                                             },
+                                             {
+                                                 "step":  2,
+                                                 "event":  "DoSpell computes and deducts MP",
+                                                 "source":  "Source\\M2Server\\ObjBase.pas:7121",
+                                                 "note":  "DamageSpell and HealthSpellChanged happen before SpellNow"
+                                             },
+                                             {
+                                                 "step":  3,
+                                                 "event":  "RM_SPELL broadcast queued",
+                                                 "source":  "Source\\M2Server\\Magic.pas:537",
+                                                 "client":  "SM_SPELL before SM_MAGICFIRE"
+                                             },
+                                             {
+                                                 "step":  4,
+                                                 "event":  "RM_DELAYMAGIC queued",
+                                                 "source":  "Source\\M2Server\\Magic.pas:563",
+                                                 "delay_ms":  600
+                                             },
+                                             {
+                                                 "step":  5,
+                                                 "event":  "RM_MAGICFIRE broadcast",
+                                                 "source":  "Source\\M2Server\\Magic.pas:end_of_SpellNow",
+                                                 "client":  "SM_MAGICFIRE"
+                                             },
+                                             {
+                                                 "step":  6,
+                                                 "event":  "training exp sync if train=true and no level-up",
+                                                 "source":  "Source\\M2Server\\ObjBase.pas:9504",
+                                                 "delay_ms":  1000
+                                             }
+                                         ]
+                  },
+                  {
+                      "id":  "mp_insufficient",
+                      "status":  "source_evidence_complete",
+                      "preconditions":  [
+                                            "Normal magic request",
+                                            "GetSpellPoint \u003e 0",
+                                            "WAbil.MP \u003c spell"
+                                        ],
+                      "expected_order":  [
+                                             {
+                                                 "step":  1,
+                                                 "event":  "SpellXY enters normal branch and resolves pum",
+                                                 "source":  "Source\\M2Server\\ObjBase.pas:9428"
+                                             },
+                                             {
+                                                 "step":  2,
+                                                 "event":  "DoSpell exits before SpellNow",
+                                                 "source":  "Source\\M2Server\\ObjBase.pas:7123"
+                                             },
+                                             {
+                                                 "step":  3,
+                                                 "event":  "RM_MAGICFIRE_FAIL broadcast",
+                                                 "source":  "Source\\M2Server\\ObjBase.pas:9538",
+                                                 "client":  "SM_MAGICFIRE_FAIL"
+                                             }
+                                         ]
+                  },
+                  {
+                      "id":  "cooldown_too_fast",
+                      "status":  "source_evidence_complete",
+                      "preconditions":  [
+                                            "GetTickCount-LatestSpellTime \u003c= LatestSpellDelay repeatedly",
+                                            "SpellTimeOverCount \u003e= 2"
+                                        ],
+                      "expected_order":  [
+                                             {
+                                                 "step":  1,
+                                                 "event":  "SpellTimeOverCount increments",
+                                                 "source":  "Source\\M2Server\\ObjBase.pas:9418"
+                                             },
+                                             {
+                                                 "step":  2,
+                                                 "event":  "normal magic rejected; LatestSpellTime refreshed",
+                                                 "source":  "Source\\M2Server\\ObjBase.pas:9553"
+                                             },
+                                             {
+                                                 "step":  3,
+                                                 "event":  "SpeedHackTimerOverCount increments; \u003e8 sets EmergencyClose",
+                                                 "source":  "Source\\M2Server\\ObjBase.pas:9555"
+                                             }
+                                         ]
+                  },
+                  {
+                      "id":  "target_lost_or_invalid_after_spell_visual",
+                      "status":  "blocked_by_missing_runtime_capture",
+                      "preconditions":  [
+                                            "Target pointer nil/dead/out of hit path after request"
+                                        ],
+                      "known_source_facts":  [
+                                                 "SpellNow sends RM_SPELL before most per-magic target validation at Magic.pas:537",
+                                                 "failed DoSpell sends RM_MAGICFIRE_FAIL at ObjBase.pas:9538"
+                                             ],
+                      "capture_needed":  "Confirm whether client sees SM_SPELL then SM_MAGICFIRE_FAIL for each invalid target class and whether RM_MAGICFIRE is still emitted with nil target in edge branches."
+                  },
+                  {
+                      "id":  "heal_success_magic2",
+                      "status":  "source_evidence_complete_runtime_timing_capture_recommended",
+                      "magic_id":  2,
+                      "preconditions":  [
+                                            "MP enough",
+                                            "target nil means self target in SpellNow heal branch",
+                                            "target not undead unless intended branch"
+                                        ],
+                      "expected_order":  [
+                                             {
+                                                 "step":  1,
+                                                 "event":  "MP deducted",
+                                                 "source":  "Source\\M2Server\\ObjBase.pas:7121"
+                                             },
+                                             {
+                                                 "step":  2,
+                                                 "event":  "RM_SPELL broadcast",
+                                                 "source":  "Source\\M2Server\\Magic.pas:537"
+                                             },
+                                             {
+                                                 "step":  3,
+                                                 "event":  "RM_MAGHEALING queued",
+                                                 "source":  "Source\\M2Server\\Magic.pas:714",
+                                                 "delay_ms":  800
+                                             },
+                                             {
+                                                 "step":  4,
+                                                 "event":  "RM_MAGICFIRE broadcast if nofire=false",
+                                                 "source":  "Source\\M2Server\\Magic.pas:end_of_SpellNow"
+                                             }
+                                         ]
+                  },
+                  {
+                      "id":  "training_exp_sync",
+                      "status":  "source_evidence_complete",
+                      "preconditions":  [
+                                            "train=true",
+                                            "pum.Level \u003c 3",
+                                            "Abil.Level \u003e= pum.pDef.NeedLevel[pum.Level]"
+                                        ],
+                      "expected_order":  [
+                                             {
+                                                 "step":  1,
+                                                 "event":  "TrainSkill(pum, 1+Random(3))",
+                                                 "source":  "Source\\M2Server\\ObjBase.pas:9504",
+                                                 "random_boundary":  "Random(3)=0..2 so increment=1..3"
+                                             },
+                                             {
+                                                 "step":  2,
+                                                 "event":  "If CheckMagicLevelup false, RM_MAGIC_LVEXP delayed 1000ms",
+                                                 "source":  "Source\\M2Server\\ObjBase.pas:9505"
+                                             },
+                                             {
+                                                 "step":  3,
+                                                 "event":  "If level-up, UpdateDelayMsgCheckParam1 RM_MAGIC_LVEXP delayed 800ms",
+                                                 "source":  "Source\\M2Server\\ObjBase.pas:7342"
+                                             }
+                                         ]
+                  }
+              ]
+}
+

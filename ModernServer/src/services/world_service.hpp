@@ -1,0 +1,78 @@
+#pragma once
+
+#include <chrono>
+#include <atomic>
+#include <mutex>
+#include <memory>
+#include <string>
+#include <thread>
+#include <unordered_map>
+
+#include "core/module.hpp"
+#include "world/legacy_frame_driver.hpp"
+#include "world/logic_runtime.hpp"
+
+namespace mir2 {
+
+class WorldService : public Module {
+ public:
+  WorldService() = default;
+  ~WorldService() override {
+    stop();
+    join();
+  }
+
+  [[nodiscard]] std::string name() const override { return "world_service"; }
+  void start(HostContext& context) override;
+  void stop() override;
+  void join() override;
+  [[nodiscard]] std::unordered_map<std::string, std::string> snapshot() const override;
+
+ private:
+  struct PendingLoad {
+    std::uint64_t session_id{0};
+    std::string gateway{"game_gateway"};
+    std::string account_id{};
+    std::string character_name{};
+    std::int32_t certification{0};
+  };
+
+  struct Admission {
+    std::string account_id{};
+    std::string character_name{};
+    std::int32_t certification{0};
+  };
+
+  void run();
+  void request_castle_dialog_context_refresh();
+  [[nodiscard]] RuntimeDispatch process_ingress_batch(WorldIngressBatch& batch);
+  [[nodiscard]] RuntimeDispatch handle_session_event(const SessionEvent& event);
+  [[nodiscard]] RuntimeDispatch handle_logic_command(const LogicCommand& command);
+  [[nodiscard]] RuntimeDispatch handle_persist_result(const PersistResult& result);
+  void flush_dispatch(RuntimeDispatch dispatch);
+
+  HostContext* context_{nullptr};
+  std::shared_ptr<LocalBus::Endpoint> endpoint_{};
+  std::thread worker_{};
+  std::atomic_bool running_{false};
+  std::unique_ptr<LogicRuntime> runtime_{};
+  LegacyFrameDriver legacy_frame_driver_{};
+  mutable std::mutex legacy_frame_mutex_{};
+  LegacyFrameTrace legacy_frame_trace_{};
+  bool legacy_frame_seen_{false};
+  std::unordered_map<std::string, PendingLoad> pending_loads_{};
+  std::unordered_map<std::int32_t, Admission> admissions_{};
+  std::unordered_map<std::uint64_t, Admission> active_sessions_{};
+  std::unordered_map<std::string, std::uint64_t> active_accounts_{};
+  std::unordered_map<std::uint64_t, std::string> session_gateways_{};
+  CastleDialogContext castle_dialog_context_{};
+  GuildCastleSnapshot guild_castle_snapshot_{};
+  std::chrono::steady_clock::time_point next_castle_context_refresh_{};
+  std::uint64_t castle_context_refresh_count_{0};
+  std::uint64_t offline_guild_result_count_{0};
+  std::uint64_t offline_guild_route_count_{0};
+  std::uint64_t offline_guild_error_count_{0};
+  bool castle_context_refresh_in_flight_{false};
+};
+
+}  // namespace mir2

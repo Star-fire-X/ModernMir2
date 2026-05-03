@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "artifact": "skill_phase0.active_spell_cases",
+  "status": "phase3_source_evidence_with_minimal_cpp_smoke",
+  "generated_at_local": "2026-04-30T00:00:00+08:00",
+  "authority": {
+    "code": "Source\\M2Server",
+    "data": "Source\\Mir200\\Release\\Mir200\\Data.mdb Magic table via magic_db.json"
+  },
+  "enabled_magic_ids_phase3": [1, 2, 5, 8, 9, 10, 11, 23, 24, 28, 29, 31, 32, 33],
+  "source_only_not_enabled": [34, 35, 36, 37],
+  "shared_sequence": [
+    "cooldown check before MP deduction",
+    "DoSpell deducts GetSpellPoint and sends SM_HEALTHSPELLCHANGED when MP changes",
+    "RM_SPELL is broadcast before skill-specific effects",
+    "RM_MAGICFIRE is broadcast after the SpellNow branch",
+    "training runs only when the Delphi branch reports success"
+  ],
+  "cases": [
+    {
+      "id": "repulsion_magic8",
+      "magic_id": 8,
+      "source": ["Source\\M2Server\\Magic.pas:case 8,37", "Source\\M2Server\\ObjBase.pas:MagPushArround"],
+      "random_calls": ["Random(20) gate", "Random(2) push distance"],
+      "expected": {
+        "scope": "adjacent hostile targets around caster",
+        "success_condition": "caster level is greater than target level and gate passes and target can move",
+        "effect": "push target away from caster",
+        "training": "only if at least one target is moved"
+      }
+    },
+    {
+      "id": "hellfire_magic9",
+      "magic_id": 9,
+      "source": ["Source\\M2Server\\Magic.pas:case 9", "Source\\M2Server\\ObjBase.pas:MagPassThroughMagic"],
+      "random_calls": ["Random(10) AntiMagic per target", "MPow/GetPower/GetAttackPower"],
+      "expected": {
+        "path": "direction from caster to requested xy, up to 5 cells",
+        "delay_ms": 600,
+        "effect": "queue RM_MAGSTRUCK for each valid line target",
+        "training": "only if one or more delayed hits are queued"
+      }
+    },
+    {
+      "id": "laser_magic10",
+      "magic_id": 10,
+      "source": ["Source\\M2Server\\Magic.pas:case 10", "Source\\M2Server\\ObjBase.pas:MagPassThroughMagic undeadattack=true"],
+      "random_calls": ["Random(10) AntiMagic per target", "MPow/GetPower/GetAttackPower"],
+      "expected": {
+        "path": "direction from caster to requested xy, up to 8 cells",
+        "delay_ms": 600,
+        "power_modifier": "Round(pwr * 1.5)",
+        "training": "only if one or more delayed hits are queued"
+      }
+    },
+    {
+      "id": "thunderbolt_magic11",
+      "magic_id": 11,
+      "source": ["Source\\M2Server\\Magic.pas:case 11,35"],
+      "random_calls": ["Random(10) AntiMagic", "MPow/GetPower/GetAttackPower"],
+      "expected": {
+        "target": "single hostile target",
+        "delay_ms": 600,
+        "undead_modifier": "Round(pwr * 1.5)",
+        "training": "only when delayed hit is queued against a monster"
+      }
+    },
+    {
+      "id": "explosion_magic23",
+      "magic_id": 23,
+      "source": ["Source\\M2Server\\Magic.pas:case 23", "Source\\M2Server\\ObjBase.pas:GetMapCreatures"],
+      "random_calls": ["MPow/GetPower/GetAttackPower", "GetMagStruckDamage per target"],
+      "expected": {
+        "center": "requested xy",
+        "radius": 1,
+        "effect": "immediate RM_MAGSTRUCK for hostile targets from map creature enumeration",
+        "training": "if at least one target is struck"
+      }
+    },
+    {
+      "id": "thunderstorm_magic24",
+      "magic_id": 24,
+      "source": ["Source\\M2Server\\Magic.pas:case 24"],
+      "random_calls": ["MPow/GetPower/GetAttackPower", "GetMagStruckDamage per target"],
+      "expected": {
+        "center": "caster position",
+        "radius": 2,
+        "undead_damage": "full pwr",
+        "non_undead_damage": "pwr div 10",
+        "training": "if at least one target is struck"
+      }
+    },
+    {
+      "id": "open_health_magic28",
+      "magic_id": 28,
+      "source": ["Source\\M2Server\\Magic.pas:case 28"],
+      "random_calls": ["Random(6) <= 3 + level", "GetPower13 duration"],
+      "expected": {
+        "delay_ms": 1500,
+        "effect": "sets open-health runtime marker only",
+        "client_protocol": "not added in phase3",
+        "training": "only when delayed marker is queued"
+      }
+    },
+    {
+      "id": "group_heal_magic29",
+      "magic_id": 29,
+      "source": ["Source\\M2Server\\Magic.pas:case 29", "Source\\M2Server\\ObjBase.pas:MagBigHealing"],
+      "random_calls": ["MPow/GetPower/GetAttackPower"],
+      "expected": {
+        "center": "requested xy",
+        "radius": 1,
+        "delay_ms": 800,
+        "effect": "queue RM_MAGHEALING for wounded friendly players",
+        "training": "if one or more heals are queued"
+      }
+    },
+    {
+      "id": "magic_shield_magic31",
+      "magic_id": 31,
+      "source": ["Source\\M2Server\\Magic.pas:case 31", "Source\\M2Server\\ObjBase.pas:MagBubbleDefenceUp", "Source\\M2Server\\ObjBase.pas:GetMagStruckDamage"],
+      "random_calls": ["MPow/GetPower/GetAttackPower for duration"],
+      "expected": {
+        "effect": "activate bubble only when no current bubble exists",
+        "damage_reduction": "Round(damage / 100 * (level + 2) * 8)",
+        "on_hit": "DamageBubbleDefence reduces remaining duration",
+        "training": "only when activation succeeds"
+      }
+    },
+    {
+      "id": "turn_undead_magic32",
+      "magic_id": 32,
+      "source": ["Source\\M2Server\\Magic.pas:case 32"],
+      "random_calls": ["Random(4) level gate", "Random(100) kill gate"],
+      "expected": {
+        "target": "undead monster, not NeverDie, level < MAXLEVEL - 1",
+        "kill_gate": "Random(100) < 15 + magic_level * 7 + (caster_level - target_level)",
+        "effect": "successful gate sets target hp to zero and broadcasts death",
+        "training": "only on successful kill"
+      }
+    },
+    {
+      "id": "ice_storm_magic33",
+      "magic_id": 33,
+      "source": ["Source\\M2Server\\Magic.pas:case 33", "Source\\M2Server\\ObjBase.pas:GetMapCreatures"],
+      "random_calls": ["MPow/GetPower/GetAttackPower", "GetMagStruckDamage per target"],
+      "expected": {
+        "center": "requested xy",
+        "radius": 1,
+        "effect": "immediate RM_MAGSTRUCK for hostile targets from map creature enumeration",
+        "training": "if at least one target is struck"
+      }
+    }
+  ],
+  "known_capture_gaps": [
+    "Exact Delphi runtime ordering for multiple objects in one map cell should still be packet-captured.",
+    "MagicID 35 and 37 share source branches with 11 and 8 but are not present in active Magic.DB and remain disabled.",
+    "Open-health client display protocol is intentionally outside phase3."
+  ]
+}

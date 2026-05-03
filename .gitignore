@@ -1,0 +1,26 @@
+*
+!.gitignore
+!README.md
+!ModernServer/
+!ModernServer/**
+!ModernClient/
+!ModernClient/**
+
+# ModernServer generated artifacts
+ModernServer/build/
+ModernServer/build-clientv1/
+ModernServer/logs/
+ModernServer/runtime/
+ModernServer/data/*.sqlite-shm
+ModernServer/data/*.sqlite-wal
+
+# ModernClient generated artifacts
+ModernClient/build/
+
+# Common editor and OS files
+*.user
+*.suo
+*.vcxproj.user
+*.pdb
+Thumbs.db
+.DS_Store

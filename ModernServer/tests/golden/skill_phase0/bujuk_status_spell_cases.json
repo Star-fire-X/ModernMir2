@@ -1,0 +1,128 @@
+{
+  "phase": "phase4",
+  "authority": {
+    "code": "Source\\M2Server",
+    "data": "Release\\Mir200\\Data.mdb derived active magic config"
+  },
+  "supported_magic_ids_added": [6, 13, 14, 15, 18, 19],
+  "still_deferred": [16, 17, 20, 21, 22, 30, 34, 35, 36, 37],
+  "shared_rules": {
+    "bujuk": {
+      "source": "Source\\M2Server\\Magic.pas:CanUseBujuk",
+      "slots": ["U_BUJUK", "U_ARMRINGL"],
+      "std_mode": 25,
+      "normal_shape": 5,
+      "availability": "Delphi Round(Dura / 100) >= count - 1",
+      "consume": "deduct count * 100 dura after DoSpell MP deduction"
+    },
+    "poison_powder": {
+      "source": "Source\\M2Server\\Magic.pas:case 6",
+      "slots": ["U_BUJUK", "U_ARMRINGL"],
+      "std_mode": 25,
+      "allowed_shape": "<= 2",
+      "shape_1": "POISON_DECHEALTH",
+      "shape_2": "POISON_DAMAGEARMOR"
+    }
+  },
+  "cases": [
+    {
+      "id": "poison_magic6_dec_health",
+      "magic_id": 6,
+      "source": [
+        "Source\\M2Server\\Magic.pas:case 6",
+        "Source\\M2Server\\ObjBase.pas:MakePoison",
+        "Source\\Common\\Grobal2.pas:POISON_DECHEALTH"
+      ],
+      "random_calls": ["Random(7 + AntiPoison)", "GetPower13(30)", "GetRPow(SC)", "training Random(3)"],
+      "expected": {
+        "item": "StdMode=25 Shape=1, deduct 100 dura",
+        "delay": "1000ms RM_MAKEPOISON",
+        "status": "POISON_DECHEALTH, refresh keeps max duration, PoisonLevel = magic level",
+        "tick": "every 2500ms damage 1 + PoisonLevel",
+        "training": "only if poison gate passes and a target status is queued"
+      }
+    },
+    {
+      "id": "poison_magic6_damage_armor",
+      "magic_id": 6,
+      "source": [
+        "Source\\M2Server\\Magic.pas:case 6",
+        "Source\\M2Server\\ObjBase.pas:StruckDamage",
+        "Source\\Common\\Grobal2.pas:POISON_DAMAGEARMOR"
+      ],
+      "random_calls": ["Random(7 + AntiPoison)", "GetPower13(40)", "GetRPow(SC)", "training Random(3)"],
+      "expected": {
+        "item": "StdMode=25 Shape=2, deduct 100 dura",
+        "delay": "1000ms RM_MAKEPOISON",
+        "status": "POISON_DAMAGEARMOR",
+        "damage": "subsequent StruckDamage is Round(damage * 1.2)",
+        "training": "only if poison gate passes and a target status is queued"
+      }
+    },
+    {
+      "id": "soul_fire_magic13",
+      "magic_id": 13,
+      "source": ["Source\\M2Server\\Magic.pas:bujuk group case 13"],
+      "random_calls": ["AntiMagic Random(10)", "MPow/GetPower/GetAttackPower with SC", "training Random(3)"],
+      "expected": {
+        "item": "CanUseBujuk count=1, deduct 100 dura",
+        "target": "MagCanHitTarget and abs(target - spell xy) <= 1",
+        "delay": "1200ms RM_DELAYMAGIC",
+        "training": "only for monster/animal target when delayed hit is queued"
+      }
+    },
+    {
+      "id": "magic_defence_magic14",
+      "magic_id": 14,
+      "source": ["Source\\M2Server\\Magic.pas:case 14", "Source\\M2Server\\ObjBase.pas:MagMakeDefenceArea"],
+      "random_calls": ["GetPower13(60)", "GetAttackPower with 5 * SC range", "training Random(3)"],
+      "expected": {
+        "area": "friends in radius 3 around spell xy",
+        "status": "STATE_MAGDEFENCEUP",
+        "effect": "high MAC += 2 + Level div 7 while active",
+        "training": "if at least one friend receives new or longer status"
+      }
+    },
+    {
+      "id": "defence_magic15",
+      "magic_id": 15,
+      "source": ["Source\\M2Server\\Magic.pas:case 15", "Source\\M2Server\\ObjBase.pas:MagMakeDefenceArea"],
+      "random_calls": ["GetPower13(60)", "GetAttackPower with 5 * SC range", "training Random(3)"],
+      "expected": {
+        "area": "friends in radius 3 around spell xy",
+        "status": "STATE_DEFENCEUP",
+        "effect": "high AC += 2 + Level div 7 while active",
+        "training": "if at least one friend receives new or longer status"
+      }
+    },
+    {
+      "id": "private_transparent_magic18",
+      "magic_id": 18,
+      "source": ["Source\\M2Server\\Magic.pas:case 18", "Source\\M2Server\\Magic.pas:MagMakePrivateTransparent"],
+      "random_calls": ["GetPower13(30)", "GetRPow(SC)", "Random(2) for adjacent monster target clear", "training Random(3)"],
+      "expected": {
+        "status": "STATE_TRANSPARENT on caster",
+        "repeat": "already transparent returns false and does not train",
+        "movement": "fixed hide clears on movement",
+        "training": "only when transparent state is newly applied"
+      }
+    },
+    {
+      "id": "group_transparent_magic19",
+      "magic_id": 19,
+      "source": ["Source\\M2Server\\Magic.pas:case 19", "Source\\M2Server\\Magic.pas:MagMakeGroupTransparent"],
+      "random_calls": ["GetPower13(30)", "GetRPow(SC)", "training Random(3)"],
+      "expected": {
+        "area": "friends in radius 1 around spell xy",
+        "delay": "800ms RM_TRANSPARENT per non-transparent friend",
+        "status": "STATE_TRANSPARENT",
+        "training": "if at least one transparent mail is queued"
+      }
+    }
+  ],
+  "known_capture_gaps": [
+    "Client packet for RM_CHARSTATUSCHANGED remains represented by server status bits and traces until client visual calibration.",
+    "Full monster target clearing for private transparent depends on later AI parity work.",
+    "Slave/friend handling for summoned pets is deferred until summon phases."
+  ]
+}

@@ -1,0 +1,4 @@
+items = [
+  { id = 1, name = "Wooden Sword", weight = 3, price = 50, std_mode = 5, shape = 1, looks = 1, dura_max = 1000, equip_slot = 1, hp_add = 0, mp_add = 0 },
+  { id = 2, name = "Basic Drug", weight = 1, price = 30, std_mode = 0, shape = 0, looks = 2, dura_max = 1, equip_slot = -1, hp_add = 10, mp_add = 0 }
+]

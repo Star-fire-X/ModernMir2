@@ -1,0 +1,69 @@
+{
+    "schema_version":  1,
+    "artifact":  "skill_phase0.protocol_constants",
+    "status":  "frozen",
+    "generated_at_local":  "2026-04-30T00:00:00+08:00",
+    "delphi":  {
+                   "source":  "Source\\Common\\Grobal2.pas",
+                   "constants":  {
+                                     "SM_SPELL":  17,
+                                     "SM_STRUCK":  31,
+                                     "SM_ADDMAGIC":  210,
+                                     "SM_SENDMYMAGIC":  211,
+                                     "SM_DELMAGIC":  212,
+                                     "SM_MAGICFIRE":  638,
+                                     "SM_MAGICFIRE_FAIL":  639,
+                                     "SM_MAGIC_LVEXP":  640,
+                                     "SM_AREASTATE":  708,
+                                     "RM_MAGSTRUCK":  10025,
+                                     "RM_MAGHEALING":  10026,
+                                     "RM_DELAYMAGIC":  10154
+                                 }
+               },
+    "current_cpp":  {
+                        "source":  "ModernServer\\src\\protocol\\legacy_types.hpp",
+                        "constants_observed":  {
+                                                   "kSmAddMagic":  210,
+                                                   "kSmSendMyMagic":  211,
+                                                   "kSmAreaState":  212
+                                               },
+                        "missing_skill_constants":  [
+                                                        "kSmDelMagic=212",
+                                                        "kSmMagicFire=638",
+                                                        "kSmMagicFireFail=639",
+                                                        "kSmMagicLvExp=640"
+                                                    ]
+                    },
+    "conflicts":  [
+                      {
+                          "id":  "sm_212_collision",
+                          "severity":  "blocking_before_phase1_protocol_work",
+                          "delphi":  "SM_DELMAGIC=212",
+                          "current_cpp":  "kSmAreaState=212",
+                          "expected":  "AreaState must align to Delphi SM_AREASTATE=708; 212 must be reserved for delete magic."
+                      }
+                  ],
+    "packet_sequence_evidence":  [
+                                     {
+                                         "message":  "SM_SPELL",
+                                         "delphi_receiver":  "Source\\Client\\ClMain.pas:4273",
+                                         "delphi_sender":  "Source\\M2Server\\ObjBase.pas:12555"
+                                     },
+                                     {
+                                         "message":  "SM_MAGICFIRE",
+                                         "delphi_receiver":  "Source\\Client\\ClMain.pas:4277",
+                                         "delphi_sender":  "Source\\M2Server\\ObjBase.pas:12562"
+                                     },
+                                     {
+                                         "message":  "SM_MAGICFIRE_FAIL",
+                                         "delphi_receiver":  "Source\\Client\\ClMain.pas:4282",
+                                         "delphi_sender":  "Source\\M2Server\\ObjBase.pas:12567"
+                                     },
+                                     {
+                                         "message":  "SM_MAGIC_LVEXP",
+                                         "delphi_receiver":  "Source\\Client\\ClMain.pas:4693",
+                                         "delphi_sender":  "Source\\M2Server\\ObjBase.pas:9506"
+                                     }
+                                 ]
+}
+
