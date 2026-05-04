@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("phase1-fast", "phase2-fast")]
+  [ValidateSet("phase1-fast", "phase2-fast", "phase3-nightly")]
   [string]$Suite = "phase1-fast",
 
   [ValidateSet("all", "server", "client")]
@@ -8,11 +8,46 @@ param(
   [ValidateSet("Debug", "Release", "RelWithDebInfo")]
   [string]$Config = "Debug",
 
-  [int]$TimeoutSeconds = 120
+  [int]$TimeoutSeconds = 120,
+
+  [switch]$List
 )
 
 . "$PSScriptRoot/common.ps1"
 . "$PSScriptRoot/compat_suites.ps1"
+
+function Write-CiSuiteList {
+  param([Parameter(Mandatory = $true)][string]$SuiteName)
+
+  Write-Host "CI suite: $SuiteName"
+  foreach ($name in @("ModernServer", "ModernClient")) {
+    $targets = @(Get-CiBuildTargets -Suite $SuiteName -ProjectName $name)
+    $tests = @(Get-CiTestNames -Suite $SuiteName -ProjectName $name)
+    Write-Host ""
+    Write-Host "$name build targets ($($targets.Count)):"
+    foreach ($target in $targets) {
+      Write-Host "  - $target"
+    }
+    Write-Host "$name tests ($($tests.Count)):"
+    foreach ($test in $tests) {
+      Write-Host "  - $test"
+    }
+  }
+
+  $quarantined = @(Get-CiQuarantinedTests)
+  if ($quarantined.Count -gt 0) {
+    Write-Host ""
+    Write-Host "Quarantined tests:"
+    foreach ($entry in $quarantined) {
+      Write-Host "  - $($entry.Project)/$($entry.Test): $($entry.Reason)"
+    }
+  }
+}
+
+if ($List) {
+  Write-CiSuiteList -SuiteName $Suite
+  exit 0
+}
 
 function Invoke-CompatCtest {
   param(
@@ -39,6 +74,10 @@ function Invoke-CompatCtest {
     --timeout "$TimeoutSeconds" `
     -R $regex
   if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "Compatibility suite '$Suite' failed. Suite contents:"
+    Write-CiSuiteList -SuiteName $Suite
+    Write-Host ""
     Fail "$Name compatibility suite '$Suite' failed. Reproduce locally with: pwsh ci/scripts/run_compat_tests.ps1 -Suite $Suite -Project $Project -Config $Config"
   }
 }

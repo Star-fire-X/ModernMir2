@@ -9,7 +9,7 @@ param(
   [string]$Arch = "x64",
   [string]$ToolchainFile = "",
 
-  [ValidateSet("", "phase1-fast", "phase2-fast")]
+  [ValidateSet("", "phase1-fast", "phase2-fast", "phase3-nightly")]
   [string]$Suite = "",
 
   [switch]$Fast,

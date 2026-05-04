@@ -57,10 +57,13 @@ jobs:
         shell: pwsh
         run: ./ci/scripts/check_text_hygiene.ps1
 
-  windows-fast:
-    name: windows-fast
+  fast-scope:
+    name: fast-scope
     runs-on: windows-latest
     needs: policy
+    outputs:
+      run_server: ${{ steps.scope.outputs.run_server }}
+      run_client: ${{ steps.scope.outputs.run_client }}
 
     steps:
       - name: Checkout
@@ -68,19 +71,118 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve fast CI scope
+        id: scope
+        shell: pwsh
+        run: ./ci/scripts/resolve_fast_ci_scope.ps1
+
+  server-fast:
+    name: server-fast
+    runs-on: windows-latest
+    needs: fast-scope
+    if: needs.fast-scope.outputs.run_server == 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\vcpkg\archives
+          key: vcpkg-${{ runner.os }}-sqlite3-x64-windows-${{ hashFiles('**/vcpkg.json', '**/vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-sqlite3-x64-windows-
+
       - name: Install C++ dependencies
         shell: pwsh
         run: |
+          $cacheRoot = Join-Path $env:LOCALAPPDATA "vcpkg\archives"
+          New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
+          $env:VCPKG_BINARY_SOURCES = "clear;files,$cacheRoot,readwrite"
           $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
           if (-not $vcpkgRoot) {
             $vcpkgRoot = "C:\vcpkg"
           }
           & "$vcpkgRoot\vcpkg.exe" install sqlite3:x64-windows
 
-      - name: Build ModernServer and ModernClient
+      - name: Build ModernServer
         shell: pwsh
-        run: ./ci/scripts/check_build.ps1 -Project all -Config Debug -Suite phase2-fast
+        run: ./ci/scripts/check_build.ps1 -Project server -Config Debug -Suite phase2-fast
 
-      - name: Run CTest smoke tests
+      - name: Run ModernServer CTest smoke tests
         shell: pwsh
-        run: ./ci/scripts/run_compat_tests.ps1 -Suite phase2-fast -Config Debug
+        run: ./ci/scripts/run_compat_tests.ps1 -Project server -Suite phase2-fast -Config Debug
+
+  client-fast:
+    name: client-fast
+    runs-on: windows-latest
+    needs: fast-scope
+    if: needs.fast-scope.outputs.run_client == 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\vcpkg\archives
+          key: vcpkg-${{ runner.os }}-sqlite3-x64-windows-${{ hashFiles('**/vcpkg.json', '**/vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-sqlite3-x64-windows-
+
+      - name: Install C++ dependencies
+        shell: pwsh
+        run: |
+          $cacheRoot = Join-Path $env:LOCALAPPDATA "vcpkg\archives"
+          New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
+          $env:VCPKG_BINARY_SOURCES = "clear;files,$cacheRoot,readwrite"
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) {
+            $vcpkgRoot = "C:\vcpkg"
+          }
+          & "$vcpkgRoot\vcpkg.exe" install sqlite3:x64-windows
+
+      - name: Build ModernClient
+        shell: pwsh
+        run: ./ci/scripts/check_build.ps1 -Project client -Config Debug -Suite phase2-fast
+
+      - name: Run ModernClient CTest smoke tests
+        shell: pwsh
+        run: ./ci/scripts/run_compat_tests.ps1 -Project client -Suite phase2-fast -Config Debug
+
+  windows-fast:
+    name: windows-fast
+    runs-on: windows-latest
+    needs:
+      - fast-scope
+      - server-fast
+      - client-fast
+    if: always()
+
+    steps:
+      - name: Check fast CI results
+        shell: pwsh
+        run: |
+          $failed = @()
+          if ("${{ needs.fast-scope.result }}" -ne "success") {
+            $failed += "fast-scope (${{ needs.fast-scope.result }})"
+          }
+          if ("${{ needs.server-fast.result }}" -notin @("success", "skipped")) {
+            $failed += "server-fast (${{ needs.server-fast.result }})"
+          }
+          if ("${{ needs.client-fast.result }}" -notin @("success", "skipped")) {
+            $failed += "client-fast (${{ needs.client-fast.result }})"
+          }
+
+          if ($failed.Count -gt 0) {
+            Write-Host "::error::Fast CI failed: $($failed -join ', ')"
+            exit 1
+          }
+
+          Write-Host "Fast CI passed."
