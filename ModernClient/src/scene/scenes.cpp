@@ -211,6 +211,8 @@ constexpr int kStateDetailPageIndex = 382;
 constexpr int kStateMagicPageIndex = 383;
 constexpr int kStateMagicPageDownIndex = 396;
 constexpr int kStateMagicPageUpIndex = 398;
+constexpr int kStateMagicLevelIconIndex = 112;
+constexpr int kStateMagicExpIconIndex = 111;
 constexpr int kMerchantDialogIndex = 384;
 constexpr int kMerchantBuyDialogIndex = 385;
 constexpr int kMerchantBuyButtonIndex = 386;
@@ -1335,9 +1337,17 @@ class LegacyStateContentNode final : public ui::UiNode {
       }
       draw_sprite(renderer, icon, rect.x + 46, rect.y + y);
       draw_legacy_text(renderer, rect.x + 84, rect.y + y, widen(magic.name), 0xFFFFFF66U);
-      draw_legacy_text(renderer, rect.x + 84, rect.y + y + 13,
-                       L"Lv " + std::to_wstring(magic.level) + L" " +
-                           std::to_wstring(magic.train) + L"/" +
+      draw_sprite(renderer,
+                  assets->get_frame(ArchiveId::prguse, kStateMagicLevelIconIndex),
+                  rect.x + 84, rect.y + y + 13);
+      draw_sprite(renderer,
+                  assets->get_frame(ArchiveId::prguse, kStateMagicExpIconIndex),
+                  rect.x + 84 + 26, rect.y + y + 13);
+      draw_legacy_text(renderer, rect.x + 84 + 13, rect.y + y + 13,
+                       std::to_wstring(magic.level),
+                       0xFFE5E7EBU);
+      draw_legacy_text(renderer, rect.x + 84 + 26 + 13, rect.y + y + 13,
+                       std::to_wstring(magic.train) + L"/" +
                            std::to_wstring(std::max(0, magic.max_train)),
                        0xFFE5E7EBU);
       if (const auto key_index = magic_key_icon_index(magic.key); key_index >= 0) {
