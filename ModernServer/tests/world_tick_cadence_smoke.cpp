@@ -88,6 +88,10 @@ int main() {
   assert(first.at("sessions") == "0");
   assert(first.at("legacy_frame") == "enabled");
   assert(first.at("legacy_last_stage") == "ServerMessageRun");
+  assert(first.contains("pending_gate_events"));
+  assert(first.contains("run_socket_last_flushed"));
+  assert(first.contains("run_socket_last_remaining"));
+  assert(first.contains("run_socket_last_ms"));
   assert(value_u64(second, "legacy_frame_index") > value_u64(first, "legacy_frame_index"));
   assert(value_u64(second, "tick") > value_u64(first, "tick"));
 

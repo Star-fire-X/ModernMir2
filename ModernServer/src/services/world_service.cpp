@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <iterator>
 #include <optional>
 #include <thread>
@@ -560,10 +561,21 @@ std::unordered_map<std::string, std::string> WorldService::snapshot() const {
   }
   LegacyFrameTrace legacy_trace;
   bool legacy_frame_seen = false;
+  std::size_t pending_gate_events = 0;
+  std::uint64_t run_socket_last_flushed = 0;
+  std::uint64_t run_socket_last_remaining = 0;
+  std::uint64_t run_socket_last_ms = 0;
   {
     std::scoped_lock lock(legacy_frame_mutex_);
     legacy_trace = legacy_frame_trace_;
     legacy_frame_seen = legacy_frame_seen_;
+  }
+  {
+    std::scoped_lock lock(gate_events_mutex_);
+    pending_gate_events = pending_gate_events_.size();
+    run_socket_last_flushed = run_socket_last_flushed_;
+    run_socket_last_remaining = run_socket_last_remaining_;
+    run_socket_last_ms = run_socket_last_ms_;
   }
   return {{"running", running_.load(std::memory_order_relaxed) ? "true" : "false"},
           {"maps", std::to_string(runtime_->map_count())},
@@ -587,6 +599,10 @@ std::unordered_map<std::string, std::string> WorldService::snapshot() const {
           {"offline_guild_results", std::to_string(offline_guild_result_count_)},
           {"offline_guild_routes", std::to_string(offline_guild_route_count_)},
           {"offline_guild_errors", std::to_string(offline_guild_error_count_)},
+          {"pending_gate_events", std::to_string(pending_gate_events)},
+          {"run_socket_last_flushed", std::to_string(run_socket_last_flushed)},
+          {"run_socket_last_remaining", std::to_string(run_socket_last_remaining)},
+          {"run_socket_last_ms", std::to_string(run_socket_last_ms)},
           {"castle_refresh_interval_ms",
            std::to_string(context_ != nullptr ? context_->config.runtime.castle_context_refresh_ms : 0)}};
 }
@@ -617,7 +633,9 @@ void WorldService::run() {
       const auto now_ms = static_cast<std::uint64_t>(
           std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count());
       LegacyFrameCallbacks callbacks;
-      callbacks.run_socket_run = []() -> RuntimeDispatch { return {}; };
+      callbacks.run_socket_run = [this, now_ms]() -> RuntimeDispatch {
+        return run_legacy_socket_stage(now_ms);
+      };
       callbacks.decode_id_socket = [this](WorldIngressBatch& batch) -> RuntimeDispatch {
         return process_ingress_batch(batch);
       };
@@ -686,6 +704,108 @@ RuntimeDispatch WorldService::process_ingress_batch(WorldIngressBatch& batch) {
   }
   batch.messages.clear();
   return combined;
+}
+
+void WorldService::queue_gate_events(RuntimeDispatch& dispatch) {
+  if (dispatch.session_events.empty()) {
+    return;
+  }
+
+  std::scoped_lock lock(gate_events_mutex_);
+  auto out = dispatch.session_events.begin();
+  for (auto it = dispatch.session_events.begin(); it != dispatch.session_events.end(); ++it) {
+    if (it->kind == SessionEventKind::send_packet ||
+        it->kind == SessionEventKind::send_packet_and_close ||
+        it->kind == SessionEventKind::force_disconnect) {
+      pending_gate_events_.push_back(std::move(*it));
+    } else {
+      if (out != it) {
+        *out = std::move(*it);
+      }
+      ++out;
+    }
+  }
+  dispatch.session_events.erase(out, dispatch.session_events.end());
+}
+
+bool WorldService::post_gate_event(SessionEvent& event) {
+  if (context_ == nullptr || context_->bus == nullptr) {
+    return false;
+  }
+  if (event.session_id != 0) {
+    if (const auto gateway = session_gateways_.find(event.session_id);
+        gateway != session_gateways_.end() &&
+        (event.gateway.empty() || event.gateway == "game_gateway")) {
+      event.gateway = gateway->second;
+    }
+  }
+  auto target = event.gateway;
+  if (context_->bus->post(target, event)) {
+    return true;
+  }
+  if (target == "game_gateway") {
+    event.gateway = "client_v1_game_gateway";
+    return context_->bus->post(event.gateway, std::move(event));
+  }
+  return false;
+}
+
+RuntimeDispatch WorldService::run_legacy_socket_stage(std::uint64_t now_ms) {
+  RuntimeDispatch dispatch;
+  const auto started = std::chrono::steady_clock::now();
+  const auto budget_ms =
+      context_ != nullptr ? static_cast<std::int64_t>(context_->config.budgets.net_flush_budget_ms)
+                          : 0;
+  std::uint64_t flushed = 0;
+
+  while (true) {
+    std::optional<SessionEvent> event;
+    {
+      std::scoped_lock lock(gate_events_mutex_);
+      if (pending_gate_events_.empty()) {
+        break;
+      }
+      event = std::move(pending_gate_events_.front());
+      pending_gate_events_.pop_front();
+    }
+
+    const auto session_id = event->session_id;
+    const auto posted = post_gate_event(*event);
+    ++flushed;
+
+    LegacyRuntimeTrace trace;
+    trace.stage = "RunSocketRun";
+    trace.action = "flush_gate_event";
+    trace.actor_id = session_id;
+    trace.now_ms = now_ms;
+    trace.value = static_cast<std::int32_t>(flushed);
+    trace.success = posted;
+    dispatch.legacy_traces.push_back(std::move(trace));
+
+    if (budget_ms == 0) {
+      break;
+    }
+    if (budget_ms > 0) {
+      const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - started)
+                               .count();
+      if (elapsed >= budget_ms) {
+        break;
+      }
+    }
+  }
+
+  {
+    std::scoped_lock lock(gate_events_mutex_);
+    run_socket_last_flushed_ = flushed;
+    run_socket_last_remaining_ = pending_gate_events_.size();
+    run_socket_last_ms_ = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - started)
+            .count());
+  }
+
+  return dispatch;
 }
 
 RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
@@ -968,6 +1088,7 @@ RuntimeDispatch WorldService::handle_persist_result(const PersistResult& result)
 }
 
 void WorldService::flush_dispatch(RuntimeDispatch dispatch) {
+  queue_gate_events(dispatch);
   for (auto& event : dispatch.session_events) {
     if (event.session_id != 0) {
       if (const auto gateway = session_gateways_.find(event.session_id);
