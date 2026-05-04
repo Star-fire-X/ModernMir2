@@ -9,11 +9,23 @@ param(
   [string]$Arch = "x64",
   [string]$ToolchainFile = "",
 
+  [ValidateSet("", "phase1-fast", "phase2-fast")]
+  [string]$Suite = "",
+
   [switch]$Fast,
   [switch]$Clean
 )
 
 . "$PSScriptRoot/common.ps1"
+. "$PSScriptRoot/compat_suites.ps1"
+
+if ($Fast -and -not $Suite) {
+  $Suite = "phase1-fast"
+}
+
+if ($Fast -and $Suite -ne "phase1-fast") {
+  Fail "-Fast is a legacy alias for -Suite phase1-fast. Use only one suite selector."
+}
 
 function Get-CMakeGenerators {
   $help = cmake --help
@@ -65,36 +77,6 @@ function Resolve-VcpkgToolchain {
 }
 
 $ResolvedToolchainFile = Resolve-VcpkgToolchain $ToolchainFile
-
-function Get-FastTargets {
-  param([Parameter(Mandatory = $true)][string]$Name)
-
-  if ($Name -eq "ModernServer") {
-    return @(
-      "mir2_host",
-      "mir2_core_smoke",
-      "mir2_logic_smoke",
-      "mir2_legacy_frame_smoke",
-      "mir2_client_v1_protocol_smoke",
-      "mir2_movement_blocking_legacy_smoke",
-      "mir2_combat_smoke",
-      "mir2_items_smoke"
-    )
-  }
-
-  if ($Name -eq "ModernClient") {
-    return @(
-      "modern_mir2_client",
-      "modern_client_asset_smoke",
-      "modern_client_protocol_map_smoke",
-      "modern_client_flow_smoke",
-      "modern_client_text_encoding_smoke",
-      "modern_client_movement_smoke"
-    )
-  }
-
-  return @()
-}
 
 function Invoke-CMakeBuild {
   param(
@@ -148,8 +130,13 @@ function Invoke-CMakeBuild {
   }
 
   Write-Host "Building $Name ($Config)..."
-  if ($Fast) {
-    foreach ($target in Get-FastTargets $Name) {
+  if ($Suite) {
+    $targets = @(Get-CiBuildTargets -Suite $Suite -ProjectName $Name)
+    if ($targets.Count -eq 0) {
+      Fail "$Name has no build targets for CI suite '$Suite'."
+    }
+
+    foreach ($target in $targets) {
       Write-Host "Building $Name target: $target"
       cmake --build $buildDir --config $Config --target $target --parallel
       if ($LASTEXITCODE -ne 0) {
