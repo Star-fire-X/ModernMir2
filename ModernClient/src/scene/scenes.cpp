@@ -978,9 +978,11 @@ void draw_item_fallback(SoftwareRenderer& renderer, const RectI& rect) {
   renderer.stroke_rect(icon, 0xFFCBD5E1U);
 }
 
+constexpr std::uint32_t kDuraLowBorderColor = 0xCCEF4444U;
+
 void draw_bag_item_icon(SoftwareRenderer& renderer,
                         const std::shared_ptr<const SpriteFrame>& frame,
-                        const RectI& cell_rect) {
+                        const RectI& cell_rect, const bool low_dura) {
   if (frame == nullptr || frame->empty()) {
     draw_item_fallback(renderer, cell_rect);
     return;
@@ -988,6 +990,13 @@ void draw_bag_item_icon(SoftwareRenderer& renderer,
   const auto x = cell_rect.x + (cell_rect.w - frame->width) / 2 - 1;
   const auto y = cell_rect.y + (cell_rect.h - frame->height) / 2 + 1;
   renderer.surface().blit_rgba(x, y, frame->width, frame->height, frame->pixels.data(), 255U);
+  if (low_dura) {
+    renderer.stroke_rect(cell_rect, kDuraLowBorderColor);
+  }
+}
+
+bool item_low_dura(const client_v1::ItemState& item) {
+  return item.dura_max > 0 && item.dura > 0 && item.dura < item.dura_max / 3;
 }
 
 void draw_equipment_item_icon(SoftwareRenderer& renderer,
@@ -1150,7 +1159,8 @@ class LegacyBottomStatusNode final : public ui::UiNode {
                        29};
       const auto& item = world.bag_items[static_cast<std::size_t>(slot)];
       if (!item_empty(item)) {
-        draw_bag_item_icon(renderer, item_icon_frame(assets, item, ArchiveId::items), cell);
+        draw_bag_item_icon(renderer, item_icon_frame(assets, item, ArchiveId::items), cell,
+                           item_low_dura(item));
       }
       draw_legacy_text(renderer, cell.x + 13, cell.y + 19, std::to_wstring(slot + 1));
     }
@@ -1363,7 +1373,8 @@ class MerchantSellNode final : public ui::UiNode {
     const auto* item = pending_item();
     if (item != nullptr) {
       draw_bag_item_icon(renderer, item_icon_frame(assets, *item, ArchiveId::items),
-                         RectI{rect.x + 27, rect.y + 67, 61, 52});
+                         RectI{rect.x + 27, rect.y + 67, 61, 52},
+                         item_low_dura(*item));
       draw_legacy_text(renderer, rect.x + 101, rect.y + 73, widen(item->name),
                        0xFFFFFF66U);
     }
@@ -1406,7 +1417,8 @@ class RepairDialogNode final : public ui::UiNode {
     const auto* item = pending_item();
     if (item != nullptr) {
       draw_bag_item_icon(renderer, item_icon_frame(assets, *item, ArchiveId::items),
-                         RectI{rect.x + 27, rect.y + 67, 61, 52});
+                         RectI{rect.x + 27, rect.y + 67, 61, 52},
+                         item_low_dura(*item));
       draw_legacy_text(renderer, rect.x + 101, rect.y + 73, widen(item->name),
                        0xFFFFFF66U);
     } else if (!repair.pending_name.empty()) {
@@ -1549,7 +1561,8 @@ class TradePanelNode final : public ui::UiNode {
         continue;
       }
       const RectI cell{x + (entry.slot % 4) * 31, y + (entry.slot / 4) * 31, 29, 29};
-      draw_bag_item_icon(renderer, item_icon_frame(assets, entry.item, ArchiveId::items), cell);
+      draw_bag_item_icon(renderer, item_icon_frame(assets, entry.item, ArchiveId::items), cell,
+                         item_low_dura(entry.item));
     }
   }
 };
@@ -1679,7 +1692,8 @@ class LegacyHud final {
       if (state_ != nullptr && valid_bag_slot(slot)) {
         const auto& item = state_->world.bag_items[static_cast<std::size_t>(slot)];
         if (!item_empty(item)) {
-          draw_bag_item_icon(renderer, item_icon_frame(assets_, item, ArchiveId::items), rect);
+          draw_bag_item_icon(renderer, item_icon_frame(assets_, item, ArchiveId::items), rect,
+                             item_low_dura(item));
         }
       }
       if (selected) {
