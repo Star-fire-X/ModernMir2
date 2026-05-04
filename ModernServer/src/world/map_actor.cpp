@@ -1354,6 +1354,7 @@ RuntimeDispatch MapActor::legacy_disconnect_player(std::uint64_t actor_id, std::
     return dispatch;
   }
   const auto session_id = player->session_id();
+  static_cast<void>(player->clear_legacy_buffs_on_logout(0));
   queue_save_player_character(dispatch, *player, now_ms);
   detach_owned_slaves(*player, dispatch, now_ms, true);
   queue_force_disconnect(dispatch, session_id, "legacy_player_disconnected");

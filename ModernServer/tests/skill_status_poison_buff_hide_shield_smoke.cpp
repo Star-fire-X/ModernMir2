@@ -24,7 +24,10 @@
 namespace {
 
 constexpr std::int32_t kTransparentStatusBit = 0x00800000;
+constexpr std::int32_t kDefenceStatusBit = 0x00400000;
+constexpr std::int32_t kMagDefenceStatusBit = 0x00200000;
 constexpr std::int32_t kMagicBubbleStatusBit = 0x00100000;
+constexpr std::uint32_t kPoisonDecHealthStatusBit = 0x80000000u;
 constexpr std::uint32_t kPoisonDamageArmorStatusBit = 0x40000000u;
 constexpr std::uint32_t kPoisonStoneStatusBit = 0x04000000u;
 
@@ -259,6 +262,84 @@ int main() {
     assert(tick_result.legacy_status_changed);
     assert((status & kPoisonStoneStatusBit) == 0);
     assert((status & kPoisonDamageArmorStatusBit) == 0);
+  }
+
+  {
+    auto record = character("BuffLifecycle", {}, 0);
+    mir2::Player player(1, 1502, std::move(record));
+    assert(player.apply_legacy_poison(0, 20, 1, 5, 99, 1));
+    assert(player.apply_legacy_poison(1, 20, 0, 1, 99, 1));
+    assert(player.apply_legacy_poison(5, 20, 0, 1, 99, 1));
+    assert(player.activate_legacy_transparent(20, 1));
+    assert(player.activate_legacy_defence_up(20, 1));
+    assert(player.activate_legacy_magic_defence_up(20, 1));
+    assert(player.activate_legacy_magic_bubble(1, 1, 21));
+    auto status = static_cast<std::uint32_t>(player.character().status);
+    assert((status & kPoisonDecHealthStatusBit) != 0);
+    assert((status & kPoisonDamageArmorStatusBit) != 0);
+    assert((status & kPoisonStoneStatusBit) != 0);
+    assert((status & static_cast<std::uint32_t>(kTransparentStatusBit)) != 0);
+    assert((status & static_cast<std::uint32_t>(kDefenceStatusBit)) != 0);
+    assert((status & static_cast<std::uint32_t>(kMagDefenceStatusBit)) != 0);
+    assert((status & static_cast<std::uint32_t>(kMagicBubbleStatusBit)) != 0);
+
+    player.mark_dead(1000);
+    status = static_cast<std::uint32_t>(player.character().status);
+    assert((status & kPoisonDecHealthStatusBit) == 0);
+    assert((status & kPoisonDamageArmorStatusBit) == 0);
+    assert((status & kPoisonStoneStatusBit) == 0);
+    assert((status & static_cast<std::uint32_t>(kTransparentStatusBit)) == 0);
+    assert((status & static_cast<std::uint32_t>(kDefenceStatusBit)) == 0);
+    assert((status & static_cast<std::uint32_t>(kMagDefenceStatusBit)) == 0);
+    assert((status & static_cast<std::uint32_t>(kMagicBubbleStatusBit)) == 0);
+    const auto tick_result = player.tick_status_effects(6);
+    assert(tick_result.damage == 0);
+  }
+
+  {
+    auto record = character("LeaveMapPolicy", {}, 0);
+    mir2::Player player(1, 1503, std::move(record));
+    assert(player.apply_legacy_poison(1, 20, 0, 1, 99, 1));
+    assert(player.apply_legacy_poison(5, 20, 0, 1, 99, 1));
+    assert(player.activate_legacy_transparent(20, 1));
+    assert(player.activate_legacy_magic_bubble(1, 1, 21));
+    const auto clear = player.clear_legacy_buffs_on_leave_map(2);
+    assert(clear.legacy_status_changed);
+    auto status = static_cast<std::uint32_t>(player.character().status);
+    assert((status & kPoisonDamageArmorStatusBit) != 0);
+    assert((status & kPoisonStoneStatusBit) == 0);
+    assert((status & static_cast<std::uint32_t>(kTransparentStatusBit)) == 0);
+    assert((status & static_cast<std::uint32_t>(kMagicBubbleStatusBit)) != 0);
+
+    const auto logout_clear = player.clear_legacy_buffs_on_logout(3);
+    assert(logout_clear.legacy_status_changed);
+    status = static_cast<std::uint32_t>(player.character().status);
+    assert((status & kPoisonDamageArmorStatusBit) == 0);
+    assert((status & static_cast<std::uint32_t>(kMagicBubbleStatusBit)) == 0);
+  }
+
+  {
+    auto record = character("AbilityExpire", {}, 0);
+    mir2::Player player(1, 1504, std::move(record));
+    assert(player.activate_legacy_defence_up(2, 1));
+    assert(player.activate_legacy_magic_defence_up(2, 1));
+    const auto tick_result = player.tick_status_effects(4);
+    const auto status = static_cast<std::uint32_t>(player.character().status);
+    assert(tick_result.legacy_status_changed);
+    assert(tick_result.ability_changed);
+    assert((status & static_cast<std::uint32_t>(kDefenceStatusBit)) == 0);
+    assert((status & static_cast<std::uint32_t>(kMagDefenceStatusBit)) == 0);
+  }
+
+  {
+    mir2::Monster monster(1, "LifecycleMonster", "0", 10, 10, 1, 20, 0, 0, 0,
+                          0, 0, 0, 0, 10);
+    assert(monster.apply_legacy_poison(0, 20, 1, 1, 99, 1));
+    assert(monster.apply_legacy_poison(5, 20, 0, 1, 99, 1));
+    monster.mark_legacy_death(1000);
+    const auto tick_result = monster.tick_status_effects(2);
+    assert(tick_result.damage == 0);
+    assert(!tick_result.legacy_status_changed);
   }
 
   return 0;
