@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 
+#include "protocol/legacy_edcode.hpp"
 #include "protocol/legacy_game_codec.hpp"
 #include "protocol/legacy_types.hpp"
 #include "world/logic_runtime.hpp"

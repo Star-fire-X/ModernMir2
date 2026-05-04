@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 #ifdef MIR2_ENABLE_ODBC
+#include <windows.h>
 #include <sqlext.h>
 #endif
 

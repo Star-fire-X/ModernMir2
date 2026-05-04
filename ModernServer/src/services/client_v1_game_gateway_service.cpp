@@ -491,6 +491,29 @@ ClientV1GameGatewayService::ClientV1GameGatewayService(
     std::shared_ptr<ClientV1AdmissionRegistry> admissions)
     : ClientV1GatewayServiceBase("client_v1_game_gateway"), admissions_(std::move(admissions)) {}
 
+#ifdef MIR2_ENABLE_TEST_HOOKS
+void ClientV1GameGatewayService::seed_session_for_test(std::uint64_t session_id) {
+  std::scoped_lock lock(mutex_);
+  sessions_[session_id] = SessionState{};
+}
+
+void ClientV1GameGatewayService::translate_legacy_packet_for_test(
+    std::uint64_t session_id, const LegacyPacket& packet,
+    std::vector<client_v1::Message>& messages) {
+  translate_legacy_packet(session_id, packet, messages);
+}
+
+std::optional<CharacterRecord> ClientV1GameGatewayService::session_character_for_test(
+    std::uint64_t session_id) const {
+  std::scoped_lock lock(mutex_);
+  const auto it = sessions_.find(session_id);
+  if (it == sessions_.end()) {
+    return std::nullopt;
+  }
+  return it->second.character;
+}
+#endif
+
 void ClientV1GameGatewayService::start(HostContext& context) {
   repository_ = std::make_unique<Repository>(context.root_dir / context.config.runtime.data_dir / "mir2.sqlite");
   repository_->ensure_schema(context.root_dir / "schema" / "mir2.sql");

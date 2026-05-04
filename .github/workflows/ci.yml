@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - "feature/**"
+      - "codex/**"
+      - "claude/**"
+  pull_request:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CTEST_OUTPUT_ON_FAILURE: "1"
+  CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+
+jobs:
+  policy:
+    name: policy
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Guard Delphi reference sources
+        shell: pwsh
+        run: ./ci/scripts/check_no_delphi_changes.ps1
+
+  windows-fast:
+    name: windows-fast
+    runs-on: windows-latest
+    needs: policy
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install C++ dependencies
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) {
+            $vcpkgRoot = "C:\vcpkg"
+          }
+          & "$vcpkgRoot\vcpkg.exe" install sqlite3:x64-windows
+
+      - name: Build ModernServer and ModernClient
+        shell: pwsh
+        run: ./ci/scripts/check_build.ps1 -Project all -Config Debug -Fast
+
+      - name: Run CTest smoke tests
+        shell: pwsh
+        run: |
+          ./ci/scripts/check_tests.ps1 -Project server -Config Debug -Regex "mir2_core_smoke|mir2_logic_smoke|mir2_legacy_frame_smoke|mir2_client_v1_protocol_smoke|mir2_movement_blocking_legacy_smoke|mir2_combat_smoke|mir2_items_smoke"
+          ./ci/scripts/check_tests.ps1 -Project client -Config Debug -Regex "modern_client_protocol_map_smoke|modern_client_flow_smoke|modern_client_text_encoding_smoke|modern_client_movement_smoke"
