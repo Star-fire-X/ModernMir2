@@ -6,6 +6,14 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(MSVC)
+  add_compile_options(/utf-8 /bigobj)
+endif()
+
+if(WIN32)
+  add_compile_definitions(_WIN32_WINNT=0x0601 WIN32_LEAN_AND_MEAN NOMINMAX)
+endif()
+
 include(FetchContent)
 include(CTest)
 
@@ -13,7 +21,7 @@ find_package(Threads REQUIRED)
 find_package(SQLite3 QUIET)
 find_package(ODBC QUIET)
 
-if(NOT SQLite3_FOUND)
+if(NOT SQLite3_FOUND AND MINGW)
   find_path(SQLITE3_INCLUDE_DIR sqlite3.h
     PATHS
       C:/msys64/ucrt64/include
@@ -34,6 +42,12 @@ if(NOT SQLite3_FOUND)
   else()
     message(FATAL_ERROR "SQLite3 was not found in the default search path or the MSYS fallback path.")
   endif()
+endif()
+
+if(NOT TARGET SQLite::SQLite3)
+  message(FATAL_ERROR
+    "SQLite3 was not found. For MSVC builds, install sqlite3 with vcpkg and configure with "
+    "-DCMAKE_TOOLCHAIN_FILE=<vcpkg-root>/scripts/buildsystems/vcpkg.cmake.")
 endif()
 
 FetchContent_Declare(
@@ -92,6 +106,10 @@ set(MIR2_HOST_SOURCES
 )
 
 add_library(mir2_hostlib ${MIR2_HOST_SOURCES})
+
+if(BUILD_TESTING)
+  target_compile_definitions(mir2_hostlib PUBLIC MIR2_ENABLE_TEST_HOOKS=1)
+endif()
 
 target_include_directories(mir2_hostlib
   PUBLIC

@@ -236,7 +236,7 @@ class DirectSoundAudioBackend::Impl {
 
     DSBUFFERDESC desc{};
     desc.dwSize = sizeof(desc);
-    desc.dwFlags = DSBCAPS_CTRLDEFAULT;
+    desc.dwFlags = DSBCAPS_CTRLVOLUME;
     desc.dwBufferBytes = static_cast<DWORD>(wave.data.samples.size());
     desc.lpwfxFormat = &format;
 

@@ -28,6 +28,14 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
   void stop() override;
   void join() override;
 
+#ifdef MIR2_ENABLE_TEST_HOOKS
+  void seed_session_for_test(std::uint64_t session_id);
+  void translate_legacy_packet_for_test(std::uint64_t session_id, const LegacyPacket& packet,
+                                        std::vector<client_v1::Message>& messages);
+  [[nodiscard]] std::optional<CharacterRecord> session_character_for_test(
+      std::uint64_t session_id) const;
+#endif
+
  protected:
   PortBinding binding(const HostContext& context) const override;
   void handle_message(std::uint64_t session_id, const std::string& peer_address,

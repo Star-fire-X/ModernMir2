@@ -10,13 +10,9 @@
 #include "protocol/legacy_game_codec.hpp"
 #include "protocol/legacy_types.hpp"
 #include "services/client_v1_admission_registry.hpp"
-#include "services/client_v1_gateway_service_base.hpp"
 #include "shared/protocol/client_v1/protocol.hpp"
 #include "storage/repository.hpp"
-
-#define private public
 #include "services/client_v1_game_gateway_service.hpp"
-#undef private
 
 namespace {
 
@@ -68,32 +64,44 @@ int main() {
   constexpr std::uint64_t kSessionId = 901;
   auto admissions = std::make_shared<mir2::ClientV1AdmissionRegistry>();
   mir2::ClientV1GameGatewayService service(admissions);
-  service.sessions_[kSessionId] = {};
+  service.seed_session_for_test(kSessionId);
 
   std::vector<mir2::client_v1::Message> messages;
   const auto add_packet = make_add_magic_packet(kSessionId, make_client_magic(1, 0, 0));
-  service.translate_legacy_packet(kSessionId, add_packet, messages);
+  service.translate_legacy_packet_for_test(kSessionId, add_packet, messages);
   const auto& add_list = only_magic_list(messages);
   assert(add_list.magics.size() == 1);
   assert(add_list.magics.front().magic_id == 1);
   assert(add_list.magics.front().level == 0);
   assert(add_list.magics.front().train == 0);
-  assert(service.sessions_[kSessionId].character.magics[0].magic_id == 1);
+  auto character = service.session_character_for_test(kSessionId);
+  assert(character.has_value());
+  if (character->magics[0].magic_id != 1) {
+    return 1;
+  }
 
   messages.clear();
-  service.translate_legacy_packet(kSessionId, make_lvexp_packet(kSessionId, 1, 2, 345),
-                                  messages);
+  service.translate_legacy_packet_for_test(kSessionId,
+                                           make_lvexp_packet(kSessionId, 1, 2, 345), messages);
   const auto& lvexp_list = only_magic_list(messages);
   assert(lvexp_list.magics.size() == 1);
   assert(lvexp_list.magics.front().level == 2);
   assert(lvexp_list.magics.front().train == 345);
-  assert(service.sessions_[kSessionId].character.magics[0].level == 2);
-  assert(service.sessions_[kSessionId].character.magics[0].cur_train == 345);
+  character = service.session_character_for_test(kSessionId);
+  assert(character.has_value());
+  if (character->magics[0].level != 2 || character->magics[0].cur_train != 345) {
+    return 1;
+  }
 
   messages.clear();
-  service.translate_legacy_packet(kSessionId, make_del_magic_packet(kSessionId, 1), messages);
+  service.translate_legacy_packet_for_test(kSessionId, make_del_magic_packet(kSessionId, 1),
+                                           messages);
   const auto& del_list = only_magic_list(messages);
   assert(del_list.magics.empty());
-  assert(mir2::is_empty(service.sessions_[kSessionId].character.magics[0]));
+  character = service.session_character_for_test(kSessionId);
+  assert(character.has_value());
+  if (!mir2::is_empty(character->magics[0])) {
+    return 1;
+  }
   return 0;
 }

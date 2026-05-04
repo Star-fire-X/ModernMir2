@@ -1,6 +1,12 @@
 *
 !.gitignore
 !README.md
+!.github/
+!.github/**
+!ci/
+!ci/**
+!shared/
+!shared/**
 !ModernServer/
 !ModernServer/**
 !ModernClient/
@@ -9,6 +15,7 @@
 # ModernServer generated artifacts
 ModernServer/build/
 ModernServer/build-clientv1/
+ModernServer/build-ci/
 ModernServer/logs/
 ModernServer/runtime/
 ModernServer/data/*.sqlite-shm
@@ -16,6 +23,7 @@ ModernServer/data/*.sqlite-wal
 
 # ModernClient generated artifacts
 ModernClient/build/
+ModernClient/build-ci/
 
 # Common editor and OS files
 *.user
