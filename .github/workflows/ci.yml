@@ -24,6 +24,7 @@ concurrency:
 env:
   CTEST_OUTPUT_ON_FAILURE: "1"
   CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+  PR_BODY: ${{ github.event.pull_request.body || '' }}
 
 jobs:
   policy:
@@ -39,6 +40,22 @@ jobs:
       - name: Guard Delphi reference sources
         shell: pwsh
         run: ./ci/scripts/check_no_delphi_changes.ps1
+
+      - name: Guard legacy resource files
+        shell: pwsh
+        run: ./ci/scripts/check_resource_format.ps1
+
+      - name: Guard unsafe compatibility changes
+        shell: pwsh
+        run: ./ci/scripts/check_unsafe_policy.ps1
+
+      - name: Guard large compatibility changes
+        shell: pwsh
+        run: ./ci/scripts/check_change_scope.ps1
+
+      - name: Check text hygiene
+        shell: pwsh
+        run: ./ci/scripts/check_text_hygiene.ps1
 
   windows-fast:
     name: windows-fast
@@ -62,10 +79,8 @@ jobs:
 
       - name: Build ModernServer and ModernClient
         shell: pwsh
-        run: ./ci/scripts/check_build.ps1 -Project all -Config Debug -Fast
+        run: ./ci/scripts/check_build.ps1 -Project all -Config Debug -Suite phase2-fast
 
       - name: Run CTest smoke tests
         shell: pwsh
-        run: |
-          ./ci/scripts/check_tests.ps1 -Project server -Config Debug -Regex "mir2_core_smoke|mir2_logic_smoke|mir2_legacy_frame_smoke|mir2_client_v1_protocol_smoke|mir2_movement_blocking_legacy_smoke|mir2_combat_smoke|mir2_items_smoke"
-          ./ci/scripts/check_tests.ps1 -Project client -Config Debug -Regex "modern_client_protocol_map_smoke|modern_client_flow_smoke|modern_client_text_encoding_smoke|modern_client_movement_smoke"
+        run: ./ci/scripts/run_compat_tests.ps1 -Suite phase2-fast -Config Debug
