@@ -1,0 +1,50 @@
+name: nightly
+
+on:
+  schedule:
+    # 03:20 Asia/Shanghai, daily.
+    - cron: "20 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CTEST_OUTPUT_ON_FAILURE: "1"
+  CI_BASE_SHA: ${{ github.event.before }}
+
+jobs:
+  windows-nightly:
+    name: windows-nightly
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install C++ dependencies
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) {
+            $vcpkgRoot = "C:\vcpkg"
+          }
+          & "$vcpkgRoot\vcpkg.exe" install sqlite3:x64-windows
+
+      - name: List compatibility suite
+        shell: pwsh
+        run: ./ci/scripts/run_compat_tests.ps1 -Suite phase3-nightly -List
+
+      - name: Build nightly compatibility targets
+        shell: pwsh
+        run: ./ci/scripts/check_build.ps1 -Project all -Config Debug -Suite phase3-nightly
+
+      - name: Run nightly compatibility tests
+        shell: pwsh
+        run: ./ci/scripts/run_compat_tests.ps1 -Suite phase3-nightly -Config Debug -TimeoutSeconds 180
