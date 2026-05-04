@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <atomic>
+#include <deque>
 #include <mutex>
 #include <memory>
 #include <string>
@@ -49,6 +50,9 @@ class WorldService : public Module {
   [[nodiscard]] RuntimeDispatch handle_session_event(const SessionEvent& event);
   [[nodiscard]] RuntimeDispatch handle_logic_command(const LogicCommand& command);
   [[nodiscard]] RuntimeDispatch handle_persist_result(const PersistResult& result);
+  void queue_gate_events(RuntimeDispatch& dispatch);
+  [[nodiscard]] RuntimeDispatch run_legacy_socket_stage(std::uint64_t now_ms);
+  bool post_gate_event(SessionEvent& event);
   void flush_dispatch(RuntimeDispatch dispatch);
 
   HostContext* context_{nullptr};
@@ -65,6 +69,11 @@ class WorldService : public Module {
   std::unordered_map<std::uint64_t, Admission> active_sessions_{};
   std::unordered_map<std::string, std::uint64_t> active_accounts_{};
   std::unordered_map<std::uint64_t, std::string> session_gateways_{};
+  mutable std::mutex gate_events_mutex_{};
+  std::deque<SessionEvent> pending_gate_events_{};
+  std::uint64_t run_socket_last_flushed_{0};
+  std::uint64_t run_socket_last_remaining_{0};
+  std::uint64_t run_socket_last_ms_{0};
   CastleDialogContext castle_dialog_context_{};
   GuildCastleSnapshot guild_castle_snapshot_{};
   std::chrono::steady_clock::time_point next_castle_context_refresh_{};

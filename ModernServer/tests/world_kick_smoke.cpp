@@ -3,6 +3,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <thread>
 
 #include "core/local_bus.hpp"
 #include "core/metrics_registry.hpp"
@@ -70,6 +71,21 @@ std::optional<mir2::AuditEvent> wait_for_audit_event(
   return std::nullopt;
 }
 
+bool wait_snapshot_value(mir2::Module& module, const std::string& key,
+                         const std::string& expected,
+                         std::chrono::milliseconds timeout = std::chrono::milliseconds(2000)) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    const auto snapshot = module.snapshot();
+    const auto it = snapshot.find(key);
+    if (it != snapshot.end() && it->second == expected) {
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  return false;
+}
+
 }  // namespace
 
 int main() {
@@ -84,6 +100,7 @@ int main() {
   config.runtime.log_dir = temp_root / "logs";
   config.runtime.status_file = temp_root / "runtime" / "status.json";
   config.runtime.default_queue_capacity = 256;
+  config.budgets.tick_ms = 500;
   config.maps.push_back(mir2::MapConfig{"0", "TestMap", {}, 0, 0, 330, 270});
 
   mir2::LocalBus bus;
@@ -138,10 +155,16 @@ int main() {
 
   const auto entered = wait_for_audit_event(log_service, [](const mir2::AuditEvent& audit) {
     return audit.category == "world.enter" && audit.message == "guest:Hero";
-  });
+  }, std::chrono::milliseconds(5000));
   if (!entered.has_value()) {
     stop_services();
     return 1;
+  }
+  if (!wait_snapshot_value(world, "pending_gate_events", "0", std::chrono::milliseconds(5000))) {
+    stop_services();
+    return 1;
+  }
+  while (game_gateway->queue->try_pop().has_value()) {
   }
 
   mir2::LogicCommand revoke;
@@ -154,10 +177,15 @@ int main() {
     return 1;
   }
 
+  if (!wait_snapshot_value(world, "pending_gate_events", "1", std::chrono::milliseconds(5000))) {
+    stop_services();
+    return 1;
+  }
+
   const auto kicked = wait_for_session_event(game_gateway, [](const mir2::SessionEvent& event) {
     return event.session_id == 77 && event.kind == mir2::SessionEventKind::send_packet_and_close &&
            packet_ident_is(event, mir2::kSmOutOfConnection);
-  });
+  }, std::chrono::milliseconds(5000));
   if (!kicked.has_value() || kicked->gateway != "game_gateway" || kicked->reason != "duplicate_login" ||
       kicked->delay_ms != 50) {
     stop_services();
