@@ -89,6 +89,59 @@ struct StatusTickResult {
   std::string shield_name{};
 };
 
+enum class LegacyBuffKind : std::int32_t {
+  poison_dechealth = 0,
+  poison_damage_armor = 1,
+  poison_dont_move = 4,
+  poison_stone = 5,
+  transparent = 8,
+  defence_up = 9,
+  magic_defence_up = 10,
+  bubble_defence_up = 11
+};
+
+enum class LegacyBuffClearPolicy {
+  death,
+  leave_map,
+  logout
+};
+
+struct LegacyBuffState {
+  LegacyBuffKind kind{LegacyBuffKind::poison_dechealth};
+  std::uint64_t expire_tick{0};
+  std::uint64_t next_tick{0};
+  std::uint64_t tick_interval{0};
+  std::int32_t level{0};
+  std::uint64_t source_actor_id{0};
+  std::int32_t status_bit{0};
+  bool affects_ability{false};
+  bool negative{false};
+  bool clear_on_death{true};
+};
+
+struct LegacyBuffClearResult {
+  bool status_changed{false};
+  bool ability_changed{false};
+};
+
+class LegacyBuffContainer {
+ public:
+  [[nodiscard]] bool activate_or_refresh(LegacyBuffState state, std::uint64_t current_tick);
+  [[nodiscard]] bool active(LegacyBuffKind kind, std::uint64_t current_tick) const;
+  [[nodiscard]] bool has(LegacyBuffKind kind) const;
+  [[nodiscard]] bool clear(LegacyBuffKind kind);
+  [[nodiscard]] LegacyBuffClearResult clear_by_policy(LegacyBuffClearPolicy policy);
+  [[nodiscard]] LegacyBuffState* tick_due(LegacyBuffKind kind, std::uint64_t current_tick);
+  [[nodiscard]] std::vector<LegacyBuffState> expire_due(std::uint64_t current_tick);
+  [[nodiscard]] std::uint64_t remaining_ticks(LegacyBuffKind kind,
+                                              std::uint64_t current_tick) const;
+  [[nodiscard]] const LegacyBuffState* get(LegacyBuffKind kind) const;
+  [[nodiscard]] LegacyBuffState* get(LegacyBuffKind kind);
+
+ private:
+  std::vector<LegacyBuffState> states_{};
+};
+
 struct LegacyMoveThrottleResult {
   bool allowed{true};
   bool disconnect{false};
@@ -255,6 +308,9 @@ class Player : public GameObject {
                                                  std::uint64_t current_tick);
   [[nodiscard]] bool clear_legacy_transparent(std::uint64_t current_tick);
   [[nodiscard]] std::size_t clear_negative_status_effects(std::uint64_t current_tick);
+  [[nodiscard]] StatusTickResult clear_legacy_buffs_on_death(std::uint64_t current_tick);
+  [[nodiscard]] StatusTickResult clear_legacy_buffs_on_leave_map(std::uint64_t current_tick);
+  [[nodiscard]] StatusTickResult clear_legacy_buffs_on_logout(std::uint64_t current_tick);
   [[nodiscard]] StatusTickResult tick_status_effects(std::uint64_t current_tick);
   void consume_move_action(std::uint64_t current_tick, bool running, std::uint32_t tick_ms);
   void restore_full_vitals();
@@ -290,7 +346,7 @@ class Player : public GameObject {
   [[nodiscard]] bool legacy_see_health_gauge() const { return legacy_see_health_gauge_; }
   void set_legacy_see_health_gauge(bool value) { legacy_see_health_gauge_ = value; }
   [[nodiscard]] bool legacy_magic_bubble_active(std::uint64_t current_tick) const;
-  [[nodiscard]] std::int32_t legacy_magic_bubble_level() const { return legacy_magic_bubble_level_; }
+  [[nodiscard]] std::int32_t legacy_magic_bubble_level() const;
   [[nodiscard]] bool activate_legacy_magic_bubble(std::int32_t level,
                                                   std::uint64_t current_tick,
                                                   std::uint64_t expire_tick);
@@ -349,24 +405,13 @@ class Player : public GameObject {
   bool ready_run_{false};
   bool ghost_{false};
   bool legacy_see_health_gauge_{false};
-  std::int32_t legacy_magic_bubble_level_{0};
-  std::uint64_t legacy_magic_bubble_expire_tick_{0};
+  LegacyBuffContainer legacy_buffs_{};
   std::int32_t legacy_prepared_sword_magic_id_{0};
   std::uint64_t legacy_prepared_sword_expire_tick_{0};
   std::uint64_t legacy_open_health_expire_tick_{0};
-  std::uint64_t legacy_poison_dechealth_expire_tick_{0};
-  std::uint64_t legacy_poison_damage_armor_expire_tick_{0};
-  std::uint64_t legacy_poison_stone_expire_tick_{0};
-  std::uint64_t legacy_next_poison_tick_{0};
-  std::uint64_t legacy_poison_tick_interval_{1};
-  std::uint64_t legacy_poison_source_actor_id_{0};
-  std::int32_t legacy_poison_level_{0};
   std::int32_t legacy_inc_healing_{0};
   std::uint64_t legacy_next_healing_tick_{0};
   std::uint64_t legacy_healing_tick_interval_{1};
-  std::uint64_t legacy_defence_up_expire_tick_{0};
-  std::uint64_t legacy_magic_defence_up_expire_tick_{0};
-  std::uint64_t legacy_transparent_expire_tick_{0};
   std::int64_t run_time_ms_{0};
   std::uint64_t run_next_tick_ms_{250};
   std::uint64_t last_save_time_ms_{0};
@@ -583,6 +628,9 @@ class Monster : public GameObject {
                                          std::uint64_t poison_tick_interval,
                                          std::uint64_t source_actor_id,
                                          std::uint64_t current_tick);
+  [[nodiscard]] StatusTickResult clear_legacy_buffs_on_death(std::uint64_t current_tick);
+  [[nodiscard]] StatusTickResult clear_legacy_buffs_on_leave_map(std::uint64_t current_tick);
+  [[nodiscard]] StatusTickResult clear_legacy_buffs_on_logout(std::uint64_t current_tick);
   [[nodiscard]] StatusTickResult tick_status_effects(std::uint64_t current_tick);
   [[nodiscard]] std::uint64_t next_status_tick() const;
   [[nodiscard]] std::int32_t current_slow_percent(std::uint64_t current_tick) const;
@@ -733,13 +781,7 @@ class Monster : public GameObject {
   std::int32_t base_dc_max_{3};
   std::int32_t base_magic_defense_{0};
   std::vector<TimedStatusEffect> status_effects_{};
-  std::uint64_t legacy_poison_dechealth_expire_tick_{0};
-  std::uint64_t legacy_poison_damage_armor_expire_tick_{0};
-  std::uint64_t legacy_poison_stone_expire_tick_{0};
-  std::uint64_t legacy_next_poison_tick_{0};
-  std::uint64_t legacy_poison_tick_interval_{1};
-  std::uint64_t legacy_poison_source_actor_id_{0};
-  std::int32_t legacy_poison_level_{0};
+  LegacyBuffContainer legacy_buffs_{};
 };
 
 class Npc : public GameObject {

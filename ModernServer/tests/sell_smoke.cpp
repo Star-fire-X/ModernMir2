@@ -73,8 +73,17 @@ int main() {
   mir2::HostConfig config;
   config.maps.push_back(mir2::MapConfig{"0", "SellMap", {}, 0, 0, 10, 10});
   config.items.push_back(mir2::ItemConfig{1, "Sell Sword", 3, 90, 5, 1, 1, 1000, 1, 0, 0});
-  config.npcs.push_back(
-      mir2::NpcConfig{"merchant_1", "0", "Trader", 11, 10, "merchant_1.txt", "sell_repair"});
+  config.npcs.push_back(mir2::NpcConfig{"merchant_1",
+                                         "0",
+                                         "Trader",
+                                         11,
+                                         10,
+                                         "merchant_1.txt",
+                                         "sell_repair",
+                                         {},
+                                         {},
+                                         100,
+                                         {5}});
 
   mir2::LogicRuntime runtime(config);
   runtime.initialize();
