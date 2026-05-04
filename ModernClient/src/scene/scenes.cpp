@@ -580,21 +580,50 @@ class ChatBoardNode final : public ui::UiNode {
     auto& world = state->world;
     const auto count = static_cast<int>(world.chat_lines.size());
     const auto max_top = std::max(0, count - kChatBoardVisibleLines);
-    const auto top = std::clamp(world.chat_board_top, 0, max_top);
-    for (int row = 0; row < kChatBoardVisibleLines; ++row) {
-      const auto index = top + row;
-      if (index < 0 || index >= count) {
-        continue;
-      }
-      const auto& line = world.chat_lines[static_cast<std::size_t>(index)];
-      const RectI line_rect{rect.x, rect.y + row * kChatBoardLineHeight, rect.w,
-                            kChatBoardLineHeight};
+    const auto top_index = std::clamp(world.chat_board_top, 0, max_top);
+
+    int visual_row = 0;
+    for (int logical = top_index; logical < count && visual_row < kChatBoardVisibleLines; ++logical) {
+      const auto& line = world.chat_lines[static_cast<std::size_t>(logical)];
       const auto back = legacy_color_to_argb(line.back_color);
-      if ((back >> 24U) != 0U) {
-        renderer.fill_rect(line_rect, back);
+      const auto fore = legacy_color_to_argb(line.fore_color);
+      auto text = widen(line.text);
+      if (text.empty()) {
+        text = L" ";
       }
-      renderer.draw_text(line_rect.x, line_rect.y, widen(line.text),
-                         legacy_color_to_argb(line.fore_color));
+      int line_start = 0;
+      while (line_start < static_cast<int>(text.size()) && visual_row < kChatBoardVisibleLines) {
+        int line_end = line_start;
+        int cur_width = 0;
+        while (line_end < static_cast<int>(text.size())) {
+          const auto ch = text[static_cast<std::size_t>(line_end)];
+          const auto ch_width =
+              renderer.measure_text_width(text.substr(static_cast<std::size_t>(line_start),
+                                                       static_cast<std::size_t>(line_end - line_start + 1)));
+          if (ch_width > rect.w && line_end > line_start) {
+            break;
+          }
+          cur_width = ch_width;
+          ++line_end;
+          if (cur_width >= rect.w) {
+            break;
+          }
+        }
+        if (line_end == line_start) {
+          ++line_end;
+        }
+        const auto sub =
+            text.substr(static_cast<std::size_t>(line_start),
+                        static_cast<std::size_t>(line_end - line_start));
+        const RectI line_rect{rect.x, rect.y + visual_row * kChatBoardLineHeight, rect.w,
+                              kChatBoardLineHeight};
+        if ((back >> 24U) != 0U) {
+          renderer.fill_rect(line_rect, back);
+        }
+        renderer.draw_text(line_rect.x, line_rect.y, sub, fore);
+        ++visual_row;
+        line_start = line_end;
+      }
     }
     UiNode::paint(renderer);
   }
