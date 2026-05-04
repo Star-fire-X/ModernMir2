@@ -1096,6 +1096,8 @@ class LegacyBottomStatusNode final : public ui::UiNode {
     if (self == nullptr || self->max_hp <= 0 || self->max_mp <= 0) {
       return;
     }
+    const auto hp_text = std::to_wstring(self->hp) + L'/' + std::to_wstring(self->max_hp);
+    const auto mp_text = std::to_wstring(self->mp) + L'/' + std::to_wstring(self->max_mp);
     if (ability.job == 0 && ability.level < 26) {
       const auto back = assets->get_frame(ArchiveId::prguse, kBottomSingleHpBackIndex);
       if (back != nullptr && !back->empty()) {
@@ -1109,6 +1111,8 @@ class LegacyBottomStatusNode final : public ui::UiNode {
                            RectI{0, top, std::max(0, fill->width - 2), fill->height - top},
                            rect.x + 38, rect.y + 90 + top);
       }
+      draw_legacy_text(renderer, rect.x + 44, rect.y + 95, hp_text);
+      draw_legacy_text(renderer, rect.x + 44, rect.y + 107, mp_text);
       return;
     }
 
@@ -1126,6 +1130,8 @@ class LegacyBottomStatusNode final : public ui::UiNode {
                        RectI{mp_left, mp_top, std::max(0, split->width - mp_left - 1),
                              split->height - mp_top},
                        rect.x + 40 + mp_left, rect.y + 91 + mp_top);
+    draw_legacy_text(renderer, rect.x + 46, rect.y + 96, hp_text);
+    draw_legacy_text(renderer, rect.x + 46 + mp_left, rect.y + 96, mp_text);
   }
 
   void draw_exp_weight(SoftwareRenderer& renderer,
@@ -1137,8 +1143,16 @@ class LegacyBottomStatusNode final : public ui::UiNode {
     }
     const auto exp_width = proportional_width(ability.exp, ability.max_exp, bar->width);
     draw_sprite_region(renderer, bar, RectI{0, 0, exp_width, bar->height}, 666, 527);
+    draw_legacy_text(renderer, 666, 512,
+                     std::to_wstring(ability.exp) + L'/' + std::to_wstring(ability.max_exp));
     const auto weight_width = proportional_width(ability.weight, ability.max_weight, bar->width);
     draw_sprite_region(renderer, bar, RectI{0, 0, weight_width, bar->height}, 666, 560);
+    draw_legacy_text(renderer, 666, 546,
+                     std::to_wstring(ability.weight) + L'/' + std::to_wstring(ability.max_weight));
+    if (ability.gold != 0) {
+      const auto gold_text = L"Gold: " + std::to_wstring(ability.gold);
+      draw_legacy_text(renderer, 660, 472, gold_text, 0xFFFFE08AU);
+    }
   }
 
   void draw_hunger(SoftwareRenderer& renderer,
@@ -1161,6 +1175,13 @@ class LegacyBottomStatusNode final : public ui::UiNode {
       if (!item_empty(item)) {
         draw_bag_item_icon(renderer, item_icon_frame(assets, item, ArchiveId::items), cell,
                            item_low_dura(item));
+        if (item.dura > 0 && item.dura_max > 0) {
+          const auto count = item.dura / 1000;
+          if (count > 1) {
+            draw_legacy_text(renderer, cell.x + 18, cell.y + 19,
+                             std::to_wstring(count));
+          }
+        }
       }
       draw_legacy_text(renderer, cell.x + 13, cell.y + 19, std::to_wstring(slot + 1));
     }
