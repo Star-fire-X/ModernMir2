@@ -57,6 +57,11 @@ bool bag_has_make_index(const mir2::CharacterRecord& character, std::int32_t mak
                      });
 }
 
+mir2::RuntimeDispatch tick_player_due(mir2::LogicRuntime& runtime, std::uint64_t& now_ms) {
+  now_ms += 251;
+  return runtime.tick(now_ms);
+}
+
 }  // namespace
 
 int main() {
@@ -97,11 +102,12 @@ int main() {
   hero.equipped_items[mir2::kEquipRingLeft].desc[7] = 1;
 
   static_cast<void>(runtime.route_logic_command(make_enter(501, hero)));
-  static_cast<void>(runtime.tick());
+  std::uint64_t now_ms = 20;
+  static_cast<void>(runtime.tick(now_ms));
 
   static_cast<void>(runtime.route_logic_command(make_item_command(
       mir2::LogicCommandKind::take_on_item, 501, 1001, "Heavy Sword", mir2::kEquipWeapon)));
-  auto dispatch = runtime.tick();
+  auto dispatch = tick_player_due(runtime, now_ms);
   assert(find_packet(dispatch, mir2::kSmTakeOnFail).has_value());
   auto snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value());
@@ -110,7 +116,7 @@ int main() {
 
   static_cast<void>(runtime.route_logic_command(make_item_command(
       mir2::LogicCommandKind::take_on_item, 501, 1002, "Level Sword", mir2::kEquipWeapon)));
-  dispatch = runtime.tick();
+  dispatch = tick_player_due(runtime, now_ms);
   assert(find_packet(dispatch, mir2::kSmTakeOnFail).has_value());
   snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value());
@@ -118,7 +124,7 @@ int main() {
 
   static_cast<void>(runtime.route_logic_command(make_item_command(
       mir2::LogicCommandKind::take_on_item, 501, 1003, "Wizard Ring", mir2::kEquipRingRight)));
-  dispatch = runtime.tick();
+  dispatch = tick_player_due(runtime, now_ms);
   assert(find_packet(dispatch, mir2::kSmTakeOnFail).has_value());
   snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value());
@@ -126,7 +132,7 @@ int main() {
 
   static_cast<void>(runtime.route_logic_command(make_item_command(
       mir2::LogicCommandKind::take_on_item, 501, 1005, "Plain Ring", mir2::kEquipRingLeft)));
-  dispatch = runtime.tick();
+  dispatch = tick_player_due(runtime, now_ms);
   assert(find_packet(dispatch, mir2::kSmTakeOnFail).has_value());
   snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value());

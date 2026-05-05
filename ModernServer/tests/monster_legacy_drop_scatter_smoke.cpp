@@ -163,7 +163,7 @@ int main() {
         map.legacy_spawn_player(make_player(blocker_id, 20, "Blocker", 9, 8, true), 1, 0, true));
 
     assert(map.enqueue_legacy_player_command(make_drop_token(blocker_id, 20), 10));
-    const auto dropped = map.legacy_process_player(blocker_id, 2, 10, false);
+    const auto dropped = map.legacy_process_player(blocker_id, 2, 251, false);
     assert(find_packet_by_body(dropped, mir2::kSmItemShow, "Token").has_value());
 
     map.enqueue_mail(make_monster(monster_id));

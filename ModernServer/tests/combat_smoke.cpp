@@ -293,7 +293,7 @@ int main() {
   static_cast<void>(broadcast_runtime.tick());
 
   static_cast<void>(broadcast_runtime.route_logic_command(make_say_command(81, "hello")));
-  const auto say_dispatch = broadcast_runtime.tick();
+  const auto say_dispatch = broadcast_runtime.tick(400);
   if (!find_packet_for(say_dispatch, 81, mir2::kSmHear).has_value() ||
       !find_packet_for(say_dispatch, 82, mir2::kSmHear).has_value() ||
       find_packet_for(say_dispatch, 83, mir2::kSmHear).has_value()) {
@@ -302,7 +302,7 @@ int main() {
 
   static_cast<void>(
       broadcast_runtime.route_logic_command(make_spell_command(81, 1, 0, 20, 19, 1)));
-  const auto ranged_spell_dispatch = broadcast_runtime.tick();
+  const auto ranged_spell_dispatch = broadcast_runtime.tick(420);
   if (!has_raw_text_for(ranged_spell_dispatch, 81, "+GOOD/")) {
     return fail(10);
   }
