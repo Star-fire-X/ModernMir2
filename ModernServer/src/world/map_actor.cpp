@@ -1462,6 +1462,19 @@ std::optional<MonsterSnapshot> MapActor::legacy_monster_snapshot(std::uint64_t a
   return monster->snapshot();
 }
 
+bool MapActor::legacy_set_player_slave_relax(std::uint64_t actor_id, bool value) {
+  const auto it = objects_.find(actor_id);
+  if (it == objects_.end()) {
+    return false;
+  }
+  auto* player = as_player(it->second.get());
+  if (player == nullptr) {
+    return false;
+  }
+  player->set_legacy_slave_relax(value);
+  return true;
+}
+
 bool MapActor::legacy_player_tracks_event(std::uint64_t actor_id, std::uint64_t event_id) const {
   const auto visibility_it = visibility_.find(actor_id);
   return visibility_it != visibility_.end() && visibility_it->second.events.contains(event_id);

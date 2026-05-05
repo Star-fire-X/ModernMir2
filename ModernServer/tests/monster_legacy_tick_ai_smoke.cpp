@@ -37,7 +37,8 @@ mir2::ActorMail make_monster(std::uint64_t actor_id, std::int32_t x, std::int32_
                              mir2::MonsterAiProfile profile,
                              std::int32_t walk_step = 1,
                              std::int32_t walk_wait_ms = 0,
-                             std::int32_t race_server = 0) {
+                             std::int32_t race_server = 0,
+                             std::int32_t attack_speed_ms = 200) {
   mir2::ActorMail mail;
   mail.kind = mir2::ActorMailKind::spawn_monster;
   mail.map_id = "0";
@@ -53,13 +54,23 @@ mir2::ActorMail make_monster(std::uint64_t actor_id, std::int32_t x, std::int32_
   mail.walk_speed_ms = 200;
   mail.walk_step = walk_step;
   mail.walk_wait_ms = walk_wait_ms;
-  mail.attack_speed_ms = 200;
+  mail.attack_speed_ms = attack_speed_ms;
   mail.monster_ai_profile = profile;
   mail.race_server = race_server;
   mail.monster_search_rate_ms = 1500;
   mail.dir = 4;
   mail.legacy_spawn_group = true;
   return mail;
+}
+
+bool has_monster_ai_trace(const mir2::RuntimeDispatch& dispatch,
+                          const std::string& action) {
+  for (const auto& trace : dispatch.legacy_traces) {
+    if (trace.stage == "MonsterAI" && trace.action == action) {
+      return true;
+    }
+  }
+  return false;
 }
 
 mir2::ActorMail make_player(std::uint64_t actor_id, std::uint64_t session_id,
@@ -158,6 +169,103 @@ int main() {
     assert(snapshot->target_actor_id == 3);
     assert(snapshot->target_x == 8);
     assert(snapshot->target_y == 8);
+  }
+
+  {
+    auto map = make_map();
+    constexpr std::uint64_t monster_id = 105;
+    map.enqueue_mail(make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::basic,
+                                  1, 0, 81));
+    map.enqueue_mail(make_player(7, 70, "FirstHero", 10, 11));
+    static_cast<void>(map.tick(1, 0));
+
+    const auto first = map.legacy_process_monster(monster_id, 2, 1001, 0, 0);
+    assert(has_monster_ai_trace(first, "MonsterNormalAttack"));
+    auto snapshot = map.legacy_monster_snapshot(monster_id);
+    assert(snapshot.has_value());
+    assert(snapshot->target_actor_id == 7);
+    assert(snapshot->search_enemy_time_ms == 1001);
+
+    map.enqueue_mail(make_player(8, 80, "NearHero", snapshot->x, snapshot->y + 1));
+    static_cast<void>(map.tick(2, 1100));
+
+    const auto too_early = map.legacy_process_monster(monster_id, 3, 2002, 0, 0);
+    assert(!has_monster_ai_trace(too_early, "MonsterNormalAttack"));
+    snapshot = map.legacy_monster_snapshot(monster_id);
+    assert(snapshot.has_value());
+    assert(snapshot->search_enemy_time_ms == 1001);
+    assert(snapshot->target_actor_id == 7);
+
+    const auto refreshed = map.legacy_process_monster(monster_id, 4, 9002, 0, 0);
+    assert(has_monster_ai_trace(refreshed, "MonsterNormalAttack"));
+    snapshot = map.legacy_monster_snapshot(monster_id);
+    assert(snapshot.has_value());
+    assert(snapshot->search_enemy_time_ms == 9002);
+    assert(snapshot->target_actor_id == 8);
+  }
+
+  {
+    auto map = make_map();
+    constexpr std::uint64_t monster_id = 106;
+    spawn(map, make_monster(monster_id, 10, 9, mir2::MonsterAiProfile::basic,
+                            1, 0, 81, 1000),
+          make_player(9, 90, "CooldownHero", 10, 10));
+
+    const auto first = map.legacy_process_monster(monster_id, 2, 1001, 0, 0);
+    assert(find_packet_by_recog(first, mir2::kSmHit,
+                                static_cast<std::int32_t>(monster_id)).has_value());
+    const auto after_hit = map.legacy_monster_snapshot(monster_id);
+    assert(after_hit.has_value());
+
+    const auto cooldown = map.legacy_process_monster(monster_id, 3, 1252, 0, 0);
+    assert(!find_packet_by_recog(cooldown, mir2::kSmHit,
+                                 static_cast<std::int32_t>(monster_id)).has_value());
+    assert(!find_packet_by_recog(cooldown, mir2::kSmWalk,
+                                 static_cast<std::int32_t>(monster_id)).has_value());
+    const auto after_cooldown = map.legacy_monster_snapshot(monster_id);
+    assert(after_cooldown.has_value());
+    assert(after_cooldown->x == after_hit->x);
+    assert(after_cooldown->y == after_hit->y);
+  }
+
+  {
+    auto map = make_map();
+    constexpr std::uint64_t monster_id = 107;
+    spawn(map, make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::basic,
+                            1, 0, 81),
+          make_player(10, 100, "GoneHero", 10, 11));
+
+    static_cast<void>(map.legacy_process_monster(monster_id, 2, 1001, 0, 0));
+    auto selected = map.legacy_monster_snapshot(monster_id);
+    assert(selected.has_value());
+    assert(selected->target_actor_id == 10);
+
+    static_cast<void>(map.legacy_disconnect_player(10, 2000));
+    const auto dispatch = map.legacy_process_monster(monster_id, 200, 5000, 0, 0);
+    assert(!find_packet_by_recog(dispatch, mir2::kSmHit,
+                                 static_cast<std::int32_t>(monster_id)).has_value());
+    const auto cleared = map.legacy_monster_snapshot(monster_id);
+    assert(cleared.has_value());
+    assert(cleared->target_actor_id == 0);
+    assert(cleared->target_x == -1);
+    assert(cleared->target_y == -1);
+  }
+
+  {
+    auto map = make_map();
+    constexpr std::uint64_t monster_id = 108;
+    spawn(map, make_monster(monster_id, 10, 5, mir2::MonsterAiProfile::aggressive,
+                            1, 0, 85),
+          make_player(11, 110, "HiddenHero", 10, 12));
+
+    const auto dispatch = map.legacy_process_monster(monster_id, 2, 1001, 0, 0);
+    assert(!has_monster_ai_trace(dispatch, "MonsterNormalAttack"));
+    assert(!find_packet_by_recog(dispatch, mir2::kSmWalk,
+                                 static_cast<std::int32_t>(monster_id)).has_value());
+    const auto hidden = map.legacy_monster_snapshot(monster_id);
+    assert(hidden.has_value());
+    assert(hidden->hide_mode);
+    assert(hidden->target_actor_id == 0);
   }
 
   {

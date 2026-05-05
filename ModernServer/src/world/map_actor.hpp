@@ -95,6 +95,7 @@ class MapActor {
   [[nodiscard]] std::optional<CharacterRecord> snapshot_player(std::uint64_t actor_id) const;
   [[nodiscard]] std::optional<MonsterSnapshot> legacy_monster_snapshot(
       std::uint64_t actor_id) const;
+  [[nodiscard]] bool legacy_set_player_slave_relax(std::uint64_t actor_id, bool value);
   [[nodiscard]] bool legacy_player_tracks_event(std::uint64_t actor_id,
                                                 std::uint64_t event_id) const;
   [[nodiscard]] const std::string& id() const { return config_.id; }

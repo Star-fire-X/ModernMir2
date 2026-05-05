@@ -356,6 +356,8 @@ class Player : public GameObject {
   [[nodiscard]] bool legacy_has_commands() const { return !legacy_inbox_.empty(); }
   [[nodiscard]] bool legacy_see_health_gauge() const { return legacy_see_health_gauge_; }
   void set_legacy_see_health_gauge(bool value) { legacy_see_health_gauge_ = value; }
+  [[nodiscard]] bool legacy_slave_relax() const { return slave_relax_; }
+  void set_legacy_slave_relax(bool value) { slave_relax_ = value; }
   [[nodiscard]] bool legacy_magic_bubble_active(std::uint64_t current_tick) const;
   [[nodiscard]] std::int32_t legacy_magic_bubble_level() const;
   [[nodiscard]] bool activate_legacy_magic_bubble(std::int32_t level,
@@ -416,6 +418,7 @@ class Player : public GameObject {
   bool ready_run_{false};
   bool ghost_{false};
   bool legacy_see_health_gauge_{false};
+  bool slave_relax_{false};
   LegacyBuffContainer legacy_buffs_{};
   std::int32_t legacy_prepared_sword_magic_id_{0};
   std::uint64_t legacy_prepared_sword_expire_tick_{0};

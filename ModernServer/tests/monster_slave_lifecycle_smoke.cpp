@@ -12,13 +12,14 @@ namespace {
 constexpr std::uint64_t kScriptMonsterBase = 0x6000000000000000ULL;
 
 mir2::CharacterRecord make_character(std::string name, std::int32_t x,
-                                     std::int32_t y) {
+                                      std::int32_t y, std::uint8_t dir = 0) {
   mir2::CharacterRecord hero;
   hero.account_id = "acct_" + name;
   hero.character_name = std::move(name);
   hero.map_id = "0";
   hero.x = x;
   hero.y = y;
+  hero.dir = dir;
   hero.ability.level = 20;
   hero.ability.hp = 50;
   hero.ability.max_hp = 50;
@@ -98,7 +99,7 @@ mir2::MapActor make_map() {
   budgets.tick_ms = 20;
   std::unordered_map<std::string, mir2::MonsterDefConfig> defs;
   defs.emplace("__whiteskeleton", make_skeleton_def());
-  return mir2::MapActor(mir2::MapConfig{"0", "SlaveLife", {}, 0, 0, 30, 30},
+  return mir2::MapActor(mir2::MapConfig{"0", "SlaveLife", {}, 0, 0, 50, 50},
                         budgets, {}, {}, {}, {}, std::move(defs));
 }
 
@@ -221,12 +222,47 @@ int main() {
   {
     auto map = make_map();
     static_cast<void>(
-        map.legacy_spawn_player(make_player(1, 104, make_character("Follower", 10, 10)),
+        map.legacy_spawn_player(make_player(1, 104, make_character("Follower", 10, 10, 0)),
                                 1, 0, true));
-    map.enqueue_mail(make_slave(2, 1, 25, 25, 100000000));
+    map.enqueue_mail(make_slave(2, 1, 10, 13, 100000000));
     static_cast<void>(map.tick(1, 0));
 
     static_cast<void>(map.legacy_process_monster(2, 400, 1000, 0, 0));
+    auto slave = map.legacy_monster_snapshot(2);
+    assert(slave.has_value());
+    assert(slave->x == 10);
+    assert(slave->y == 12);
+    assert(slave->target_x == 10);
+    assert(slave->target_y == 11);
+  }
+
+  {
+    auto map = make_map();
+    static_cast<void>(
+        map.legacy_spawn_player(make_player(1, 105, make_character("Relax", 10, 10, 0)),
+                                1, 0, true));
+    assert(map.legacy_set_player_slave_relax(1, true));
+    map.enqueue_mail(make_slave(2, 1, 10, 13, 100000000));
+    static_cast<void>(map.tick(1, 0));
+
+    static_cast<void>(map.legacy_process_monster(2, 500, 1000, 0, 0));
+    auto slave = map.legacy_monster_snapshot(2);
+    assert(slave.has_value());
+    assert(slave->x == 10);
+    assert(slave->y == 13);
+    assert(slave->target_x == -1);
+    assert(slave->target_y == -1);
+  }
+
+  {
+    auto map = make_map();
+    static_cast<void>(
+        map.legacy_spawn_player(make_player(1, 106, make_character("Recall", 10, 10, 0)),
+                                1, 0, true));
+    map.enqueue_mail(make_slave(2, 1, 35, 35, 100000000));
+    static_cast<void>(map.tick(1, 0));
+
+    static_cast<void>(map.legacy_process_monster(2, 600, 1000, 0, 0));
     auto slave = map.legacy_monster_snapshot(2);
     assert(slave.has_value());
     assert(std::abs(slave->x - 10) <= 3);
