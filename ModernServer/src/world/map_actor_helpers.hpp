@@ -30,9 +30,16 @@ constexpr std::int32_t kPoisonDecHealth = 0;
 constexpr std::int32_t kLegacyPoisonStone = 5;
 constexpr std::int32_t kRcDoorGuard = 11;
 constexpr std::int32_t kRcArcherPolice = 20;
+constexpr std::int32_t kRcWolf = 53;
+constexpr std::int32_t kRcMonster = 80;
+constexpr std::int32_t kRcOma = 81;
 constexpr std::int32_t kRcSpitSpider = 82;
+constexpr std::int32_t kRcSlowMonster = 83;
 constexpr std::int32_t kRcKillingHerb = 85;
+constexpr std::int32_t kRcSkeleton = 86;
 constexpr std::int32_t kRcDualAxeSkeleton = 87;
+constexpr std::int32_t kRcHeavyAxeSkeleton = 88;
+constexpr std::int32_t kRcKnightSkeleton = 89;
 constexpr std::int32_t kRcBigKudeki = 90;
 constexpr std::int32_t kRcMagCowFaceMon = 91;
 constexpr std::int32_t kRcThornDark = 93;
@@ -47,6 +54,7 @@ constexpr std::int32_t kRcSpiderHouse = 116;
 constexpr std::int32_t kRcHighRiskSpider = 118;
 constexpr std::int32_t kRcBigPoisonSpider = 119;
 constexpr std::int32_t kRcScultureKingNoFollower = 122;
+constexpr std::int32_t kRcNoblePigKing = 124;
 constexpr std::int32_t kRcToxicGhost = 127;
 
 enum class LegacyMonsterRaceBehavior {
