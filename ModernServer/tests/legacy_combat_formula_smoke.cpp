@@ -147,9 +147,36 @@ int main() {
     static_cast<void>(runtime.route_logic_command(make_attack(102, 0, 10, 9, 1)));
     const auto dispatch = runtime.tick();
     const auto struck = find_packet(dispatch, mir2::kSmStruck, 102);
+    if (!struck.has_value() || struck->message.param != 12 || struck->message.tag != 20 ||
+        struck->message.series != 8) {
+      return fail(2);
+    }
+  }
+
+  {
+    mir2::HostConfig config;
+    config.runtime.legacy_random_seed = 1;
+    config.maps.push_back(mir2::MapConfig{"0", "UndeadPowerMap", {}, 20, 20, 10, 10});
+    config.spawns.push_back(
+        mir2::SpawnConfig{"0", "monster", "Undead", 10, 9, 30000, 1, 20, 0, 0, 0, 20, 1});
+    mir2::ItemConfig slayer{3, "Undead Slayer", 1, 100, 5, 0, 10, 1000, 1, 0, 0};
+    slayer.undead = 4;
+    config.items.push_back(slayer);
+
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto hero = make_player("SlayerWithPower", 10, 10);
+    hero.ability.dc = mir2::make_word(8, 8);
+    hero.equipped_items[mir2::kEquipWeapon] = mir2::LegacyUserItem{3001, 3, 1000, 1000};
+    static_cast<void>(runtime.route_logic_command(make_enter(106, hero)));
+    static_cast<void>(runtime.tick());
+
+    static_cast<void>(runtime.route_logic_command(make_attack(106, 0, 10, 9, 1)));
+    const auto dispatch = runtime.tick();
+    const auto struck = find_packet(dispatch, mir2::kSmStruck, 106);
     if (!struck.has_value() || struck->message.param != 8 || struck->message.tag != 20 ||
         struck->message.series != 12) {
-      return fail(2);
+      return fail(7);
     }
   }
 
