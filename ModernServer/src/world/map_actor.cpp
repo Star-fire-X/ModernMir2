@@ -479,13 +479,31 @@ std::int32_t legacy_packed_attack_power(const Player& attacker, std::uint16_t id
                          std::lround(static_cast<double>(raw) * resolve_attack_multiplier(ident))));
 }
 
+std::int32_t legacy_player_undead_power(
+    const Player& attacker, const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
+  std::int32_t power = 0;
+  for (const auto& item : attacker.character().equipped_items) {
+    if (is_empty(item) || item.dura == 0) {
+      continue;
+    }
+    const auto* config = find_item_config(item_configs, item.index);
+    if (config == nullptr) {
+      continue;
+    }
+    const auto upgraded = legacy_upgraded_item_config(*config, item);
+    power += std::max(upgraded.undead, 0);
+  }
+  return power;
+}
+
 std::int32_t legacy_physical_struck_damage(const GameObject& target, std::int32_t damage,
-                                           std::int32_t armor_roll) {
+                                           std::int32_t armor_roll,
+                                           std::int32_t undead_power = 0) {
   const auto [ac_min, ac_max] = actor_physical_defense_range(target);
   const auto armor = ac_min + std::clamp(armor_roll, 0, std::max(0, ac_max - ac_min));
   auto result = std::max(0, damage - armor);
   if (actor_undead(target) && result > 0) {
-    result += std::max(1, result / 2);
+    result += std::max(undead_power, 0);
   }
   return result;
 }
