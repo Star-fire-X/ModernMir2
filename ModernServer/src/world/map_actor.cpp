@@ -1116,13 +1116,14 @@ RuntimeDispatch MapActor::legacy_process_monster(std::uint64_t actor_id,
   if (monster->legacy_search_due(now_ms)) {
     monster->mark_legacy_search_time(now_ms);
   }
-  if (handle_monster_status_effects(*monster, dispatch, current_tick, now_ms)) {
+  if (run_due) {
+    handle_monster_ai(*monster, dispatch, current_tick, now_ms);
+    monster->mark_legacy_run_time(now_ms);
+  }
+  if (!monster->is_dead() &&
+      handle_monster_status_effects(*monster, dispatch, current_tick, now_ms)) {
     trace.action = "status_death";
   } else {
-    if (run_due) {
-      handle_monster_ai(*monster, dispatch, current_tick, now_ms);
-      monster->mark_legacy_run_time(now_ms);
-    }
     MapContext context;
     context.tick = current_tick;
     context.map_id = config_.id;

@@ -110,7 +110,7 @@ MonsterAiProfile infer_monster_ai_profile(const MonsterDefConfig& def) {
   }
   if (name.find("oma") != std::string::npos || name.find("woma") != std::string::npos ||
       name.find("skeleton") != std::string::npos || name.find("wolf") != std::string::npos ||
-      (def.race_server >= 80 && def.race_server <= 89)) {
+      (def.race_server >= 81 && def.race_server <= 89)) {
     return MonsterAiProfile::aggressive;
   }
   if (def.walk_speed_ms >= 1200 || def.walk_wait_ms >= 800) {

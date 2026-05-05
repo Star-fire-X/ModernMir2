@@ -36,7 +36,8 @@ std::optional<mir2::DecodedLegacyGamePacket> find_packet_by_recog(
 mir2::ActorMail make_monster(std::uint64_t actor_id, std::int32_t x, std::int32_t y,
                              mir2::MonsterAiProfile profile,
                              std::int32_t walk_step = 1,
-                             std::int32_t walk_wait_ms = 0) {
+                             std::int32_t walk_wait_ms = 0,
+                             std::int32_t race_server = 0) {
   mir2::ActorMail mail;
   mail.kind = mir2::ActorMailKind::spawn_monster;
   mail.map_id = "0";
@@ -54,6 +55,7 @@ mir2::ActorMail make_monster(std::uint64_t actor_id, std::int32_t x, std::int32_
   mail.walk_wait_ms = walk_wait_ms;
   mail.attack_speed_ms = 200;
   mail.monster_ai_profile = profile;
+  mail.race_server = race_server;
   mail.monster_search_rate_ms = 1500;
   mail.dir = 4;
   mail.legacy_spawn_group = true;
@@ -121,8 +123,24 @@ int main() {
 
   {
     auto map = make_map();
+    constexpr std::uint64_t monster_id = 104;
+    spawn(map, make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::aggressive,
+                            1, 0, 80),
+          make_player(6, 60, "PassiveHero", 10, 9));
+
+    const auto dispatch = map.legacy_process_monster(monster_id, 2, 1001, 0, 0);
+    assert(!find_packet_by_recog(dispatch, mir2::kSmHit,
+                                 static_cast<std::int32_t>(monster_id)).has_value());
+    const auto snapshot = map.legacy_monster_snapshot(monster_id);
+    assert(snapshot.has_value());
+    assert(snapshot->target_actor_id == 0);
+  }
+
+  {
+    auto map = make_map();
     constexpr std::uint64_t monster_id = 101;
-    map.enqueue_mail(make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::aggressive));
+    map.enqueue_mail(make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::basic,
+                                  1, 0, 81));
     map.enqueue_mail(make_player(2, 20, "FarHero", 10, 11));
     map.enqueue_mail(make_player(3, 30, "NearHero", 8, 8));
     static_cast<void>(map.tick(1, 0));

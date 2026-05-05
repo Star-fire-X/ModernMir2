@@ -1,6 +1,29 @@
 #pragma once
 
 // Implementation detail for map_actor.cpp: monster, slave, reward, and AI members.
+namespace {
+
+bool legacy_monster_has_pre_run_search(const Monster& monster) {
+  switch (monster.race_server()) {
+    case kRcWolf:
+    case kRcOma:
+    case kRcSlowMonster:
+    case kRcSkeleton:
+    case kRcHeavyAxeSkeleton:
+    case kRcKnightSkeleton:
+    case kRcNoblePigKing:
+      return true;
+    case kRcMonster:
+      return false;
+    default:
+      break;
+  }
+  return monster.race_server() == 0 &&
+         monster.ai_profile() == MonsterAiProfile::aggressive;
+}
+
+}  // namespace
+
 bool MapActor::handle_monster_status_effects(Monster& monster, RuntimeDispatch& dispatch,
                                              std::uint64_t current_tick,
                                              std::uint64_t now_ms) {
@@ -778,10 +801,26 @@ bool MapActor::legacy_monster_think(Monster& monster, RuntimeDispatch& dispatch,
       3000) {
     monster.mark_think_time(now_ms);
     if (monster.target_actor_id() != 0) {
-      auto* target = find_player(monster.target_actor_id());
-      if (target == nullptr || target->is_dead() ||
-          is_safe_zone(config_, target->x(), target->y()) ||
-          target->legacy_transparent_active(current_tick)) {
+      const auto target_it = objects_.find(monster.target_actor_id());
+      auto* target = target_it != objects_.end() ? target_it->second.get() : nullptr;
+      auto* player_target = as_player(target);
+      auto* monster_target = as_monster(target);
+      const auto focus_expired =
+          monster.target_focus_time_ms() != 0 && now_ms > monster.target_focus_time_ms() + 30000ULL;
+      const auto target_too_far =
+          target != nullptr &&
+          (std::abs(target->x() - monster.x()) > 15 ||
+           std::abs(target->y() - monster.y()) > 15);
+      const auto invalid_player =
+          player_target != nullptr &&
+          (player_target->is_dead() ||
+           is_safe_zone(config_, player_target->x(), player_target->y()) ||
+           player_target->legacy_transparent_active(current_tick));
+      const auto invalid_monster =
+          monster_target != nullptr &&
+          (monster_target->is_dead() || monster_target->legacy_ghosted());
+      if (target == nullptr || focus_expired || target_too_far ||
+          invalid_player || invalid_monster) {
         monster.lose_target();
       }
     }
@@ -806,11 +845,7 @@ bool MapActor::legacy_monster_think(Monster& monster, RuntimeDispatch& dispatch,
 
 void MapActor::legacy_active_search(Monster& monster, RuntimeDispatch& dispatch,
                                     std::uint64_t current_tick, std::uint64_t now_ms) {
-  const auto profile = monster.ai_profile();
-  const auto active_search = profile == MonsterAiProfile::aggressive ||
-                             profile == MonsterAiProfile::ranged ||
-                             profile == MonsterAiProfile::stationary;
-  if (!active_search) {
+  if (!legacy_monster_has_pre_run_search(monster)) {
     return;
   }
 
@@ -1686,10 +1721,6 @@ void MapActor::handle_monster_ai(Monster& monster, RuntimeDispatch& dispatch,
     return;
   }
 
-  if (handle_slave_follow(monster, dispatch, current_tick, now_ms)) {
-    return;
-  }
-
   if (!monster.is_slave()) {
     legacy_active_search(monster, dispatch, current_tick, now_ms);
   }
@@ -1722,6 +1753,10 @@ void MapActor::handle_monster_ai(Monster& monster, RuntimeDispatch& dispatch,
 
   if (monster.target_actor_id() != 0 && legacy_attack_target(monster, dispatch,
                                                              current_tick, now_ms)) {
+    return;
+  }
+
+  if (handle_slave_follow(monster, dispatch, current_tick, now_ms)) {
     return;
   }
 
