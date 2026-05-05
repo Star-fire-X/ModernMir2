@@ -55,6 +55,7 @@ class GatewayServiceBase : public Module {
   std::shared_ptr<LocalBus::Endpoint> endpoint_{};
   mutable std::mutex mutex_{};
   std::unordered_map<std::uint64_t, std::shared_ptr<GameSession>> sessions_{};
+  std::unordered_map<std::uint64_t, std::uint64_t> session_sequences_{};
   std::atomic_bool running_{false};
   std::atomic_uint64_t next_session_id_{1};
 };

@@ -70,6 +70,7 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
     std::int32_t trade_local_gold{0};
     bool trade_local_accept{false};
     bool guild_visible{false};
+    std::uint64_t next_session_seq{0};
   };
 
   void handle_client_hello(std::uint64_t session_id, const client_v1::ClientHello& hello);

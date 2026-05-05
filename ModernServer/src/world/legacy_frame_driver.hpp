@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "core/messages.hpp"
@@ -22,11 +23,36 @@ enum class LegacyFrameStage {
 
 [[nodiscard]] std::string_view legacy_frame_stage_name(LegacyFrameStage stage);
 
+struct WorldIngressMessage {
+  BusMessage message{};
+  std::uint64_t ingress_seq{0};
+  std::uint64_t frame_index{0};
+
+  WorldIngressMessage() = default;
+  WorldIngressMessage(BusMessage value, std::uint64_t ingress = 0,
+                      std::uint64_t frame = 0)
+      : message(std::move(value)), ingress_seq(ingress), frame_index(frame) {}
+  WorldIngressMessage(SessionEvent value) : message(std::move(value)) {}
+  WorldIngressMessage(LogicCommand value) : message(std::move(value)) {}
+  WorldIngressMessage(ActorMail value) : message(std::move(value)) {}
+  WorldIngressMessage(PersistRequest value) : message(std::move(value)) {}
+  WorldIngressMessage(PersistResult value) : message(std::move(value)) {}
+  WorldIngressMessage(AuditEvent value) : message(std::move(value)) {}
+};
+
 struct WorldIngressBatch {
-  std::vector<BusMessage> messages{};
+  std::vector<WorldIngressMessage> messages{};
 
   [[nodiscard]] bool empty() const { return messages.empty(); }
   [[nodiscard]] std::size_t size() const { return messages.size(); }
+  void push(BusMessage message, std::uint64_t ingress_seq = 0) {
+    messages.emplace_back(std::move(message), ingress_seq);
+  }
+  void mark_frame(std::uint64_t frame_index) {
+    for (auto& message : messages) {
+      message.frame_index = frame_index;
+    }
+  }
 };
 
 struct LegacyFrameStageTrace {

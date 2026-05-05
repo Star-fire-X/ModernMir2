@@ -1545,6 +1545,15 @@ std::optional<LegacyQueuedCommand> Player::pop_legacy_command() {
   return command;
 }
 
+std::vector<std::uint64_t> Player::legacy_inbox_session_sequences() const {
+  std::vector<std::uint64_t> sequences;
+  sequences.reserve(legacy_inbox_.size());
+  for (const auto& command : legacy_inbox_) {
+    sequences.push_back(command.mail.session_seq);
+  }
+  return sequences;
+}
+
 void Player::on_mail(const ActorMail& mail, MapContext& context) {
   GameObject::on_mail(mail, context);
   switch (mail.kind) {

@@ -91,6 +91,8 @@ class MapActor {
   [[nodiscard]] std::optional<LegacyPlayerState> legacy_player_state(
       std::uint64_t actor_id) const;
   [[nodiscard]] std::size_t legacy_player_inbox_size(std::uint64_t actor_id) const;
+  [[nodiscard]] std::vector<std::uint64_t> legacy_player_inbox_session_sequences(
+      std::uint64_t actor_id) const;
   [[nodiscard]] std::int64_t legacy_player_run_time_ms(std::uint64_t actor_id) const;
   [[nodiscard]] std::optional<CharacterRecord> snapshot_player(std::uint64_t actor_id) const;
   [[nodiscard]] std::optional<MonsterSnapshot> legacy_monster_snapshot(

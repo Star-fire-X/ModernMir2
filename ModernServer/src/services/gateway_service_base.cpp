@@ -121,6 +121,10 @@ bool GatewayServiceBase::forward_packet(std::uint64_t session_id, const std::str
   event.session_id = session_id;
   event.peer_address = peer_address;
   event.packet = packet;
+  {
+    std::scoped_lock lock(mutex_);
+    event.session_seq = ++session_sequences_[session_id];
+  }
 
   const auto accepted = context_->bus->post(ingress_target(), event);
   const auto queue_depth = context_->bus->queue_depth(ingress_target());
@@ -137,6 +141,7 @@ bool GatewayServiceBase::forward_packet(std::uint64_t session_id, const std::str
 void GatewayServiceBase::remove_session(std::uint64_t session_id) {
   std::scoped_lock lock(mutex_);
   sessions_.erase(session_id);
+  session_sequences_.erase(session_id);
   if (context_ != nullptr) {
     context_->metrics->set_gauge(name() + ".sessions", static_cast<std::int64_t>(sessions_.size()));
   }
@@ -158,6 +163,7 @@ void GatewayServiceBase::do_accept() {
       {
         std::scoped_lock lock(mutex_);
         sessions_[session_id] = session;
+        session_sequences_[session_id] = 0;
       }
       session->start(session_id);
     }
