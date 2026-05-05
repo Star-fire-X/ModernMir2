@@ -36,38 +36,52 @@ int main() {
   mir2::LogicRuntime runtime(config);
   runtime.initialize();
 
-  const auto before_mission = runtime.tick(999);
-  assert(!has_trace(before_mission, "LegacyMission", "ProcessMissions"));
-  assert(!has_trace(before_mission, "LegacyTimer", "DoorTimer"));
+  const auto first = runtime.tick(1000);
+  assert(!has_trace(first, "LegacyMission", "ProcessMissions"));
+  assert(!has_trace(first, "LegacyTimer", "DoorTimer"));
+  assert(!has_trace(first, "LegacyTimer", "Timer10Sec"));
+  assert(!has_trace(first, "LegacyTimer", "Timer10Min"));
 
-  const auto mission = runtime.tick(1001);
+  const auto door_boundary = runtime.tick(1500);
+  assert(!has_trace(door_boundary, "LegacyTimer", "DoorTimer"));
+
+  const auto mission_boundary = runtime.tick(2000);
+  assert(!has_trace(mission_boundary, "LegacyMission", "ProcessMissions"));
+  assert(has_trace(mission_boundary, "LegacyTimer", "DoorTimer"));
+
+  const auto mission = runtime.tick(2001);
   assert(has_trace(mission, "LegacyMission", "ProcessMissions"));
   assert(has_trace(mission, "LegacyMission", "CheckServerWaitTimeOut"));
   assert(has_trace(mission, "LegacyMission", "CheckHolySeizeValid"));
-  assert(has_trace(mission, "LegacyTimer", "DoorTimer"));
+  assert(!has_trace(mission, "LegacyTimer", "DoorTimer"));
   const auto actions = timer_actions(mission);
   const std::vector<std::string> expected{
       "ProcessNpcs:begin",
       "LegacyMission:ProcessMissions",
       "LegacyMission:CheckServerWaitTimeOut",
-      "LegacyMission:CheckHolySeizeValid",
-      "LegacyTimer:DoorTimer"};
+      "LegacyMission:CheckHolySeizeValid"};
   assert(actions == expected);
 
-  const auto before_door = runtime.tick(1501);
+  const auto before_door = runtime.tick(2501);
   assert(!has_trace(before_door, "LegacyTimer", "DoorTimer"));
 
-  const auto door = runtime.tick(1502);
+  const auto door = runtime.tick(2502);
   assert(has_trace(door, "LegacyTimer", "DoorTimer"));
   assert(!has_trace(door, "LegacyMission", "ProcessMissions"));
 
-  const auto ten_sec = runtime.tick(10001);
+  const auto ten_sec_boundary = runtime.tick(11000);
+  assert(!has_trace(ten_sec_boundary, "LegacyTimer", "Timer10Sec"));
+
+  const auto ten_sec = runtime.tick(11001);
   assert(has_trace(ten_sec, "LegacyTimer", "Timer10Sec"));
   assert(has_trace(ten_sec, "LegacyTimer", "FrmIDSoc.SendUserCount"));
-  const auto no_repeat = runtime.tick(10002);
+  const auto no_repeat = runtime.tick(11002);
   assert(!has_trace(no_repeat, "LegacyTimer", "Timer10Sec"));
 
-  const auto ten_min = runtime.tick(600001);
+  const auto ten_min_boundary = runtime.tick(601000);
+  assert(!has_trace(ten_min_boundary, "LegacyTimer", "Timer10Min"));
+
+  const auto ten_min = runtime.tick(601001);
   assert(has_trace(ten_min, "LegacyTimer", "Timer10Min"));
   assert(has_trace(ten_min, "LegacyTimer", "NoticeMan.RefreshNoticeList"));
   assert(has_trace(ten_min, "LegacyTimer", "UserCastle.SaveAll"));

@@ -1404,11 +1404,6 @@ RuntimeDispatch MapActor::tick(std::uint64_t current_tick, std::uint64_t now_ms)
     mailbox_.push_back(std::move(delayed_mail));
   }
 
-  const auto closed_doors = environment_.close_expired_doors(now_ms, kDoorAutoCloseMs);
-  if (!closed_doors.empty()) {
-    broadcast_close_doors(closed_doors, dispatch);
-  }
-
   while (!mailbox_.empty()) {
     ActorMail mail = std::move(mailbox_.front());
     mailbox_.pop_front();
@@ -1448,6 +1443,15 @@ RuntimeDispatch MapActor::tick(std::uint64_t current_tick, std::uint64_t now_ms)
     schedule_actor(current_tick, object);
   }
 
+  return dispatch;
+}
+
+RuntimeDispatch MapActor::close_expired_doors(std::uint64_t now_ms) {
+  RuntimeDispatch dispatch;
+  const auto closed_doors = environment_.close_expired_doors(now_ms, kDoorAutoCloseMs);
+  if (!closed_doors.empty()) {
+    broadcast_close_doors(closed_doors, dispatch);
+  }
   return dispatch;
 }
 

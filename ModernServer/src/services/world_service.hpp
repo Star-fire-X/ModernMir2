@@ -29,6 +29,12 @@ class WorldService : public Module {
   void join() override;
   [[nodiscard]] std::unordered_map<std::string, std::string> snapshot() const override;
 
+#ifdef MIR2_ENABLE_TEST_HOOKS
+  void attach_context_for_test(HostContext& context);
+  void enqueue_gate_event_for_test(SessionEvent event);
+  [[nodiscard]] RuntimeDispatch run_legacy_socket_stage_for_test(std::uint64_t now_ms);
+#endif
+
  private:
   struct PendingLoad {
     std::uint64_t session_id{0};

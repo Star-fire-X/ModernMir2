@@ -189,6 +189,7 @@ class LogicRuntime {
   std::uint64_t open_door_check_ms_{0};
   std::uint64_t timer10min_ms_{0};
   std::uint64_t timer10sec_ms_{0};
+  bool user_engine_timers_initialized_{false};
   std::uint64_t last_now_ms_{0};
   std::uint64_t current_tick_{0};
   LegacyRandom legacy_random_{1};
