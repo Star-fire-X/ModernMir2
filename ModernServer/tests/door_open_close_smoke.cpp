@@ -83,10 +83,12 @@ int main() {
   enter.y = 2;
   enter.character = make_character();
   static_cast<void>(runtime.route_logic_command(enter));
-  static_cast<void>(runtime.tick());
+  std::uint64_t now_ms = 100000;
+  static_cast<void>(runtime.tick(now_ms));
 
   for (int index = 0; index < 12; ++index) {
-    static_cast<void>(runtime.tick());
+    now_ms += 20;
+    static_cast<void>(runtime.tick(now_ms));
   }
 
   mir2::LogicCommand walk;
@@ -95,22 +97,30 @@ int main() {
   walk.x = 2;
   walk.y = 2;
   static_cast<void>(runtime.route_logic_command(walk));
-  const auto open_dispatch = runtime.tick();
+  now_ms += 20;
+  const auto open_time_ms = now_ms;
+  const auto open_dispatch = runtime.tick(now_ms);
   const auto opened = find_packet(open_dispatch, 1, mir2::kSmOpenDoorOk);
   assert(opened.has_value());
   assert(opened->message.param == 2 && opened->message.tag == 2);
   const auto still_source = runtime.snapshot_character_actor("Hero");
   assert(still_source.has_value() && still_source->map_id == "0");
 
-  auto saw_close = false;
-  for (int index = 0; index < 270; ++index) {
-    const auto close_dispatch = runtime.tick();
-    const auto closed = find_packet(close_dispatch, 1, mir2::kSmCloseDoor);
-    if (closed.has_value() && closed->message.param == 2 && closed->message.tag == 2) {
-      saw_close = true;
-      break;
-    }
-  }
-  assert(saw_close);
+  const auto at_ttl = runtime.tick(open_time_ms + 5000);
+  assert(!find_packet(at_ttl, 1, mir2::kSmCloseDoor).has_value());
+
+  const auto after_ttl_before_gate = runtime.tick(open_time_ms + 5001);
+  assert(!find_packet(after_ttl_before_gate, 1, mir2::kSmCloseDoor).has_value());
+
+  const auto at_door_gate_boundary = runtime.tick(open_time_ms + 5500);
+  assert(!find_packet(at_door_gate_boundary, 1, mir2::kSmCloseDoor).has_value());
+
+  const auto close_dispatch = runtime.tick(open_time_ms + 5501);
+  const auto closed = find_packet(close_dispatch, 1, mir2::kSmCloseDoor);
+  assert(closed.has_value());
+  assert(closed->message.param == 2 && closed->message.tag == 2);
+
+  const auto no_repeat = runtime.tick(open_time_ms + 6002);
+  assert(!find_packet(no_repeat, 1, mir2::kSmCloseDoor).has_value());
   return 0;
 }

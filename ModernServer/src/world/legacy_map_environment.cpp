@@ -341,7 +341,7 @@ std::vector<std::pair<std::int32_t, std::int32_t>> LegacyMapEnvironment::close_e
     std::uint64_t now_ms, std::uint64_t ttl_ms) {
   std::vector<CellKey> closed;
   for (auto& core : door_cores_) {
-    if (!core.open || core.open_time_ms == 0 || now_ms < core.open_time_ms + ttl_ms) {
+    if (!core.open || core.open_time_ms == 0 || now_ms <= core.open_time_ms + ttl_ms) {
       continue;
     }
     core.open = false;

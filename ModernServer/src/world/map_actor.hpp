@@ -54,6 +54,7 @@ class MapActor {
   void set_guild_castle_snapshot(GuildCastleSnapshot guild_castle_snapshot);
   [[nodiscard]] RuntimeDispatch tick(std::uint64_t current_tick);
   [[nodiscard]] RuntimeDispatch tick(std::uint64_t current_tick, std::uint64_t now_ms);
+  [[nodiscard]] RuntimeDispatch close_expired_doors(std::uint64_t now_ms);
   [[nodiscard]] RuntimeDispatch legacy_spawn_player(const ActorMail& mail,
                                                     std::uint64_t current_tick,
                                                     std::uint64_t now_ms,

@@ -50,18 +50,24 @@ bool check_frame_driver_order() {
                    std::get_if<mir2::PersistResult>(&ingress.messages[1]) != nullptr &&
                    std::get_if<mir2::ActorMail>(&ingress.messages[2]) != nullptr;
     mir2::RuntimeDispatch dispatch;
+    dispatch.session_events.push_back(
+        mir2::SessionEvent{mir2::SessionEventKind::send_packet, "game_gateway", 1});
     dispatch.audit_events.push_back({"legacy_frame.decode", "ok", "smoke"});
     return dispatch;
   };
   callbacks.user_engine_execute_run = [&]() -> mir2::RuntimeDispatch {
     observed.emplace_back("UserEngineExecuteRun");
     mir2::RuntimeDispatch dispatch;
-    dispatch.session_events.push_back(mir2::SessionEvent{});
+    dispatch.session_events.push_back(
+        mir2::SessionEvent{mir2::SessionEventKind::send_packet, "game_gateway", 2});
     return dispatch;
   };
   callbacks.event_manager_run = [&]() -> mir2::RuntimeDispatch {
     observed.emplace_back("EventManagerRun");
-    return {};
+    mir2::RuntimeDispatch dispatch;
+    dispatch.session_events.push_back(
+        mir2::SessionEvent{mir2::SessionEventKind::force_disconnect, "game_gateway", 3});
+    return dispatch;
   };
   callbacks.server_message_run = [&]() -> mir2::RuntimeDispatch {
     observed.emplace_back("ServerMessageRun");
@@ -76,8 +82,14 @@ bool check_frame_driver_order() {
     std::cerr << "legacy_frame_order\n";
     return false;
   }
-  if (dispatch.audit_events.size() != 1 || dispatch.session_events.size() != 1) {
+  if (dispatch.audit_events.size() != 1 || dispatch.session_events.size() != 3) {
     std::cerr << "legacy_frame_dispatch\n";
+    return false;
+  }
+  if (dispatch.session_events[0].session_id != 1 ||
+      dispatch.session_events[1].session_id != 2 ||
+      dispatch.session_events[2].session_id != 3) {
+    std::cerr << "legacy_frame_session_fifo\n";
     return false;
   }
 
@@ -92,7 +104,7 @@ bool check_frame_driver_order() {
   if (first_trace.stages[stage_index(first_trace, mir2::LegacyFrameStage::run_socket_run)]
           .output_count != 0 ||
       first_trace.stages[stage_index(first_trace, mir2::LegacyFrameStage::decode_id_socket)]
-          .output_count != 1 ||
+          .output_count != 2 ||
       first_trace.stages[stage_index(first_trace,
                                      mir2::LegacyFrameStage::user_engine_execute_run)]
           .output_count != 1 ||
@@ -178,6 +190,57 @@ bool check_world_service_snapshot() {
   return ready;
 }
 
+bool check_gate_fifo_zero_budget() {
+  mir2::HostConfig config;
+  config.budgets.net_flush_budget_ms = 0;
+
+  mir2::LocalBus bus;
+  mir2::MetricsRegistry metrics;
+  mir2::ShutdownToken shutdown;
+  auto gateway = bus.register_endpoint("game_gateway", 128);
+
+  mir2::HostContext context;
+  context.config = config;
+  context.bus = &bus;
+  context.metrics = &metrics;
+  context.shutdown = &shutdown;
+
+  mir2::WorldService world;
+  world.attach_context_for_test(context);
+  world.enqueue_gate_event_for_test(
+      mir2::SessionEvent{mir2::SessionEventKind::send_packet, "game_gateway", 11});
+  world.enqueue_gate_event_for_test(
+      mir2::SessionEvent{mir2::SessionEventKind::send_packet_and_close, "game_gateway", 12});
+  world.enqueue_gate_event_for_test(
+      mir2::SessionEvent{mir2::SessionEventKind::force_disconnect, "game_gateway", 13});
+
+  const auto dispatch = world.run_legacy_socket_stage_for_test(5000);
+  if (dispatch.legacy_traces.size() != 3 || bus.queue_depth("game_gateway") != 3) {
+    std::cerr << "gate_fifo_zero_budget_count\n";
+    return false;
+  }
+
+  for (const auto expected_session : {11ULL, 12ULL, 13ULL}) {
+    auto message = gateway->queue->try_pop();
+    if (!message.has_value()) {
+      std::cerr << "gate_fifo_missing_message\n";
+      return false;
+    }
+    const auto* event = std::get_if<mir2::SessionEvent>(&*message);
+    if (event == nullptr || event->session_id != expected_session) {
+      std::cerr << "gate_fifo_order\n";
+      return false;
+    }
+  }
+
+  const auto empty = world.run_legacy_socket_stage_for_test(5001);
+  if (!empty.legacy_traces.empty()) {
+    std::cerr << "gate_fifo_not_drained\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -188,6 +251,9 @@ int main() {
     return 1;
   }
   if (!check_world_service_snapshot()) {
+    return 1;
+  }
+  if (!check_gate_fifo_zero_budget()) {
     return 1;
   }
   return 0;

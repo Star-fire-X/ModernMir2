@@ -1508,6 +1508,15 @@ void LogicRuntime::process_user_engine_timers(std::uint64_t now_ms, RuntimeDispa
   constexpr std::uint64_t kTimer10SecMs = 10ULL * 1000ULL;
   constexpr std::uint64_t kTimer10MinMs = 10ULL * 60ULL * 1000ULL;
 
+  if (!user_engine_timers_initialized_) {
+    mission_time_ms_ = now_ms;
+    open_door_check_ms_ = now_ms;
+    timer10min_ms_ = now_ms;
+    timer10sec_ms_ = now_ms;
+    user_engine_timers_initialized_ = true;
+    return;
+  }
+
   if (now_ms > mission_time_ms_ + kMissionIntervalMs) {
     mission_time_ms_ = now_ms;
     add_stage_trace(dispatch, "LegacyMission", "ProcessMissions", now_ms, 0, 0);
@@ -1518,6 +1527,13 @@ void LogicRuntime::process_user_engine_timers(std::uint64_t now_ms, RuntimeDispa
   if (now_ms > open_door_check_ms_ + kDoorIntervalMs) {
     open_door_check_ms_ = now_ms;
     add_stage_trace(dispatch, "LegacyTimer", "DoorTimer", now_ms, 0, 0);
+    for (const auto& map_id : map_order_) {
+      auto map_it = maps_.find(map_id);
+      if (map_it == maps_.end()) {
+        continue;
+      }
+      append_dispatch(dispatch, map_it->second->close_expired_doors(now_ms));
+    }
   }
 
   if (now_ms > timer10min_ms_ + kTimer10MinMs) {

@@ -555,6 +555,19 @@ void WorldService::join() {
   }
 }
 
+#ifdef MIR2_ENABLE_TEST_HOOKS
+void WorldService::attach_context_for_test(HostContext& context) { context_ = &context; }
+
+void WorldService::enqueue_gate_event_for_test(SessionEvent event) {
+  std::scoped_lock lock(gate_events_mutex_);
+  pending_gate_events_.push_back(std::move(event));
+}
+
+RuntimeDispatch WorldService::run_legacy_socket_stage_for_test(std::uint64_t now_ms) {
+  return run_legacy_socket_stage(now_ms);
+}
+#endif
+
 std::unordered_map<std::string, std::string> WorldService::snapshot() const {
   if (runtime_ == nullptr) {
     return {{"running", "false"}};
@@ -782,9 +795,6 @@ RuntimeDispatch WorldService::run_legacy_socket_stage(std::uint64_t now_ms) {
     trace.success = posted;
     dispatch.legacy_traces.push_back(std::move(trace));
 
-    if (budget_ms == 0) {
-      break;
-    }
     if (budget_ms > 0) {
       const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                                std::chrono::steady_clock::now() - started)
