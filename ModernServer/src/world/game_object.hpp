@@ -353,6 +353,7 @@ class Player : public GameObject {
   [[nodiscard]] std::uint64_t legacy_ghost_time_ms() const { return ghost_time_ms_; }
   [[nodiscard]] std::uint64_t legacy_last_save_time_ms() const { return last_save_time_ms_; }
   [[nodiscard]] std::size_t legacy_inbox_size() const { return legacy_inbox_.size(); }
+  [[nodiscard]] std::vector<std::uint64_t> legacy_inbox_session_sequences() const;
   [[nodiscard]] bool legacy_has_commands() const { return !legacy_inbox_.empty(); }
   [[nodiscard]] bool legacy_see_health_gauge() const { return legacy_see_health_gauge_; }
   void set_legacy_see_health_gauge(bool value) { legacy_see_health_gauge_ = value; }

@@ -31,6 +31,7 @@ struct LegacyReadyUser {
 
 struct LegacyRuntimeContext {
   bool persistence_overloaded{false};
+  std::size_t player_process_limit{0};
 };
 
 class LogicRuntime {
@@ -87,6 +88,8 @@ class LogicRuntime {
   [[nodiscard]] std::optional<LegacyPlayerState> legacy_session_state(
       std::uint64_t session_id) const;
   [[nodiscard]] std::size_t legacy_session_inbox_size(std::uint64_t session_id) const;
+  [[nodiscard]] std::vector<std::uint64_t> legacy_session_inbox_sequences(
+      std::uint64_t session_id) const;
   [[nodiscard]] std::int64_t legacy_session_run_time_ms(std::uint64_t session_id) const;
 
  private:

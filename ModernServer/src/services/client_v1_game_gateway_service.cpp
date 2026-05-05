@@ -1557,6 +1557,12 @@ void ClientV1GameGatewayService::post_logic_command(LogicCommand command) {
   if (command.gateway.empty()) {
     command.gateway = name();
   }
+  if (command.session_id != 0 && command.session_seq == 0) {
+    std::scoped_lock lock(mutex_);
+    if (auto it = sessions_.find(command.session_id); it != sessions_.end()) {
+      command.session_seq = ++it->second.next_session_seq;
+    }
+  }
   context().bus->post("world_service", std::move(command));
 }
 

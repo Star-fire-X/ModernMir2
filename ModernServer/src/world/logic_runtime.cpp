@@ -576,6 +576,7 @@ ActorMail LogicRuntime::make_player_mail(const LogicCommand& command,
   mail.map_id = locator.map_id;
   mail.actor_id = locator.actor_id;
   mail.session_id = command.session_id;
+  mail.session_seq = command.session_seq;
   mail.x = command.x;
   mail.y = command.y;
   mail.dir = command.dir;
@@ -1041,6 +1042,9 @@ void LogicRuntime::process_user_humans(std::uint64_t now_ms,
   std::size_t processed = 0;
   const auto initial_size = run_user_order_.size();
   while (!run_user_order_.empty() && processed < initial_size) {
+    if (context.player_process_limit > 0 && processed >= context.player_process_limit) {
+      break;
+    }
     if (hum_cur_ >= run_user_order_.size()) {
       hum_cur_ = 0;
     }
@@ -1620,6 +1624,19 @@ std::size_t LogicRuntime::legacy_session_inbox_size(std::uint64_t session_id) co
     return 0;
   }
   return map_it->second->legacy_player_inbox_size(locator_it->second.actor_id);
+}
+
+std::vector<std::uint64_t> LogicRuntime::legacy_session_inbox_sequences(
+    std::uint64_t session_id) const {
+  const auto locator_it = session_index_.find(session_id);
+  if (locator_it == session_index_.end()) {
+    return {};
+  }
+  const auto map_it = maps_.find(locator_it->second.map_id);
+  if (map_it == maps_.end()) {
+    return {};
+  }
+  return map_it->second->legacy_player_inbox_session_sequences(locator_it->second.actor_id);
 }
 
 std::int64_t LogicRuntime::legacy_session_run_time_ms(std::uint64_t session_id) const {

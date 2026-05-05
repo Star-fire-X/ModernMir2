@@ -1358,6 +1358,13 @@ std::size_t MapActor::legacy_player_inbox_size(std::uint64_t actor_id) const {
   return player != nullptr ? player->legacy_inbox_size() : 0;
 }
 
+std::vector<std::uint64_t> MapActor::legacy_player_inbox_session_sequences(
+    std::uint64_t actor_id) const {
+  const auto* player = find_player(actor_id);
+  return player != nullptr ? player->legacy_inbox_session_sequences()
+                           : std::vector<std::uint64_t>{};
+}
+
 std::int64_t MapActor::legacy_player_run_time_ms(std::uint64_t actor_id) const {
   const auto* player = find_player(actor_id);
   return player != nullptr ? player->legacy_run_time_ms() : 0;

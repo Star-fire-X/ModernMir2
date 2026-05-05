@@ -58,6 +58,7 @@ RuntimeDispatch LegacyFrameDriver::run_frame(std::uint64_t now_ms, WorldIngressB
   trace.frame_index = ++frame_index_;
   trace.now_ms = now_ms;
   trace.stages.reserve(5);
+  ingress_batch.mark_frame(trace.frame_index);
 
   const auto frame_start = std::chrono::steady_clock::now();
 
@@ -99,6 +100,17 @@ RuntimeDispatch LegacyFrameDriver::run_frame(std::uint64_t now_ms, WorldIngressB
               }
               return {};
             });
+  if (!ingress_batch.empty()) {
+    LegacyRuntimeTrace guard;
+    guard.stage = std::string(legacy_frame_stage_name(LegacyFrameStage::decode_id_socket));
+    guard.action = "ingress_batch_not_cleared";
+    guard.now_ms = now_ms;
+    guard.current_tick = trace.frame_index;
+    guard.cursor = ingress_batch.size();
+    guard.success = false;
+    combined.legacy_traces.push_back(std::move(guard));
+    ingress_batch.messages.clear();
+  }
   run_stage(LegacyFrameStage::user_engine_execute_run, 0, [&]() -> RuntimeDispatch {
     if (callbacks.user_engine_execute_run) {
       return callbacks.user_engine_execute_run();

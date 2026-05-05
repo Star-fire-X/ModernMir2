@@ -4,6 +4,7 @@
 #include <charconv>
 #include <chrono>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <thread>
 #include <vector>
@@ -563,8 +564,17 @@ void WorldService::enqueue_gate_event_for_test(SessionEvent event) {
   pending_gate_events_.push_back(std::move(event));
 }
 
+void WorldService::seed_session_sequence_for_test(std::uint64_t session_id,
+                                                  std::uint64_t session_seq) {
+  session_sequence_watermarks_[session_id] = session_seq;
+}
+
 RuntimeDispatch WorldService::run_legacy_socket_stage_for_test(std::uint64_t now_ms) {
   return run_legacy_socket_stage(now_ms);
+}
+
+RuntimeDispatch WorldService::process_ingress_batch_for_test(WorldIngressBatch& batch) {
+  return process_ingress_batch(batch);
 }
 #endif
 
@@ -631,7 +641,7 @@ void WorldService::run() {
       if (!message.has_value()) {
         break;
       }
-      pending_ingress.messages.push_back(std::move(*message));
+      pending_ingress.push(std::move(*message), ++next_ingress_seq_);
     }
 
     const auto now = std::chrono::steady_clock::now();
@@ -704,7 +714,12 @@ void WorldService::request_castle_dialog_context_refresh() {
 
 RuntimeDispatch WorldService::process_ingress_batch(WorldIngressBatch& batch) {
   RuntimeDispatch combined;
-  for (auto& message : batch.messages) {
+  for (auto& ingress : batch.messages) {
+    if (!accept_ingress_sequence(ingress, combined)) {
+      continue;
+    }
+
+    auto& message = ingress.message;
     if (auto event = std::get_if<SessionEvent>(&message)) {
       append_dispatch(combined, handle_session_event(*event));
     } else if (auto command = std::get_if<LogicCommand>(&message)) {
@@ -717,6 +732,67 @@ RuntimeDispatch WorldService::process_ingress_batch(WorldIngressBatch& batch) {
   }
   batch.messages.clear();
   return combined;
+}
+
+bool WorldService::accept_ingress_sequence(const WorldIngressMessage& ingress,
+                                           RuntimeDispatch& dispatch) {
+  std::uint64_t session_id = 0;
+  std::uint64_t session_seq = 0;
+  std::string kind = "unknown";
+
+  if (const auto* event = std::get_if<SessionEvent>(&ingress.message)) {
+    session_id = event->session_id;
+    session_seq = event->session_seq;
+    kind = "SessionEvent";
+  } else if (const auto* command = std::get_if<LogicCommand>(&ingress.message)) {
+    session_id = command->session_id;
+    session_seq = command->session_seq;
+    kind = "LogicCommand";
+  } else if (const auto* mail = std::get_if<ActorMail>(&ingress.message)) {
+    session_id = mail->session_id;
+    session_seq = mail->session_seq;
+    kind = "ActorMail";
+  }
+
+  if (session_id == 0 || session_seq == 0) {
+    return true;
+  }
+
+  const auto last_it = session_sequence_watermarks_.find(session_id);
+  const auto last_seq =
+      last_it != session_sequence_watermarks_.end() ? last_it->second : 0;
+  if (session_seq > last_seq) {
+    session_sequence_watermarks_[session_id] = session_seq;
+    return true;
+  }
+
+  const auto detail = "session=" + std::to_string(session_id) +
+                      " seq=" + std::to_string(session_seq) +
+                      " last=" + std::to_string(last_seq) +
+                      " ingress=" + std::to_string(ingress.ingress_seq) +
+                      " frame=" + std::to_string(ingress.frame_index);
+  dispatch.audit_events.push_back(
+      AuditEvent{"world.ingress_stale_sequence", kind + " " + detail, name()});
+
+  LegacyRuntimeTrace trace;
+  trace.stage = "DecodeIdSocket";
+  trace.action = "stale_session_sequence";
+  trace.actor_id = session_id;
+  trace.cursor = static_cast<std::size_t>(ingress.ingress_seq);
+  trace.sub_cursor = static_cast<std::size_t>(ingress.frame_index);
+  trace.value = static_cast<std::int32_t>(
+      std::min<std::uint64_t>(session_seq,
+                              static_cast<std::uint64_t>(
+                                  std::numeric_limits<std::int32_t>::max())));
+  trace.damage = static_cast<std::int32_t>(
+      std::min<std::uint64_t>(last_seq,
+                              static_cast<std::uint64_t>(
+                                  std::numeric_limits<std::int32_t>::max())));
+  trace.command = std::move(kind);
+  trace.label = detail;
+  trace.success = false;
+  dispatch.legacy_traces.push_back(std::move(trace));
+  return false;
 }
 
 void WorldService::queue_gate_events(RuntimeDispatch& dispatch) {
@@ -848,6 +924,7 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
 
     if (auto command = decode_game_command(event.session_id, event.packet); command.has_value()) {
       command->gateway = event.gateway.empty() ? "game_gateway" : event.gateway;
+      command->session_seq = event.session_seq;
       session_gateways_[event.session_id] = command->gateway;
       return runtime_->route_logic_command(*command);
     }
@@ -885,6 +962,7 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
       command.kind = LogicCommandKind::walk;
       command.gateway = event.gateway.empty() ? "game_gateway" : event.gateway;
       command.session_id = event.session_id;
+      command.session_seq = event.session_seq;
       command.x = *x;
       command.y = *y;
       return runtime_->route_logic_command(command);
@@ -900,6 +978,7 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
       command.kind = LogicCommandKind::attack;
       command.gateway = event.gateway.empty() ? "game_gateway" : event.gateway;
       command.session_id = event.session_id;
+      command.session_seq = event.session_seq;
       command.x = *x;
       return runtime_->route_logic_command(command);
     }
