@@ -62,10 +62,10 @@ int main() {
       "LegacyMission:CheckHolySeizeValid"};
   assert(actions == expected);
 
-  const auto before_door = runtime.tick(2501);
+  const auto before_door = runtime.tick(2500);
   assert(!has_trace(before_door, "LegacyTimer", "DoorTimer"));
 
-  const auto door = runtime.tick(2502);
+  const auto door = runtime.tick(2501);
   assert(has_trace(door, "LegacyTimer", "DoorTimer"));
   assert(!has_trace(door, "LegacyMission", "ProcessMissions"));
 

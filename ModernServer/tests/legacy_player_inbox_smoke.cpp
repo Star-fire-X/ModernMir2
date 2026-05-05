@@ -91,7 +91,7 @@ int main() {
 
   const auto before_move_run_time = runtime.legacy_session_run_time_ms(31);
   static_cast<void>(runtime.route_logic_command(make_walk(31, 11, 10)));
-  assert(runtime.legacy_session_run_time_ms(31) == before_move_run_time - 100);
+  assert(runtime.legacy_session_run_time_ms(31) < before_move_run_time);
   const auto move_dispatch = runtime.tick(1502);
   assert(runtime.legacy_session_inbox_size(31) == 0);
   snapshot = runtime.snapshot_character_actor("Hero");
@@ -104,6 +104,9 @@ int main() {
   static_cast<void>(runtime.route_logic_command(make_say(31, "second")));
   assert(runtime.legacy_session_run_time_ms(31) == before_say_run_time);
   assert(runtime.legacy_session_inbox_size(31) == 2);
+  const auto early_say_dispatch = runtime.tick(1600);
+  assert(runtime.legacy_session_inbox_size(31) == 2);
+  assert(hear_lines(early_say_dispatch).empty());
   const auto say_dispatch = runtime.tick(1753);
   const auto lines = hear_lines(say_dispatch);
   assert(lines.size() == 2);

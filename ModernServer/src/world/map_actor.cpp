@@ -1043,33 +1043,8 @@ RuntimeDispatch MapActor::legacy_process_player(std::uint64_t actor_id,
       dispatch_legacy_initialize(*player, dispatch, now_ms);
       break;
     case LegacyPlayerState::running: {
-      handle_player_status_effects(*player, dispatch, current_tick);
-      if (player->is_dead() && player->death_time_ms() != 0 &&
-          now_ms > player->death_time_ms() + kPlayerCorpseMs) {
-        static_cast<void>(environment_.delete_from_map(player->x(), player->y(),
-                                                       LegacyMapObjectShape::moving_object,
-                                                       player->id()));
-        player->mark_legacy_ghost(now_ms);
-        queue_save_player_character(dispatch, *player, now_ms);
-        break;
-      }
-      const auto should_operate = player->legacy_due(now_ms) || player->legacy_has_commands();
-      if (should_operate) {
-        while (auto command = player->pop_legacy_command()) {
-          handle_mail(command->mail, dispatch, current_tick, now_ms, true);
-          player = find_player(actor_id);
-          if (player == nullptr) {
-            return dispatch;
-          }
-        }
-        player->mark_legacy_running_time(now_ms);
-      }
-      constexpr std::uint64_t kLegacyAutoSaveMs = 15ULL * 60ULL * 1000ULL;
-      if (!persistence_overloaded &&
-          now_ms > player->legacy_last_save_time_ms() + kLegacyAutoSaveMs) {
-        queue_save_player_character(dispatch, *player, now_ms);
-        player->mark_legacy_autosaved(now_ms);
-      }
+      legacy_operate_player_running(actor_id, *player, dispatch, current_tick, now_ms,
+                                    persistence_overloaded);
       break;
     }
     case LegacyPlayerState::ghost:
@@ -1333,7 +1308,8 @@ bool MapActor::enqueue_legacy_player_command(const ActorMail& mail, std::uint64_
   }
   player->enqueue_legacy_command(mail, now_ms);
   if (player->legacy_ready_run() && is_legacy_response_compensated_command(mail.kind)) {
-    player->rewind_legacy_run_time(100);
+    player->rewind_legacy_run_time(std::max<std::uint64_t>(
+        100, player->legacy_run_next_tick_ms() + 1));
   }
   return true;
 }

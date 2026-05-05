@@ -118,6 +118,18 @@ class MapActor {
   void dispatch_legacy_initialize(Player& player, RuntimeDispatch& dispatch,
                                   std::uint64_t now_ms);
   void dispatch_legacy_close(Player& player, RuntimeDispatch& dispatch);
+  void legacy_operate_player_running(std::uint64_t actor_id, Player& player,
+                                     RuntimeDispatch& dispatch,
+                                     std::uint64_t current_tick,
+                                     std::uint64_t now_ms,
+                                     bool persistence_overloaded);
+  void trace_player_operate(RuntimeDispatch& dispatch, const Player& player,
+                            std::string action, std::uint64_t current_tick,
+                            std::uint64_t now_ms, bool success = true,
+                            std::int32_t value = 0,
+                            std::string label = {}) const;
+  void handle_player_health_spell_tick(Player& player, RuntimeDispatch& dispatch,
+                                       std::uint64_t current_tick);
   void handle_player_status_effects(Player& player, RuntimeDispatch& dispatch,
                                     std::uint64_t current_tick);
   [[nodiscard]] bool handle_monster_status_effects(Monster& monster, RuntimeDispatch& dispatch,

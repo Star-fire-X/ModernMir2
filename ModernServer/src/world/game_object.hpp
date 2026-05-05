@@ -89,6 +89,12 @@ struct StatusTickResult {
   std::string shield_name{};
 };
 
+struct LegacyHealthSpellTickResult {
+  std::int32_t hp{0};
+  std::int32_t mp{0};
+  bool changed{false};
+};
+
 enum class LegacyBuffKind : std::int32_t {
   poison_dechealth = 0,
   poison_damage_armor = 1,
@@ -287,9 +293,14 @@ class Player : public GameObject {
   void reset_move_throttle();
   [[nodiscard]] DamageResult apply_damage(std::int32_t amount, std::uint64_t current_tick);
   [[nodiscard]] std::int32_t apply_heal(std::int32_t amount);
+  [[nodiscard]] std::int32_t apply_spell(std::int32_t amount);
+  void queue_legacy_health_spell(std::int32_t hp, std::int32_t mp, std::int32_t healing,
+                                 std::uint64_t current_tick,
+                                 std::uint64_t tick_interval);
   void queue_legacy_healing(std::int32_t amount, std::uint64_t current_tick,
                             std::uint64_t tick_interval);
   [[nodiscard]] bool legacy_healing_pending() const;
+  [[nodiscard]] LegacyHealthSpellTickResult tick_legacy_health_spell(std::uint64_t current_tick);
   [[nodiscard]] bool spend_mp(std::int32_t amount);
   [[nodiscard]] ExperienceResult gain_experience(std::int32_t amount);
   void add_status_effect(TimedStatusEffect effect);
@@ -409,9 +420,11 @@ class Player : public GameObject {
   std::int32_t legacy_prepared_sword_magic_id_{0};
   std::uint64_t legacy_prepared_sword_expire_tick_{0};
   std::uint64_t legacy_open_health_expire_tick_{0};
+  std::int32_t legacy_inc_health_{0};
+  std::int32_t legacy_inc_spell_{0};
   std::int32_t legacy_inc_healing_{0};
-  std::uint64_t legacy_next_healing_tick_{0};
-  std::uint64_t legacy_healing_tick_interval_{1};
+  std::uint64_t legacy_next_health_spell_tick_{0};
+  std::uint64_t legacy_health_spell_tick_interval_{1};
   std::int64_t run_time_ms_{0};
   std::uint64_t run_next_tick_ms_{250};
   std::uint64_t last_save_time_ms_{0};

@@ -149,7 +149,6 @@ constexpr std::int32_t kStateDefenceUp = 9;
 constexpr std::int32_t kStateMagicDefenceUp = 10;
 constexpr std::int32_t kStateBubbleDefenceUp = 11;
 constexpr std::int32_t kLegacyHealingCap = 300;
-constexpr std::int32_t kLegacyHealingPerTick = 5;
 
 constexpr std::int32_t kRcSpitSpider = 82;
 constexpr std::int32_t kRcKillingHerb = 85;
@@ -830,21 +829,106 @@ std::int32_t Player::apply_heal(std::int32_t amount) {
   return static_cast<std::int32_t>(character_.ability.hp) - before;
 }
 
-void Player::queue_legacy_healing(std::int32_t amount, std::uint64_t current_tick,
-                                  std::uint64_t tick_interval) {
-  if (amount <= 0 || character_.ability.hp == 0 ||
-      character_.ability.hp >= character_.ability.max_hp) {
+std::int32_t Player::apply_spell(std::int32_t amount) {
+  if (amount <= 0 || character_.ability.mp >= character_.ability.max_mp) {
+    return 0;
+  }
+  const auto before = static_cast<std::int32_t>(character_.ability.mp);
+  character_.ability.mp = clamp_u16(std::min(before + amount,
+                                             static_cast<std::int32_t>(character_.ability.max_mp)));
+  return static_cast<std::int32_t>(character_.ability.mp) - before;
+}
+
+void Player::queue_legacy_health_spell(std::int32_t hp, std::int32_t mp,
+                                       std::int32_t healing,
+                                       std::uint64_t current_tick,
+                                       std::uint64_t tick_interval) {
+  if (character_.ability.hp == 0) {
     return;
   }
-  legacy_inc_healing_ =
-      std::min(kLegacyHealingCap, legacy_inc_healing_ + std::max(amount, 0));
-  legacy_healing_tick_interval_ = std::max<std::uint64_t>(tick_interval, 1);
-  if (legacy_next_healing_tick_ == 0 || current_tick >= legacy_next_healing_tick_) {
-    legacy_next_healing_tick_ = current_tick + legacy_healing_tick_interval_;
+  if (hp > 0 && character_.ability.hp < character_.ability.max_hp) {
+    legacy_inc_health_ =
+        std::min(kLegacyHealingCap, legacy_inc_health_ + std::max(hp, 0));
+  }
+  if (mp > 0 && character_.ability.mp < character_.ability.max_mp) {
+    legacy_inc_spell_ =
+        std::min(kLegacyHealingCap, legacy_inc_spell_ + std::max(mp, 0));
+  }
+  if (healing > 0 && character_.ability.hp < character_.ability.max_hp) {
+    legacy_inc_healing_ =
+        std::min(kLegacyHealingCap, legacy_inc_healing_ + std::max(healing, 0));
+  }
+  if (legacy_inc_health_ <= 0 && legacy_inc_spell_ <= 0 && legacy_inc_healing_ <= 0) {
+    return;
+  }
+  legacy_health_spell_tick_interval_ = std::max<std::uint64_t>(tick_interval, 1);
+  if (legacy_next_health_spell_tick_ == 0 ||
+      current_tick >= legacy_next_health_spell_tick_) {
+    legacy_next_health_spell_tick_ = current_tick + legacy_health_spell_tick_interval_;
   }
 }
 
+void Player::queue_legacy_healing(std::int32_t amount, std::uint64_t current_tick,
+                                  std::uint64_t tick_interval) {
+  queue_legacy_health_spell(0, 0, amount, current_tick, tick_interval);
+}
+
 bool Player::legacy_healing_pending() const { return legacy_inc_healing_ > 0; }
+
+LegacyHealthSpellTickResult Player::tick_legacy_health_spell(std::uint64_t current_tick) {
+  LegacyHealthSpellTickResult result;
+  if (character_.ability.hp == 0 ||
+      (legacy_inc_health_ <= 0 && legacy_inc_spell_ <= 0 && legacy_inc_healing_ <= 0)) {
+    legacy_next_health_spell_tick_ = current_tick;
+    return result;
+  }
+  if (legacy_next_health_spell_tick_ == 0 ||
+      current_tick < legacy_next_health_spell_tick_) {
+    return result;
+  }
+
+  const auto per_health =
+      std::max<std::int32_t>(1, 5 + static_cast<std::int32_t>(character_.ability.level) / 10);
+  const auto per_spell = per_health;
+  constexpr std::int32_t kLegacyPerHealing = 5;
+
+  auto hp_amount = std::min(legacy_inc_health_, per_health);
+  if (hp_amount > 0) {
+    const auto healed = apply_heal(hp_amount);
+    result.hp += healed;
+    legacy_inc_health_ -= hp_amount;
+  }
+
+  auto mp_amount = std::min(legacy_inc_spell_, per_spell);
+  if (mp_amount > 0) {
+    const auto restored = apply_spell(mp_amount);
+    result.mp += restored;
+    legacy_inc_spell_ -= mp_amount;
+  }
+
+  auto healing_amount = std::min(legacy_inc_healing_, kLegacyPerHealing);
+  if (healing_amount > 0) {
+    const auto healed = apply_heal(healing_amount);
+    result.hp += healed;
+    legacy_inc_healing_ -= healing_amount;
+  }
+
+  if (character_.ability.hp >= character_.ability.max_hp) {
+    legacy_inc_health_ = 0;
+    legacy_inc_healing_ = 0;
+  }
+  if (character_.ability.mp >= character_.ability.max_mp) {
+    legacy_inc_spell_ = 0;
+  }
+  if (legacy_inc_health_ <= 0 && legacy_inc_spell_ <= 0 && legacy_inc_healing_ <= 0) {
+    legacy_next_health_spell_tick_ = 0;
+  } else {
+    legacy_next_health_spell_tick_ +=
+        std::max<std::uint64_t>(legacy_health_spell_tick_interval_, 1);
+  }
+  result.changed = result.hp > 0 || result.mp > 0;
+  return result;
+}
 
 bool Player::spend_mp(std::int32_t amount) {
   if (amount < 0) {
@@ -1061,25 +1145,6 @@ StatusTickResult Player::tick_status_effects(std::uint64_t current_tick) {
     }
   }
 
-  while (legacy_inc_healing_ > 0 && legacy_next_healing_tick_ != 0 &&
-         current_tick >= legacy_next_healing_tick_ && character_.ability.hp > 0) {
-    const auto healed = apply_heal(std::min(legacy_inc_healing_, kLegacyHealingPerTick));
-    if (healed <= 0) {
-      legacy_inc_healing_ = 0;
-      legacy_next_healing_tick_ = 0;
-      break;
-    }
-    result.heal += healed;
-    legacy_inc_healing_ -= healed;
-    if (legacy_inc_healing_ <= 0 ||
-        character_.ability.hp >= character_.ability.max_hp) {
-      legacy_inc_healing_ = 0;
-      legacy_next_healing_tick_ = 0;
-      break;
-    }
-    legacy_next_healing_tick_ += std::max<std::uint64_t>(legacy_healing_tick_interval_, 1);
-  }
-
   const auto expired_buffs = legacy_buffs_.expire_due(current_tick);
   if (!expired_buffs.empty()) {
     clear_player_status_bits(character_.status, expired_buffs);
@@ -1105,6 +1170,11 @@ StatusTickResult Player::tick_status_effects(std::uint64_t current_tick) {
     }
     if (applied.hp_damage > 0 && poison->source_actor_id != 0) {
       result.source_actor_id = poison->source_actor_id;
+    }
+    if (applied.hp_damage > 0 &&
+        (legacy_inc_health_ > 0 || legacy_inc_spell_ > 0 || legacy_inc_healing_ > 0)) {
+      legacy_next_health_spell_tick_ =
+          current_tick + std::max<std::uint64_t>(legacy_health_spell_tick_interval_, 1);
     }
     poison->next_tick += std::max<std::uint64_t>(poison->tick_interval, 1);
     if (character_.ability.hp == 0) {

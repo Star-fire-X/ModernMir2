@@ -48,6 +48,34 @@ void MapActor::dispatch_legacy_close(Player& player, RuntimeDispatch& dispatch) 
   objects_.erase(actor_id);
 }
 
+void MapActor::trace_player_operate(RuntimeDispatch& dispatch, const Player& player,
+                                    std::string action, std::uint64_t current_tick,
+                                    std::uint64_t now_ms, bool success,
+                                    std::int32_t value, std::string label) const {
+  LegacyRuntimeTrace trace;
+  trace.stage = "PlayerOperate";
+  trace.action = std::move(action);
+  trace.map_id = config_.id;
+  trace.object_name = player.name();
+  trace.actor_id = player.id();
+  trace.now_ms = now_ms;
+  trace.current_tick = current_tick;
+  trace.label = std::move(label);
+  trace.value = value;
+  trace.success = success;
+  dispatch.legacy_traces.push_back(std::move(trace));
+}
+
+void MapActor::handle_player_health_spell_tick(Player& player, RuntimeDispatch& dispatch,
+                                               std::uint64_t current_tick) {
+  const auto tick_result = player.tick_legacy_health_spell(current_tick);
+  if (!tick_result.changed) {
+    return;
+  }
+  queue_packet(dispatch, player.session_id(),
+               make_health_spell_changed_packet(player.session_id(), player));
+}
+
 void MapActor::handle_player_status_effects(Player& player, RuntimeDispatch& dispatch,
                                             std::uint64_t current_tick) {
   const auto tick_result = player.tick_status_effects(current_tick);
@@ -94,3 +122,60 @@ void MapActor::handle_player_status_effects(Player& player, RuntimeDispatch& dis
   }
 }
 
+void MapActor::legacy_operate_player_running(std::uint64_t actor_id, Player& player,
+                                             RuntimeDispatch& dispatch,
+                                             std::uint64_t current_tick,
+                                             std::uint64_t now_ms,
+                                             bool persistence_overloaded) {
+  if (!player.legacy_due(now_ms)) {
+    return;
+  }
+
+  trace_player_operate(dispatch, player, "pre_periodic", current_tick, now_ms);
+  sync_area_state(dispatch, config_, player);
+  sync_player_visibility(player, dispatch, false);
+
+  trace_player_operate(dispatch, player, "operate_timers", current_tick, now_ms);
+
+  trace_player_operate(dispatch, player, "health_spell", current_tick, now_ms);
+  handle_player_health_spell_tick(player, dispatch, current_tick);
+
+  trace_player_operate(dispatch, player, "status", current_tick, now_ms);
+  handle_player_status_effects(player, dispatch, current_tick);
+
+  trace_player_operate(dispatch, player, "messages", current_tick, now_ms,
+                       player.legacy_has_commands(),
+                       static_cast<std::int32_t>(player.legacy_inbox_size()));
+  while (auto command = player.pop_legacy_command()) {
+    handle_mail(command->mail, dispatch, current_tick, now_ms, true);
+    auto* current_player = find_player(actor_id);
+    if (current_player == nullptr) {
+      return;
+    }
+  }
+
+  auto* current_player = find_player(actor_id);
+  if (current_player == nullptr) {
+    return;
+  }
+  trace_player_operate(dispatch, *current_player, "post_operate", current_tick, now_ms);
+  sync_player_visibility(*current_player, dispatch, false);
+
+  if (current_player->is_dead() && current_player->death_time_ms() != 0 &&
+      now_ms > current_player->death_time_ms() + kPlayerCorpseMs) {
+    static_cast<void>(environment_.delete_from_map(current_player->x(), current_player->y(),
+                                                   LegacyMapObjectShape::moving_object,
+                                                   current_player->id()));
+    current_player->mark_legacy_ghost(now_ms);
+    queue_save_player_character(dispatch, *current_player, now_ms);
+    return;
+  }
+
+  constexpr std::uint64_t kLegacyAutoSaveMs = 15ULL * 60ULL * 1000ULL;
+  if (!persistence_overloaded &&
+      now_ms > current_player->legacy_last_save_time_ms() + kLegacyAutoSaveMs) {
+    queue_save_player_character(dispatch, *current_player, now_ms);
+    current_player->mark_legacy_autosaved(now_ms);
+  }
+  current_player->mark_legacy_running_time(now_ms);
+}
