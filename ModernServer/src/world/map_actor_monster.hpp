@@ -4,6 +4,9 @@
 namespace {
 
 bool legacy_monster_has_pre_run_search(const Monster& monster) {
+  if (legacy_monster_has_special_behavior(monster.race_server())) {
+    return false;
+  }
   switch (monster.race_server()) {
     case kRcWolf:
     case kRcOma:
@@ -19,7 +22,16 @@ bool legacy_monster_has_pre_run_search(const Monster& monster) {
       break;
   }
   return monster.race_server() == 0 &&
-         monster.ai_profile() == MonsterAiProfile::aggressive;
+         (monster.ai_profile() == MonsterAiProfile::aggressive ||
+          monster.ai_profile() == MonsterAiProfile::ranged ||
+          monster.ai_profile() == MonsterAiProfile::stationary);
+}
+
+std::pair<std::int32_t, std::int32_t> legacy_slave_back_position(const Player& master) {
+  const auto back_dir =
+      static_cast<std::uint8_t>((master.character().dir + 4) % 8);
+  const auto [dx, dy] = direction_delta(back_dir);
+  return {master.x() + dx, master.y() + dy};
 }
 
 }  // namespace
@@ -507,17 +519,28 @@ bool MapActor::handle_slave_follow(Monster& monster, RuntimeDispatch& dispatch,
   if (master == nullptr) {
     return false;
   }
-  const auto dx = master->x() - monster.x();
-  const auto dy = master->y() - monster.y();
+  if (master->legacy_slave_relax()) {
+    return true;
+  }
+  const auto [back_x, back_y] = legacy_slave_back_position(*master);
+  const auto dx = back_x - monster.x();
+  const auto dy = back_y - monster.y();
   const auto cheb = std::max(std::abs(dx), std::abs(dy));
-  if (cheb <= 2) {
+  if (cheb <= 1) {
     return false;
   }
-  if (cheb > 12) {
+  if (std::max(std::abs(master->x() - monster.x()),
+               std::abs(master->y() - monster.y())) > 20) {
     recall_owned_slaves_to_master(*master, dispatch, current_tick, now_ms);
     return true;
   }
-  monster.set_target_xy(master->x(), master->y());
+  if (std::max(std::abs(master->x() - monster.x()),
+               std::abs(master->y() - monster.y())) <= 2 &&
+      !environment_.can_walk(back_x, back_y, true)) {
+    monster.set_target_xy(monster.x(), monster.y());
+    return false;
+  }
+  monster.set_target_xy(back_x, back_y);
   return legacy_goto_target_xy(monster, dispatch, current_tick, now_ms);
 }
 
