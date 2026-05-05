@@ -61,6 +61,11 @@ std::int32_t bag_count_by_index(const mir2::CharacterRecord& character, std::int
                     [&](const mir2::LegacyUserItem& item) { return item.index == item_index; }));
 }
 
+mir2::RuntimeDispatch tick_player_due(mir2::LogicRuntime& runtime, std::uint64_t& now_ms) {
+  now_ms += 251;
+  return runtime.tick(now_ms);
+}
+
 }  // namespace
 
 int main() {
@@ -99,9 +104,10 @@ int main() {
   hero.bag_items[0] = mir2::LegacyUserItem{1001, 1, 1, 1};
 
   static_cast<void>(runtime.route_logic_command(make_enter(701, hero)));
-  static_cast<void>(runtime.tick());
+  std::uint64_t now_ms = 20;
+  static_cast<void>(runtime.tick(now_ms));
   static_cast<void>(runtime.route_logic_command(make_use(701, 1001, "Healing Potion")));
-  auto dispatch = runtime.tick();
+  auto dispatch = tick_player_due(runtime, now_ms);
   assert(find_packet(dispatch, mir2::kSmEatFail).has_value());
   auto snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value());
@@ -124,10 +130,11 @@ int main() {
   user.bag_items[2] = mir2::LegacyUserItem{2003, 4, 1, 1};
 
   static_cast<void>(runtime.route_logic_command(make_enter(702, user)));
-  static_cast<void>(runtime.tick());
+  now_ms += 20;
+  static_cast<void>(runtime.tick(now_ms));
 
   static_cast<void>(runtime.route_logic_command(make_use(702, 2001, "Potion Bundle")));
-  dispatch = runtime.tick();
+  dispatch = tick_player_due(runtime, now_ms);
   assert(find_packet(dispatch, mir2::kSmEatOk).has_value());
   snapshot = runtime.snapshot_character_actor("User");
   assert(snapshot.has_value());
@@ -135,7 +142,7 @@ int main() {
   assert(bag_count_by_index(*snapshot, 1) == 3);
 
   static_cast<void>(runtime.route_logic_command(make_use(702, 2003, "Random Scroll")));
-  dispatch = runtime.tick();
+  dispatch = tick_player_due(runtime, now_ms);
   assert(find_packet(dispatch, mir2::kSmEatOk).has_value());
   auto moved = runtime.snapshot_character_actor("User");
   assert(moved.has_value());
@@ -144,7 +151,7 @@ int main() {
   assert(!bag_has_make_index(*moved, 2003));
 
   static_cast<void>(runtime.route_logic_command(make_use(702, 2002, "Town Portal")));
-  dispatch = runtime.tick();
+  dispatch = tick_player_due(runtime, now_ms);
   assert(find_packet(dispatch, mir2::kSmEatOk).has_value());
   moved = runtime.snapshot_character_actor("User");
   assert(moved.has_value());

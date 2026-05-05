@@ -74,6 +74,11 @@ mir2::LogicCommand make_gold_command(std::uint64_t session_id, std::int32_t amou
   return command;
 }
 
+mir2::RuntimeDispatch tick_player_due(mir2::LogicRuntime& runtime, std::uint64_t& now_ms) {
+  now_ms += 251;
+  return runtime.tick(now_ms);
+}
+
 }  // namespace
 
 int main() {
@@ -122,7 +127,8 @@ int main() {
   enter.character = hero;
   static_cast<void>(runtime.route_logic_command(enter));
 
-  const auto login_dispatch = runtime.tick();
+  std::uint64_t now_ms = 20;
+  const auto login_dispatch = runtime.tick(now_ms);
   const auto new_map_packet = find_packet(login_dispatch, mir2::kSmNewMap);
   if (!new_map_packet.has_value()) {
     return 1;
@@ -130,7 +136,7 @@ int main() {
   const auto actor_id = static_cast<std::uint64_t>(static_cast<std::uint32_t>(new_map_packet->message.recog));
   static_cast<void>(runtime.route_logic_command(
       make_item_command(mir2::LogicCommandKind::drop_item, 7, 1001, "Wooden Sword")));
-  const auto drop_dispatch = runtime.tick();
+  const auto drop_dispatch = tick_player_due(runtime, now_ms);
   if (!has_packet(drop_dispatch, mir2::kSmItemShow) ||
       !has_packet(drop_dispatch, mir2::kSmDelItem) ||
       !has_packet(drop_dispatch, mir2::kSmDropItemSuccess) ||
@@ -165,7 +171,7 @@ int main() {
   pickup.x = 10;
   pickup.y = 10;
   static_cast<void>(runtime.route_logic_command(pickup));
-  const auto pickup_dispatch = runtime.tick();
+  const auto pickup_dispatch = tick_player_due(runtime, now_ms);
   if (!has_packet(pickup_dispatch, mir2::kSmItemHide) ||
       !has_packet(pickup_dispatch, mir2::kSmAddItem) ||
       !has_packet(pickup_dispatch, mir2::kSmWeightChanged)) {
@@ -194,7 +200,7 @@ int main() {
   }
   static_cast<void>(runtime.route_logic_command(make_item_command(
       mir2::LogicCommandKind::take_on_item, 7, 1001, "Wooden Sword", 1)));
-  const auto take_on_dispatch = runtime.tick();
+  const auto take_on_dispatch = tick_player_due(runtime, now_ms);
   if (!has_packet(take_on_dispatch, mir2::kSmDelItem) ||
       !has_packet(take_on_dispatch, mir2::kSmTakeOnOk) ||
       !has_packet(take_on_dispatch, mir2::kSmUpdateItem) ||
@@ -229,7 +235,7 @@ int main() {
   attack.session_id = 7;
   attack.game_message.ident = mir2::kCmHit;
   static_cast<void>(runtime.route_logic_command(attack));
-  const auto attack_dispatch_1 = runtime.tick();
+  const auto attack_dispatch_1 = tick_player_due(runtime, now_ms);
   const auto attack_update_1 = find_packet(attack_dispatch_1, mir2::kSmUpdateItem);
   if (!attack_update_1.has_value() || has_packet(attack_dispatch_1, mir2::kSmDuraChange)) {
     return 1;
@@ -239,7 +245,7 @@ int main() {
     return 1;
   }
   static_cast<void>(runtime.route_logic_command(attack));
-  const auto attack_dispatch_2 = runtime.tick();
+  const auto attack_dispatch_2 = tick_player_due(runtime, now_ms);
   const auto attack_update_2 = find_packet(attack_dispatch_2, mir2::kSmUpdateItem);
   const auto attack_dura = find_packet(attack_dispatch_2, mir2::kSmDuraChange);
   if (!attack_update_2.has_value() || !attack_dura.has_value()) {
@@ -253,7 +259,7 @@ int main() {
   }
   static_cast<void>(runtime.route_logic_command(make_item_command(
       mir2::LogicCommandKind::take_off_item, 7, 1001, "Wooden Sword", 1)));
-  const auto take_off_dispatch = runtime.tick();
+  const auto take_off_dispatch = tick_player_due(runtime, now_ms);
   if (!has_packet(take_off_dispatch, mir2::kSmDelItem) ||
       !has_packet(take_off_dispatch, mir2::kSmTakeOffOk) ||
       !has_packet(take_off_dispatch, mir2::kSmAddItem) ||
@@ -284,7 +290,7 @@ int main() {
   }
   static_cast<void>(runtime.route_logic_command(
       make_item_command(mir2::LogicCommandKind::eat_item, 7, 1002, "Basic Drug")));
-  const auto eat_dispatch = runtime.tick();
+  const auto eat_dispatch = tick_player_due(runtime, now_ms);
   if (!has_packet(eat_dispatch, mir2::kSmDelItem) ||
       !has_packet(eat_dispatch, mir2::kSmEatOk) ||
       !has_packet(eat_dispatch, mir2::kSmHealthSpellChanged) ||
@@ -309,7 +315,7 @@ int main() {
     return 1;
   }
   static_cast<void>(runtime.route_logic_command(make_gold_command(7, 120)));
-  const auto drop_gold_dispatch = runtime.tick();
+  const auto drop_gold_dispatch = tick_player_due(runtime, now_ms);
   if (!has_packet(drop_gold_dispatch, mir2::kSmItemShow) ||
       !has_packet(drop_gold_dispatch, mir2::kSmGoldChanged)) {
     return 1;
@@ -330,7 +336,7 @@ int main() {
   pickup_gold.x = 10;
   pickup_gold.y = 10;
   static_cast<void>(runtime.route_logic_command(pickup_gold));
-  const auto pickup_gold_dispatch = runtime.tick();
+  const auto pickup_gold_dispatch = tick_player_due(runtime, now_ms);
   if (!has_packet(pickup_gold_dispatch, mir2::kSmItemHide) ||
       !has_packet(pickup_gold_dispatch, mir2::kSmGoldChanged)) {
     return 1;
@@ -350,7 +356,7 @@ int main() {
   query_bag.kind = mir2::LogicCommandKind::query_bag_items;
   query_bag.session_id = 7;
   static_cast<void>(runtime.route_logic_command(query_bag));
-  const auto bag_dispatch = runtime.tick();
+  const auto bag_dispatch = tick_player_due(runtime, now_ms);
   const auto bag_packet = find_packet(bag_dispatch, mir2::kSmBagItems);
   if (!bag_packet.has_value()) {
     return 1;
@@ -394,12 +400,13 @@ int main() {
     enter_collector.y = collector.y;
     enter_collector.character = collector;
     static_cast<void>(env_runtime.route_logic_command(enter_collector));
-    static_cast<void>(env_runtime.tick());
+    std::uint64_t env_now_ms = 20;
+    static_cast<void>(env_runtime.tick(env_now_ms));
 
     auto drop_token = [&](std::int32_t make_index) {
       static_cast<void>(env_runtime.route_logic_command(
           make_item_command(mir2::LogicCommandKind::drop_item, 17, make_index, "Token")));
-      return env_runtime.tick();
+      return tick_player_due(env_runtime, env_now_ms);
     };
 
     static_cast<void>(drop_token(3001));
@@ -411,7 +418,7 @@ int main() {
     pickup_first.x = 10;
     pickup_first.y = 10;
     static_cast<void>(env_runtime.route_logic_command(pickup_first));
-    const auto fifo_pickup = env_runtime.tick();
+    const auto fifo_pickup = tick_player_due(env_runtime, env_now_ms);
     const auto fifo_add = find_packet(fifo_pickup, mir2::kSmAddItem);
     if (!fifo_add.has_value()) {
       return 1;
@@ -434,7 +441,7 @@ int main() {
     query_env_bag.kind = mir2::LogicCommandKind::query_bag_items;
     query_env_bag.session_id = 17;
     static_cast<void>(env_runtime.route_logic_command(query_env_bag));
-    const auto env_bag_dispatch = env_runtime.tick();
+    const auto env_bag_dispatch = tick_player_due(env_runtime, env_now_ms);
     const auto env_bag_packet = find_packet(env_bag_dispatch, mir2::kSmBagItems);
     if (!env_bag_packet.has_value()) {
       return 1;
@@ -472,12 +479,13 @@ int main() {
     enter_banker.y = banker.y;
     enter_banker.character = banker;
     static_cast<void>(gold_runtime.route_logic_command(enter_banker));
-    static_cast<void>(gold_runtime.tick());
+    std::uint64_t gold_now_ms = 20;
+    static_cast<void>(gold_runtime.tick(gold_now_ms));
 
     static_cast<void>(gold_runtime.route_logic_command(make_gold_command(27, 120)));
-    static_cast<void>(gold_runtime.tick());
+    static_cast<void>(tick_player_due(gold_runtime, gold_now_ms));
     static_cast<void>(gold_runtime.route_logic_command(make_gold_command(27, 80)));
-    static_cast<void>(gold_runtime.tick());
+    static_cast<void>(tick_player_due(gold_runtime, gold_now_ms));
 
     mir2::LogicCommand pickup_merged_gold;
     pickup_merged_gold.kind = mir2::LogicCommandKind::pickup_item;
@@ -485,7 +493,7 @@ int main() {
     pickup_merged_gold.x = 10;
     pickup_merged_gold.y = 10;
     static_cast<void>(gold_runtime.route_logic_command(pickup_merged_gold));
-    const auto merged_gold_pickup = gold_runtime.tick();
+    const auto merged_gold_pickup = tick_player_due(gold_runtime, gold_now_ms);
     const auto merged_gold_changed = find_packet(merged_gold_pickup, mir2::kSmGoldChanged);
     if (!merged_gold_changed.has_value() || merged_gold_changed->message.recog != 1000) {
       return 1;
