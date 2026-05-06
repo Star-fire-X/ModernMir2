@@ -947,10 +947,10 @@ constexpr int kEquipWeapon = 1;
 constexpr int kEquipRightHand = 2;
 constexpr int kEquipNecklace = 3;
 constexpr int kEquipHelmet = 4;
-constexpr int kEquipArmRingRight = 5;
-constexpr int kEquipArmRingLeft = 6;
-constexpr int kEquipRingRight = 7;
-constexpr int kEquipRingLeft = 8;
+constexpr int kEquipArmRingLeft = 5;
+constexpr int kEquipArmRingRight = 6;
+constexpr int kEquipRingLeft = 7;
+constexpr int kEquipRingRight = 8;
 
 /// 检查装备槽位是否接受指定 std_mode 类型的物品
 bool equipment_slot_accepts_std_mode(const int slot, const std::uint8_t std_mode,
