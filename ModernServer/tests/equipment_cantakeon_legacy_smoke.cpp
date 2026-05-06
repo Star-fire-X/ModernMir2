@@ -75,7 +75,10 @@ int main() {
   wrong_job_ring.job = 1;
   mir2::ItemConfig cursed_ring{4, "Cursed Ring", 1, 100, 22, 1, 4, 1000, 7, 0, 0};
   mir2::ItemConfig plain_ring{5, "Plain Ring", 1, 100, 22, 1, 5, 1000, 7, 0, 0};
-  config.items = {heavy_sword, level_sword, wrong_job_ring, cursed_ring, plain_ring};
+  mir2::ItemConfig dc_sword{6, "Dc Sword", 2, 100, 5, 1, 6, 1000, 1, 0, 0};
+  dc_sword.need = 1;
+  dc_sword.need_level = 3;
+  config.items = {heavy_sword, level_sword, wrong_job_ring, cursed_ring, plain_ring, dc_sword};
 
   mir2::LogicRuntime runtime(config);
   runtime.initialize();
@@ -98,6 +101,7 @@ int main() {
   hero.bag_items[1] = mir2::LegacyUserItem{1002, 2, 1000, 1000};
   hero.bag_items[2] = mir2::LegacyUserItem{1003, 3, 1000, 1000};
   hero.bag_items[3] = mir2::LegacyUserItem{1005, 5, 1000, 1000};
+  hero.bag_items[4] = mir2::LegacyUserItem{1006, 6, 1000, 1000};
   hero.equipped_items[mir2::kEquipRingLeft] = mir2::LegacyUserItem{1004, 4, 1000, 1000};
   hero.equipped_items[mir2::kEquipRingLeft].desc[7] = 1;
 
@@ -121,6 +125,14 @@ int main() {
   snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value());
   assert(bag_has_make_index(*snapshot, 1002));
+
+  static_cast<void>(runtime.route_logic_command(make_item_command(
+      mir2::LogicCommandKind::take_on_item, 501, 1006, "Dc Sword", mir2::kEquipWeapon)));
+  dispatch = tick_player_due(runtime, now_ms);
+  assert(find_packet(dispatch, mir2::kSmTakeOnFail).has_value());
+  snapshot = runtime.snapshot_character_actor("Hero");
+  assert(snapshot.has_value());
+  assert(bag_has_make_index(*snapshot, 1006));
 
   static_cast<void>(runtime.route_logic_command(make_item_command(
       mir2::LogicCommandKind::take_on_item, 501, 1003, "Wizard Ring", mir2::kEquipRingRight)));

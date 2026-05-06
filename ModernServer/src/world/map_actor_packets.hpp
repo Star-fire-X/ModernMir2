@@ -50,6 +50,7 @@ LegacyStdItem make_std_item(const LegacyUserItem& item,
     std_item.std_mode = static_cast<std::uint8_t>(std::clamp(upgraded.std_mode, 0, 255));
     std_item.shape = static_cast<std::uint8_t>(std::clamp(upgraded.shape, 0, 255));
     std_item.weight = static_cast<std::uint8_t>(std::clamp(upgraded.weight, 0, 255));
+    std_item.ani_count = static_cast<std::uint8_t>(std::clamp(upgraded.ani_count, 0, 255));
     std_item.looks =
         static_cast<std::uint16_t>(std::clamp(upgraded.looks > 0 ? upgraded.looks : item.index, 0, 65535));
     std_item.price = upgraded.price;

@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "spdlog/spdlog.h"
 #include "sqlite3.h"
 
 namespace mir2 {
@@ -88,6 +89,10 @@ void read_blob_array(sqlite3_stmt* statement, int column, std::array<T, N>& valu
   if (blob == nullptr || bytes <= 0) {
     return;
   }
+  if (static_cast<std::size_t>(bytes) != sizeof(values)) {
+    spdlog::warn("Legacy blob column {} has {} bytes; expected {} bytes", column, bytes,
+                 sizeof(values));
+  }
   std::memcpy(values.data(), blob,
               std::min<std::size_t>(static_cast<std::size_t>(bytes), sizeof(values)));
 }
@@ -112,6 +117,10 @@ std::vector<LegacyUserItem> decode_merchant_goods_blob(sqlite3_stmt* statement, 
   const auto bytes = sqlite3_column_bytes(statement, column);
   if (raw == nullptr || bytes <= 0) {
     return goods;
+  }
+  if (static_cast<std::size_t>(bytes) % sizeof(LegacyUserItem) != 0) {
+    spdlog::warn("Merchant goods blob column {} has {} bytes; item size is {}", column, bytes,
+                 sizeof(LegacyUserItem));
   }
   const auto count = static_cast<std::size_t>(bytes) / sizeof(LegacyUserItem);
   goods.resize(count);

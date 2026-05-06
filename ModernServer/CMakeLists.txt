@@ -102,6 +102,7 @@ set(MIR2_HOST_SOURCES
   src/world/legacy_magic_runtime.cpp
   src/world/legacy_skill_formula.cpp
   src/world/logic_runtime.cpp
+  src/world/make_index_allocator.cpp
   src/world/map_actor.cpp
 )
 
@@ -506,6 +507,11 @@ if(BUILD_TESTING)
   add_executable(mir2_items_smoke tests/items_smoke.cpp)
   target_link_libraries(mir2_items_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_items_smoke COMMAND mir2_items_smoke)
+
+  add_executable(mir2_item_phase1_compat_smoke tests/item_phase1_compat_smoke.cpp)
+  target_link_libraries(mir2_item_phase1_compat_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_item_phase1_compat_smoke COMMAND mir2_item_phase1_compat_smoke)
+
   add_executable(mir2_special_consumables_legacy_smoke
       tests/special_consumables_legacy_smoke.cpp)
     target_link_libraries(mir2_special_consumables_legacy_smoke PRIVATE mir2_hostlib)
