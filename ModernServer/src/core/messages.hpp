@@ -131,6 +131,7 @@ struct SessionEvent {
   LegacyPacket packet{};
   std::string reason{};
   std::int32_t delay_ms{0};
+  std::uint64_t session_seq{0};
 };
 
 enum class LogicCommandKind {
@@ -171,6 +172,7 @@ struct LogicCommand {
   LogicCommandKind kind{LogicCommandKind::raw_packet};
   std::string gateway{"game_gateway"};
   std::uint64_t session_id{0};
+  std::uint64_t session_seq{0};
   std::string account_id{};
   std::string character_name{};
   std::string map_id{};
@@ -246,6 +248,7 @@ struct ActorMail {
   std::string map_id{};
   std::uint64_t actor_id{0};
   std::uint64_t session_id{0};
+  std::uint64_t session_seq{0};
   std::uint64_t target_actor_id{0};
   std::int32_t item_make_index{0};
   std::int32_t item_slot{-1};

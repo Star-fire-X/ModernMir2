@@ -1880,6 +1880,15 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
+      const auto dc_min = packed_min(attacker->character().ability.dc);
+      const auto dc_max = std::max(dc_min, packed_max(attacker->character().ability.dc));
+      const auto attack_roll =
+          legacy_random_value(dispatch, "LegacyCombat", "attack_power_roll",
+                              std::max(1, dc_max - dc_min + 1), attacker->id(),
+                              target->id(), "attack", now_ms, current_tick);
+      const auto attack_power =
+          legacy_packed_attack_power(*attacker, effective_ident, attack_roll);
+      const auto undead_power = legacy_player_undead_power(*attacker, item_configs_);
       const auto hit_roll =
           legacy_random_value(dispatch, "LegacyCombat", "hit_check",
                               std::max(legacy_speed_point(*target), 1), attacker->id(),
@@ -1890,20 +1899,13 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
-      const auto dc_min = packed_min(attacker->character().ability.dc);
-      const auto dc_max = std::max(dc_min, packed_max(attacker->character().ability.dc));
-      const auto attack_roll =
-          legacy_random_value(dispatch, "LegacyCombat", "attack_power_roll",
-                              std::max(1, dc_max - dc_min + 1), attacker->id(),
-                              target->id(), "attack", now_ms, current_tick);
-      const auto attack_power =
-          legacy_packed_attack_power(*attacker, effective_ident, attack_roll);
       const auto [ac_min, ac_max] = actor_physical_defense_range(*target);
       const auto armor_roll =
           legacy_random_value(dispatch, "LegacyCombat", "armor_roll",
                               std::max(1, ac_max - ac_min + 1), attacker->id(),
                               target->id(), "attack", now_ms, current_tick);
-      const auto damage = legacy_physical_struck_damage(*target, attack_power, armor_roll);
+      const auto damage =
+          legacy_physical_struck_damage(*target, attack_power, armor_roll, undead_power);
       add_legacy_trace(dispatch, "LegacyCombat", "damage", effective_mail, current_tick, now_ms, true,
                        attack_power, damage, "GetAttackPower/GetHitStruckDamage");
       std::int32_t applied_damage = 0;
@@ -1924,6 +1926,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         shield_name = damage_result.shield_name;
         target_died = player_target->is_dead();
         if (applied_damage > 0) {
+          const auto struck_wdam =
+              legacy_random_value(dispatch, "LegacyCombat", "struck_dura_damage", 10,
+                                  attacker->id(), player_target->id(), "StruckDamage",
+                                  now_ms, current_tick) +
+              5;
           auto apply_struck_dura = [&](std::size_t slot, bool force) {
             auto* item = player_target->equipped_item_mutable(slot);
             if (item == nullptr || is_empty(*item) || item->dura == 0) {
@@ -1939,12 +1946,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
               }
             }
             const auto before = *item;
-            const auto wdam =
-                legacy_random_value(dispatch, "LegacyCombat", "struck_dura_damage", 10,
-                                    attacker->id(), player_target->id(), "StruckDamage",
-                                    now_ms, current_tick) +
-                5;
-            item->dura = item->dura > wdam ? static_cast<std::uint16_t>(item->dura - wdam) : 0;
+            item->dura = item->dura > struck_wdam
+                             ? static_cast<std::uint16_t>(item->dura - struck_wdam)
+                             : 0;
             queue_packet(dispatch, player_target->session_id(),
                          make_update_item_packet(player_target->session_id(), player_target->id(),
                                                  *item, item_configs_));
@@ -2058,7 +2062,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                   attacker->id(), extra_target->id(), "wide_hit", now_ms,
                                   current_tick);
           const auto extra_damage =
-              legacy_physical_struck_damage(*extra_target, extra_attack_power, extra_armor_roll);
+              legacy_physical_struck_damage(*extra_target, extra_attack_power, extra_armor_roll,
+                                            undead_power);
           std::int32_t extra_applied_damage = 0;
           bool extra_target_died = false;
           Monster* extra_slain_monster = nullptr;

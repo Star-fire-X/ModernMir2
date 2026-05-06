@@ -203,6 +203,12 @@ if(BUILD_TESTING)
   add_test(NAME mir2_legacy_player_operate_order_smoke
     COMMAND mir2_legacy_player_operate_order_smoke)
 
+  add_executable(mir2_legacy_player_rotation_smoke
+    tests/legacy_player_rotation_smoke.cpp)
+  target_link_libraries(mir2_legacy_player_rotation_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_player_rotation_smoke
+    COMMAND mir2_legacy_player_rotation_smoke)
+
   add_executable(mir2_legacy_player_disconnect_smoke tests/legacy_player_disconnect_smoke.cpp)
   target_link_libraries(mir2_legacy_player_disconnect_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_player_disconnect_smoke COMMAND mir2_legacy_player_disconnect_smoke)

@@ -39,16 +39,30 @@ bool check_frame_driver_order() {
 
   std::vector<std::string> observed;
   bool ingress_fifo = true;
+  bool frame_boundary = true;
   mir2::LegacyFrameCallbacks callbacks;
   callbacks.run_socket_run = [&]() -> mir2::RuntimeDispatch {
     observed.emplace_back("RunSocketRun");
-    return {};
+    mir2::RuntimeDispatch dispatch;
+    dispatch.session_events.push_back(
+        mir2::SessionEvent{mir2::SessionEventKind::send_packet, "game_gateway", 99});
+    return dispatch;
   };
   callbacks.decode_id_socket = [&](mir2::WorldIngressBatch& ingress) -> mir2::RuntimeDispatch {
     observed.emplace_back("DecodeIdSocket");
-    ingress_fifo = ingress.size() == 3 && std::get_if<mir2::SessionEvent>(&ingress.messages[0]) != nullptr &&
-                   std::get_if<mir2::PersistResult>(&ingress.messages[1]) != nullptr &&
-                   std::get_if<mir2::ActorMail>(&ingress.messages[2]) != nullptr;
+    ingress_fifo =
+        ingress.size() == 3 &&
+        std::get_if<mir2::SessionEvent>(&ingress.messages[0].message) != nullptr &&
+        std::get_if<mir2::PersistResult>(&ingress.messages[1].message) != nullptr &&
+        std::get_if<mir2::ActorMail>(&ingress.messages[2].message) != nullptr;
+    frame_boundary =
+        ingress_fifo &&
+        ingress.messages[0].frame_index == 1 &&
+        ingress.messages[1].frame_index == 1 &&
+        ingress.messages[2].frame_index == 1 &&
+        ingress.messages[0].ingress_seq == 0 &&
+        ingress.messages[1].ingress_seq == 0 &&
+        ingress.messages[2].ingress_seq == 0;
     mir2::RuntimeDispatch dispatch;
     dispatch.session_events.push_back(
         mir2::SessionEvent{mir2::SessionEventKind::send_packet, "game_gateway", 1});
@@ -78,18 +92,27 @@ bool check_frame_driver_order() {
   const std::vector<std::string> expected{"RunSocketRun", "DecodeIdSocket",
                                           "UserEngineExecuteRun", "EventManagerRun",
                                           "ServerMessageRun"};
-  if (observed != expected || !ingress_fifo) {
+  if (observed != expected || !ingress_fifo || !frame_boundary) {
     std::cerr << "legacy_frame_order\n";
     return false;
   }
-  if (dispatch.audit_events.size() != 1 || dispatch.session_events.size() != 3) {
+  if (dispatch.audit_events.size() != 1 || dispatch.session_events.size() != 4) {
     std::cerr << "legacy_frame_dispatch\n";
     return false;
   }
-  if (dispatch.session_events[0].session_id != 1 ||
-      dispatch.session_events[1].session_id != 2 ||
-      dispatch.session_events[2].session_id != 3) {
+  if (dispatch.session_events[0].session_id != 99 ||
+      dispatch.session_events[1].session_id != 1 ||
+      dispatch.session_events[2].session_id != 2 ||
+      dispatch.session_events[3].session_id != 3) {
     std::cerr << "legacy_frame_session_fifo\n";
+    return false;
+  }
+  if (dispatch.legacy_traces.size() != 1 ||
+      dispatch.legacy_traces.front().stage != "DecodeIdSocket" ||
+      dispatch.legacy_traces.front().action != "ingress_batch_not_cleared" ||
+      dispatch.legacy_traces.front().cursor != 3 ||
+      dispatch.legacy_traces.front().current_tick != 1) {
+    std::cerr << "legacy_frame_boundary_trace\n";
     return false;
   }
 
@@ -102,7 +125,7 @@ bool check_frame_driver_order() {
     return false;
   }
   if (first_trace.stages[stage_index(first_trace, mir2::LegacyFrameStage::run_socket_run)]
-          .output_count != 0 ||
+          .output_count != 1 ||
       first_trace.stages[stage_index(first_trace, mir2::LegacyFrameStage::decode_id_socket)]
           .output_count != 2 ||
       first_trace.stages[stage_index(first_trace,
@@ -241,6 +264,62 @@ bool check_gate_fifo_zero_budget() {
   return true;
 }
 
+bool check_ingress_sequence_guard() {
+  mir2::WorldService world;
+  world.seed_session_sequence_for_test(77, 5);
+
+  mir2::LogicCommand stale;
+  stale.kind = mir2::LogicCommandKind::authenticate;
+  stale.session_id = 77;
+  stale.session_seq = 4;
+  stale.account_id = "acct_stale";
+  stale.character_name = "Stale";
+  stale.certification = 44;
+
+  mir2::LogicCommand duplicate = stale;
+  duplicate.session_seq = 5;
+  duplicate.account_id = "acct_duplicate";
+  duplicate.character_name = "Duplicate";
+  duplicate.certification = 55;
+
+  mir2::LogicCommand fresh;
+  fresh.kind = mir2::LogicCommandKind::authenticate;
+  fresh.session_id = 77;
+  fresh.session_seq = 6;
+  fresh.account_id = "acct_fresh";
+  fresh.character_name = "Fresh";
+  fresh.certification = 66;
+
+  mir2::WorldIngressBatch batch;
+  batch.push(duplicate, 10);
+  batch.push(stale, 11);
+  batch.push(fresh, 12);
+  batch.mark_frame(3);
+
+  const auto dispatch = world.process_ingress_batch_for_test(batch);
+  if (!batch.empty()) {
+    std::cerr << "ingress_sequence_batch_not_cleared\n";
+    return false;
+  }
+  if (dispatch.audit_events.size() != 2 || dispatch.legacy_traces.size() != 2) {
+    std::cerr << "ingress_sequence_guard_count\n";
+    return false;
+  }
+  const auto& duplicate_trace = dispatch.legacy_traces[0];
+  const auto& stale_trace = dispatch.legacy_traces[1];
+  if (duplicate_trace.action != "stale_session_sequence" ||
+      duplicate_trace.actor_id != 77 || duplicate_trace.cursor != 10 ||
+      duplicate_trace.sub_cursor != 3 || duplicate_trace.value != 5 ||
+      duplicate_trace.damage != 5 || stale_trace.action != "stale_session_sequence" ||
+      stale_trace.actor_id != 77 || stale_trace.cursor != 11 ||
+      stale_trace.sub_cursor != 3 || stale_trace.value != 4 ||
+      stale_trace.damage != 5) {
+    std::cerr << "ingress_sequence_guard_trace\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -254,6 +333,9 @@ int main() {
     return 1;
   }
   if (!check_gate_fifo_zero_budget()) {
+    return 1;
+  }
+  if (!check_ingress_sequence_guard()) {
     return 1;
   }
   return 0;

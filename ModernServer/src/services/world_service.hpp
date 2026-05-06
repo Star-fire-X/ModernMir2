@@ -32,7 +32,9 @@ class WorldService : public Module {
 #ifdef MIR2_ENABLE_TEST_HOOKS
   void attach_context_for_test(HostContext& context);
   void enqueue_gate_event_for_test(SessionEvent event);
+  void seed_session_sequence_for_test(std::uint64_t session_id, std::uint64_t session_seq);
   [[nodiscard]] RuntimeDispatch run_legacy_socket_stage_for_test(std::uint64_t now_ms);
+  [[nodiscard]] RuntimeDispatch process_ingress_batch_for_test(WorldIngressBatch& batch);
 #endif
 
  private:
@@ -53,6 +55,8 @@ class WorldService : public Module {
   void run();
   void request_castle_dialog_context_refresh();
   [[nodiscard]] RuntimeDispatch process_ingress_batch(WorldIngressBatch& batch);
+  [[nodiscard]] bool accept_ingress_sequence(const WorldIngressMessage& ingress,
+                                             RuntimeDispatch& dispatch);
   [[nodiscard]] RuntimeDispatch handle_session_event(const SessionEvent& event);
   [[nodiscard]] RuntimeDispatch handle_logic_command(const LogicCommand& command);
   [[nodiscard]] RuntimeDispatch handle_persist_result(const PersistResult& result);
@@ -75,6 +79,8 @@ class WorldService : public Module {
   std::unordered_map<std::uint64_t, Admission> active_sessions_{};
   std::unordered_map<std::string, std::uint64_t> active_accounts_{};
   std::unordered_map<std::uint64_t, std::string> session_gateways_{};
+  std::unordered_map<std::uint64_t, std::uint64_t> session_sequence_watermarks_{};
+  std::uint64_t next_ingress_seq_{0};
   mutable std::mutex gate_events_mutex_{};
   std::deque<SessionEvent> pending_gate_events_{};
   std::uint64_t run_socket_last_flushed_{0};

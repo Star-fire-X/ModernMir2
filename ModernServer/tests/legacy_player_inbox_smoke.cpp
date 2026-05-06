@@ -34,21 +34,34 @@ mir2::LegacyReadyUser make_ready(std::uint64_t session_id) {
   return ready;
 }
 
-mir2::LogicCommand make_walk(std::uint64_t session_id, int x, int y) {
+mir2::LogicCommand make_walk(std::uint64_t session_id, int x, int y,
+                             std::uint64_t session_seq = 0) {
   mir2::LogicCommand command;
   command.kind = mir2::LogicCommandKind::walk;
   command.session_id = session_id;
+  command.session_seq = session_seq;
   command.x = x;
   command.y = y;
   return command;
 }
 
-mir2::LogicCommand make_say(std::uint64_t session_id, std::string text) {
+mir2::LogicCommand make_say(std::uint64_t session_id, std::string text,
+                            std::uint64_t session_seq = 0) {
   mir2::LogicCommand command;
   command.kind = mir2::LogicCommandKind::say;
   command.session_id = session_id;
+  command.session_seq = session_seq;
   command.text = std::move(text);
   command.game_message = mir2::make_default_message(mir2::kCmSay, 0, 0, 0, 0);
+  return command;
+}
+
+mir2::LogicCommand make_spell(std::uint64_t session_id, std::uint64_t session_seq) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::spell;
+  command.session_id = session_id;
+  command.session_seq = session_seq;
+  command.game_message = mir2::make_default_message(mir2::kCmSpell, 0, 0, 0, 0);
   return command;
 }
 
@@ -76,8 +89,9 @@ int main() {
   static_cast<void>(runtime.tick(1000));
   assert(runtime.legacy_session_state(31) == mir2::LegacyPlayerState::initialize_pending);
 
-  static_cast<void>(runtime.route_logic_command(make_walk(31, 11, 10)));
+  static_cast<void>(runtime.route_logic_command(make_walk(31, 11, 10, 1)));
   assert(runtime.legacy_session_inbox_size(31) == 1);
+  assert(runtime.legacy_session_inbox_sequences(31) == std::vector<std::uint64_t>{1});
   auto snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value());
   assert(snapshot->x == 10 && snapshot->y == 10);
@@ -90,7 +104,9 @@ int main() {
   assert(snapshot->x == 10 && snapshot->y == 10);
 
   const auto before_move_run_time = runtime.legacy_session_run_time_ms(31);
-  static_cast<void>(runtime.route_logic_command(make_walk(31, 11, 10)));
+  static_cast<void>(runtime.route_logic_command(make_walk(31, 11, 10, 2)));
+  assert((runtime.legacy_session_inbox_sequences(31) ==
+          std::vector<std::uint64_t>{1, 2}));
   assert(runtime.legacy_session_run_time_ms(31) < before_move_run_time);
   const auto move_dispatch = runtime.tick(1502);
   assert(runtime.legacy_session_inbox_size(31) == 0);
@@ -100,12 +116,15 @@ int main() {
   assert(!move_dispatch.session_events.empty());
 
   const auto before_say_run_time = runtime.legacy_session_run_time_ms(31);
-  static_cast<void>(runtime.route_logic_command(make_say(31, "first")));
-  static_cast<void>(runtime.route_logic_command(make_say(31, "second")));
+  static_cast<void>(runtime.route_logic_command(make_say(31, "first", 3)));
+  static_cast<void>(runtime.route_logic_command(make_say(31, "second", 4)));
+  static_cast<void>(runtime.route_logic_command(make_spell(31, 5)));
   assert(runtime.legacy_session_run_time_ms(31) == before_say_run_time);
-  assert(runtime.legacy_session_inbox_size(31) == 2);
+  assert(runtime.legacy_session_inbox_size(31) == 3);
+  assert((runtime.legacy_session_inbox_sequences(31) ==
+          std::vector<std::uint64_t>{3, 4, 5}));
   const auto early_say_dispatch = runtime.tick(1600);
-  assert(runtime.legacy_session_inbox_size(31) == 2);
+  assert(runtime.legacy_session_inbox_size(31) == 3);
   assert(hear_lines(early_say_dispatch).empty());
   const auto say_dispatch = runtime.tick(1753);
   const auto lines = hear_lines(say_dispatch);
