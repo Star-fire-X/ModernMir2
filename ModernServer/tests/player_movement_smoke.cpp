@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -107,6 +108,36 @@ bool has_packet_ident(const mir2::RuntimeDispatch& dispatch, std::uint64_t sessi
   return false;
 }
 
+int count_packet_ident(const mir2::RuntimeDispatch& dispatch, std::uint64_t session_id,
+                       std::uint16_t ident) {
+  int count = 0;
+  for (const auto& event : dispatch.session_events) {
+    if (event.session_id != session_id) {
+      continue;
+    }
+    const auto decoded = mir2::decode_legacy_game_packet(event.packet);
+    if (decoded.has_value() && decoded->message.ident == ident) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+std::optional<std::size_t> packet_index(const mir2::RuntimeDispatch& dispatch,
+                                        std::uint64_t session_id, std::uint16_t ident) {
+  for (std::size_t index = 0; index < dispatch.session_events.size(); ++index) {
+    const auto& event = dispatch.session_events[index];
+    if (event.session_id != session_id) {
+      continue;
+    }
+    const auto decoded = mir2::decode_legacy_game_packet(event.packet);
+    if (decoded.has_value() && decoded->message.ident == ident) {
+      return index;
+    }
+  }
+  return std::nullopt;
+}
+
 std::optional<mir2::DecodedLegacyGamePacket> find_packet(
     const mir2::RuntimeDispatch& dispatch, std::uint64_t session_id, std::uint16_t ident) {
   for (const auto& event : dispatch.session_events) {
@@ -185,12 +216,17 @@ int main() {
   hero = snapshot(runtime, "Hero");
   assert(hero.x == 4 && hero.y == 5);
   assert(has_packet_ident(dispatch, 8, mir2::kSmRun));
+  assert(count_packet_ident(dispatch, 8, mir2::kSmRun) == 1);
+  assert(!has_packet_ident(dispatch, 8, mir2::kSmWalk));
+  assert(!has_packet_ident(dispatch, 8, mir2::kSmTurn));
+  assert(!has_packet_ident(dispatch, 8, mir2::kSmDisappear));
 
   advance(runtime, 12);
   dispatch = move(runtime, 7, mir2::LogicCommandKind::run, 4, 7);
   hero = snapshot(runtime, "Hero");
   assert(hero.x == 4 && hero.y == 5);
   assert_move_fail_packet(dispatch, 7, hero);
+  assert(!has_packet_ident(dispatch, 8, mir2::kSmRun));
 
   advance(runtime, 12);
   dispatch = move(runtime, 7, mir2::LogicCommandKind::run, 6, 5);
@@ -231,6 +267,29 @@ int main() {
   static_cast<void>(move(runtime, 10, mir2::LogicCommandKind::walk, 6, 1));
   const auto sprinter = snapshot(runtime, "Sprinter");
   assert(sprinter.x == 5 && sprinter.y == 1);
+
+  {
+    const auto visibility_map = write_test_map(40, 10, {});
+    mir2::HostConfig visibility_config;
+    visibility_config.budgets.tick_ms = 20;
+    visibility_config.maps.push_back(
+        mir2::MapConfig{"0", "VisibilityOrderMap", visibility_map, 0, 0, 1, 1});
+    mir2::LogicRuntime visibility_runtime(visibility_config);
+    visibility_runtime.initialize();
+
+    enter(visibility_runtime, 21, make_character("Runner", 10, 5));
+    enter(visibility_runtime, 22, make_character("NewWatcher", 23, 5));
+
+    const auto visibility_dispatch =
+        move(visibility_runtime, 21, mir2::LogicCommandKind::run, 12, 5);
+    const auto runner = snapshot(visibility_runtime, "Runner");
+    assert(runner.x == 12 && runner.y == 5);
+    const auto run_index = packet_index(visibility_dispatch, 22, mir2::kSmRun);
+    const auto turn_index = packet_index(visibility_dispatch, 22, mir2::kSmTurn);
+    assert(run_index.has_value());
+    assert(turn_index.has_value());
+    assert(*run_index < *turn_index);
+  }
 
   return 0;
 }

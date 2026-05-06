@@ -97,6 +97,21 @@ bool has_action(const mir2::RuntimeDispatch& dispatch, const std::string& action
   return std::find(actions.begin(), actions.end(), action) != actions.end();
 }
 
+std::optional<std::size_t> action_index(const mir2::RuntimeDispatch& dispatch,
+                                        const std::string& action) {
+  const auto actions = combat_actions(dispatch);
+  const auto iter = std::find(actions.begin(), actions.end(), action);
+  if (iter == actions.end()) {
+    return std::nullopt;
+  }
+  return static_cast<std::size_t>(std::distance(actions.begin(), iter));
+}
+
+int action_count(const mir2::RuntimeDispatch& dispatch, const std::string& action) {
+  const auto actions = combat_actions(dispatch);
+  return static_cast<int>(std::count(actions.begin(), actions.end(), action));
+}
+
 }  // namespace
 
 int main() {
@@ -116,7 +131,8 @@ int main() {
     const auto dispatch = runtime.tick();
     const auto actions = combat_actions(dispatch);
     const std::vector<std::string> expected_prefix{
-        "ack", "attack_broadcast", "hit_check", "armor_roll", "damage", "struck"};
+        "ack", "attack_broadcast", "attack_power_roll", "hit_check", "armor_roll", "damage",
+        "struck"};
     assert(actions.size() >= expected_prefix.size());
     assert(std::equal(expected_prefix.begin(), expected_prefix.end(), actions.begin()));
     assert(find_packet(dispatch, mir2::kSmStruck).has_value());
@@ -146,6 +162,11 @@ int main() {
     static_cast<void>(runtime.route_logic_command(make_attack(61, 10, 9, hero_actor_id + 1)));
     const auto dispatch = runtime.tick();
     assert(has_action(dispatch, "miss"));
+    const auto attack_roll_index = action_index(dispatch, "attack_power_roll");
+    const auto hit_index = action_index(dispatch, "hit_check");
+    assert(attack_roll_index.has_value());
+    assert(hit_index.has_value());
+    assert(*attack_roll_index < *hit_index);
     assert(!find_packet(dispatch, mir2::kSmStruck).has_value());
     const auto rival = runtime.snapshot_character_actor("Rival");
     assert(rival.has_value());
@@ -179,6 +200,69 @@ int main() {
     assert(!find_packet_for(dispatch, 73, mir2::kSmHit).has_value());
     assert(!find_packet_for(dispatch, 73, mir2::kSmStruck).has_value());
     assert(!find_packet_for(dispatch, 73, mir2::kSmDeath).has_value());
+  }
+
+  {
+    mir2::HostConfig config;
+    config.runtime.legacy_random_seed = 1;
+    mir2::MapConfig map{"0", "DuraTraceMap", {}, 0, 0, 10, 10};
+    map.allow_pk = true;
+    map.fight_zone = true;
+    config.maps.push_back(map);
+    mir2::ItemConfig armor{2, "Training Armor", 1, 10, 10, 0, 0, 1000, 0, 0, 0};
+    mir2::ItemConfig necklace{3, "Training Necklace", 1, 10, 19, 0, 0, 1000, 3, 0, 0};
+    config.items.push_back(armor);
+    config.items.push_back(necklace);
+
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto attacker = make_character("a", "Attacker", 10, 10);
+    attacker.ability.dc = mir2::make_word(10, 10);
+    auto target = make_character("b", "Durable", 10, 9);
+    target.equipped_items[mir2::kEquipDress] = mir2::LegacyUserItem{2001, 2, 500, 1000};
+    target.equipped_items[mir2::kEquipNecklace] = mir2::LegacyUserItem{2002, 3, 500, 1000};
+    static_cast<void>(runtime.route_logic_command(make_enter(81, attacker)));
+    static_cast<void>(runtime.tick());
+    const auto target_login = runtime.route_logic_command(make_enter(82, target));
+    static_cast<void>(target_login);
+    const auto target_dispatch = runtime.tick();
+    const auto target_map = find_packet_for(target_dispatch, 82, mir2::kSmNewMap);
+    assert(target_map.has_value());
+    const auto target_actor_id =
+        static_cast<std::uint64_t>(static_cast<std::uint32_t>(target_map->message.recog));
+
+    static_cast<void>(runtime.route_logic_command(make_attack(81, 10, 9, target_actor_id)));
+    const auto dispatch = runtime.tick();
+    assert(action_count(dispatch, "struck_dura_damage") == 1);
+    const auto damage_index = action_index(dispatch, "struck_dura_damage");
+    const auto gate_index = action_index(dispatch, "struck_dura_gate");
+    assert(damage_index.has_value());
+    if (gate_index.has_value()) {
+      assert(*damage_index < *gate_index);
+    }
+  }
+
+  {
+    mir2::HostConfig config;
+    config.runtime.legacy_random_seed = 1;
+    config.maps.push_back(mir2::MapConfig{"0", "DeathMap", {}, 0, 0, 10, 10});
+    config.spawns.push_back(
+        mir2::SpawnConfig{"0", "monster", "Fragile", 10, 9, 30000, 1, 1, 0, 0, 0, 20});
+
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto attacker = make_character("a", "Executioner", 10, 10);
+    attacker.ability.dc = mir2::make_word(10, 10);
+    static_cast<void>(runtime.route_logic_command(make_enter(91, attacker)));
+    static_cast<void>(runtime.tick());
+    static_cast<void>(runtime.route_logic_command(make_enter(92, make_character("b", "Witness", 11, 10))));
+    static_cast<void>(runtime.tick());
+
+    static_cast<void>(runtime.route_logic_command(make_attack(91, 10, 9)));
+    const auto dispatch = runtime.tick();
+    assert(find_packet_for(dispatch, 92, mir2::kSmDeath).has_value());
+    assert(!find_packet_for(dispatch, 92, mir2::kSmStruck).has_value());
+    assert(has_action(dispatch, "death"));
   }
 
   return 0;
