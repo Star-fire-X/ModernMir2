@@ -900,6 +900,7 @@ void load_items(const std::filesystem::path& directory, HostConfig& config) {
         item.scroll_kind = value_or<std::string>(item_table, "scroll_kind", {});
         item.unbind_item = value_or<std::string>(item_table, "unbind_item", {});
         item.unbind_count = value_or<int>(item_table, "unbind_count", 0);
+        item.ani_count = value_or<int>(item_table, "ani_count", 0);
         config.items.push_back(std::move(item));
       }
     }

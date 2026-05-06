@@ -397,6 +397,10 @@ void LogicRuntime::initialize() {
   gen_cur_ = 0;
   mer_cur_ = 0;
   npc_cur_ = 0;
+  make_index_allocator_.reset();
+  for (const auto& [_, merchant_state] : merchant_states_) {
+    make_index_allocator_.observe(merchant_state);
+  }
   one_zen_time_ms_ = 0;
   default_map_id_.clear();
   apply_runtime_castle_defaults(config_.runtime, castle_dialog_context_);
@@ -431,7 +435,7 @@ void LogicRuntime::initialize() {
     auto [map_it, inserted] = maps_.emplace(
         map.id, std::make_unique<MapActor>(map, config_.budgets, item_configs_, magic_configs_,
                                            config_.map_quests, castle_dialog_context_,
-                                           monster_defs_));
+                                           monster_defs_, &make_index_allocator_));
     map_it->second->set_legacy_random(&legacy_random_);
     if (inserted) {
       map_order_.push_back(map.id);
@@ -477,7 +481,8 @@ void LogicRuntime::initialize() {
       if (item_it == item_configs_.end()) {
         continue;
       }
-      mail.merchant_items.push_back(make_merchant_item(item_it->second, next_make_index_++));
+      mail.merchant_items.push_back(
+          make_merchant_item(item_it->second, make_index_allocator_.allocate()));
     }
     for (const auto& product : npc.merchant_products) {
       const auto* item_config = find_item_config_by_name(item_configs_, product.item_name);
@@ -490,7 +495,8 @@ void LogicRuntime::initialize() {
           item_config->id, item_config->name, std::max(product.count, 0),
           static_cast<std::uint64_t>(std::max(product.refresh_hours, 0)) * 60ULL * 1000ULL, 0});
       for (std::int32_t count = 0; count < product.count; ++count) {
-        mail.merchant_items.push_back(make_merchant_item(*item_config, next_make_index_++));
+        mail.merchant_items.push_back(
+            make_merchant_item(*item_config, make_index_allocator_.allocate()));
       }
     }
     if (const auto state = merchant_states_.find(mail.merchant_key); state != merchant_states_.end()) {
@@ -515,6 +521,7 @@ void LogicRuntime::set_merchant_states(std::vector<MerchantStateRecord> merchant
   merchant_states_.clear();
   for (auto& state : merchant_states) {
     if (!state.merchant_key.empty()) {
+      make_index_allocator_.observe(state);
       merchant_states_[state.merchant_key] = std::move(state);
     }
   }
@@ -826,6 +833,7 @@ RuntimeDispatch LogicRuntime::enqueue_ready_user(LegacyReadyUser ready_user) {
   ready_user.character.map_id =
       resolve_map_id(ready_user.character.map_id.empty() ? ready_user.map_id
                                                          : ready_user.character.map_id);
+  make_index_allocator_.observe(ready_user.character);
   ready_users_.push_back(std::move(ready_user));
   return dispatch;
 }
@@ -1179,7 +1187,7 @@ void LogicRuntime::roll_legacy_monster_items_for_spawn(const MonsterGroup& group
     for (std::int32_t index = 0; index < drop.count; ++index) {
       LegacyUserItem item;
       item.index = static_cast<std::uint16_t>(std::clamp(item_it->second.id, 0, 65535));
-      item.make_index = next_make_index_++;
+      item.make_index = make_index_allocator_.allocate();
       const auto dura_max = std::clamp(
           item_it->second.dura_max > 0 ? item_it->second.dura_max : 1000, 1, 65535);
       item.dura_max = static_cast<std::uint16_t>(dura_max);

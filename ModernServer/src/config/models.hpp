@@ -265,6 +265,7 @@ struct ItemConfig {
   std::string scroll_kind{};
   std::string unbind_item{};
   std::int32_t unbind_count{0};
+  std::int32_t ani_count{0};
 };
 
 struct LegacyMagicDefinition {

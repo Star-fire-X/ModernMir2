@@ -140,7 +140,8 @@ int main() {
   if (!has_packet(drop_dispatch, mir2::kSmItemShow) ||
       !has_packet(drop_dispatch, mir2::kSmDelItem) ||
       !has_packet(drop_dispatch, mir2::kSmDropItemSuccess) ||
-      !has_packet(drop_dispatch, mir2::kSmWeightChanged)) {
+      !has_packet(drop_dispatch, mir2::kSmWeightChanged) ||
+      drop_dispatch.persist_requests.empty()) {
     return 1;
   }
 
@@ -174,7 +175,8 @@ int main() {
   const auto pickup_dispatch = tick_player_due(runtime, now_ms);
   if (!has_packet(pickup_dispatch, mir2::kSmItemHide) ||
       !has_packet(pickup_dispatch, mir2::kSmAddItem) ||
-      !has_packet(pickup_dispatch, mir2::kSmWeightChanged)) {
+      !has_packet(pickup_dispatch, mir2::kSmWeightChanged) ||
+      pickup_dispatch.persist_requests.empty()) {
     return 1;
   }
 
@@ -206,7 +208,8 @@ int main() {
       !has_packet(take_on_dispatch, mir2::kSmUpdateItem) ||
       !has_packet(take_on_dispatch, mir2::kSmAbility) ||
       !has_packet(take_on_dispatch, mir2::kSmSendUseItems) ||
-      !has_packet(take_on_dispatch, mir2::kSmWeightChanged)) {
+      !has_packet(take_on_dispatch, mir2::kSmWeightChanged) ||
+      take_on_dispatch.persist_requests.empty()) {
     return 1;
   }
 
@@ -317,7 +320,8 @@ int main() {
   static_cast<void>(runtime.route_logic_command(make_gold_command(7, 120)));
   const auto drop_gold_dispatch = tick_player_due(runtime, now_ms);
   if (!has_packet(drop_gold_dispatch, mir2::kSmItemShow) ||
-      !has_packet(drop_gold_dispatch, mir2::kSmGoldChanged)) {
+      !has_packet(drop_gold_dispatch, mir2::kSmGoldChanged) ||
+      drop_gold_dispatch.persist_requests.empty()) {
     return 1;
   }
 
@@ -338,7 +342,8 @@ int main() {
   static_cast<void>(runtime.route_logic_command(pickup_gold));
   const auto pickup_gold_dispatch = tick_player_due(runtime, now_ms);
   if (!has_packet(pickup_gold_dispatch, mir2::kSmItemHide) ||
-      !has_packet(pickup_gold_dispatch, mir2::kSmGoldChanged)) {
+      !has_packet(pickup_gold_dispatch, mir2::kSmGoldChanged) ||
+      pickup_gold_dispatch.persist_requests.empty()) {
     return 1;
   }
 

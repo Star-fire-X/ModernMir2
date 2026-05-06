@@ -652,6 +652,26 @@ bool legacy_can_take_on_item(const CharacterRecord& character,
     }
     return false;
   }
+  if (upgraded.need >= 1 && upgraded.need <= 3 && upgraded.need_level > 0) {
+    const auto current = [&]() {
+      switch (upgraded.need) {
+        case 1:
+          return packed_high(character.ability.dc);
+        case 2:
+          return packed_high(character.ability.mc);
+        case 3:
+          return packed_high(character.ability.sc);
+        default:
+          return 0;
+      }
+    }();
+    if (current < upgraded.need_level) {
+      if (reason != nullptr) {
+        *reason = "need";
+      }
+      return false;
+    }
+  }
 
   const auto new_weight = std::max(upgraded.weight, 0);
   if (legacy_slot_uses_hand_weight(static_cast<std::size_t>(slot))) {

@@ -929,14 +929,16 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
                    std::unordered_map<std::int32_t, MagicConfig> magic_configs,
                    std::vector<MapQuestConfig> map_quests,
                    CastleDialogContext castle_dialog_context,
-                   std::unordered_map<std::string, MonsterDefConfig> monster_defs)
+                   std::unordered_map<std::string, MonsterDefConfig> monster_defs,
+                   MakeIndexAllocator* make_index_allocator)
     : config_(std::move(config)),
       budgets_(std::move(budgets)),
       item_configs_(std::move(item_configs)),
       magic_configs_(std::move(magic_configs)),
       monster_defs_(std::move(monster_defs)),
       map_quests_(std::move(map_quests)),
-      castle_dialog_context_(std::move(castle_dialog_context)) {
+      castle_dialog_context_(std::move(castle_dialog_context)),
+      make_index_allocator_(make_index_allocator) {
   movement_map_ = legacy::decode_map_file(config_.source_map);
   if (movement_map_ != nullptr) {
     if (config_.width <= 0) {
@@ -961,6 +963,11 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
 void MapActor::enqueue_mail(ActorMail mail) { mailbox_.push_back(std::move(mail)); }
 
 void MapActor::set_legacy_random(LegacyRandom* legacy_random) { legacy_random_ = legacy_random; }
+
+std::int32_t MapActor::allocate_make_index() {
+  return make_index_allocator_ != nullptr ? make_index_allocator_->allocate()
+                                          : fallback_make_index_allocator_.allocate();
+}
 
 bool MapActor::apply_merchant_state(const MerchantStateRecord& state) {
   if (!state.map_id.empty() && state.map_id != config_.id) {
@@ -1218,8 +1225,8 @@ RuntimeDispatch MapActor::legacy_process_merchant(std::uint64_t actor_id,
                 return !is_empty(existing) && existing.index == product.item_id;
               });
           for (std::int32_t i = stock; i < product.target_count; ++i) {
-            insert_at = goods.insert(insert_at,
-                                     make_runtime_merchant_item(*config, next_script_make_index_++));
+            insert_at =
+                goods.insert(insert_at, make_runtime_merchant_item(*config, allocate_make_index()));
             ++insert_at;
           }
           changed = true;

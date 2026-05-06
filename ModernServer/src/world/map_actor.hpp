@@ -17,6 +17,7 @@
 #include "world/game_object.hpp"
 #include "world/legacy_map_environment.hpp"
 #include "world/legacy_random.hpp"
+#include "world/make_index_allocator.hpp"
 
 namespace mir2 {
 
@@ -45,7 +46,8 @@ class MapActor {
            std::unordered_map<std::int32_t, MagicConfig> magic_configs,
            std::vector<MapQuestConfig> map_quests = {},
            CastleDialogContext castle_dialog_context = {},
-           std::unordered_map<std::string, MonsterDefConfig> monster_defs = {});
+           std::unordered_map<std::string, MonsterDefConfig> monster_defs = {},
+           MakeIndexAllocator* make_index_allocator = nullptr);
 
   void enqueue_mail(ActorMail mail);
   void set_legacy_random(LegacyRandom* legacy_random);
@@ -284,6 +286,7 @@ class MapActor {
   [[nodiscard]] bool can_walk_tile(std::int32_t x, std::int32_t y) const;
   [[nodiscard]] LegacyMovingObjectState moving_state_for(const GameObject& object) const;
   [[nodiscard]] std::vector<const GroundItem*> ordered_ground_items() const;
+  [[nodiscard]] std::int32_t allocate_make_index();
   [[nodiscard]] std::int32_t legacy_random_value(RuntimeDispatch& dispatch,
                                                  std::string stage,
                                                  std::string action,
@@ -317,6 +320,8 @@ class MapActor {
   WheelTimer<std::uint64_t> object_wheel_{1024};
   WheelTimer<ActorMail> delayed_mail_wheel_{1024};
   LegacyRandom* legacy_random_{nullptr};
+  MakeIndexAllocator fallback_make_index_allocator_{};
+  MakeIndexAllocator* make_index_allocator_{nullptr};
   std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>> objects_{};
   std::unordered_map<std::uint64_t, MonsterSpawnTemplate> monster_spawn_templates_{};
   std::unordered_map<std::uint64_t, GroundItem> ground_items_{};
@@ -325,7 +330,6 @@ class MapActor {
   std::unordered_map<std::string, std::unordered_set<std::string>> script_name_lists_{};
   std::uint64_t next_ground_item_id_{1};
   std::uint64_t next_script_monster_id_{0x6000000000000000ULL};
-  std::int32_t next_script_make_index_{200000};
 };
 
 }  // namespace mir2

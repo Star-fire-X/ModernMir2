@@ -646,7 +646,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       for (std::int32_t index = 0; index < target.amount; ++index) {
         LegacyUserItem item;
         item.index = static_cast<std::uint16_t>(std::clamp(item_config->id, 0, 65535));
-        item.make_index = next_script_make_index_++;
+        item.make_index = allocate_make_index();
         item.dura_max =
             static_cast<std::uint16_t>(std::clamp(item_config->dura_max, 0, 65535));
         item.dura = item.dura_max;

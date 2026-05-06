@@ -13,6 +13,7 @@
 #include "world/game_object.hpp"
 #include "world/legacy_event_manager.hpp"
 #include "world/legacy_random.hpp"
+#include "world/make_index_allocator.hpp"
 #include "world/map_actor.hpp"
 
 namespace mir2 {
@@ -197,8 +198,8 @@ class LogicRuntime {
   std::uint64_t current_tick_{0};
   LegacyRandom legacy_random_{1};
   LegacyEventManager legacy_event_manager_{};
+  MakeIndexAllocator make_index_allocator_{};
   std::uint64_t next_actor_id_{1};
-  std::int32_t next_make_index_{100000};
   std::string default_map_id_{};
 };
 

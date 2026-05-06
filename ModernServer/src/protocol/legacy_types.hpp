@@ -334,6 +334,30 @@ struct LegacyClientMagic {
 
 #pragma pack(pop)
 
+static_assert(sizeof(LegacyUserItem) == 40);
+static_assert(offsetof(LegacyUserItem, make_index) == 0);
+static_assert(offsetof(LegacyUserItem, index) == 4);
+static_assert(offsetof(LegacyUserItem, dura) == 6);
+static_assert(offsetof(LegacyUserItem, dura_max) == 8);
+static_assert(offsetof(LegacyUserItem, desc) == 10);
+static_assert(offsetof(LegacyUserItem, color_r) == 24);
+static_assert(offsetof(LegacyUserItem, color_g) == 25);
+static_assert(offsetof(LegacyUserItem, color_b) == 26);
+static_assert(offsetof(LegacyUserItem, prefix) == 27);
+static_assert(sizeof(LegacyStdItem) == 69);
+static_assert(offsetof(LegacyStdItem, name) == 0);
+static_assert(offsetof(LegacyStdItem, std_mode) == 15);
+static_assert(offsetof(LegacyStdItem, shape) == 16);
+static_assert(offsetof(LegacyStdItem, weight) == 17);
+static_assert(offsetof(LegacyStdItem, ani_count) == 18);
+static_assert(offsetof(LegacyStdItem, price) == 37);
+static_assert(offsetof(LegacyStdItem, eff_value2) == 68);
+static_assert(sizeof(LegacyClientItem) == 77);
+static_assert(offsetof(LegacyClientItem, item) == 0);
+static_assert(offsetof(LegacyClientItem, make_index) == 69);
+static_assert(offsetof(LegacyClientItem, dura) == 73);
+static_assert(offsetof(LegacyClientItem, dura_max) == 75);
+
 template <std::size_t N>
 inline void set_short_string(LegacyShortString<N>& target, const std::string& value) {
   target.length = static_cast<std::uint8_t>(std::min<std::size_t>(N, value.size()));

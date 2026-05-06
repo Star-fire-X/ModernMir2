@@ -994,6 +994,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                            ground_item.name));
       queue_packet(dispatch, player->session_id(),
                    make_weight_changed_packet(player->session_id(), player->character()));
+      queue_save_character(dispatch, *player);
       add_legacy_trace(dispatch, "LegacyItem", "success", mail, current_tick, now_ms, true,
                        static_cast<std::int32_t>(ground_item.id), 0, "drop_item");
       break;
@@ -1031,16 +1032,19 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
-      player->spend_gold(mail.amount);
       if (add_result.merged) {
         auto existing = ground_items_.find(add_result.object_id);
         if (existing == ground_items_.end()) {
+          add_legacy_trace(dispatch, "LegacyItem", "merge_state_reject", mail, current_tick,
+                           now_ms, false, mail.amount, 0, "drop_gold");
           break;
         }
+        player->spend_gold(mail.amount);
         existing->second.gold_amount += mail.amount;
         existing->second.looks = gold_looks(existing->second.gold_amount);
         ground_item = existing->second;
       } else {
+        player->spend_gold(mail.amount);
         ++next_ground_item_id_;
         ground_items_[ground_item.id] = ground_item;
       }
@@ -1048,6 +1052,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       sync_visibility_after_item_change(ground_item.x, ground_item.y, dispatch, ground_item.id);
       queue_packet(dispatch, player->session_id(),
                    make_gold_changed_packet(player->session_id(), player->character().gold));
+      queue_save_character(dispatch, *player);
       add_legacy_trace(dispatch, "LegacyItem", add_result.merged ? "merged" : "success", mail,
                        current_tick, now_ms, true, ground_item.gold_amount, 0, "drop_gold");
       break;
@@ -1208,9 +1213,13 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       requester->refresh_derived_state(item_configs_);
       queue_packet(dispatch, requester->session_id(),
+                   make_del_item_packet(requester->session_id(), requester->id(), *item,
+                                        item_configs_));
+      queue_packet(dispatch, requester->session_id(),
                    make_storage_result_packet(requester->session_id(), kSmStorageOk));
       queue_packet(dispatch, requester->session_id(),
                    make_weight_changed_packet(requester->session_id(), requester->character()));
+      queue_save_character(dispatch, *requester);
       break;
     }
     case ActorMailKind::take_back_storage_item: {
@@ -1250,6 +1259,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                         item->make_index));
       queue_packet(dispatch, requester->session_id(),
                    make_weight_changed_packet(requester->session_id(), requester->character()));
+      queue_save_character(dispatch, *requester);
       break;
     }
     case ActorMailKind::pickup_item: {
@@ -1282,6 +1292,13 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
 
       if (ground_it->second.is_gold) {
+        const auto new_gold = static_cast<std::int64_t>(player->character().gold) +
+                              static_cast<std::int64_t>(ground_it->second.gold_amount);
+        if (new_gold > kLegacyBagGold) {
+          add_legacy_trace(dispatch, "LegacyItem", "gold_cap_reject", mail, current_tick, now_ms,
+                           false, ground_it->second.gold_amount, 0, "pickup_gold");
+          break;
+        }
         player->add_gold(ground_it->second.gold_amount);
         const auto ground_item = ground_it->second;
         static_cast<void>(environment_.delete_from_map(
@@ -1291,6 +1308,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
 
         queue_packet(dispatch, player->session_id(),
                      make_gold_changed_packet(player->session_id(), player->character().gold));
+        queue_save_character(dispatch, *player);
         add_legacy_trace(dispatch, "LegacyItem", "success", mail, current_tick, now_ms, true,
                          ground_item.gold_amount, 0, "pickup_gold");
         break;
@@ -1314,6 +1332,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                    make_add_item_packet(player->session_id(), ground_item.item, item_configs_));
       queue_packet(dispatch, player->session_id(),
                    make_weight_changed_packet(player->session_id(), player->character()));
+      queue_save_character(dispatch, *player);
       add_legacy_trace(dispatch, "LegacyItem", "success", mail, current_tick, now_ms, true,
                        ground_item.item.make_index, 0, "pickup_item");
       static_cast<void>(trigger_map_quest(*player, ground_item.dropper_name, ground_item.name,
@@ -1441,6 +1460,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                   player->character().feature));
         });
       }
+      queue_save_character(dispatch, *player);
       add_legacy_trace(dispatch, "LegacyItem", "success", mail, current_tick, now_ms, true,
                        player->character().feature, 0, "take_on_item");
       break;
@@ -1515,6 +1535,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                   player->character().feature));
         });
       }
+      queue_save_character(dispatch, *player);
       add_legacy_trace(dispatch, "LegacyItem", "success", mail, current_tick, now_ms, true,
                        player->character().feature, 0, "take_off_item");
       break;
@@ -1573,7 +1594,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         for (std::int32_t index = 0; index < item_config->unbind_count; ++index) {
           LegacyUserItem item;
           item.index = static_cast<std::uint16_t>(std::clamp(target_config->id, 0, 65535));
-          item.make_index = next_script_make_index_++;
+          item.make_index = allocate_make_index();
           item.dura_max = static_cast<std::uint16_t>(
               std::clamp(target_config->dura_max > 0 ? target_config->dura_max : 1, 1, 65535));
           item.dura = item.dura_max;
