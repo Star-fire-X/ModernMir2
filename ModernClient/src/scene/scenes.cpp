@@ -1042,19 +1042,51 @@ void draw_equipment_item_icon(SoftwareRenderer& renderer,
   renderer.surface().blit_rgba(x, y, frame->width, frame->height, frame->pixels.data(), 255U);
 }
 
+const wchar_t* std_mode_name(const std::uint8_t std_mode) {
+  switch (std_mode) {
+    case 0:  return L"药品";
+    case 1:  return L"食物";
+    case 2:  return L"食物";
+    case 3:  return L"食物";
+    case 4:  return L"技能书";
+    case 5:
+    case 6:  return L"武器";
+    case 10:
+    case 11: return L"衣服";
+    case 15: return L"头盔";
+    case 19:
+    case 20:
+    case 21: return L"项链";
+    case 22:
+    case 23: return L"戒指";
+    case 24:
+    case 26: return L"手镯";
+    case 25: return L"毒药";
+    case 30: return L"蜡烛";
+    case 31: return L"特殊";
+    case 40: return L"肉类";
+    case 42: return L"酒";
+    case 43: return L"矿石";
+    default: return L"物品";
+  }
+}
+
+std::uint32_t item_name_color(const std::uint8_t std_mode) {
+  if (std_mode >= 25)  return 0xFFFACC15U;
+  if (std_mode >= 19)  return 0xFF60A5FAU;
+  if (std_mode >= 10)  return 0xFF4ADE80U;
+  return 0xFFF5F7FAU;
+}
+
 std::wstring item_tooltip_text(const client_v1::ItemState& item) {
   auto text = widen(item.name);
+  text.append(L"\n");
+  text.append(std_mode_name(item.std_mode));
   if (item.dura_max != 0) {
-    text.append(L"\nDura ");
-    text.append(std::to_wstring(item.dura));
+    text.append(L"\n持久 ");
+    text.append(std::to_wstring(item.dura / 1000));
     text.push_back(L'/');
-    text.append(std::to_wstring(item.dura_max));
-  }
-  text.append(L"\nStdMode ");
-  text.append(std::to_wstring(item.std_mode));
-  if (item.make_index != 0) {
-    text.append(L"\nIndex ");
-    text.append(std::to_wstring(item.make_index));
+    text.append(std::to_wstring(item.dura_max / 1000));
   }
   return text;
 }
@@ -3502,7 +3534,7 @@ class LegacyHud final {
       const auto& item = world.bag_items[static_cast<std::size_t>(hovered_bag_slot_)];
       if (!item_empty(item)) {
         tooltip_->show_at(input.mouse_x + 12, input.mouse_y + 16, item_tooltip_text(item),
-                          0xFFF8FAFCU);
+                          item_name_color(item.std_mode));
         return;
       }
     }
@@ -3511,7 +3543,7 @@ class LegacyHud final {
           world.equipment[static_cast<std::size_t>(hovered_equipment_slot_)];
       if (!item_empty(item)) {
         tooltip_->show_at(input.mouse_x + 12, input.mouse_y + 16, item_tooltip_text(item),
-                          0xFFF8FAFCU);
+                          item_name_color(item.std_mode));
         return;
       }
     }
