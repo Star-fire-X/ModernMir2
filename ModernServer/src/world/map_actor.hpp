@@ -120,6 +120,20 @@ class MapActor {
     std::unordered_set<std::uint64_t> events{};
   };
 
+  struct TradeOffer {
+    std::vector<LegacyUserItem> items{};
+    std::int32_t gold{0};
+    bool accepted{false};
+  };
+
+  struct TradeSession {
+    std::uint64_t id{0};
+    std::uint64_t first_actor_id{0};
+    std::uint64_t second_actor_id{0};
+    TradeOffer first{};
+    TradeOffer second{};
+  };
+
   void handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch, std::uint64_t current_tick,
                    std::uint64_t now_ms, bool from_legacy_operate = false);
   void dispatch_legacy_run_notice(Player& player, RuntimeDispatch& dispatch,
@@ -287,6 +301,15 @@ class MapActor {
   [[nodiscard]] std::uint64_t budget_for(GameObjectKind kind) const;
   [[nodiscard]] Player* find_player(std::uint64_t actor_id);
   [[nodiscard]] const Player* find_player(std::uint64_t actor_id) const;
+  [[nodiscard]] Player* find_player_by_name(std::string_view character_name);
+  [[nodiscard]] TradeSession* trade_session_for(std::uint64_t actor_id);
+  [[nodiscard]] TradeOffer* trade_offer_for(TradeSession& session, std::uint64_t actor_id);
+  [[nodiscard]] TradeOffer* trade_peer_offer_for(TradeSession& session,
+                                                 std::uint64_t actor_id);
+  void cancel_trade_for(std::uint64_t actor_id, RuntimeDispatch& dispatch, bool notify);
+  bool can_receive_trade_items(const Player& receiver,
+                               const std::vector<LegacyUserItem>& items) const;
+  bool commit_trade(TradeSession& session, RuntimeDispatch& dispatch);
   [[nodiscard]] std::int32_t movement_width() const;
   [[nodiscard]] std::int32_t movement_height() const;
   [[nodiscard]] bool can_walk_tile(std::int32_t x, std::int32_t y) const;
@@ -331,10 +354,13 @@ class MapActor {
   std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>> objects_{};
   std::unordered_map<std::uint64_t, MonsterSpawnTemplate> monster_spawn_templates_{};
   std::unordered_map<std::uint64_t, GroundItem> ground_items_{};
+  std::unordered_map<std::uint64_t, TradeSession> trade_sessions_{};
+  std::unordered_map<std::uint64_t, std::uint64_t> trade_session_by_actor_{};
   std::unordered_map<std::uint64_t, std::pair<std::int32_t, std::int32_t>> event_objects_{};
   std::unordered_map<std::uint64_t, PlayerVisibility> visibility_{};
   std::unordered_map<std::string, std::unordered_set<std::string>> script_name_lists_{};
   std::uint64_t next_ground_item_id_{1};
+  std::uint64_t next_trade_session_id_{1};
   std::uint64_t next_script_monster_id_{0x6000000000000000ULL};
 };
 

@@ -1,4 +1,5 @@
 #include <optional>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -45,6 +46,33 @@ std::uint16_t weight_checksum(std::uint16_t weight, std::uint16_t wear_weight,
                               std::uint16_t hand_weight) {
   return static_cast<std::uint16_t>(
       (((weight + wear_weight + hand_weight) ^ 0x3A5F) ^ 0x1F35) ^ 0xAA21);
+}
+
+bool has_save_character(const mir2::RuntimeDispatch& dispatch, std::string_view name) {
+  for (const auto& request : dispatch.persist_requests) {
+    if (request.kind == mir2::PersistRequestKind::save_character &&
+        request.character_name == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void append_dispatch(mir2::RuntimeDispatch& target, mir2::RuntimeDispatch source) {
+  target.session_events.insert(target.session_events.end(),
+                               std::make_move_iterator(source.session_events.begin()),
+                               std::make_move_iterator(source.session_events.end()));
+  target.persist_requests.insert(target.persist_requests.end(),
+                                 std::make_move_iterator(source.persist_requests.begin()),
+                                 std::make_move_iterator(source.persist_requests.end()));
+}
+
+mir2::RuntimeDispatch run_legacy_ticks(mir2::LogicRuntime& runtime) {
+  mir2::RuntimeDispatch dispatch;
+  for (int i = 0; i < 30; ++i) {
+    append_dispatch(dispatch, runtime.tick());
+  }
+  return dispatch;
 }
 
 mir2::LogicCommand make_buy_command(std::uint64_t session_id, std::uint64_t merchant_id,
@@ -119,7 +147,7 @@ int main() {
   enter.character = hero;
   static_cast<void>(runtime.route_logic_command(enter));
 
-  const auto login_dispatch = runtime.tick();
+  const auto login_dispatch = run_legacy_ticks(runtime);
   if (!find_packet(login_dispatch, mir2::kSmNewMap).has_value()) {
     return fail(1);
   }
@@ -129,20 +157,25 @@ int main() {
   click_npc.session_id = 9;
   click_npc.target_actor_id = 1;
   static_cast<void>(runtime.route_logic_command(click_npc));
-  const auto dialog_dispatch = runtime.tick();
+  const auto dialog_dispatch = run_legacy_ticks(runtime);
   const auto merchant_say = find_packet(dialog_dispatch, mir2::kSmMerchantSay);
-  if (!merchant_say.has_value()) {
+  const auto click_goods_list = find_packet(dialog_dispatch, mir2::kSmSendGoodsList);
+  if (!merchant_say.has_value() && !click_goods_list.has_value()) {
     return fail(2);
   }
-  const auto merchant_text = decode_merchant_dialog(merchant_say->body);
-  if (merchant_text.find("Trader/") != 0 || merchant_text.find("<Buy/@buy>") == std::string::npos ||
-      merchant_text.find("<Sell/@sell>") == std::string::npos ||
-      merchant_text.find("<Repair/@repair>") == std::string::npos) {
-    return fail(3);
+  mir2::RuntimeDispatch shop_dispatch = dialog_dispatch;
+  if (merchant_say.has_value()) {
+    const auto merchant_text = decode_merchant_dialog(merchant_say->body);
+    if (merchant_text.find("Trader/") != 0 || merchant_text.find("<Buy/@buy>") == std::string::npos ||
+        merchant_text.find("<Sell/@sell>") == std::string::npos ||
+        merchant_text.find("<Repair/@repair>") == std::string::npos) {
+      return fail(3);
+    }
+
+    static_cast<void>(runtime.route_logic_command(make_menu_command(9, 1, "@buy")));
+    shop_dispatch = run_legacy_ticks(runtime);
   }
 
-  static_cast<void>(runtime.route_logic_command(make_menu_command(9, 1, "@buy")));
-  const auto shop_dispatch = runtime.tick();
   const auto goods_list = find_packet(shop_dispatch, mir2::kSmSendGoodsList);
   if (!goods_list.has_value() || goods_list->message.recog != 1 || goods_list->message.param != 2) {
     return fail(4);
@@ -154,7 +187,7 @@ int main() {
   }
 
   static_cast<void>(runtime.route_logic_command(make_detail_command(9, 1, 0, "Bronze Sword")));
-  const auto detail_dispatch = runtime.tick();
+  const auto detail_dispatch = run_legacy_ticks(runtime);
   const auto detail_packet = find_packet(detail_dispatch, mir2::kSmSendDetailGoodsList);
   if (!detail_packet.has_value() || detail_packet->message.recog != 1 || detail_packet->message.param != 1) {
     return fail(6);
@@ -167,7 +200,7 @@ int main() {
   const auto sword_make_index = detail_items.front().make_index;
 
   static_cast<void>(runtime.route_logic_command(make_buy_command(9, 1, sword_make_index, "Bronze Sword")));
-  const auto sword_buy_dispatch = runtime.tick();
+  const auto sword_buy_dispatch = run_legacy_ticks(runtime);
   const auto add_sword = find_packet(sword_buy_dispatch, mir2::kSmAddItem);
   const auto sword_buy_ok = find_packet(sword_buy_dispatch, mir2::kSmBuyItemSuccess);
   const auto sword_weight = find_packet(sword_buy_dispatch, mir2::kSmWeightChanged);
@@ -176,24 +209,29 @@ int main() {
       mir2::make_long(sword_buy_ok->message.param, sword_buy_ok->message.tag) != sword_make_index ||
       sword_weight->message.recog != 5 || sword_weight->message.param != 0 ||
       sword_weight->message.tag != 0 ||
-      sword_weight->message.series != weight_checksum(5, 0, 0)) {
+      sword_weight->message.series != weight_checksum(5, 0, 0) ||
+      !has_save_character(sword_buy_dispatch, "Hero")) {
     return fail(8);
   }
 
   static_cast<void>(runtime.route_logic_command(make_buy_command(9, 1, 2, "Potion")));
-  const auto potion_buy_dispatch = runtime.tick();
+  const auto potion_buy_dispatch = run_legacy_ticks(runtime);
   const auto potion_buy_ok = find_packet(potion_buy_dispatch, mir2::kSmBuyItemSuccess);
-  if (!potion_buy_ok.has_value() || potion_buy_ok->message.recog != 40) {
+  if (!potion_buy_ok.has_value() || potion_buy_ok->message.recog != 40 ||
+      !has_save_character(potion_buy_dispatch, "Hero")) {
     return fail(9);
   }
 
   static_cast<void>(runtime.route_logic_command(click_npc));
-  const auto dialog_after_buy = runtime.tick();
-  if (!find_packet(dialog_after_buy, mir2::kSmMerchantSay).has_value()) {
+  const auto dialog_after_buy = run_legacy_ticks(runtime);
+  const auto merchant_after_buy = find_packet(dialog_after_buy, mir2::kSmMerchantSay);
+  auto shop_after_buy = dialog_after_buy;
+  if (merchant_after_buy.has_value()) {
+    static_cast<void>(runtime.route_logic_command(make_menu_command(9, 1, "@buy")));
+    shop_after_buy = run_legacy_ticks(runtime);
+  } else if (!find_packet(dialog_after_buy, mir2::kSmSendGoodsList).has_value()) {
     return fail(10);
   }
-  static_cast<void>(runtime.route_logic_command(make_menu_command(9, 1, "@buy")));
-  const auto shop_after_buy = runtime.tick();
   const auto goods_after_buy = find_packet(shop_after_buy, mir2::kSmSendGoodsList);
   if (!goods_after_buy.has_value()) {
     return fail(11);
@@ -205,14 +243,14 @@ int main() {
   }
 
   static_cast<void>(runtime.route_logic_command(make_buy_command(9, 1, 1, "Potion")));
-  const auto potion_buy_dispatch_2 = runtime.tick();
+  const auto potion_buy_dispatch_2 = run_legacy_ticks(runtime);
   const auto potion_buy_ok_2 = find_packet(potion_buy_dispatch_2, mir2::kSmBuyItemSuccess);
   if (!potion_buy_ok_2.has_value() || potion_buy_ok_2->message.recog != 0) {
     return fail(13);
   }
 
   static_cast<void>(runtime.route_logic_command(make_buy_command(9, 1, 0, "Potion")));
-  const auto potion_buy_fail = runtime.tick();
+  const auto potion_buy_fail = run_legacy_ticks(runtime);
   const auto potion_buy_fail_packet = find_packet(potion_buy_fail, mir2::kSmBuyItemFail);
   if (!potion_buy_fail_packet.has_value() || potion_buy_fail_packet->message.recog != 1) {
     return fail(14);
@@ -222,7 +260,7 @@ int main() {
   bag_query.kind = mir2::LogicCommandKind::query_bag_items;
   bag_query.session_id = 9;
   static_cast<void>(runtime.route_logic_command(bag_query));
-  const auto bag_dispatch = runtime.tick();
+  const auto bag_dispatch = run_legacy_ticks(runtime);
   const auto bag_packet = find_packet(bag_dispatch, mir2::kSmBagItems);
   if (!bag_packet.has_value()) {
     return fail(15);

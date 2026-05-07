@@ -1,5 +1,7 @@
 #include <optional>
+#include <iterator>
 #include <string>
+#include <string_view>
 
 #include "protocol/legacy_edcode.hpp"
 #include "protocol/legacy_game_codec.hpp"
@@ -36,6 +38,33 @@ std::optional<mir2::LegacyClientItem> first_bag_item(std::string_view body) {
     return decode_client_item(part);
   }
   return std::nullopt;
+}
+
+bool has_save_character(const mir2::RuntimeDispatch& dispatch, std::string_view name) {
+  for (const auto& request : dispatch.persist_requests) {
+    if (request.kind == mir2::PersistRequestKind::save_character &&
+        request.character_name == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void append_dispatch(mir2::RuntimeDispatch& target, mir2::RuntimeDispatch source) {
+  target.session_events.insert(target.session_events.end(),
+                               std::make_move_iterator(source.session_events.begin()),
+                               std::make_move_iterator(source.session_events.end()));
+  target.persist_requests.insert(target.persist_requests.end(),
+                                 std::make_move_iterator(source.persist_requests.begin()),
+                                 std::make_move_iterator(source.persist_requests.end()));
+}
+
+mir2::RuntimeDispatch run_legacy_ticks(mir2::LogicRuntime& runtime) {
+  mir2::RuntimeDispatch dispatch;
+  for (int i = 0; i < 30; ++i) {
+    append_dispatch(dispatch, runtime.tick());
+  }
+  return dispatch;
 }
 
 mir2::LogicCommand make_repair_command(mir2::LogicCommandKind kind, std::uint64_t session_id,
@@ -91,7 +120,7 @@ int main() {
   enter.character = hero;
   static_cast<void>(runtime.route_logic_command(enter));
 
-  const auto login_dispatch = runtime.tick();
+  const auto login_dispatch = run_legacy_ticks(runtime);
   if (!find_packet(login_dispatch, mir2::kSmNewMap).has_value()) {
     return 1;
   }
@@ -101,7 +130,7 @@ int main() {
   click_npc.session_id = 7;
   click_npc.target_actor_id = 1;
   static_cast<void>(runtime.route_logic_command(click_npc));
-  const auto click_dispatch = runtime.tick();
+  const auto click_dispatch = run_legacy_ticks(runtime);
   const auto repair_menu = find_packet(click_dispatch, mir2::kSmSendUserRepair);
   if (!repair_menu.has_value() || repair_menu->message.recog != 1) {
     return 1;
@@ -109,7 +138,7 @@ int main() {
 
   static_cast<void>(runtime.route_logic_command(make_repair_command(
       mir2::LogicCommandKind::query_repair_cost, 7, 1, 1001, "Repair Sword")));
-  const auto query_dispatch = runtime.tick();
+  const auto query_dispatch = run_legacy_ticks(runtime);
   const auto repair_cost = find_packet(query_dispatch, mir2::kSmSendRepairCost);
   if (!repair_cost.has_value() || repair_cost->message.recog != 12) {
     return 1;
@@ -117,10 +146,10 @@ int main() {
 
   static_cast<void>(runtime.route_logic_command(
       make_repair_command(mir2::LogicCommandKind::repair_item, 7, 1, 1001, "Repair Sword")));
-  const auto repair_dispatch = runtime.tick();
+  const auto repair_dispatch = run_legacy_ticks(runtime);
   const auto repair_ok = find_packet(repair_dispatch, mir2::kSmUserRepairItemOk);
   if (!repair_ok.has_value() || repair_ok->message.recog != 88 || repair_ok->message.param != 987 ||
-      repair_ok->message.tag != 987) {
+      repair_ok->message.tag != 987 || !has_save_character(repair_dispatch, "Hero")) {
     return 1;
   }
 
@@ -128,7 +157,7 @@ int main() {
   bag_query.kind = mir2::LogicCommandKind::query_bag_items;
   bag_query.session_id = 7;
   static_cast<void>(runtime.route_logic_command(bag_query));
-  const auto bag_dispatch = runtime.tick();
+  const auto bag_dispatch = run_legacy_ticks(runtime);
   const auto bag_packet = find_packet(bag_dispatch, mir2::kSmBagItems);
   if (!bag_packet.has_value()) {
     return 1;
@@ -142,7 +171,7 @@ int main() {
 
   static_cast<void>(runtime.route_logic_command(
       make_repair_command(mir2::LogicCommandKind::repair_item, 7, 1, 9999, "Missing Sword")));
-  const auto repair_fail_dispatch = runtime.tick();
+  const auto repair_fail_dispatch = run_legacy_ticks(runtime);
   if (!find_packet(repair_fail_dispatch, mir2::kSmUserRepairItemFail).has_value()) {
     return 1;
   }

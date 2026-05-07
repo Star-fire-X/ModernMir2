@@ -118,6 +118,7 @@ function Get-CiBuildTargets {
     "mir2_world_kick_smoke",
     "mir2_world_invalid_command_smoke",
     "mir2_gateway_kick_smoke",
+    "mir2_item_phase3_trade_smoke",
     "mir2_repair_smoke",
     "mir2_sell_smoke",
     "mir2_buy_smoke",

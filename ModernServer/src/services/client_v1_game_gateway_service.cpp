@@ -1274,8 +1274,9 @@ void ClientV1GameGatewayService::handle_group_remove_member_request(
 
 void ClientV1GameGatewayService::handle_trade_try_request(
     std::uint64_t session_id, const client_v1::TradeTryRequest& request) {
-  auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  const auto state = session(session_id);
+  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+      request.target_name.empty()) {
     return;
   }
   {
@@ -1286,11 +1287,16 @@ void ClientV1GameGatewayService::handle_trade_try_request(
       it->second.trade_remote_name = request.target_name;
       it->second.trade_local_gold = 0;
       it->second.trade_local_accept = false;
-      state = it->second;
     }
   }
-  send_message(session_id, client_v1::TradeState{true, state->trade_remote_name, {}, {}, 0, 0,
+  send_message(session_id, client_v1::TradeState{true, request.target_name, {}, {}, 0, 0,
                                                  false, false});
+  LogicCommand command;
+  command.kind = LogicCommandKind::trade_try;
+  command.gateway = name();
+  command.session_id = session_id;
+  command.text = request.target_name;
+  post_logic_command(std::move(command));
 }
 
 void ClientV1GameGatewayService::handle_trade_cancel_request(
@@ -1310,6 +1316,11 @@ void ClientV1GameGatewayService::handle_trade_cancel_request(
     }
   }
   send_message(session_id, client_v1::TradeState{});
+  LogicCommand command;
+  command.kind = LogicCommandKind::trade_cancel;
+  command.gateway = name();
+  command.session_id = session_id;
+  post_logic_command(std::move(command));
 }
 
 void ClientV1GameGatewayService::handle_trade_add_item_request(
@@ -1321,9 +1332,14 @@ void ClientV1GameGatewayService::handle_trade_add_item_request(
   }
   send_message(session_id, client_v1::TradeState{state->trade_visible, state->trade_remote_name,
                                                  {}, {}, state->trade_local_gold, 0,
-                                                 state->trade_local_accept, false});
-  send_message(session_id, client_v1::SysMessage{
-                               "Trade item backend is not available in client_v1 yet.", 1});
+                                                 false, false});
+  LogicCommand command;
+  command.kind = LogicCommandKind::trade_add_item;
+  command.gateway = name();
+  command.session_id = session_id;
+  command.item_make_index = request.item_make_index;
+  command.text = request.name;
+  post_logic_command(std::move(command));
 }
 
 void ClientV1GameGatewayService::handle_trade_remove_item_request(
@@ -1335,9 +1351,14 @@ void ClientV1GameGatewayService::handle_trade_remove_item_request(
   }
   send_message(session_id, client_v1::TradeState{state->trade_visible, state->trade_remote_name,
                                                  {}, {}, state->trade_local_gold, 0,
-                                                 state->trade_local_accept, false});
-  send_message(session_id, client_v1::SysMessage{
-                               "Trade item backend is not available in client_v1 yet.", 1});
+                                                 false, false});
+  LogicCommand command;
+  command.kind = LogicCommandKind::trade_remove_item;
+  command.gateway = name();
+  command.session_id = session_id;
+  command.item_make_index = request.item_make_index;
+  command.text = request.name;
+  post_logic_command(std::move(command));
 }
 
 void ClientV1GameGatewayService::handle_trade_set_gold_request(
@@ -1352,12 +1373,19 @@ void ClientV1GameGatewayService::handle_trade_set_gold_request(
     auto it = sessions_.find(session_id);
     if (it != sessions_.end()) {
       it->second.trade_local_gold = std::min<std::int32_t>(request.gold, it->second.character.gold);
+      it->second.trade_local_accept = false;
       state = it->second;
     }
   }
   send_message(session_id, client_v1::TradeState{state->trade_visible, state->trade_remote_name,
                                                  {}, {}, state->trade_local_gold, 0,
-                                                 state->trade_local_accept, false});
+                                                 false, false});
+  LogicCommand command;
+  command.kind = LogicCommandKind::trade_set_gold;
+  command.gateway = name();
+  command.session_id = session_id;
+  command.amount = state->trade_local_gold;
+  post_logic_command(std::move(command));
 }
 
 void ClientV1GameGatewayService::handle_trade_accept_request(
@@ -1375,10 +1403,12 @@ void ClientV1GameGatewayService::handle_trade_accept_request(
     }
   }
   send_message(session_id, client_v1::TradeState{state->trade_visible, state->trade_remote_name,
-                                                 {}, {}, state->trade_local_gold, 0, true,
-                                                 false});
-  send_message(session_id, client_v1::SysMessage{
-                               "Trade matching is not available in client_v1 yet.", 1});
+                                                 {}, {}, state->trade_local_gold, 0, true, false});
+  LogicCommand command;
+  command.kind = LogicCommandKind::trade_accept;
+  command.gateway = name();
+  command.session_id = session_id;
+  post_logic_command(std::move(command));
 }
 
 void ClientV1GameGatewayService::handle_guild_open_request(

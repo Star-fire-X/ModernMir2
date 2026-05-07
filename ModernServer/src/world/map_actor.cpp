@@ -1357,6 +1357,7 @@ RuntimeDispatch MapActor::legacy_disconnect_player(std::uint64_t actor_id, std::
   }
   const auto session_id = player->session_id();
   static_cast<void>(player->clear_legacy_buffs_on_logout(0));
+  cancel_trade_for(actor_id, dispatch, true);
   queue_save_player_character(dispatch, *player, now_ms);
   detach_owned_slaves(*player, dispatch, now_ms, true);
   queue_force_disconnect(dispatch, session_id, "legacy_player_disconnected");
@@ -1617,6 +1618,231 @@ Player* MapActor::find_player(std::uint64_t actor_id) {
 const Player* MapActor::find_player(std::uint64_t actor_id) const {
   const auto it = objects_.find(actor_id);
   return it != objects_.end() ? as_player(it->second.get()) : nullptr;
+}
+
+Player* MapActor::find_player_by_name(std::string_view character_name) {
+  const auto key = util::lower_copy(std::string(character_name));
+  if (key.empty()) {
+    return nullptr;
+  }
+  for (auto& [_, object] : objects_) {
+    auto* player = as_player(object.get());
+    if (player != nullptr &&
+        util::lower_copy(player->character().character_name) == key) {
+      return player;
+    }
+  }
+  return nullptr;
+}
+
+MapActor::TradeSession* MapActor::trade_session_for(std::uint64_t actor_id) {
+  const auto by_actor_it = trade_session_by_actor_.find(actor_id);
+  if (by_actor_it == trade_session_by_actor_.end()) {
+    return nullptr;
+  }
+  const auto session_it = trade_sessions_.find(by_actor_it->second);
+  return session_it != trade_sessions_.end() ? &session_it->second : nullptr;
+}
+
+MapActor::TradeOffer* MapActor::trade_offer_for(TradeSession& session,
+                                                std::uint64_t actor_id) {
+  if (session.first_actor_id == actor_id) {
+    return &session.first;
+  }
+  if (session.second_actor_id == actor_id) {
+    return &session.second;
+  }
+  return nullptr;
+}
+
+MapActor::TradeOffer* MapActor::trade_peer_offer_for(TradeSession& session,
+                                                     std::uint64_t actor_id) {
+  if (session.first_actor_id == actor_id) {
+    return &session.second;
+  }
+  if (session.second_actor_id == actor_id) {
+    return &session.first;
+  }
+  return nullptr;
+}
+
+bool MapActor::can_receive_trade_items(const Player& receiver,
+                                       const std::vector<LegacyUserItem>& items) const {
+  std::size_t free_slots = 0;
+  std::int32_t total_weight = 0;
+  for (const auto& bag_item : receiver.character().bag_items) {
+    if (is_empty(bag_item)) {
+      ++free_slots;
+    } else {
+      total_weight += item_weight(bag_item, item_configs_);
+    }
+  }
+  if (items.size() > free_slots) {
+    return false;
+  }
+  for (const auto& item : items) {
+    if (is_empty(item)) {
+      return false;
+    }
+    total_weight += item_weight(item, item_configs_);
+  }
+  return total_weight <= std::max<std::int32_t>(receiver.character().ability.max_weight, 0);
+}
+
+void MapActor::cancel_trade_for(std::uint64_t actor_id, RuntimeDispatch& dispatch, bool notify) {
+  auto* session = trade_session_for(actor_id);
+  if (session == nullptr) {
+    return;
+  }
+
+  const auto session_id = session->id;
+  auto* first = find_player(session->first_actor_id);
+  auto* second = find_player(session->second_actor_id);
+  bool returned_all = true;
+  auto return_offer = [&](Player* player, TradeOffer& offer) {
+    if (player == nullptr) {
+      return;
+    }
+    std::vector<LegacyUserItem> remaining;
+    for (const auto& item : offer.items) {
+      if (!player->add_bag_item(item)) {
+        returned_all = false;
+        remaining.push_back(item);
+        continue;
+      }
+      queue_packet(dispatch, player->session_id(),
+                   make_add_item_packet(player->session_id(), item, item_configs_));
+    }
+    offer.items = std::move(remaining);
+    if (offer.items.empty()) {
+      offer.gold = 0;
+    }
+    offer.accepted = false;
+    player->refresh_derived_state(item_configs_);
+    queue_packet(dispatch, player->session_id(),
+                 make_weight_changed_packet(player->session_id(), player->character()));
+    queue_save_character(dispatch, *player);
+    if (notify) {
+      queue_system_notice(dispatch, *player, "Trade cancelled.");
+    }
+  };
+
+  return_offer(first, session->first);
+  return_offer(second, session->second);
+
+  if (!returned_all) {
+    if (first != nullptr) {
+      queue_system_notice(dispatch, *first, "Trade cancel failed: bag is full.");
+    }
+    if (second != nullptr) {
+      queue_system_notice(dispatch, *second, "Trade cancel failed: bag is full.");
+    }
+    return;
+  }
+
+  trade_session_by_actor_.erase(session->first_actor_id);
+  trade_session_by_actor_.erase(session->second_actor_id);
+  trade_sessions_.erase(session_id);
+}
+
+bool MapActor::commit_trade(TradeSession& session, RuntimeDispatch& dispatch) {
+  auto* first = find_player(session.first_actor_id);
+  auto* second = find_player(session.second_actor_id);
+  if (first == nullptr || second == nullptr) {
+    return false;
+  }
+  if (first->is_dead() || second->is_dead() || !in_interaction_range(*first, *second) ||
+      (session.first.gold < 0 || session.second.gold < 0) ||
+      (session.first.gold > 0 && !first->can_spend_gold(session.first.gold)) ||
+      (session.second.gold > 0 && !second->can_spend_gold(session.second.gold)) ||
+      static_cast<std::int64_t>(first->character().gold) + session.second.gold > kLegacyBagGold ||
+      static_cast<std::int64_t>(second->character().gold) + session.first.gold > kLegacyBagGold ||
+      !can_receive_trade_items(*first, session.second.items) ||
+      !can_receive_trade_items(*second, session.first.items)) {
+    session.first.accepted = false;
+    session.second.accepted = false;
+    queue_system_notice(dispatch, *first, "Trade failed.");
+    queue_system_notice(dispatch, *second, "Trade failed.");
+    return false;
+  }
+
+  std::vector<LegacyUserItem> added_to_first;
+  std::vector<LegacyUserItem> added_to_second;
+  auto rollback_added = [&] {
+    for (const auto& item : added_to_first) {
+      static_cast<void>(first->remove_bag_item(item.make_index, item_name(item, item_configs_),
+                                               item_configs_));
+    }
+    for (const auto& item : added_to_second) {
+      static_cast<void>(second->remove_bag_item(item.make_index, item_name(item, item_configs_),
+                                                item_configs_));
+    }
+    first->refresh_derived_state(item_configs_);
+    second->refresh_derived_state(item_configs_);
+  };
+
+  for (const auto& item : session.second.items) {
+    if (!first->add_bag_item(item)) {
+      rollback_added();
+      session.first.accepted = false;
+      session.second.accepted = false;
+      queue_system_notice(dispatch, *first, "Trade failed.");
+      queue_system_notice(dispatch, *second, "Trade failed.");
+      return false;
+    }
+    added_to_first.push_back(item);
+  }
+  for (const auto& item : session.first.items) {
+    if (!second->add_bag_item(item)) {
+      rollback_added();
+      session.first.accepted = false;
+      session.second.accepted = false;
+      queue_system_notice(dispatch, *first, "Trade failed.");
+      queue_system_notice(dispatch, *second, "Trade failed.");
+      return false;
+    }
+    added_to_second.push_back(item);
+  }
+
+  if (session.first.gold > 0) {
+    first->spend_gold(session.first.gold);
+    second->add_gold(session.first.gold);
+  }
+  if (session.second.gold > 0) {
+    second->spend_gold(session.second.gold);
+    first->add_gold(session.second.gold);
+  }
+
+  first->refresh_derived_state(item_configs_);
+  second->refresh_derived_state(item_configs_);
+  for (const auto& item : added_to_first) {
+    queue_packet(dispatch, first->session_id(),
+                 make_add_item_packet(first->session_id(), item, item_configs_));
+  }
+  for (const auto& item : added_to_second) {
+    queue_packet(dispatch, second->session_id(),
+                 make_add_item_packet(second->session_id(), item, item_configs_));
+  }
+  if (session.first.gold > 0 || session.second.gold > 0) {
+    queue_packet(dispatch, first->session_id(),
+                 make_gold_changed_packet(first->session_id(), first->character().gold));
+    queue_packet(dispatch, second->session_id(),
+                 make_gold_changed_packet(second->session_id(), second->character().gold));
+  }
+  queue_packet(dispatch, first->session_id(),
+               make_weight_changed_packet(first->session_id(), first->character()));
+  queue_packet(dispatch, second->session_id(),
+               make_weight_changed_packet(second->session_id(), second->character()));
+  queue_save_character(dispatch, *first);
+  queue_save_character(dispatch, *second);
+  queue_system_notice(dispatch, *first, "Trade completed.");
+  queue_system_notice(dispatch, *second, "Trade completed.");
+
+  const auto session_id = session.id;
+  trade_session_by_actor_.erase(session.first_actor_id);
+  trade_session_by_actor_.erase(session.second_actor_id);
+  trade_sessions_.erase(session_id);
+  return true;
 }
 
 std::int32_t MapActor::movement_width() const {

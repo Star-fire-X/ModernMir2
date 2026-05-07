@@ -520,6 +520,10 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_item_phase2_use_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_item_phase2_use_smoke COMMAND mir2_item_phase2_use_smoke)
 
+  add_executable(mir2_item_phase3_trade_smoke tests/item_phase3_trade_smoke.cpp)
+  target_link_libraries(mir2_item_phase3_trade_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_item_phase3_trade_smoke COMMAND mir2_item_phase3_trade_smoke)
+
   add_executable(mir2_special_consumables_legacy_smoke
       tests/special_consumables_legacy_smoke.cpp)
     target_link_libraries(mir2_special_consumables_legacy_smoke PRIVATE mir2_hostlib)

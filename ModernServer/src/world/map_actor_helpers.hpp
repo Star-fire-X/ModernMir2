@@ -341,6 +341,12 @@ bool is_legacy_player_command(ActorMailKind kind) {
     case ActorMailKind::repair_item:
     case ActorMailKind::storage_item:
     case ActorMailKind::take_back_storage_item:
+    case ActorMailKind::trade_try:
+    case ActorMailKind::trade_cancel:
+    case ActorMailKind::trade_add_item:
+    case ActorMailKind::trade_remove_item:
+    case ActorMailKind::trade_set_gold:
+    case ActorMailKind::trade_accept:
       return true;
     default:
       return false;
