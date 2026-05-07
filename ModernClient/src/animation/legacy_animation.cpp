@@ -213,6 +213,123 @@ constexpr LegacyMonsterActionTable kMA21 = {{{0, 4, 6, 200, 0},
                                              {260, 10, 0, 120, 0},
                                              {340, 1, 0, 140, 0}}};
 
+// MA22：race 47（石像怪/石像将军），stand 起始于 80
+constexpr LegacyMonsterActionTable kMA22 = {{{80, 4, 6, 200, 0},
+                                             {160, 6, 4, 160, 3},
+                                             {240, 6, 4, 100, 0},
+                                             {0, 0, 0, 0, 0},
+                                             {320, 2, 0, 100, 0},
+                                             {340, 10, 0, 160, 0},
+                                             {0, 6, 4, 170, 0}}};
+
+// MA23：race 48/49（石像王/Boss），stand 起始于 20
+constexpr LegacyMonsterActionTable kMA23 = {{{20, 4, 6, 200, 0},
+                                             {100, 6, 4, 160, 3},
+                                             {180, 6, 4, 100, 0},
+                                             {0, 0, 0, 0, 0},
+                                             {260, 2, 0, 100, 0},
+                                             {280, 10, 0, 160, 0},
+                                             {0, 20, 0, 100, 0}}};
+
+// MA24：race 32（蝎子 2 型），含 critical 动作
+constexpr LegacyMonsterActionTable kMA24 = {{{0, 4, 6, 200, 0},
+                                             {80, 6, 4, 160, 3},
+                                             {160, 6, 4, 100, 0},
+                                             {240, 6, 4, 100, 0},
+                                             {320, 2, 0, 100, 0},
+                                             {340, 10, 0, 140, 0},
+                                             {420, 1, 0, 140, 0}}};
+
+// MA25：race 33（蜈蚣王），walk 10 帧无方向跳帧
+constexpr LegacyMonsterActionTable kMA25 = {{{0, 4, 6, 200, 0},
+                                             {70, 10, 0, 200, 3},
+                                             {20, 6, 4, 120, 0},
+                                             {10, 6, 4, 120, 0},
+                                             {50, 2, 0, 100, 0},
+                                             {60, 10, 0, 200, 0},
+                                             {80, 10, 0, 200, 3}}};
+
+// MA26：race 99（城堡门），可移动门
+constexpr LegacyMonsterActionTable kMA26 = {{{0, 1, 7, 200, 0},
+                                             {0, 0, 0, 160, 0},
+                                             {56, 6, 2, 500, 0},
+                                             {64, 6, 2, 500, 0},
+                                             {0, 4, 4, 100, 0},
+                                             {24, 10, 0, 120, 0},
+                                             {0, 0, 0, 150, 0}}};
+
+// MA27：race 98（城墙结构），不可移动
+constexpr LegacyMonsterActionTable kMA27 = {{{0, 1, 7, 200, 0},
+                                             {0, 0, 0, 160, 0},
+                                             {0, 0, 0, 250, 0},
+                                             {0, 0, 0, 250, 0},
+                                             {0, 0, 0, 100, 0},
+                                             {0, 10, 0, 120, 0},
+                                             {0, 0, 0, 150, 0}}};
+
+// MA28：race 54（小精灵怪物/女）
+constexpr LegacyMonsterActionTable kMA28 = {{{80, 4, 6, 200, 0},
+                                             {160, 6, 4, 160, 3},
+                                             {0, 6, 4, 100, 0},
+                                             {0, 0, 0, 0, 0},
+                                             {240, 2, 0, 100, 0},
+                                             {260, 10, 0, 120, 0},
+                                             {0, 10, 0, 100, 0}}};
+
+// MA29：race 55（战士精灵怪物/男），attack 含 critical
+constexpr LegacyMonsterActionTable kMA29 = {{{80, 4, 6, 200, 0},
+                                             {160, 6, 4, 160, 3},
+                                             {240, 6, 4, 100, 0},
+                                             {0, 10, 0, 100, 0},
+                                             {320, 2, 0, 100, 0},
+                                             {340, 10, 0, 120, 0},
+                                             {0, 10, 0, 100, 0}}};
+
+// MA30：race 34（大心脏怪物/巨虫），walk 10 帧无方向跳帧
+constexpr LegacyMonsterActionTable kMA30 = {{{0, 4, 6, 200, 0},
+                                             {0, 10, 0, 200, 3},
+                                             {10, 6, 4, 120, 0},
+                                             {10, 6, 4, 120, 0},
+                                             {20, 2, 0, 100, 0},
+                                             {30, 20, 0, 150, 0},
+                                             {0, 10, 0, 200, 3}}};
+
+// MA31：race 35（蜘蛛屋怪物）
+constexpr LegacyMonsterActionTable kMA31 = {{{0, 4, 6, 200, 0},
+                                             {0, 10, 0, 200, 3},
+                                             {10, 6, 4, 120, 0},
+                                             {0, 6, 4, 120, 0},
+                                             {0, 2, 8, 100, 0},
+                                             {20, 10, 0, 200, 0},
+                                             {0, 10, 0, 200, 3}}};
+
+// MA32：race 36（爆炸蜘蛛），stand 1 帧
+constexpr LegacyMonsterActionTable kMA32 = {{{0, 1, 9, 200, 0},
+                                             {0, 6, 4, 200, 3},
+                                             {0, 6, 4, 120, 0},
+                                             {0, 6, 4, 120, 0},
+                                             {0, 2, 8, 100, 0},
+                                             {80, 10, 0, 80, 0},
+                                             {80, 10, 0, 200, 3}}};
+
+// MA33：race 60/61/62/70/71/72（电子蝎子/Boss猪/石像王(大)/般若守卫系列）
+constexpr LegacyMonsterActionTable kMA33 = {{{0, 4, 6, 200, 0},
+                                             {80, 6, 4, 200, 3},
+                                             {160, 6, 4, 120, 0},
+                                             {340, 6, 4, 120, 0},
+                                             {240, 2, 0, 100, 0},
+                                             {260, 10, 0, 200, 0},
+                                             {260, 10, 0, 200, 0}}};
+
+// MA34：race 63（骷髅王），die/death 各 20 帧
+constexpr LegacyMonsterActionTable kMA34 = {{{0, 4, 6, 200, 0},
+                                             {80, 6, 4, 200, 3},
+                                             {160, 6, 4, 120, 0},
+                                             {320, 6, 4, 120, 0},
+                                             {400, 2, 0, 100, 0},
+                                             {420, 20, 0, 200, 0},
+                                             {420, 20, 0, 200, 0}}};
+
 // MA50：race 50（NPC/商人），所有动作 4 帧 200ms
 constexpr LegacyMonsterActionTable kMA50 = {{{0, 4, 4, 200, 0},
                                              {0, 4, 4, 200, 0},
@@ -703,23 +820,42 @@ const LegacyMonsterActionTable* legacy_monster_action_table(const int race,
     case 16:                   return &kMA16;
     case 30:
     case 31:                   return &kMA17;
+    case 32:                   return &kMA24;
+    case 33:                   return &kMA25;
+    case 34:                   return &kMA30;
+    case 35:                   return &kMA31;
+    case 36:                   return &kMA32;
     case 19:
     case 20:
     case 21:
     case 37:
     case 40:
-    case 45:
+    case 45:                   return &kMA19;
+    case 47:                   return &kMA22;
+    case 48:
+    case 49:                   return &kMA23;
     case 52:
-    case 53:
+    case 53:                   return &kMA19;
+    case 54:                   return &kMA28;
+    case 55:                   return &kMA29;
+    case 41:
+    case 42:                   return &kMA20;
+    case 43:                   return &kMA21;
+    case 60:
+    case 61:
+    case 62:                   return &kMA33;
+    case 63:                   return &kMA34;
     case 64:
     case 65:
     case 66:
     case 67:
     case 68:
     case 69:                   return &kMA19;
-    case 41:
-    case 42:                   return &kMA20;
-    case 43:                   return &kMA21;
+    case 70:
+    case 71:
+    case 72:                   return &kMA33;
+    case 98:                   return &kMA27;
+    case 99:                   return &kMA26;
     case 50:
       if (appearance == 23)    return &kMA51;
       if (appearance == 24 || appearance == 25) return &kMA52;
