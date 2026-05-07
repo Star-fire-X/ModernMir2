@@ -66,6 +66,25 @@ function Fail {
   exit 1
 }
 
+function Get-CiCMakeBuildDirName {
+  $name = $env:CI_CMAKE_BUILD_DIR_NAME
+  if (-not $name) {
+    return "build-ci"
+  }
+
+  if ($name -notmatch '^build-ci(?:[-_.][A-Za-z0-9]+)*$') {
+    Fail "CI_CMAKE_BUILD_DIR_NAME must be a build-ci leaf directory name without path separators."
+  }
+
+  return $name
+}
+
+function Get-CiCMakeBuildDir {
+  param([Parameter(Mandatory = $true)][string]$RelativePath)
+
+  return Join-Path (Join-Path $RepoRoot $RelativePath) (Get-CiCMakeBuildDirName)
+}
+
 function Write-CiError {
   param(
     [Parameter(Mandatory = $true)][string]$Message,

@@ -68,6 +68,8 @@ jobs:
     needs: policy
     if: needs.policy.outputs.run_server == 'true'
     env:
+      CI_CMAKE_GENERATOR: Ninja
+      CI_CMAKE_BUILD_DIR_NAME: build-ci-ninja
       CI_CMAKE_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}\.ci-cache\cmake-fetchcontent
 
     steps:
@@ -102,11 +104,12 @@ jobs:
           if (-not $vcpkgRoot) {
             $vcpkgRoot = "C:\vcpkg"
           }
+          "CI_VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & "$vcpkgRoot\vcpkg.exe" install sqlite3:x64-windows
 
       - name: Build ModernServer
         shell: pwsh
-        run: ./ci/scripts/check_build.ps1 -Project server -Config Debug -Suite phase2-fast
+        run: ./ci/scripts/invoke_vs_dev_cmd.ps1 -Command './ci/scripts/check_build.ps1 -Project server -Config Debug -Suite phase2-fast'
 
       - name: Run ModernServer CTest smoke tests
         shell: pwsh
@@ -117,6 +120,9 @@ jobs:
     runs-on: windows-latest
     needs: policy
     if: needs.policy.outputs.run_client == 'true'
+    env:
+      CI_CMAKE_GENERATOR: Ninja
+      CI_CMAKE_BUILD_DIR_NAME: build-ci-ninja
 
     steps:
       - name: Checkout
@@ -126,7 +132,7 @@ jobs:
 
       - name: Build ModernClient
         shell: pwsh
-        run: ./ci/scripts/check_build.ps1 -Project client -Config Debug -Suite phase2-fast
+        run: ./ci/scripts/invoke_vs_dev_cmd.ps1 -Command './ci/scripts/check_build.ps1 -Project client -Config Debug -Suite phase2-fast'
 
       - name: Run ModernClient CTest smoke tests
         shell: pwsh
