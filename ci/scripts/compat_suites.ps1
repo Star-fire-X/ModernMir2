@@ -228,6 +228,29 @@ function Get-CiTestNames {
   return @()
 }
 
+function Get-CiAggregateBuildTarget {
+  param(
+    [Parameter(Mandatory = $true)][string]$Suite,
+    [Parameter(Mandatory = $true)][string]$ProjectName
+  )
+
+  Assert-CiSuite $Suite
+
+  if ($Suite -ne "phase2-fast") {
+    return ""
+  }
+
+  if ($ProjectName -eq "ModernServer") {
+    return "mir2_ci_phase2_fast"
+  }
+
+  if ($ProjectName -eq "ModernClient") {
+    return "modern_client_ci_phase2_fast"
+  }
+
+  return ""
+}
+
 function Get-CiTestRegex {
   param(
     [Parameter(Mandatory = $true)][string]$Suite,

@@ -56,7 +56,19 @@ function Resolve-CMakeGenerator {
   Fail "No supported CMake generator found. Install Visual Studio 2026/2022 or Ninja."
 }
 
-$ResolvedGenerator = Resolve-CMakeGenerator $Generator
+function Resolve-RequestedCMakeGenerator {
+  if ($Generator) {
+    return $Generator
+  }
+
+  if ($env:CI_CMAKE_GENERATOR) {
+    return $env:CI_CMAKE_GENERATOR
+  }
+
+  return ""
+}
+
+$ResolvedGenerator = Resolve-CMakeGenerator (Resolve-RequestedCMakeGenerator)
 
 function Resolve-VcpkgToolchain {
   param([string]$RequestedToolchainFile = "")
@@ -65,7 +77,7 @@ function Resolve-VcpkgToolchain {
     return $RequestedToolchainFile
   }
 
-  $roots = @($env:VCPKG_ROOT, $env:VCPKG_INSTALLATION_ROOT, "C:\vcpkg") | Where-Object { $_ }
+  $roots = @($env:CI_VCPKG_ROOT, $env:VCPKG_INSTALLATION_ROOT, "C:\vcpkg", $env:VCPKG_ROOT) | Where-Object { $_ }
   foreach ($root in $roots) {
     $candidate = Join-Path $root "scripts/buildsystems/vcpkg.cmake"
     if (Test-Path -LiteralPath $candidate) {
@@ -85,7 +97,8 @@ function Invoke-CMakeBuild {
   )
 
   $sourceDir = Join-Path $RepoRoot $RelativePath
-  $buildDir = Join-Path $sourceDir "build-ci"
+  $buildDirName = Get-CiCMakeBuildDirName
+  $buildDir = Get-CiCMakeBuildDir -RelativePath $RelativePath
 
   if (-not (Test-Path -LiteralPath (Join-Path $sourceDir "CMakeLists.txt"))) {
     Fail "$Name does not contain CMakeLists.txt at $sourceDir."
@@ -94,7 +107,7 @@ function Invoke-CMakeBuild {
   if ($Clean -and (Test-Path -LiteralPath $buildDir)) {
     $sourceFull = [System.IO.Path]::GetFullPath($sourceDir).TrimEnd('\')
     $buildFull = [System.IO.Path]::GetFullPath($buildDir).TrimEnd('\')
-    if (($buildFull -notlike "$sourceFull\*") -or ((Split-Path -Leaf $buildFull) -ne "build-ci")) {
+    if (($buildFull -notlike "$sourceFull\*") -or ((Split-Path -Leaf $buildFull) -ne $buildDirName)) {
       Fail "Refusing to clean unexpected build directory: $buildFull"
     }
 
@@ -110,19 +123,30 @@ function Invoke-CMakeBuild {
     "-DBUILD_TESTING=ON",
     "-DCMAKE_BUILD_TYPE=$Config"
   )
+  if ($env:CI_CMAKE_FETCHCONTENT_BASE_DIR) {
+    $fetchContentBaseDir = $env:CI_CMAKE_FETCHCONTENT_BASE_DIR
+    New-Item -ItemType Directory -Force -Path $fetchContentBaseDir | Out-Null
+    $configureArgs += @("-DFETCHCONTENT_BASE_DIR=$fetchContentBaseDir")
+  }
   if ($Arch -and $ResolvedGenerator -match "Visual Studio") {
     $configureArgs += @("-A", $Arch)
-    if ($ResolvedToolchainFile) {
-      $configureArgs += @("-DCMAKE_TOOLCHAIN_FILE=$ResolvedToolchainFile")
-      if ($Arch -eq "x64") {
-        $configureArgs += @("-DVCPKG_TARGET_TRIPLET=x64-windows")
-      }
+  }
+
+  $useVcpkgToolchain = $ResolvedToolchainFile -and (($Name -eq "ModernServer") -or $ToolchainFile)
+  if ($useVcpkgToolchain) {
+    $configureArgs += @("-DCMAKE_TOOLCHAIN_FILE=$ResolvedToolchainFile")
+    if ($Arch -eq "x64") {
+      $configureArgs += @("-DVCPKG_TARGET_TRIPLET=x64-windows")
     }
   }
 
   Write-Host "Using CMake generator: $ResolvedGenerator"
-  if ($ResolvedToolchainFile -and $ResolvedGenerator -match "Visual Studio") {
+  Write-Host "Using CMake build directory: $buildDir"
+  if ($useVcpkgToolchain) {
     Write-Host "Using vcpkg toolchain: $ResolvedToolchainFile"
+  }
+  if ($env:CI_CMAKE_FETCHCONTENT_BASE_DIR) {
+    Write-Host "Using FetchContent cache: $env:CI_CMAKE_FETCHCONTENT_BASE_DIR"
   }
   cmake @configureArgs
   if ($LASTEXITCODE -ne 0) {
@@ -136,11 +160,23 @@ function Invoke-CMakeBuild {
       Fail "$Name has no build targets for CI suite '$Suite'."
     }
 
+    $aggregateTarget = Get-CiAggregateBuildTarget -Suite $Suite -ProjectName $Name
+    Write-Host "Building $Name CI suite targets:"
     foreach ($target in $targets) {
-      Write-Host "Building $Name target: $target"
-      cmake --build $buildDir --config $Config --target $target --parallel
+      Write-Host "  - $target"
+    }
+
+    if ($aggregateTarget) {
+      Write-Host "Using aggregate CI target: $aggregateTarget"
+      cmake --build $buildDir --config $Config --parallel --target $aggregateTarget
       if ($LASTEXITCODE -ne 0) {
-        Fail "$Name target $target build failed. Fix the first compiler/linker error before changing tests or CI policy."
+        Fail "$Name aggregate target $aggregateTarget build failed. Fix the first compiler/linker error before changing tests or CI policy."
+      }
+    } else {
+      $buildArgs = @("--build", $buildDir, "--config", $Config, "--parallel", "--target") + $targets
+      cmake @buildArgs
+      if ($LASTEXITCODE -ne 0) {
+        Fail "$Name CI suite '$Suite' build failed. Fix the first compiler/linker error before changing tests or CI policy."
       }
     }
   } else {

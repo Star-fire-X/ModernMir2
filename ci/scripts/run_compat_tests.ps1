@@ -60,7 +60,7 @@ function Invoke-CompatCtest {
     Fail "$Name has no tests for CI suite '$Suite'."
   }
 
-  $buildDir = Join-Path $RepoRoot "$RelativePath/build-ci"
+  $buildDir = Get-CiCMakeBuildDir -RelativePath $RelativePath
   if (-not (Test-Path -LiteralPath $buildDir)) {
     Fail "$Name build directory is missing: $buildDir. Run ci/scripts/check_build.ps1 first."
   }

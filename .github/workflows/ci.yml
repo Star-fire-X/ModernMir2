@@ -5,9 +5,6 @@ on:
     branches:
       - main
       - dev
-      - "feature/**"
-      - "codex/**"
-      - "claude/**"
   pull_request:
     branches:
       - main
@@ -30,6 +27,9 @@ jobs:
   policy:
     name: policy
     runs-on: windows-latest
+    outputs:
+      run_server: ${{ steps.scope.outputs.run_server }}
+      run_client: ${{ steps.scope.outputs.run_client }}
 
     steps:
       - name: Checkout
@@ -57,20 +57,6 @@ jobs:
         shell: pwsh
         run: ./ci/scripts/check_text_hygiene.ps1
 
-  fast-scope:
-    name: fast-scope
-    runs-on: windows-latest
-    needs: policy
-    outputs:
-      run_server: ${{ steps.scope.outputs.run_server }}
-      run_client: ${{ steps.scope.outputs.run_client }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
       - name: Resolve fast CI scope
         id: scope
         shell: pwsh
@@ -79,14 +65,26 @@ jobs:
   server-fast:
     name: server-fast
     runs-on: windows-latest
-    needs: fast-scope
-    if: needs.fast-scope.outputs.run_server == 'true'
+    needs: policy
+    if: needs.policy.outputs.run_server == 'true'
+    env:
+      CI_CMAKE_GENERATOR: Ninja
+      CI_CMAKE_BUILD_DIR_NAME: build-ci-ninja
+      CI_CMAKE_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}\.ci-cache\cmake-fetchcontent-ninja
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+
+      - name: Cache CMake FetchContent
+        uses: actions/cache@v4
+        with:
+          path: .ci-cache\cmake-fetchcontent-ninja
+          key: cmake-fetchcontent-ninja-${{ runner.os }}-${{ hashFiles('ModernServer/CMakeLists.txt') }}
+          restore-keys: |
+            cmake-fetchcontent-ninja-${{ runner.os }}-
 
       - name: Cache vcpkg binary packages
         uses: actions/cache@v4
@@ -106,11 +104,12 @@ jobs:
           if (-not $vcpkgRoot) {
             $vcpkgRoot = "C:\vcpkg"
           }
+          "CI_VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & "$vcpkgRoot\vcpkg.exe" install sqlite3:x64-windows
 
       - name: Build ModernServer
         shell: pwsh
-        run: ./ci/scripts/check_build.ps1 -Project server -Config Debug -Suite phase2-fast
+        run: ./ci/scripts/invoke_vs_dev_cmd.ps1 -Command './ci/scripts/check_build.ps1 -Project server -Config Debug -Suite phase2-fast'
 
       - name: Run ModernServer CTest smoke tests
         shell: pwsh
@@ -119,38 +118,21 @@ jobs:
   client-fast:
     name: client-fast
     runs-on: windows-latest
-    needs: fast-scope
-    if: needs.fast-scope.outputs.run_client == 'true'
+    needs: policy
+    if: needs.policy.outputs.run_client == 'true'
+    env:
+      CI_CMAKE_GENERATOR: Ninja
+      CI_CMAKE_BUILD_DIR_NAME: build-ci-ninja
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
-
-      - name: Cache vcpkg binary packages
-        uses: actions/cache@v4
-        with:
-          path: ~\AppData\Local\vcpkg\archives
-          key: vcpkg-${{ runner.os }}-sqlite3-x64-windows-${{ hashFiles('**/vcpkg.json', '**/vcpkg-configuration.json') }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-sqlite3-x64-windows-
-
-      - name: Install C++ dependencies
-        shell: pwsh
-        run: |
-          $cacheRoot = Join-Path $env:LOCALAPPDATA "vcpkg\archives"
-          New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
-          $env:VCPKG_BINARY_SOURCES = "clear;files,$cacheRoot,readwrite"
-          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
-          if (-not $vcpkgRoot) {
-            $vcpkgRoot = "C:\vcpkg"
-          }
-          & "$vcpkgRoot\vcpkg.exe" install sqlite3:x64-windows
+          fetch-depth: 1
 
       - name: Build ModernClient
         shell: pwsh
-        run: ./ci/scripts/check_build.ps1 -Project client -Config Debug -Suite phase2-fast
+        run: ./ci/scripts/invoke_vs_dev_cmd.ps1 -Command './ci/scripts/check_build.ps1 -Project client -Config Debug -Suite phase2-fast'
 
       - name: Run ModernClient CTest smoke tests
         shell: pwsh
@@ -160,7 +142,7 @@ jobs:
     name: windows-fast
     runs-on: windows-latest
     needs:
-      - fast-scope
+      - policy
       - server-fast
       - client-fast
     if: always()
@@ -170,8 +152,8 @@ jobs:
         shell: pwsh
         run: |
           $failed = @()
-          if ("${{ needs.fast-scope.result }}" -ne "success") {
-            $failed += "fast-scope (${{ needs.fast-scope.result }})"
+          if ("${{ needs.policy.result }}" -ne "success") {
+            $failed += "policy (${{ needs.policy.result }})"
           }
           if ("${{ needs.server-fast.result }}" -notin @("success", "skipped")) {
             $failed += "server-fast (${{ needs.server-fast.result }})"
