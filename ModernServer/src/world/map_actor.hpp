@@ -31,11 +31,15 @@ class MapActor {
     std::int32_t gold_amount{0};
     LegacyUserItem item{};
     std::string name{};
+    std::int32_t count{1};
     std::int32_t looks{0};
+    std::int32_t ani_count{0};
     std::int32_t x{0};
     std::int32_t y{0};
     std::uint64_t owner_actor_id{0};
     std::uint64_t drop_time_ms{0};
+    std::uint64_t ownership_expire_ms{0};
+    std::uint64_t expire_time_ms{0};
     std::uint64_t dropper_actor_id{0};
     std::string dropper_name{};
     bool death_drop{false};
@@ -266,6 +270,8 @@ class MapActor {
                                              std::uint64_t now_ms);
   void remove_actor_from_visibility(std::uint64_t actor_id, RuntimeDispatch& dispatch);
   void remove_item_from_visibility(std::uint64_t item_id, RuntimeDispatch& dispatch);
+  void refresh_ground_item_ownership(GroundItem& item, std::uint64_t now_ms);
+  void remove_expired_ground_items(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   bool try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
                          std::uint64_t current_tick, std::uint64_t now_ms);
   bool try_item_map_move(Player& player, std::string target_map_id, std::int32_t target_x,

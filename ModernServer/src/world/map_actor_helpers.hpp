@@ -20,6 +20,7 @@ constexpr std::uint64_t kMapChangeProtectMs = 3000;
 constexpr std::uint64_t kPlayerCorpseMs = 180000;
 constexpr std::uint64_t kMonsterCorpseMs = 180000;
 constexpr std::uint64_t kLegacyDropOwnerMs = 120000;
+constexpr std::uint64_t kLegacyGroundItemExpireMs = 10ULL * 60ULL * 1000ULL;
 constexpr std::int32_t kLegacyMonsterGoldDropChunk = 2000;
 constexpr std::int32_t kLegacyMonsterGoldDropMaxChunks = 17;
 constexpr std::uint64_t kDoorAutoCloseMs = 5000;

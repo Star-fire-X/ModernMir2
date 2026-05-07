@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include "asio.hpp"
@@ -110,6 +111,22 @@ std::optional<mir2::CharacterRecord> wait_for_saved_character(
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
   return std::nullopt;
+}
+
+template <typename ModuleT>
+bool wait_for_snapshot_value(const ModuleT& module, std::string_view key,
+                             std::string_view expected,
+                             std::chrono::milliseconds timeout = std::chrono::seconds(4)) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    const auto snapshot = module.snapshot();
+    const auto it = snapshot.find(std::string(key));
+    if (it != snapshot.end() && it->second == expected) {
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  return false;
 }
 
 bool has_snapshot_item(const mir2::client_v1::BagSnapshot& snapshot, std::int32_t make_index) {
@@ -329,6 +346,14 @@ int main() {
   }
 
   game_socket->close(ignored);
+  if (!wait_for_snapshot_value(game_gateway, "sessions", "0")) {
+    stop_services();
+    return fail("disconnect gateway cleanup");
+  }
+  if (!wait_for_snapshot_value(world_service, "sessions", "0")) {
+    stop_services();
+    return fail("disconnect world cleanup");
+  }
   const auto saved = wait_for_saved_character(source_root, database_path);
   if (!saved.has_value()) {
     stop_services();
