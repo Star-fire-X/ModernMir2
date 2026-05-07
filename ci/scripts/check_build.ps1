@@ -110,6 +110,11 @@ function Invoke-CMakeBuild {
     "-DBUILD_TESTING=ON",
     "-DCMAKE_BUILD_TYPE=$Config"
   )
+  if ($env:CI_CMAKE_FETCHCONTENT_BASE_DIR) {
+    $fetchContentBaseDir = $env:CI_CMAKE_FETCHCONTENT_BASE_DIR
+    New-Item -ItemType Directory -Force -Path $fetchContentBaseDir | Out-Null
+    $configureArgs += @("-DFETCHCONTENT_BASE_DIR=$fetchContentBaseDir")
+  }
   if ($Arch -and $ResolvedGenerator -match "Visual Studio") {
     $configureArgs += @("-A", $Arch)
     if ($ResolvedToolchainFile) {
@@ -124,6 +129,9 @@ function Invoke-CMakeBuild {
   if ($ResolvedToolchainFile -and $ResolvedGenerator -match "Visual Studio") {
     Write-Host "Using vcpkg toolchain: $ResolvedToolchainFile"
   }
+  if ($env:CI_CMAKE_FETCHCONTENT_BASE_DIR) {
+    Write-Host "Using FetchContent cache: $env:CI_CMAKE_FETCHCONTENT_BASE_DIR"
+  }
   cmake @configureArgs
   if ($LASTEXITCODE -ne 0) {
     Fail "$Name CMake configure failed. Check dependencies, CMakeLists.txt, and whether new source files were added to the target."
@@ -136,11 +144,23 @@ function Invoke-CMakeBuild {
       Fail "$Name has no build targets for CI suite '$Suite'."
     }
 
+    $aggregateTarget = Get-CiAggregateBuildTarget -Suite $Suite -ProjectName $Name
+    Write-Host "Building $Name CI suite targets:"
     foreach ($target in $targets) {
-      Write-Host "Building $Name target: $target"
-      cmake --build $buildDir --config $Config --target $target --parallel
+      Write-Host "  - $target"
+    }
+
+    if ($aggregateTarget) {
+      Write-Host "Using aggregate CI target: $aggregateTarget"
+      cmake --build $buildDir --config $Config --parallel --target $aggregateTarget
       if ($LASTEXITCODE -ne 0) {
-        Fail "$Name target $target build failed. Fix the first compiler/linker error before changing tests or CI policy."
+        Fail "$Name aggregate target $aggregateTarget build failed. Fix the first compiler/linker error before changing tests or CI policy."
+      }
+    } else {
+      $buildArgs = @("--build", $buildDir, "--config", $Config, "--parallel", "--target") + $targets
+      cmake @buildArgs
+      if ($LASTEXITCODE -ne 0) {
+        Fail "$Name CI suite '$Suite' build failed. Fix the first compiler/linker error before changing tests or CI policy."
       }
     }
   } else {

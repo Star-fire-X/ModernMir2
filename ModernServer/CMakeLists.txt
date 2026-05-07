@@ -743,4 +743,34 @@ if(BUILD_TESTING)
   add_executable(mir2_config_gateway_flags_smoke tests/config_gateway_flags_smoke.cpp)
   target_link_libraries(mir2_config_gateway_flags_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_config_gateway_flags_smoke COMMAND mir2_config_gateway_flags_smoke)
+
+  add_custom_target(mir2_ci_phase2_fast
+    DEPENDS
+      mir2_host
+      mir2_core_smoke
+      mir2_logic_smoke
+      mir2_legacy_frame_smoke
+      mir2_client_v1_protocol_smoke
+      mir2_movement_blocking_legacy_smoke
+      mir2_combat_smoke
+      mir2_items_smoke
+      mir2_world_tick_cadence_smoke
+      mir2_player_movement_smoke
+      mir2_visibility_delta_smoke
+      mir2_monster_legacy_combat_damage_smoke
+      mir2_skill_formula_golden_smoke
+      mir2_skill_protocol_golden_smoke
+      mir2_skill_status_poison_buff_hide_shield_smoke
+      mir2_equipment_cantakeon_legacy_smoke
+      mir2_item_phase2_ground_smoke
+      mir2_item_phase2_use_smoke
+      mir2_special_consumables_legacy_smoke
+      mir2_monster_legacy_drop_scatter_smoke
+      mir2_client_v1_auth_boundary_smoke
+      mir2_client_v1_login_to_world_flow_smoke
+      mir2_client_v1_game_command_bridge_smoke
+      mir2_client_v1_inventory_npc_smoke
+      mir2_client_v1_world_min_loop_smoke
+      mir2_client_v1_magic_gateway_smoke
+  )
 endif()
