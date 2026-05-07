@@ -955,10 +955,15 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       ground_item.id = next_ground_item_id_;
       ground_item.item = *bag_item;
       ground_item.name = item_name(*bag_item, item_configs_);
+      ground_item.count = 1;
       ground_item.looks = item_looks(*bag_item, item_configs_);
+      if (const auto* config = find_item_config(item_configs_, bag_item->index); config != nullptr) {
+        ground_item.ani_count = config->ani_count;
+      }
       ground_item.x = player->x();
       ground_item.y = player->y();
       ground_item.drop_time_ms = now_ms;
+      ground_item.expire_time_ms = now_ms + kLegacyGroundItemExpireMs;
       ground_item.dropper_actor_id = player->id();
       ground_item.dropper_name = player->name();
       const auto add_result = environment_.add_item_object(
@@ -1016,10 +1021,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       ground_item.is_gold = true;
       ground_item.gold_amount = mail.amount;
       ground_item.name = "Gold";
+      ground_item.count = mail.amount;
       ground_item.looks = gold_looks(mail.amount);
       ground_item.x = player->x();
       ground_item.y = player->y();
       ground_item.drop_time_ms = now_ms;
+      ground_item.expire_time_ms = now_ms + kLegacyGroundItemExpireMs;
       ground_item.dropper_actor_id = player->id();
       ground_item.dropper_name = player->name();
 
@@ -1040,8 +1047,16 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           break;
         }
         player->spend_gold(mail.amount);
+        refresh_ground_item_ownership(existing->second, now_ms);
+        const auto same_owner = existing->second.owner_actor_id == ground_item.owner_actor_id;
         existing->second.gold_amount += mail.amount;
+        existing->second.count = existing->second.gold_amount;
         existing->second.looks = gold_looks(existing->second.gold_amount);
+        existing->second.expire_time_ms = now_ms + kLegacyGroundItemExpireMs;
+        if (!same_owner) {
+          existing->second.owner_actor_id = 0;
+          existing->second.ownership_expire_ms = 0;
+        }
         ground_item = existing->second;
       } else {
         player->spend_gold(mail.amount);
@@ -1280,10 +1295,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
 
       auto& ground_item_ref = ground_it->second;
-      if (ground_item_ref.owner_actor_id != 0 && ground_item_ref.drop_time_ms != 0 &&
-          now_ms > ground_item_ref.drop_time_ms + kLegacyDropOwnerMs) {
-        ground_item_ref.owner_actor_id = 0;
-      }
+      refresh_ground_item_ownership(ground_item_ref, now_ms);
       if (ground_item_ref.owner_actor_id != 0 && ground_item_ref.owner_actor_id != player->id()) {
         add_legacy_trace(dispatch, "LegacyItem", "owner_reject", mail, current_tick, now_ms,
                          false, static_cast<std::int32_t>(ground_item_ref.owner_actor_id), 0,
@@ -1625,6 +1637,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                      make_eat_result_packet(player->session_id(), true));
         queue_packet(dispatch, player->session_id(),
                      make_weight_changed_packet(player->session_id(), player->character()));
+        queue_save_character(dispatch, *player);
         add_legacy_trace(dispatch, "LegacyItem", "unbind_success", mail, current_tick, now_ms,
                          true, item_config->unbind_count, 0, item_config->unbind_item);
         break;
@@ -1662,6 +1675,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                      make_eat_result_packet(player->session_id(), true));
         queue_packet(dispatch, player->session_id(),
                      make_weight_changed_packet(player->session_id(), player->character()));
+        queue_save_character(dispatch, *player);
         add_legacy_trace(dispatch, "LegacySkill", "book_success", mail, current_tick, now_ms,
                          true, book_result.magic_id, 0, "ReadBook");
         break;
@@ -1704,18 +1718,27 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           break;
         }
         player->refresh_derived_state(item_configs_);
-        queue_packet(dispatch, player->session_id(),
-                     make_del_item_packet(player->session_id(), player->id(), *removed,
-                                          item_configs_));
-        queue_packet(dispatch, player->session_id(),
-                     make_eat_result_packet(player->session_id(), true));
-        queue_packet(dispatch, player->session_id(),
-                     make_weight_changed_packet(player->session_id(), player->character()));
+        const auto session_id = player->session_id();
+        const auto actor_id = player->id();
+        const auto character_after_use = player->character();
         if (!try_item_map_move(*player, target_map, target_x, target_y, dispatch, current_tick,
                                now_ms)) {
           add_legacy_trace(dispatch, "LegacyItem", "scroll_transfer_reject", mail,
                            current_tick, now_ms, false, removed->index, 0, kind);
+          if (auto* rollback_player = find_player(actor_id); rollback_player != nullptr) {
+            static_cast<void>(rollback_player->add_bag_item(*removed));
+            rollback_player->refresh_derived_state(item_configs_);
+          }
+          queue_packet(dispatch, session_id, make_eat_result_packet(session_id, false));
         } else {
+          queue_packet(dispatch, session_id,
+                       make_del_item_packet(session_id, actor_id, *removed, item_configs_));
+          queue_packet(dispatch, session_id, make_eat_result_packet(session_id, true));
+          queue_packet(dispatch, session_id,
+                       make_weight_changed_packet(session_id, character_after_use));
+          if (auto* moved_player = find_player(actor_id); moved_player != nullptr) {
+            queue_save_character(dispatch, *moved_player);
+          }
           add_legacy_trace(dispatch, "LegacyItem", "scroll_success", mail, current_tick,
                            now_ms, true, removed->index, 0, kind);
         }
@@ -1751,15 +1774,29 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                      make_eat_result_packet(player->session_id(), false));
         break;
       }
+      auto consumed_item = *removed;
+      const auto keep_consumed_item = consumed_item.dura > 1;
+      if (keep_consumed_item) {
+        --consumed_item.dura;
+        static_cast<void>(player->add_bag_item(consumed_item));
+      }
       player->refresh_derived_state(item_configs_);
-      queue_packet(dispatch, player->session_id(),
-                   make_del_item_packet(player->session_id(), player->id(), *removed, item_configs_));
+      if (keep_consumed_item) {
+        queue_packet(dispatch, player->session_id(),
+                     make_update_item_packet(player->session_id(), player->id(), consumed_item,
+                                             item_configs_));
+      } else {
+        queue_packet(dispatch, player->session_id(),
+                     make_del_item_packet(player->session_id(), player->id(), *removed,
+                                          item_configs_));
+      }
       queue_packet(dispatch, player->session_id(),
                    make_eat_result_packet(player->session_id(), true));
       queue_packet(dispatch, player->session_id(),
                    make_health_spell_changed_packet(player->session_id(), *player));
       queue_packet(dispatch, player->session_id(),
                    make_weight_changed_packet(player->session_id(), player->character()));
+      queue_save_character(dispatch, *player);
       add_legacy_trace(dispatch, "LegacyItem", "success", mail, current_tick, now_ms, true,
                        removed->index, 0, "eat_item");
       break;

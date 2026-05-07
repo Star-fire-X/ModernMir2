@@ -652,6 +652,10 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
   auto prepare_death_drop = [&](GroundItem& ground_item) {
     ground_item.owner_actor_id = drop_owner_actor_id;
     ground_item.drop_time_ms = now_ms;
+    if (ground_item.owner_actor_id != 0) {
+      ground_item.ownership_expire_ms = now_ms + kLegacyDropOwnerMs;
+    }
+    ground_item.expire_time_ms = now_ms + kLegacyGroundItemExpireMs;
     ground_item.dropper_actor_id = monster->id();
     ground_item.dropper_name = monster->name();
     ground_item.death_drop = true;
@@ -672,8 +676,16 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
       if (existing == ground_items_.end()) {
         return false;
       }
+      refresh_ground_item_ownership(existing->second, now_ms);
+      const auto same_owner = existing->second.owner_actor_id == ground_item.owner_actor_id;
       existing->second.gold_amount += ground_item.gold_amount;
+      existing->second.count = existing->second.gold_amount;
       existing->second.looks = gold_looks(existing->second.gold_amount);
+      existing->second.expire_time_ms = now_ms + kLegacyGroundItemExpireMs;
+      if (!same_owner) {
+        existing->second.owner_actor_id = 0;
+        existing->second.ownership_expire_ms = 0;
+      }
       sync_visibility_after_item_change(existing->second.x, existing->second.y, dispatch,
                                         existing->second.id);
     } else {
@@ -697,6 +709,7 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
     ground_item.is_gold = true;
     ground_item.gold_amount = gold_amount;
     ground_item.name = "Gold";
+    ground_item.count = gold_amount;
     ground_item.looks = gold_looks(ground_item.gold_amount);
     prepare_death_drop(ground_item);
     static_cast<void>(
@@ -711,7 +724,11 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
     ground_item.id = next_ground_item_id_;
     ground_item.item = item;
     ground_item.name = item_name(item, item_configs_);
+    ground_item.count = 1;
     ground_item.looks = item_looks(item, item_configs_);
+    if (const auto* config = find_item_config(item_configs_, item.index); config != nullptr) {
+      ground_item.ani_count = config->ani_count;
+    }
     prepare_death_drop(ground_item);
     static_cast<void>(place_ground_item(ground_item, LegacyMapItemState{}, 3));
   }

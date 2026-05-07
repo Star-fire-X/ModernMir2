@@ -512,6 +512,14 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_item_phase1_compat_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_item_phase1_compat_smoke COMMAND mir2_item_phase1_compat_smoke)
 
+  add_executable(mir2_item_phase2_ground_smoke tests/item_phase2_ground_smoke.cpp)
+  target_link_libraries(mir2_item_phase2_ground_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_item_phase2_ground_smoke COMMAND mir2_item_phase2_ground_smoke)
+
+  add_executable(mir2_item_phase2_use_smoke tests/item_phase2_use_smoke.cpp)
+  target_link_libraries(mir2_item_phase2_use_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_item_phase2_use_smoke COMMAND mir2_item_phase2_use_smoke)
+
   add_executable(mir2_special_consumables_legacy_smoke
       tests/special_consumables_legacy_smoke.cpp)
     target_link_libraries(mir2_special_consumables_legacy_smoke PRIVATE mir2_hostlib)

@@ -1419,6 +1419,8 @@ RuntimeDispatch MapActor::tick(std::uint64_t current_tick, std::uint64_t now_ms)
     handle_mail(mail, dispatch, current_tick, now_ms);
   }
 
+  remove_expired_ground_items(dispatch, now_ms);
+
   std::unordered_map<GameObjectKind, std::uint64_t> consumed_budget{};
   for (const auto actor_id : object_wheel_.pop_ready(current_tick)) {
     auto object_it = objects_.find(actor_id);
@@ -1453,6 +1455,41 @@ RuntimeDispatch MapActor::tick(std::uint64_t current_tick, std::uint64_t now_ms)
   }
 
   return dispatch;
+}
+
+void MapActor::refresh_ground_item_ownership(GroundItem& item, std::uint64_t now_ms) {
+  if (item.owner_actor_id == 0) {
+    return;
+  }
+  const auto expire_ms = item.ownership_expire_ms != 0
+                             ? item.ownership_expire_ms
+                             : item.drop_time_ms + kLegacyDropOwnerMs;
+  if (expire_ms != 0 && now_ms > expire_ms) {
+    item.owner_actor_id = 0;
+    item.ownership_expire_ms = 0;
+  }
+}
+
+void MapActor::remove_expired_ground_items(RuntimeDispatch& dispatch, std::uint64_t now_ms) {
+  std::vector<std::uint64_t> expired_ids;
+  for (auto& [item_id, item] : ground_items_) {
+    refresh_ground_item_ownership(item, now_ms);
+    if (item.expire_time_ms != 0 && now_ms > item.expire_time_ms) {
+      expired_ids.push_back(item_id);
+    }
+  }
+
+  for (const auto item_id : expired_ids) {
+    const auto item_it = ground_items_.find(item_id);
+    if (item_it == ground_items_.end()) {
+      continue;
+    }
+    const auto item = item_it->second;
+    static_cast<void>(environment_.delete_from_map(
+        item.x, item.y, LegacyMapObjectShape::item_object, item.id));
+    remove_item_from_visibility(item.id, dispatch);
+    ground_items_.erase(item_it);
+  }
 }
 
 RuntimeDispatch MapActor::close_expired_doors(std::uint64_t now_ms) {
