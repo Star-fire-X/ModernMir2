@@ -70,7 +70,7 @@ jobs:
     env:
       CI_CMAKE_GENERATOR: Ninja
       CI_CMAKE_BUILD_DIR_NAME: build-ci-ninja
-      CI_CMAKE_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}\.ci-cache\cmake-fetchcontent
+      CI_CMAKE_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}\.ci-cache\cmake-fetchcontent-ninja
 
     steps:
       - name: Checkout
@@ -81,10 +81,10 @@ jobs:
       - name: Cache CMake FetchContent
         uses: actions/cache@v4
         with:
-          path: .ci-cache\cmake-fetchcontent
-          key: cmake-fetchcontent-${{ runner.os }}-${{ hashFiles('ModernServer/CMakeLists.txt') }}
+          path: .ci-cache\cmake-fetchcontent-ninja
+          key: cmake-fetchcontent-ninja-${{ runner.os }}-${{ hashFiles('ModernServer/CMakeLists.txt') }}
           restore-keys: |
-            cmake-fetchcontent-${{ runner.os }}-
+            cmake-fetchcontent-ninja-${{ runner.os }}-
 
       - name: Cache vcpkg binary packages
         uses: actions/cache@v4
