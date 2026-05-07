@@ -2322,6 +2322,7 @@ class LegacyHud final {
     state_ = context.state;
     assets_ = context.assets;
     audio_ = context.audio;
+    app_ = context.app;
     if (bottom_status_ != nullptr) {
       bottom_status_->state = state_;
       bottom_status_->assets = assets_;
@@ -2378,6 +2379,9 @@ class LegacyHud final {
     update_hover_state(*context.input, world);
     update_drag_overlay(*context.input, world);
     update_tooltip(*context.input, world);
+    if (context.input->right_pressed && !world.moving_item.active) {
+      handle_right_click(*context.input, *tree_);
+    }
   }
 
   void bring_if_visible(ui::UiNode* node) {
@@ -3463,6 +3467,239 @@ class LegacyHud final {
     }
   }
 
+  // ---- 右键快捷菜单 ----
+
+  void handle_right_click(const InputState& input, ui::UiTree& tree) {
+    // 背包格子右键
+    if (item_bag_ != nullptr && item_bag_->visible && item_grid_ != nullptr) {
+      const auto cell = item_grid_->cell_at(input.mouse_x, input.mouse_y);
+      if (cell.has_value()) {
+        const auto slot = cell->first + cell->second * kBagGridColumns + kBagGridFirstSlot;
+        if (state_ != nullptr && valid_bag_slot(slot)) {
+          const auto& item = state_->world.bag_items[static_cast<std::size_t>(slot)];
+          if (!item_empty(item)) {
+            show_context_menu(tree, slot, MovingItemSource::bag, item, input.mouse_x,
+                              input.mouse_y);
+            return;
+          }
+        }
+      }
+    }
+    // 装备槽右键
+    if (state_window_ != nullptr && state_window_->visible) {
+      const auto eq_slot = equipment_slot_at(input.mouse_x, input.mouse_y);
+      if (eq_slot >= 0 && state_ != nullptr) {
+        const auto& item = state_->world.equipment[static_cast<std::size_t>(eq_slot)];
+        if (!item_empty(item)) {
+          show_context_menu(tree, eq_slot, MovingItemSource::equipment, item, input.mouse_x,
+                            input.mouse_y);
+        }
+      }
+    }
+  }
+
+  void show_context_menu(ui::UiTree& tree, const int slot, const MovingItemSource source,
+                         const client_v1::ItemState& item, const int mouse_x,
+                         const int mouse_y) {
+    hide_context_menu(tree);
+    auto& menu = context_menu_;
+    menu.visible = true;
+    menu.target_slot = slot;
+    menu.source = source;
+    const auto is_bag = source == MovingItemSource::bag;
+    menu.can_use = is_bag && item_usable_from_bag(item);
+    menu.can_equip = is_bag && equipment_slot_accepts_std_mode(
+        get_equipment_slot_for_item(item), item.std_mode);
+    menu.can_unequip = !is_bag;
+    menu.can_drop = true;
+
+    // 计算菜单应在的屏幕位置
+    const auto* ctx_node = tree.root();
+    if (ctx_node == nullptr) {
+      return;
+    }
+    const auto rb = ctx_node->resolved_bounds();
+    menu.anchor_x = std::clamp(mouse_x, 0, rb.w - 80);
+    menu.anchor_y = std::clamp(mouse_y, 0, rb.h - 100);
+
+    if (context_menu_window_ == nullptr) {
+      context_menu_window_ = tree.root()->emplace_child<ui::Window>(RectI{0, 0, 80, 24});
+      context_menu_window_->floating = true;
+      context_menu_window_->fallback_fill_color = 0xEE1A1A2EU;
+      context_menu_window_->fallback_border_color = 0xFF4A5568U;
+    }
+    build_context_menu_buttons();
+    context_menu_window_->bounds.x = menu.anchor_x;
+    context_menu_window_->bounds.y = menu.anchor_y;
+    context_menu_window_->show(tree);
+    tree.bring_to_front(context_menu_window_);
+  }
+
+  void hide_context_menu(ui::UiTree& tree) {
+    context_menu_ = ItemContextMenu{};
+    if (context_menu_window_ != nullptr) {
+      context_menu_window_->hide(tree);
+    }
+  }
+
+  void build_context_menu_buttons() {
+    if (context_menu_window_ == nullptr) {
+      return;
+    }
+    context_menu_window_->children().clear();
+    const auto& menu = context_menu_;
+    int row = 0;
+    auto add_item = [&](const std::wstring& text, std::function<void()> action) {
+      auto* btn = context_menu_window_->emplace_child<ui::Button>(RectI{2, 2 + row * 22, 76, 20});
+      btn->text = text;
+      btn->on_click = [this, action = std::move(action)] {
+        action();
+        if (tree_ != nullptr) {
+          hide_context_menu(*tree_);
+        }
+      };
+      ++row;
+    };
+    if (menu.can_use)      add_item(L"使用", [this] { execute_context_use(); });
+    if (menu.can_equip)    add_item(L"装备", [this] { execute_context_equip(); });
+    if (menu.can_unequip)  add_item(L"卸装", [this] { execute_context_unequip(); });
+    if (menu.can_drop)     add_item(L"丢弃", [this] { execute_context_drop(); });
+    const auto h = 4 + row * 22;
+    context_menu_window_->bounds.h = h;
+  }
+
+  void execute_context_use() {
+    const auto slot = context_menu_.target_slot;
+    if (state_ == nullptr || !valid_bag_slot(slot)) {
+      return;
+    }
+    handle_bag_use(slot);
+  }
+
+  void execute_context_equip() {
+    const auto slot = context_menu_.target_slot;
+    if (state_ == nullptr || !valid_bag_slot(slot)) {
+      return;
+    }
+    handle_bag_equip(slot);
+  }
+
+  void execute_context_unequip() {
+    const auto slot = context_menu_.target_slot;
+    if (state_ == nullptr || !valid_equipment_slot(slot)) {
+      return;
+    }
+    handle_equipment_unequip(slot);
+  }
+
+  void execute_context_drop() {
+    const auto slot = context_menu_.target_slot;
+    if (state_ == nullptr) {
+      return;
+    }
+    if (context_menu_.source == MovingItemSource::bag && valid_bag_slot(slot)) {
+      handle_bag_drop(slot);
+    } else if (context_menu_.source == MovingItemSource::equipment &&
+               valid_equipment_slot(slot)) {
+      handle_equipment_drop(slot);
+    }
+  }
+
+  void handle_bag_use(const int slot) {
+    if (state_ == nullptr || !valid_bag_slot(slot)) {
+      return;
+    }
+    const auto& item = state_->world.bag_items[static_cast<std::size_t>(slot)];
+    if (!item_usable_from_bag(item)) {
+      return;
+    }
+    if (app_ != nullptr) {
+      state_->begin_pending_item_action(PendingItemActionKind::use, MovingItemSource::bag, slot,
+                                        -1, item, GetTickCount64());
+      app_->request_use_item(client_v1::UseItemIntent{item.make_index, slot});
+    }
+  }
+
+  void handle_bag_equip(const int slot) {
+    if (state_ == nullptr || !valid_bag_slot(slot)) {
+      return;
+    }
+    const auto& item = state_->world.bag_items[static_cast<std::size_t>(slot)];
+    const auto equip_slot = get_equipment_slot_for_item(item);
+    if (!equipment_slot_accepts_std_mode(equip_slot, item.std_mode)) {
+      return;
+    }
+    if (app_ != nullptr) {
+      state_->begin_pending_item_action(PendingItemActionKind::equip, MovingItemSource::bag, slot,
+                                        equip_slot, item, GetTickCount64());
+      app_->request_equip_item(
+          client_v1::EquipItemRequest{equip_slot, item.make_index, item.name});
+    }
+  }
+
+  void handle_equipment_unequip(const int slot) {
+    if (state_ == nullptr || !valid_equipment_slot(slot)) {
+      return;
+    }
+    const auto& item = state_->world.equipment[static_cast<std::size_t>(slot)];
+    if (app_ != nullptr) {
+      state_->begin_pending_item_action(PendingItemActionKind::unequip,
+                                        MovingItemSource::equipment, slot, -1, item,
+                                        GetTickCount64());
+      app_->request_unequip_item(
+          client_v1::UnequipItemRequest{slot, item.make_index, item.name});
+    }
+  }
+
+  void handle_bag_drop(const int slot) {
+    if (state_ == nullptr || !valid_bag_slot(slot)) {
+      return;
+    }
+    auto& item = state_->world.bag_items[static_cast<std::size_t>(slot)];
+    if (app_ != nullptr) {
+      state_->begin_pending_item_action(PendingItemActionKind::drop, MovingItemSource::bag, slot,
+                                        -1, item, GetTickCount64());
+      app_->request_drop_item(
+          client_v1::DropItemRequest{item.make_index, item.name});
+    }
+    item = client_v1::ItemState{};
+  }
+
+  void handle_equipment_drop(const int slot) {
+    if (state_ == nullptr || !valid_equipment_slot(slot)) {
+      return;
+    }
+    auto& item = state_->world.equipment[static_cast<std::size_t>(slot)];
+    if (app_ != nullptr) {
+      state_->begin_pending_item_action(PendingItemActionKind::drop,
+                                        MovingItemSource::equipment, slot, -1, item,
+                                        GetTickCount64());
+      app_->request_drop_item(
+          client_v1::DropItemRequest{item.make_index, item.name});
+    }
+    item = client_v1::ItemState{};
+  }
+
+  /// 根据物品 std_mode 返回对应的装备槽位
+  static int get_equipment_slot_for_item(const client_v1::ItemState& item) {
+    switch (item.std_mode) {
+      case 5:
+      case 6:   return 1;  // weapon
+      case 10:
+      case 11:  return 0;  // dress
+      case 15:  return 4;  // helmet
+      case 19:
+      case 20:
+      case 21:  return 3;  // necklace
+      case 22:
+      case 23:  return 5;  // armring (left)
+      case 24:
+      case 26:  return 7;  // ring (left)
+      case 25:  return 6;  // armring (right)
+      default:  return -1;
+    }
+  }
+
   void add_equipment_button(const int slot, const RectI bounds) {
     if (state_window_ == nullptr || !valid_equipment_slot(slot)) {
       return;
@@ -3940,6 +4177,7 @@ class LegacyHud final {
   NpcDialogNode* npc_dialog_{nullptr};
   ui::Tooltip* tooltip_{nullptr};
   ui::DragSpriteOverlay* drag_overlay_{nullptr};
+  ClientApp* app_{nullptr};
   HFONT chat_edit_font_{nullptr};
   int hovered_bag_slot_{-1};
   int hovered_belt_slot_{-1};
@@ -3948,6 +4186,22 @@ class LegacyHud final {
   int pending_bag_click_slot_{-1};
   int pending_bag_double_click_slot_{-1};
   int pending_equipment_click_slot_{-1};
+
+  // 右键快捷菜单状态
+  struct ItemContextMenu {
+    bool visible{false};
+    int anchor_x{0};
+    int anchor_y{0};
+    int target_slot{-1};
+    MovingItemSource source{MovingItemSource::bag};
+    bool can_use{false};
+    bool can_equip{false};
+    bool can_unequip{false};
+    bool can_drop{false};
+  };
+  ItemContextMenu context_menu_{};
+  ui::Window* context_menu_window_{nullptr};
+
   std::string pending_chat_send_{};
   std::string pending_npc_select_{};
   std::uint64_t pending_npc_select_merchant_id_{0};
