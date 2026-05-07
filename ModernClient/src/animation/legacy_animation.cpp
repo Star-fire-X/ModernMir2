@@ -424,6 +424,50 @@ constexpr std::array<int, 36> kEffectBase = {
 constexpr std::array<int, 6> kHitEffectBase = {800, 1410, 1700, 3480, 3390, 40};
 
 // ====================================================================
+// 魔法特效参数表（kMagicEffectParams）
+// 每个 magic_id 的爆炸帧偏移、帧间隔、爆炸帧数、光照强度等参数。
+// 值与 Delphi PlayScn.pas NewMagic() 中 mtExplosion 分支的硬编码参数一致。
+// 字段为 0 时表示使用通用默认值（explosion_base=effect_base+170, light=1, etc.）。
+// ====================================================================
+
+/// 单个魔法的特效参数（覆盖 spawn_magic_effect 中的通用默认值）
+struct LegacyMagicEffectParams {
+  int explosion_base{0};                ///< 爆炸帧在归档中的绝对偏移 (0=effect_base+170)
+  std::uint64_t next_frame_ms{0};       ///< 帧间隔毫秒 (0=默认50)
+  int explosion_frame_count{0};         ///< 爆炸动画帧数 (0=默认10)
+  int light{1};                         ///< 光照强度 (1=默认, 2=中, 3=高)
+};
+
+/// 魔法特效参数表：索引 = magic_id
+/// 未列出的 magic_id 使用全零默认值（即沿用通用参数）
+constexpr std::array<LegacyMagicEffectParams, 36> kMagicEffectParams = {{
+    // 0-17: 大部分使用通用默认
+    {}, {}, {}, {}, {}, {}, {}, {},
+    {}, {}, {}, {},
+    {}, {}, {}, {}, {}, {},
+    // 18: 冰咆哮 (mtExplosion, magnumb=18)
+    {1570, 80, 10, 1},
+    // 19-20: 通用
+    {}, {},
+    // 21: 地狱雷光 (mtExplosion, magnumb=21)
+    {1660, 80, 20, 3},
+    // 22-25: 通用
+    {}, {}, {}, {},
+    // 26: 诱惑之光 (mtExplosion, magnumb=26)
+    {3990, 80, 10, 2},
+    // 27: 回生术 (mtExplosion, magnumb=27)
+    {1800, 80, 10, 3},
+    // 28-29: 通用
+    {}, {},
+    // 30: 群体治疗 (mtExplosion, magnumb=30)
+    {3930, 80, 16, 3},
+    // 31: 暴风雪 (mtExplosion, magnumb=31)
+    {3850, 80, 20, 3},
+    // 32-35: 通用 (Magic2 系列)
+    {}, {}, {}, {},
+}};
+
+// ====================================================================
 // 内部工具函数
 // 提供坐标转换、角色类型判断、魔法类型映射等底层工具
 // ====================================================================
@@ -1873,6 +1917,22 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
       effect.repetition = false;
       effect.explosion_frame_count = 6;
       break;
+  }
+
+  // 查找魔法特定参数，覆盖按类型分配的通用默认值
+  // 这些参数来自 Delphi PlayScn.pas NewMagic() 中的硬编码值
+  if (create.magic_id >= 0 && create.magic_id < static_cast<int>(kMagicEffectParams.size())) {
+    const auto& params = kMagicEffectParams[static_cast<std::size_t>(create.magic_id)];
+    if (params.explosion_base > 0) {
+      effect.explosion_base = params.explosion_base;
+    }
+    if (params.next_frame_ms > 0) {
+      effect.next_frame_ms = params.next_frame_ms;
+    }
+    if (params.explosion_frame_count > 0) {
+      effect.explosion_frame_count = params.explosion_frame_count;
+    }
+    effect.light = params.light;
   }
 
   if (effect.fixed_effect) {
