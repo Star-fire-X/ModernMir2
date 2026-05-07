@@ -1,5 +1,7 @@
 #include <optional>
+#include <iterator>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "protocol/legacy_edcode.hpp"
@@ -43,6 +45,33 @@ std::uint16_t weight_checksum(std::uint16_t weight, std::uint16_t wear_weight,
                               std::uint16_t hand_weight) {
   return static_cast<std::uint16_t>(
       (((weight + wear_weight + hand_weight) ^ 0x3A5F) ^ 0x1F35) ^ 0xAA21);
+}
+
+bool has_save_character(const mir2::RuntimeDispatch& dispatch, std::string_view name) {
+  for (const auto& request : dispatch.persist_requests) {
+    if (request.kind == mir2::PersistRequestKind::save_character &&
+        request.character_name == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void append_dispatch(mir2::RuntimeDispatch& target, mir2::RuntimeDispatch source) {
+  target.session_events.insert(target.session_events.end(),
+                               std::make_move_iterator(source.session_events.begin()),
+                               std::make_move_iterator(source.session_events.end()));
+  target.persist_requests.insert(target.persist_requests.end(),
+                                 std::make_move_iterator(source.persist_requests.begin()),
+                                 std::make_move_iterator(source.persist_requests.end()));
+}
+
+mir2::RuntimeDispatch run_legacy_ticks(mir2::LogicRuntime& runtime) {
+  mir2::RuntimeDispatch dispatch;
+  for (int i = 0; i < 30; ++i) {
+    append_dispatch(dispatch, runtime.tick());
+  }
+  return dispatch;
 }
 
 mir2::LogicCommand make_sell_command(mir2::LogicCommandKind kind, std::uint64_t session_id,
@@ -117,7 +146,7 @@ int main() {
   enter.character = hero;
   static_cast<void>(runtime.route_logic_command(enter));
 
-  const auto login_dispatch = runtime.tick();
+  const auto login_dispatch = run_legacy_ticks(runtime);
   if (!find_packet(login_dispatch, mir2::kSmNewMap).has_value()) {
     return 1;
   }
@@ -127,19 +156,24 @@ int main() {
   click_npc.session_id = 7;
   click_npc.target_actor_id = 1;
   static_cast<void>(runtime.route_logic_command(click_npc));
-  const auto click_dispatch = runtime.tick();
+  const auto click_dispatch = run_legacy_ticks(runtime);
   const auto merchant_say = find_packet(click_dispatch, mir2::kSmMerchantSay);
-  if (!merchant_say.has_value()) {
+  const auto direct_sell_menu = find_packet(click_dispatch, mir2::kSmSendUserSell);
+  if (!merchant_say.has_value() && !direct_sell_menu.has_value()) {
     return 1;
   }
-  const auto merchant_text = decode_merchant_dialog(merchant_say->body);
-  if (merchant_text.find("Trader/") != 0 || merchant_text.find("<Sell/@sell>") == std::string::npos ||
-      merchant_text.find("<Repair/@repair>") == std::string::npos) {
-    return 1;
+  mir2::RuntimeDispatch sell_dispatch_0 = click_dispatch;
+  if (merchant_say.has_value()) {
+    const auto merchant_text = decode_merchant_dialog(merchant_say->body);
+    if (merchant_text.find("Trader/") != 0 || merchant_text.find("<Sell/@sell>") == std::string::npos ||
+        merchant_text.find("<Repair/@repair>") == std::string::npos) {
+      return 1;
+    }
+
+    static_cast<void>(runtime.route_logic_command(make_menu_command(7, 1, "@sell")));
+    sell_dispatch_0 = run_legacy_ticks(runtime);
   }
 
-  static_cast<void>(runtime.route_logic_command(make_menu_command(7, 1, "@sell")));
-  const auto sell_dispatch_0 = runtime.tick();
   const auto sell_menu = find_packet(sell_dispatch_0, mir2::kSmSendUserSell);
   if (!sell_menu.has_value() || sell_menu->message.recog != 1) {
     return 1;
@@ -147,7 +181,7 @@ int main() {
 
   static_cast<void>(runtime.route_logic_command(
       make_sell_command(mir2::LogicCommandKind::query_sell_price, 7, 1, 1001, "Sell Sword")));
-  const auto query_dispatch = runtime.tick();
+  const auto query_dispatch = run_legacy_ticks(runtime);
   const auto sell_price = find_packet(query_dispatch, mir2::kSmSendBuyPrice);
   if (!sell_price.has_value() || sell_price->message.recog != 36) {
     return 1;
@@ -155,12 +189,13 @@ int main() {
 
   static_cast<void>(runtime.route_logic_command(
       make_sell_command(mir2::LogicCommandKind::sell_item, 7, 1, 1001, "Sell Sword")));
-  const auto sell_dispatch = runtime.tick();
+  const auto sell_dispatch = run_legacy_ticks(runtime);
   const auto sell_ok = find_packet(sell_dispatch, mir2::kSmUserSellItemOk);
   const auto sell_weight = find_packet(sell_dispatch, mir2::kSmWeightChanged);
   if (!sell_ok.has_value() || !sell_weight.has_value() || sell_ok->message.recog != 46 ||
       sell_weight->message.recog != 0 || sell_weight->message.param != 0 ||
-      sell_weight->message.tag != 0 || sell_weight->message.series != weight_checksum(0, 0, 0)) {
+      sell_weight->message.tag != 0 || sell_weight->message.series != weight_checksum(0, 0, 0) ||
+      !has_save_character(sell_dispatch, "Hero")) {
     return 1;
   }
 
@@ -168,7 +203,7 @@ int main() {
   bag_query.kind = mir2::LogicCommandKind::query_bag_items;
   bag_query.session_id = 7;
   static_cast<void>(runtime.route_logic_command(bag_query));
-  const auto bag_dispatch = runtime.tick();
+  const auto bag_dispatch = run_legacy_ticks(runtime);
   const auto bag_packet = find_packet(bag_dispatch, mir2::kSmBagItems);
   if (!bag_packet.has_value()) {
     return 1;
@@ -179,7 +214,7 @@ int main() {
 
   static_cast<void>(runtime.route_logic_command(
       make_sell_command(mir2::LogicCommandKind::sell_item, 7, 1, 1001, "Sell Sword")));
-  const auto sell_fail_dispatch = runtime.tick();
+  const auto sell_fail_dispatch = run_legacy_ticks(runtime);
   if (!find_packet(sell_fail_dispatch, mir2::kSmUserSellItemFail).has_value()) {
     return 1;
   }

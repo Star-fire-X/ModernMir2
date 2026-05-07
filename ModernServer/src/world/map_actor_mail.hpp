@@ -11,6 +11,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
   context.items = &item_configs_;
   context.magics = &magic_configs_;
 
+  auto reject_trade_locked_item_change = [&](Player* player) {
+    if (player == nullptr || trade_session_for(player->id()) == nullptr) {
+      return false;
+    }
+    queue_system_notice(dispatch, *player, "Finish trade first.");
+    return true;
+  };
+
   if (!from_legacy_operate && is_legacy_player_command(mail.kind)) {
     static_cast<void>(enqueue_legacy_player_command(mail, now_ms));
     return;
@@ -104,6 +112,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       auto it = objects_.find(mail.actor_id);
       if (it != objects_.end()) {
         if (auto* player = as_player(it->second.get()); player != nullptr) {
+          cancel_trade_for(mail.actor_id, dispatch, true);
           PersistRequest request;
           request.kind = PersistRequestKind::save_character;
           request.account_id = player->character().account_id;
@@ -121,6 +130,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
     }
     case ActorMailKind::transfer: {
       if (const auto it = objects_.find(mail.actor_id); it != objects_.end()) {
+        if (as_player(it->second.get()) != nullptr) {
+          cancel_trade_for(mail.actor_id, dispatch, true);
+        }
         static_cast<void>(environment_.delete_from_map(
             it->second->x(), it->second->y(), LegacyMapObjectShape::moving_object,
             it->second->id()));
@@ -937,6 +949,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (player == nullptr || player->is_dead()) {
         break;
       }
+      if (reject_trade_locked_item_change(player)) {
+        queue_packet(dispatch, player->session_id(),
+                     make_drop_result_packet(player->session_id(), false, mail.item_make_index,
+                                             mail.payload));
+        break;
+      }
 
       const auto* bag_item =
           player->bag_item_mutable(mail.item_make_index, mail.payload, item_configs_);
@@ -1013,6 +1031,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
         break;
       }
+      if (reject_trade_locked_item_change(player)) {
+        add_legacy_trace(dispatch, "LegacyItem", "trade_locked", mail, current_tick, now_ms,
+                         false, mail.amount, 0, "drop_gold");
+        break;
+      }
 
       GroundItem ground_item;
       add_legacy_trace(dispatch, "LegacyItem", "validate", mail, current_tick, now_ms, true,
@@ -1085,6 +1108,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           !in_interaction_range(*requester, *target_it->second)) {
         break;
       }
+      if (reject_trade_locked_item_change(requester)) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_user_repair_result_packet(requester->session_id(), false, 0, 0, 0));
+        break;
+      }
       auto* item = requester->bag_item_mutable(mail.item_make_index, mail.payload, item_configs_);
       if (item == nullptr) {
         queue_packet(dispatch, requester->session_id(),
@@ -1108,6 +1136,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                    make_user_repair_result_packet(requester->session_id(), true,
                                                   requester->character().gold, item->dura,
                                                   item->dura_max));
+      queue_packet(dispatch, requester->session_id(),
+                   make_gold_changed_packet(requester->session_id(), requester->character().gold));
+      queue_save_character(dispatch, *requester);
       break;
     }
     case ActorMailKind::sell_item: {
@@ -1121,6 +1152,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       auto* merchant = as_npc(target_it->second.get());
       if (requester == nullptr || merchant == nullptr || !merchant->supports_sell() ||
           !in_interaction_range(*requester, *target_it->second)) {
+        break;
+      }
+      if (reject_trade_locked_item_change(requester)) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_user_sell_result_packet(requester->session_id(), false, 0));
         break;
       }
       const auto item = requester->remove_bag_item(mail.item_make_index, mail.payload, item_configs_);
@@ -1147,6 +1183,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                 requester->character().gold));
       queue_packet(dispatch, requester->session_id(),
                    make_weight_changed_packet(requester->session_id(), requester->character()));
+      queue_save_character(dispatch, *requester);
       dispatch.persist_requests.push_back(make_save_merchant_state_request(*merchant));
       break;
     }
@@ -1161,6 +1198,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       auto* merchant = as_npc(target_it->second.get());
       if (requester == nullptr || merchant == nullptr || !merchant->supports_buy() ||
           !in_interaction_range(*requester, *target_it->second)) {
+        break;
+      }
+      if (reject_trade_locked_item_change(requester)) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_buy_item_result_packet(requester->session_id(), false, 2, 0));
         break;
       }
       auto item = take_merchant_item(*merchant, mail.payload, mail.item_make_index, item_configs_);
@@ -1198,7 +1240,150 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       queue_packet(dispatch, requester->session_id(),
                    make_buy_item_result_packet(requester->session_id(), true,
                                                requester->character().gold, item->make_index));
+      queue_save_character(dispatch, *requester);
       dispatch.persist_requests.push_back(make_save_merchant_state_request(*merchant));
+      break;
+    }
+    case ActorMailKind::trade_try: {
+      auto* requester = find_player(mail.actor_id);
+      auto* target = find_player_by_name(mail.payload);
+      if (requester == nullptr || target == nullptr || requester == target ||
+          requester->is_dead() || target->is_dead()) {
+        if (requester != nullptr) {
+          queue_system_notice(dispatch, *requester, "Trade request failed.");
+        }
+        break;
+      }
+      if (!in_interaction_range(*requester, *target) ||
+          trade_session_for(requester->id()) != nullptr ||
+          trade_session_for(target->id()) != nullptr) {
+        queue_system_notice(dispatch, *requester, "Trade request failed.");
+        break;
+      }
+      TradeSession session;
+      session.id = next_trade_session_id_++;
+      session.first_actor_id = requester->id();
+      session.second_actor_id = target->id();
+      trade_session_by_actor_[session.first_actor_id] = session.id;
+      trade_session_by_actor_[session.second_actor_id] = session.id;
+      trade_sessions_[session.id] = std::move(session);
+      queue_system_notice(dispatch, *requester, "Trade started with " +
+                                               target->character().character_name + ".");
+      queue_system_notice(dispatch, *target, "Trade started with " +
+                                            requester->character().character_name + ".");
+      break;
+    }
+    case ActorMailKind::trade_cancel: {
+      cancel_trade_for(mail.actor_id, dispatch, true);
+      break;
+    }
+    case ActorMailKind::trade_add_item: {
+      auto* player = find_player(mail.actor_id);
+      auto* session = trade_session_for(mail.actor_id);
+      if (player == nullptr || session == nullptr) {
+        break;
+      }
+      auto* offer = trade_offer_for(*session, mail.actor_id);
+      auto* peer_offer = trade_peer_offer_for(*session, mail.actor_id);
+      if (offer == nullptr || peer_offer == nullptr || offer->accepted) {
+        queue_system_notice(dispatch, *player, "Trade item failed.");
+        break;
+      }
+      const auto already_offered =
+          std::any_of(offer->items.begin(), offer->items.end(), [&](const LegacyUserItem& item) {
+            return !is_empty(item) && item.make_index == mail.item_make_index;
+          });
+      if (already_offered) {
+        queue_system_notice(dispatch, *player, "Trade item failed.");
+        break;
+      }
+      const auto item = player->remove_bag_item(mail.item_make_index, mail.payload, item_configs_);
+      if (!item.has_value()) {
+        queue_system_notice(dispatch, *player, "Trade item failed.");
+        break;
+      }
+      offer->items.push_back(*item);
+      offer->accepted = false;
+      peer_offer->accepted = false;
+      player->refresh_derived_state(item_configs_);
+      queue_packet(dispatch, player->session_id(),
+                   make_del_item_packet(player->session_id(), player->id(), *item, item_configs_));
+      queue_packet(dispatch, player->session_id(),
+                   make_weight_changed_packet(player->session_id(), player->character()));
+      break;
+    }
+    case ActorMailKind::trade_remove_item: {
+      auto* player = find_player(mail.actor_id);
+      auto* session = trade_session_for(mail.actor_id);
+      if (player == nullptr || session == nullptr) {
+        break;
+      }
+      auto* offer = trade_offer_for(*session, mail.actor_id);
+      auto* peer_offer = trade_peer_offer_for(*session, mail.actor_id);
+      if (offer == nullptr || peer_offer == nullptr || offer->accepted) {
+        queue_system_notice(dispatch, *player, "Trade remove failed.");
+        break;
+      }
+      const auto item_it = std::find_if(
+          offer->items.begin(), offer->items.end(), [&](const LegacyUserItem& item) {
+            return !is_empty(item) && item.make_index == mail.item_make_index &&
+                   (mail.payload.empty() || item_name(item, item_configs_) == mail.payload);
+          });
+      if (item_it == offer->items.end() ||
+          !player->can_add_bag_item(*item_it, item_configs_)) {
+        queue_system_notice(dispatch, *player, "Trade remove failed.");
+        break;
+      }
+      const auto item = *item_it;
+      offer->items.erase(item_it);
+      if (!player->add_bag_item(item)) {
+        offer->items.push_back(item);
+        queue_system_notice(dispatch, *player, "Trade remove failed.");
+        break;
+      }
+      offer->accepted = false;
+      peer_offer->accepted = false;
+      player->refresh_derived_state(item_configs_);
+      queue_packet(dispatch, player->session_id(),
+                   make_add_item_packet(player->session_id(), item, item_configs_));
+      queue_packet(dispatch, player->session_id(),
+                   make_weight_changed_packet(player->session_id(), player->character()));
+      break;
+    }
+    case ActorMailKind::trade_set_gold: {
+      auto* player = find_player(mail.actor_id);
+      auto* session = trade_session_for(mail.actor_id);
+      if (player == nullptr || session == nullptr) {
+        break;
+      }
+      auto* offer = trade_offer_for(*session, mail.actor_id);
+      auto* peer_offer = trade_peer_offer_for(*session, mail.actor_id);
+      if (offer == nullptr || peer_offer == nullptr || mail.amount < 0 ||
+          mail.amount > player->character().gold || offer->accepted) {
+        queue_system_notice(dispatch, *player, "Trade gold failed.");
+        break;
+      }
+      offer->gold = mail.amount;
+      offer->accepted = false;
+      peer_offer->accepted = false;
+      break;
+    }
+    case ActorMailKind::trade_accept: {
+      auto* player = find_player(mail.actor_id);
+      auto* session = trade_session_for(mail.actor_id);
+      if (player == nullptr || session == nullptr) {
+        break;
+      }
+      auto* offer = trade_offer_for(*session, mail.actor_id);
+      if (offer == nullptr) {
+        break;
+      }
+      offer->accepted = true;
+      if (session->first.accepted && session->second.accepted) {
+        static_cast<void>(commit_trade(*session, dispatch));
+      } else {
+        queue_system_notice(dispatch, *player, "Trade accepted.");
+      }
       break;
     }
     case ActorMailKind::storage_item: {
@@ -1212,6 +1397,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       const auto* merchant = as_npc(target_it->second.get());
       if (requester == nullptr || merchant == nullptr || !merchant->supports_storage() ||
           !in_interaction_range(*requester, *target_it->second)) {
+        break;
+      }
+      if (reject_trade_locked_item_change(requester)) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_storage_result_packet(requester->session_id(), kSmStorageFail));
         break;
       }
       const auto item = requester->remove_bag_item(mail.item_make_index, mail.payload, item_configs_);
@@ -1250,6 +1440,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           !in_interaction_range(*requester, *target_it->second)) {
         break;
       }
+      if (reject_trade_locked_item_change(requester)) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_take_back_storage_result_packet(requester->session_id(),
+                                                          kSmTakeBackStorageItemFail, 0));
+        break;
+      }
       const auto item =
           requester->remove_storage_item(mail.item_make_index, mail.payload, item_configs_);
       if (!item.has_value()) {
@@ -1280,6 +1476,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
     case ActorMailKind::pickup_item: {
       auto* player = find_player(mail.actor_id);
       if (player == nullptr || player->is_dead() || player->x() != mail.x || player->y() != mail.y) {
+        break;
+      }
+      if (reject_trade_locked_item_change(player)) {
+        add_legacy_trace(dispatch, "LegacyItem", "trade_locked", mail, current_tick, now_ms,
+                         false, 0, 0, "pickup_item");
         break;
       }
 
@@ -1359,6 +1560,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           add_legacy_trace(dispatch, "LegacyItem", "slot_reject", mail, current_tick, now_ms,
                            false, mail.item_slot, 0, "take_on_item");
         }
+        break;
+      }
+      if (reject_trade_locked_item_change(player)) {
+        queue_packet(dispatch, player->session_id(),
+                     make_take_on_result_packet(player->session_id(), false, 0));
         break;
       }
 
@@ -1489,6 +1695,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
         break;
       }
+      if (reject_trade_locked_item_change(player)) {
+        queue_packet(dispatch, player->session_id(),
+                     make_take_off_result_packet(player->session_id(), false, 0));
+        break;
+      }
 
       add_legacy_trace(dispatch, "LegacyItem", "validate", mail, current_tick, now_ms, true,
                        mail.item_slot, 0, "take_off_item");
@@ -1555,6 +1766,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
     case ActorMailKind::eat_item: {
       auto* player = find_player(mail.actor_id);
       if (player == nullptr || player->is_dead()) {
+        break;
+      }
+      if (reject_trade_locked_item_change(player)) {
+        queue_packet(dispatch, player->session_id(),
+                     make_eat_result_packet(player->session_id(), false));
         break;
       }
 

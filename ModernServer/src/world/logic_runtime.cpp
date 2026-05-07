@@ -672,6 +672,24 @@ ActorMail LogicRuntime::make_player_mail(const LogicCommand& command,
     case LogicCommandKind::take_back_storage_item:
       mail.kind = ActorMailKind::take_back_storage_item;
       break;
+    case LogicCommandKind::trade_try:
+      mail.kind = ActorMailKind::trade_try;
+      break;
+    case LogicCommandKind::trade_cancel:
+      mail.kind = ActorMailKind::trade_cancel;
+      break;
+    case LogicCommandKind::trade_add_item:
+      mail.kind = ActorMailKind::trade_add_item;
+      break;
+    case LogicCommandKind::trade_remove_item:
+      mail.kind = ActorMailKind::trade_remove_item;
+      break;
+    case LogicCommandKind::trade_set_gold:
+      mail.kind = ActorMailKind::trade_set_gold;
+      break;
+    case LogicCommandKind::trade_accept:
+      mail.kind = ActorMailKind::trade_accept;
+      break;
     default:
       break;
   }
@@ -750,6 +768,12 @@ RuntimeDispatch LogicRuntime::route_logic_command(const LogicCommand& command) {
     case LogicCommandKind::repair_item:
     case LogicCommandKind::storage_item:
     case LogicCommandKind::take_back_storage_item:
+    case LogicCommandKind::trade_try:
+    case LogicCommandKind::trade_cancel:
+    case LogicCommandKind::trade_add_item:
+    case LogicCommandKind::trade_remove_item:
+    case LogicCommandKind::trade_set_gold:
+    case LogicCommandKind::trade_accept:
     case LogicCommandKind::logout: {
       auto it = session_index_.find(command.session_id);
       if (it == session_index_.end()) {
