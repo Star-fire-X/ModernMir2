@@ -43,7 +43,7 @@ bool MapActor::try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
     return false;
   }
 
-  auto snapshot = player.snapshot();
+  auto snapshot = player.persistent_snapshot();
   snapshot.map_id = gate->gate.target_map_id;
   snapshot.x = gate->gate.target_x;
   snapshot.y = gate->gate.target_y;
@@ -143,7 +143,7 @@ bool MapActor::try_item_map_move(Player& player, std::string target_map_id,
     target_map_id = config_.id;
   }
 
-  auto snapshot = player.snapshot();
+  auto snapshot = player.persistent_snapshot();
   snapshot.map_id = target_map_id;
   snapshot.x = target_x;
   snapshot.y = target_y;

@@ -36,6 +36,16 @@ bool matches_legacy_sex(std::int32_t required_sex, std::uint8_t character_sex) {
   return required_sex < 0 || required_sex == static_cast<std::int32_t>(character_sex);
 }
 
+bool matches_legacy_dress_sex(const ItemConfig& item_config, std::uint8_t character_sex) {
+  if (item_config.std_mode == 10) {
+    return character_sex == 0;
+  }
+  if (item_config.std_mode == 11) {
+    return character_sex == 1;
+  }
+  return true;
+}
+
 std::uint8_t clamp_legacy_desc(std::int32_t value) {
   return static_cast<std::uint8_t>(std::clamp(value, 0, 255));
 }
@@ -73,7 +83,6 @@ std::int32_t legacy_resolve_slot_from_std_mode(std::int32_t std_mode) {
     case 11:
       return static_cast<std::int32_t>(kEquipDress);
     case 15:
-    case 16:
       return static_cast<std::int32_t>(kEquipHelmet);
     case 19:
     case 20:
@@ -119,7 +128,7 @@ bool legacy_item_fits_slot(const ItemConfig& item_config, std::int32_t slot) {
       return item_config.std_mode == 19 || item_config.std_mode == 20 ||
              item_config.std_mode == 21;
     case static_cast<std::int32_t>(kEquipHelmet):
-      return item_config.std_mode == 15 || item_config.std_mode == 16;
+      return item_config.std_mode == 15;
     case static_cast<std::int32_t>(kEquipRingLeft):
     case static_cast<std::int32_t>(kEquipRingRight):
       return item_config.std_mode == 22 || item_config.std_mode == 23;
@@ -145,15 +154,38 @@ bool legacy_slot_uses_hand_weight(std::size_t slot) {
   return slot == kEquipWeapon || slot == kEquipRightHand;
 }
 
+namespace {
+
+bool desc7_locks_takeoff(const ItemConfig& item_config) {
+  switch (item_config.std_mode) {
+    case 15:
+    case 19:
+    case 20:
+    case 21:
+    case 22:
+    case 23:
+    case 24:
+    case 26:
+    case 52:
+    case 53:
+    case 54:
+      return true;
+    default:
+      return false;
+  }
+}
+
+}  // namespace
+
 bool legacy_item_can_take_off(const ItemConfig* item_config, const LegacyUserItem& item) {
   if (is_empty(item)) {
     return true;
   }
-  if (item.desc[7] != 0) {
-    return false;
-  }
   if (item_config == nullptr) {
     return true;
+  }
+  if (desc7_locks_takeoff(*item_config) && item.desc[7] != 0) {
+    return false;
   }
   return (item_config->item_desc & (kLegacyItemUnableTakeOff | kLegacyItemNeverTakeOff)) == 0;
 }
@@ -208,12 +240,9 @@ ItemConfig legacy_upgraded_item_config(const ItemConfig& item_config,
       upgraded.mc = add_high(upgraded.mc, user_item.desc[1]);
       upgraded.sc = add_high(upgraded.sc, user_item.desc[2]);
       upgraded.ac = add_low(upgraded.ac, user_item.desc[3]);
-      upgraded.accurate += user_item.desc[5];
-      if (user_item.desc[6] > 10) {
-        upgraded.atk_spd += user_item.desc[6] - 10;
-      } else {
-        upgraded.atk_spd -= user_item.desc[6];
-      }
+      upgraded.ac = add_high(upgraded.ac, user_item.desc[5]);
+      upgraded.mac = add_low(upgraded.mac, user_item.desc[4]);
+      upgraded.mac = add_high(upgraded.mac, user_item.desc[6]);
       if (user_item.desc[7] >= 1 && user_item.desc[7] <= 10) {
         upgraded.special_pwr = user_item.desc[7];
       }
@@ -625,6 +654,7 @@ bool legacy_can_take_on_item(const CharacterRecord& character,
                              std::int32_t current_hand_weight,
                              std::int32_t old_slot_weight,
                              std::string* reason) {
+  static_cast<void>(current_hand_weight);
   if (!legacy_item_fits_slot(item_config, slot)) {
     if (reason != nullptr) {
       *reason = "slot";
@@ -639,7 +669,8 @@ bool legacy_can_take_on_item(const CharacterRecord& character,
     }
     return false;
   }
-  if (!matches_legacy_sex(upgraded.sex, character.sex)) {
+  if (!matches_legacy_dress_sex(upgraded, character.sex) ||
+      !matches_legacy_sex(upgraded.sex, character.sex)) {
     if (reason != nullptr) {
       *reason = "sex";
     }
@@ -675,8 +706,7 @@ bool legacy_can_take_on_item(const CharacterRecord& character,
 
   const auto new_weight = std::max(upgraded.weight, 0);
   if (legacy_slot_uses_hand_weight(static_cast<std::size_t>(slot))) {
-    if (current_hand_weight - old_slot_weight + new_weight >
-        static_cast<std::int32_t>(character.ability.max_hand_weight)) {
+    if (new_weight > static_cast<std::int32_t>(character.ability.max_hand_weight)) {
       if (reason != nullptr) {
         *reason = "hand_weight";
       }

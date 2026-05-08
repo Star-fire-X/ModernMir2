@@ -1676,7 +1676,7 @@ void queue_save_character(RuntimeDispatch& dispatch, const Player& player) {
   request.kind = PersistRequestKind::save_character;
   request.account_id = player.character().account_id;
   request.character_name = player.character().character_name;
-  request.character = player.snapshot();
+  request.character = player.persistent_snapshot();
   dispatch.persist_requests.push_back(std::move(request));
 }
 

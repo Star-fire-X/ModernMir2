@@ -60,6 +60,11 @@ std::optional<T> decode_body(std::string_view body) {
   return value;
 }
 
+mir2::RuntimeDispatch tick_player_due(mir2::LogicRuntime& runtime, std::uint64_t& now_ms) {
+  now_ms += 251;
+  return runtime.tick(now_ms);
+}
+
 }  // namespace
 
 int main() {
@@ -94,11 +99,12 @@ int main() {
   hero.bag_items[0].desc[5] = 4;
 
   static_cast<void>(runtime.route_logic_command(make_enter(601, hero)));
-  static_cast<void>(runtime.tick());
+  std::uint64_t now_ms = 20;
+  static_cast<void>(runtime.tick(now_ms));
 
   static_cast<void>(runtime.route_logic_command(make_item_command(
       mir2::LogicCommandKind::take_on_item, 601, 1001, "Upgrade Sword", mir2::kEquipWeapon)));
-  const auto take_on = runtime.tick();
+  const auto take_on = tick_player_due(runtime, now_ms);
   const auto ability_packet = find_packet(take_on, mir2::kSmAbility);
   const auto sub_packet = find_packet(take_on, mir2::kSmSubAbility);
   assert(ability_packet.has_value());
@@ -109,26 +115,30 @@ int main() {
   assert(ability->mc == mir2::make_word(0, 2));
   assert(ability->sc == mir2::make_word(0, 4));
   assert(ability->hand_weight == 3);
-  assert(sub_packet->message.param == mir2::make_word(15, 10));
+  assert(sub_packet->message.param == mir2::make_word(14, 10));
 
   auto snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value());
   assert(snapshot->equipped_items[mir2::kEquipWeapon].make_index == 1001);
+  assert(!take_on.persist_requests.empty());
+  assert(take_on.persist_requests.back().character.ability.dc == mir2::make_word(0, 0));
 
   auto zero_dura = snapshot->equipped_items[mir2::kEquipWeapon];
   zero_dura.dura = 0;
   snapshot->equipped_items[mir2::kEquipWeapon] = zero_dura;
+  snapshot->ability = take_on.persist_requests.back().character.ability;
   mir2::LogicRuntime zero_runtime(config);
   zero_runtime.initialize();
   static_cast<void>(zero_runtime.route_logic_command(make_enter(602, *snapshot)));
-  const auto relogin = zero_runtime.tick();
+  std::uint64_t zero_now_ms = 20;
+  const auto relogin = zero_runtime.tick(zero_now_ms);
   const auto relogin_ability_packet = find_packet(relogin, mir2::kSmAbility);
   assert(relogin_ability_packet.has_value());
   const auto relogin_ability =
       decode_body<mir2::LegacyAbility>(relogin_ability_packet->body);
   assert(relogin_ability.has_value());
   assert(relogin_ability->dc == mir2::make_word(0, 0));
-  assert(relogin_ability->hand_weight == 3);
+  assert(relogin_ability->hand_weight == 0);
 
   return 0;
 }

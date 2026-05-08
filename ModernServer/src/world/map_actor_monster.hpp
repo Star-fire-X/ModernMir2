@@ -263,7 +263,7 @@ std::array<CharacterSlaveRecord, kMaxLegacySlaves> MapActor::snapshot_owned_slav
 }
 
 CharacterRecord MapActor::snapshot_player_with_slaves(Player& player, std::uint64_t now_ms) {
-  auto snapshot = player.snapshot();
+  auto snapshot = player.persistent_snapshot();
   snapshot.slaves = snapshot_owned_slaves(player, now_ms);
   return snapshot;
 }
