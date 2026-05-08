@@ -227,6 +227,7 @@ class Player : public GameObject {
   [[nodiscard]] std::uint64_t session_id() const { return session_id_; }
   [[nodiscard]] const CharacterRecord& character() const { return character_; }
   [[nodiscard]] CharacterRecord snapshot() const;
+  [[nodiscard]] CharacterRecord persistent_snapshot() const;
   [[nodiscard]] bool is_dead() const;
   [[nodiscard]] bool in_safe_zone() const { return in_safe_zone_; }
   [[nodiscard]] bool has_free_bag_slot() const;

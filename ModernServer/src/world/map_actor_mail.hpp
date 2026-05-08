@@ -1607,8 +1607,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
 
       std::string reject_reason;
-      const auto old_slot_weight =
-          current_equipped != nullptr ? item_weight(*current_equipped, item_configs_) : 0;
+      const auto old_slot_weight = current_equipped != nullptr && current_equipped->dura > 0
+                                       ? item_weight(*current_equipped, item_configs_)
+                                       : 0;
       if (!legacy_can_take_on_item(player->character(), *item_config, *removed, mail.item_slot,
                                    player->character().ability.wear_weight,
                                    player->character().ability.hand_weight, old_slot_weight,

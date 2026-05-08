@@ -58,6 +58,11 @@ mir2::LogicCommand make_item_command(mir2::LogicCommandKind kind, std::uint64_t 
   return command;
 }
 
+mir2::RuntimeDispatch tick_player_due(mir2::LogicRuntime& runtime, std::uint64_t& now_ms) {
+  now_ms += 251;
+  return runtime.tick(now_ms);
+}
+
 }  // namespace
 
 int main() {
@@ -100,14 +105,15 @@ int main() {
   hero.bag_items[0].dura_max = 1000;
 
   static_cast<void>(runtime.route_logic_command(make_enter(201, hero)));
-  const auto login = runtime.tick();
+  std::uint64_t now_ms = 20;
+  const auto login = runtime.tick(now_ms);
   if (!find_packet(login, mir2::kSmNewMap, 201).has_value()) {
     return fail(1);
   }
 
   static_cast<void>(runtime.route_logic_command(make_item_command(
       mir2::LogicCommandKind::take_on_item, 201, 1001, "Derived Sword", 1)));
-  const auto take_on = runtime.tick();
+  const auto take_on = tick_player_due(runtime, now_ms);
   const auto ability_packet = find_packet(take_on, mir2::kSmAbility, 201);
   const auto sub_ability = find_packet(take_on, mir2::kSmSubAbility, 201);
   if (!ability_packet.has_value() || !sub_ability.has_value()) {
@@ -117,15 +123,19 @@ int main() {
   if (!ability.has_value()) {
     return fail(3);
   }
-  if (ability->ac != mir2::make_word(2, 3) || ability->mac != mir2::make_word(1, 1) ||
+  if (ability->ac != mir2::make_word(1, 1) || ability->mac != mir2::make_word(0, 0) ||
       ability->dc != mir2::make_word(3, 6) || ability->mc != mir2::make_word(1, 3) ||
-      ability->sc != mir2::make_word(4, 4) || ability->hp != 10 || ability->max_hp != 25 ||
-      ability->mp != 5 || ability->max_mp != 17 || ability->weight != 0 ||
+      ability->sc != mir2::make_word(4, 4) || ability->hp != 10 || ability->max_hp != 20 ||
+      ability->mp != 5 || ability->max_mp != 10 || ability->weight != 0 ||
       ability->wear_weight != 0 || ability->hand_weight != 3) {
     return fail(4);
   }
-  if (sub_ability->message.param != mir2::make_word(12, 13)) {
+  if (sub_ability->message.param != mir2::make_word(12, 10)) {
     return fail(5);
+  }
+  if (take_on.persist_requests.empty() ||
+      take_on.persist_requests.back().character.ability.dc != mir2::make_word(1, 1)) {
+    return fail(12);
   }
 
   const auto equipped_snapshot = runtime.snapshot_character_actor("Hero");
@@ -137,7 +147,7 @@ int main() {
 
   static_cast<void>(runtime.route_logic_command(make_item_command(
       mir2::LogicCommandKind::take_off_item, 201, 1001, "Derived Sword", 1)));
-  const auto take_off = runtime.tick();
+  const auto take_off = tick_player_due(runtime, now_ms);
   const auto base_ability_packet = find_packet(take_off, mir2::kSmAbility, 201);
   const auto base_sub_ability = find_packet(take_off, mir2::kSmSubAbility, 201);
   if (!base_ability_packet.has_value() || !base_sub_ability.has_value()) {

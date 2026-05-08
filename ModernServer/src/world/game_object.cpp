@@ -439,6 +439,21 @@ CharacterRecord Player::snapshot() const {
   return snapshot;
 }
 
+CharacterRecord Player::persistent_snapshot() const {
+  CharacterRecord snapshot = this->snapshot();
+  auto ability = base_ability_;
+  ability.level = character_.ability.level;
+  ability.exp = character_.ability.exp;
+  ability.max_exp = character_.ability.max_exp;
+  ability.hp = character_.ability.hp;
+  ability.mp = character_.ability.mp;
+  ability.weight = 0;
+  ability.wear_weight = 0;
+  ability.hand_weight = 0;
+  snapshot.ability = ability;
+  return snapshot;
+}
+
 bool Player::is_dead() const { return character_.ability.hp == 0; }
 
 bool Player::has_free_bag_slot() const {
@@ -1289,15 +1304,51 @@ void Player::refresh_derived_state(
       return;
     }
     const auto upgraded = legacy_upgraded_item_config(*config, item);
-    derived.ac = add_packed_range(derived.ac, upgraded.ac);
-    derived.mac = add_packed_range(derived.mac, upgraded.mac);
+    switch (upgraded.std_mode) {
+      case 5:
+      case 6:
+        accuracy_point_ += packed_max(upgraded.ac);
+        break;
+      case 20:
+      case 24:
+        accuracy_point_ += packed_max(upgraded.ac);
+        speed_point_ += packed_max(upgraded.mac);
+        break;
+      case 52:
+        if (upgraded.eff_type1 == 1) {
+          derived.max_hand_weight = clamp_u8(
+              static_cast<std::int32_t>(derived.max_hand_weight) + upgraded.eff_value1);
+        } else if (upgraded.eff_type1 == 2) {
+          derived.max_wear_weight = clamp_u8(
+              static_cast<std::int32_t>(derived.max_wear_weight) + upgraded.eff_value1);
+        }
+        if (upgraded.eff_type2 == 1) {
+          derived.max_hand_weight = clamp_u8(
+              static_cast<std::int32_t>(derived.max_hand_weight) + upgraded.eff_value2);
+        } else if (upgraded.eff_type2 == 2) {
+          derived.max_wear_weight = clamp_u8(
+              static_cast<std::int32_t>(derived.max_wear_weight) + upgraded.eff_value2);
+        }
+        derived.ac = add_packed_range(derived.ac, upgraded.ac);
+        derived.mac = add_packed_range(derived.mac, upgraded.mac);
+        break;
+      case 19:
+      case 21:
+      case 23:
+      case 53:
+        break;
+      default:
+        derived.ac = add_packed_range(derived.ac, upgraded.ac);
+        derived.mac = add_packed_range(derived.mac, upgraded.mac);
+        break;
+    }
     derived.dc = add_packed_range(derived.dc, upgraded.dc);
     derived.mc = add_packed_range(derived.mc, upgraded.mc);
     derived.sc = add_packed_range(derived.sc, upgraded.sc);
-    derived.max_hp = clamp_u16(static_cast<std::int32_t>(derived.max_hp) + upgraded.hp_add);
-    derived.max_mp = clamp_u16(static_cast<std::int32_t>(derived.max_mp) + upgraded.mp_add);
-    accuracy_point_ += upgraded.accurate;
-    speed_point_ += upgraded.agility;
+    if (upgraded.std_mode == 53) {
+      derived.max_hp = clamp_u16(static_cast<std::int32_t>(derived.max_hp) + upgraded.hp_add);
+      derived.max_mp = clamp_u16(static_cast<std::int32_t>(derived.max_mp) + upgraded.mp_add);
+    }
   };
 
   accuracy_point_ = base_ability_.reserved1 > 0 ? base_ability_.reserved1 : 10;
@@ -1314,7 +1365,8 @@ void Player::refresh_derived_state(
   std::int32_t wear_weight = 0;
   std::int32_t hand_weight = 0;
   for (std::size_t slot = 0; slot < character_.equipped_items.size(); ++slot) {
-    const auto weight = item_weight(character_.equipped_items[slot], item_configs);
+    const auto& item = character_.equipped_items[slot];
+    const auto weight = !is_empty(item) && item.dura > 0 ? item_weight(item, item_configs) : 0;
     if (legacy_slot_uses_hand_weight(slot)) {
       hand_weight += weight;
     } else {

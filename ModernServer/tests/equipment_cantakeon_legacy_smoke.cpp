@@ -7,6 +7,7 @@
 
 #include "protocol/legacy_game_codec.hpp"
 #include "protocol/legacy_types.hpp"
+#include "world/legacy_item_rules.hpp"
 #include "world/logic_runtime.hpp"
 
 namespace {
@@ -79,6 +80,41 @@ int main() {
   dc_sword.need = 1;
   dc_sword.need_level = 3;
   config.items = {heavy_sword, level_sword, wrong_job_ring, cursed_ring, plain_ring, dc_sword};
+
+  mir2::ItemConfig mode16_helmet;
+  mode16_helmet.std_mode = 16;
+  mode16_helmet.equip_slot = -1;
+  assert(mir2::legacy_resolve_slot_from_std_mode(16) == -1);
+  assert(!mir2::legacy_item_fits_slot(mode16_helmet, mir2::kEquipHelmet));
+
+  mir2::ItemConfig male_dress;
+  male_dress.std_mode = 10;
+  male_dress.weight = 1;
+  male_dress.equip_slot = -1;
+  mir2::ItemConfig female_dress = male_dress;
+  female_dress.std_mode = 11;
+  mir2::CharacterRecord male_rule_character;
+  male_rule_character.sex = 0;
+  male_rule_character.ability.level = 40;
+  male_rule_character.ability.max_wear_weight = 100;
+  male_rule_character.ability.max_hand_weight = 5;
+  mir2::LegacyUserItem rule_item{2001, 1, 1000, 1000};
+  assert(mir2::legacy_can_take_on_item(male_rule_character, male_dress, rule_item,
+                                       mir2::kEquipDress, 0, 0, 0));
+  assert(!mir2::legacy_can_take_on_item(male_rule_character, female_dress, rule_item,
+                                        mir2::kEquipDress, 0, 0, 0));
+
+  mir2::ItemConfig right_hand_item;
+  right_hand_item.std_mode = 30;
+  right_hand_item.weight = 4;
+  right_hand_item.equip_slot = -1;
+  assert(mir2::legacy_can_take_on_item(male_rule_character, right_hand_item, rule_item,
+                                       mir2::kEquipRightHand, 0, 4, 0));
+
+  mir2::LegacyUserItem desc7_weapon{2002, 1, 1000, 1000};
+  desc7_weapon.desc[7] = 3;
+  assert(mir2::legacy_item_can_take_off(&heavy_sword, desc7_weapon));
+  assert(!mir2::legacy_item_can_take_off(&cursed_ring, desc7_weapon));
 
   mir2::LogicRuntime runtime(config);
   runtime.initialize();
