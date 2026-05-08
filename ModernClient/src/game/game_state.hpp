@@ -1055,6 +1055,7 @@ struct GameStateStore {
       world.npc_dialog.npc_name = message.text.substr(0, slash);
       world.npc_dialog.text = message.text.substr(slash + 1);
     }
+    std::replace(world.npc_dialog.text.begin(), world.npc_dialog.text.end(), '\\', '\n');
     if (auto self = world.actors.find(world.self_actor_id); self != world.actors.end()) {
       world.npc_dialog.opened_x = self->second.x;
       world.npc_dialog.opened_y = self->second.y;

@@ -164,12 +164,12 @@ int main() {
   assert(state.world.actors[2000].saying_started_ms != 0);
   assert(state.world.chat_lines.back().text == "Hen: cluck");
 
-  state.apply(NpcDialog{2000, 384, "Shopkeeper/Hello <Buy/@buy>"});
+  state.apply(NpcDialog{2000, 384, "Shopkeeper/Line1\\Line2 <Buy/@buy>"});
   assert(state.world.npc_dialog.visible);
   assert(state.world.npc_dialog.merchant_id == 2000);
   assert(state.world.npc_dialog.face == 384);
   assert(state.world.npc_dialog.npc_name == "Shopkeeper");
-  assert(state.world.npc_dialog.text == "Hello <Buy/@buy>");
+  assert(state.world.npc_dialog.text == "Line1\nLine2 <Buy/@buy>");
   assert(state.world.npc_dialog.opened_x == 330);
   assert(state.world.npc_dialog.opened_y == 270);
   state.apply(NpcDialogClose{2000});

@@ -951,6 +951,10 @@ constexpr int kEquipArmRingLeft = 5;
 constexpr int kEquipArmRingRight = 6;
 constexpr int kEquipRingLeft = 7;
 constexpr int kEquipRingRight = 8;
+constexpr int kEquipBujuk = 9;
+constexpr int kEquipBelt = 10;
+constexpr int kEquipBoots = 11;
+constexpr int kEquipCharm = 12;
 
 /// 检查装备槽位是否接受指定 std_mode 类型的物品
 bool equipment_slot_accepts_std_mode(const int slot, const std::uint8_t std_mode,
@@ -3511,7 +3515,7 @@ class LegacyHud final {
     menu.can_equip = is_bag && equipment_slot_accepts_std_mode(
         get_equipment_slot_for_item(item), item.std_mode);
     menu.can_unequip = !is_bag;
-    menu.can_drop = true;
+    menu.can_drop = is_bag;
 
     // 计算菜单应在的屏幕位置
     const auto* ctx_node = tree.root();
@@ -3599,9 +3603,6 @@ class LegacyHud final {
     }
     if (context_menu_.source == MovingItemSource::bag && valid_bag_slot(slot)) {
       handle_bag_drop(slot);
-    } else if (context_menu_.source == MovingItemSource::equipment &&
-               valid_equipment_slot(slot)) {
-      handle_equipment_drop(slot);
     }
   }
 
@@ -3665,37 +3666,26 @@ class LegacyHud final {
     item = client_v1::ItemState{};
   }
 
-  void handle_equipment_drop(const int slot) {
-    if (state_ == nullptr || !valid_equipment_slot(slot)) {
-      return;
-    }
-    auto& item = state_->world.equipment[static_cast<std::size_t>(slot)];
-    if (app_ != nullptr) {
-      state_->begin_pending_item_action(PendingItemActionKind::drop,
-                                        MovingItemSource::equipment, slot, -1, item,
-                                        GetTickCount64());
-      app_->request_drop_item(
-          client_v1::DropItemRequest{item.make_index, item.name});
-    }
-    item = client_v1::ItemState{};
-  }
-
   /// 根据物品 std_mode 返回对应的装备槽位
   static int get_equipment_slot_for_item(const client_v1::ItemState& item) {
     switch (item.std_mode) {
       case 5:
-      case 6:   return 1;  // weapon
+      case 6:   return kEquipWeapon;
       case 10:
-      case 11:  return 0;  // dress
-      case 15:  return 4;  // helmet
+      case 11:  return kEquipDress;
+      case 15:  return kEquipHelmet;
       case 19:
       case 20:
-      case 21:  return 3;  // necklace
+      case 21:  return kEquipNecklace;
       case 22:
-      case 23:  return 5;  // armring (left)
+      case 23:  return kEquipRingLeft;
       case 24:
-      case 26:  return 7;  // ring (left)
-      case 25:  return 6;  // armring (right)
+      case 26:  return kEquipArmRingRight;
+      case 25:  return kEquipBujuk;
+      case 30:  return kEquipRightHand;
+      case 52:  return kEquipBoots;
+      case 53:  return kEquipCharm;
+      case 54:  return kEquipBelt;
       default:  return -1;
     }
   }
@@ -3824,11 +3814,11 @@ class LegacyHud final {
       return;
     }
 
-    if (lx > 666 && lx < 666 + 40 && ly > 145 && ly < 145 + 10) {
-      tooltip_->show_at(666, 496, L"Level", 0xFFFFFF66U);
+    if (RectI{660, 28, 50, 14}.contains(lx, ly)) {
+      tooltip_->show_at(input.mouse_x + 12, input.mouse_y + 16, L"Level", 0xFFFFFF66U);
       return;
     }
-    if (lx > 666 && lx < 666 + 40 && ly > 180 && ly < 180 + 10) {
+    if (RectI{666, 59, 40, 10}.contains(lx, ly)) {
       std::wstringstream out;
       const auto percent = ability.max_exp == 0
                                ? 0.0
@@ -3836,11 +3826,11 @@ class LegacyHud final {
                                   static_cast<double>(ability.max_exp)) *
                                      100.0;
       out << std::fixed << std::setprecision(2) << percent;
-      tooltip_->show_at(666, 526, out.str(), 0xFFFFFF66U);
+      tooltip_->show_at(input.mouse_x + 12, input.mouse_y + 16, out.str(), 0xFFFFFF66U);
       return;
     }
-    if (lx > 666 && lx < 666 + 40 && ly > 210 && ly < 210 + 10) {
-      tooltip_->show_at(666, 560,
+    if (RectI{666, 92, 40, 10}.contains(lx, ly)) {
+      tooltip_->show_at(input.mouse_x + 12, input.mouse_y + 16,
                         std::to_wstring(ability.weight) + L"/" +
                             std::to_wstring(ability.max_weight),
                         0xFFFFFF66U);
