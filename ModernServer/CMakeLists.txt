@@ -422,6 +422,17 @@ if(BUILD_TESTING)
     target_link_libraries(mir2_equipment_special_combat_smoke PRIVATE mir2_hostlib)
     add_test(NAME mir2_equipment_special_combat_smoke
       COMMAND mir2_equipment_special_combat_smoke)
+  add_executable(mir2_weapon_upgrade_smoke tests/weapon_upgrade_smoke.cpp)
+    target_link_libraries(mir2_weapon_upgrade_smoke PRIVATE mir2_hostlib)
+    add_test(NAME mir2_weapon_upgrade_smoke COMMAND mir2_weapon_upgrade_smoke)
+  add_executable(mir2_player_death_drop_smoke tests/player_death_drop_smoke.cpp)
+    target_link_libraries(mir2_player_death_drop_smoke PRIVATE mir2_hostlib)
+    add_test(NAME mir2_player_death_drop_smoke COMMAND mir2_player_death_drop_smoke)
+  add_executable(mir2_weapon_luck_lifecycle_smoke
+      tests/weapon_luck_lifecycle_smoke.cpp)
+    target_link_libraries(mir2_weapon_luck_lifecycle_smoke PRIVATE mir2_hostlib)
+    add_test(NAME mir2_weapon_luck_lifecycle_smoke
+      COMMAND mir2_weapon_luck_lifecycle_smoke)
 
   add_executable(mir2_pk_attack_mode_rules_smoke tests/pk_attack_mode_rules_smoke.cpp)
   target_link_libraries(mir2_pk_attack_mode_rules_smoke PRIVATE mir2_hostlib)
@@ -768,6 +779,9 @@ if(BUILD_TESTING)
       mir2_skill_status_poison_buff_hide_shield_smoke
       mir2_equipment_cantakeon_legacy_smoke
       mir2_equipment_special_combat_smoke
+      mir2_weapon_upgrade_smoke
+      mir2_player_death_drop_smoke
+      mir2_weapon_luck_lifecycle_smoke
       mir2_item_phase2_ground_smoke
       mir2_item_phase2_use_smoke
       mir2_special_consumables_legacy_smoke

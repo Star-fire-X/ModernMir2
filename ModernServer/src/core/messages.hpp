@@ -74,6 +74,17 @@ struct CharacterRecord {
   std::array<std::int32_t, kMaxLegacyScriptParams> script_params{};
   std::uint32_t daily_quest{0};
   std::array<CharacterSlaveRecord, kMaxLegacySlaves> slaves{};
+  double body_luck{0.0};
+};
+
+struct LegacyWeaponUpgradeRecord {
+  std::string character_name{};
+  LegacyUserItem item{};
+  std::uint8_t updc{0};
+  std::uint8_t upsc{0};
+  std::uint8_t upmc{0};
+  std::uint8_t durapoint{0};
+  std::uint64_t ready_time_ms{0};
 };
 
 struct MerchantProductRuntimeConfig {
@@ -90,6 +101,7 @@ struct MerchantStateRecord {
   std::string map_id{};
   std::vector<LegacyUserItem> goods{};
   std::unordered_map<std::int32_t, std::int32_t> prices{};
+  std::vector<LegacyWeaponUpgradeRecord> weapon_upgrades{};
 };
 
 struct AccountRecord {
@@ -269,6 +281,7 @@ struct ActorMail {
   std::string npc_service{};
   std::string merchant_key{};
   std::vector<LegacyUserItem> merchant_items{};
+  std::vector<LegacyWeaponUpgradeRecord> weapon_upgrades{};
   std::vector<MerchantProductRuntimeConfig> merchant_products{};
   std::unordered_map<std::int32_t, std::int32_t> merchant_prices{};
   std::vector<std::int32_t> legacy_deal_std_modes{};

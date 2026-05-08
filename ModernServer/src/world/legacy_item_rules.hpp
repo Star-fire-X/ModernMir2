@@ -13,6 +13,8 @@ namespace mir2 {
 
 constexpr std::int32_t kLegacyItemUnableTakeOff = 0x02;
 constexpr std::int32_t kLegacyItemNeverTakeOff = 0x04;
+constexpr std::int32_t kLegacyItemDieAndBreak = 0x08;
+constexpr std::int32_t kLegacyItemNeverLose = 0x10;
 constexpr std::int32_t kLegacyRingTransparentItem = 111;
 constexpr std::int32_t kLegacyRingMakeStoneItem = 113;
 constexpr std::int32_t kLegacyRingRevivalItem = 114;
@@ -32,6 +34,8 @@ bool legacy_item_is_consumable(const ItemConfig& item_config);
 bool legacy_item_is_magic_book(const ItemConfig& item_config);
 bool legacy_item_is_scroll(const ItemConfig& item_config);
 bool legacy_item_is_unbind_bundle(const ItemConfig& item_config);
+bool legacy_is_upgrade_weapon_stuff(const ItemConfig& item_config);
+bool legacy_is_blessed_oil(const ItemConfig& item_config);
 std::string legacy_scroll_kind(const ItemConfig& item_config);
 ItemConfig legacy_upgraded_item_config(const ItemConfig& item_config,
                                        const LegacyUserItem& user_item);

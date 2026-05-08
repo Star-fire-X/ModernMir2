@@ -300,6 +300,7 @@ class Player : public GameObject {
   [[nodiscard]] std::uint8_t attack_mode() const { return character_.attack_mode; }
   [[nodiscard]] std::int32_t pk_point() const { return character_.pk_point; }
   [[nodiscard]] std::int32_t pk_level() const;
+  [[nodiscard]] std::int32_t body_luck_level() const;
   [[nodiscard]] std::uint64_t death_time_ms() const { return character_.death_time_ms; }
   [[nodiscard]] std::uint8_t quest_mark(std::int32_t index) const;
   [[nodiscard]] std::uint8_t quest_open_unit(std::int32_t index) const;
@@ -387,9 +388,12 @@ class Player : public GameObject {
   void set_daily_quest(std::uint32_t value);
   void refresh_derived_state(const std::unordered_map<std::int32_t, ItemConfig>& item_configs);
   void mark_dead(std::uint64_t now_ms);
+  [[nodiscard]] bool legacy_death_drop_settled() const { return legacy_death_drop_settled_; }
+  void mark_legacy_death_drop_settled() { legacy_death_drop_settled_ = true; }
   void revive_at(std::string map_id, std::int32_t x, std::int32_t y,
                  std::uint16_t hp, std::uint16_t mp);
   void inc_pk_point(std::int32_t amount);
+  void add_body_luck(double amount);
   void record_pk_hiter(std::uint64_t actor_id, std::uint64_t now_ms);
   [[nodiscard]] bool has_recent_pk_hiter(std::uint64_t actor_id, std::uint64_t now_ms) const;
   void set_in_safe_zone(bool value) { in_safe_zone_ = value; }
@@ -472,6 +476,7 @@ class Player : public GameObject {
   bool login_sign_{false};
   bool ready_run_{false};
   bool ghost_{false};
+  bool legacy_death_drop_settled_{false};
   bool legacy_see_health_gauge_{false};
   bool slave_relax_{false};
   LegacyRepairMode legacy_repair_mode_{LegacyRepairMode::normal};
@@ -864,7 +869,8 @@ class Npc : public GameObject {
       std::int32_t price_rate_percent = 100, std::string merchant_key = {},
       std::vector<MerchantProductRuntimeConfig> merchant_products = {},
       std::unordered_map<std::int32_t, std::int32_t> merchant_prices = {},
-      std::vector<std::int32_t> deal_std_modes = {});
+      std::vector<std::int32_t> deal_std_modes = {},
+      std::vector<LegacyWeaponUpgradeRecord> weapon_upgrades = {});
 
   [[nodiscard]] bool supports_buy() const;
   [[nodiscard]] bool supports_sell() const;
@@ -872,6 +878,7 @@ class Npc : public GameObject {
   [[nodiscard]] bool supports_storage() const;
   [[nodiscard]] bool supports_guild() const;
   [[nodiscard]] bool supports_castle() const;
+  [[nodiscard]] bool supports_weapon_upgrade() const;
   [[nodiscard]] bool legacy_due(std::uint64_t now_ms) const;
   [[nodiscard]] bool legacy_search_due(std::uint64_t now_ms) const;
   [[nodiscard]] std::int64_t legacy_run_time_ms() const { return run_time_ms_; }
@@ -886,6 +893,12 @@ class Npc : public GameObject {
   [[nodiscard]] std::int32_t price_rate_percent() const { return price_rate_percent_; }
   [[nodiscard]] const std::vector<LegacyUserItem>& merchant_items() const { return merchant_items_; }
   [[nodiscard]] std::vector<LegacyUserItem>& merchant_items_mutable() { return merchant_items_; }
+  [[nodiscard]] const std::vector<LegacyWeaponUpgradeRecord>& weapon_upgrades() const {
+    return weapon_upgrades_;
+  }
+  [[nodiscard]] std::vector<LegacyWeaponUpgradeRecord>& weapon_upgrades_mutable() {
+    return weapon_upgrades_;
+  }
   [[nodiscard]] const std::vector<MerchantProductRuntimeConfig>& merchant_products() const {
     return merchant_products_;
   }
@@ -915,12 +928,14 @@ class Npc : public GameObject {
   std::string service_{};
   std::string merchant_key_{};
   std::vector<LegacyUserItem> merchant_items_{};
+  std::vector<LegacyWeaponUpgradeRecord> weapon_upgrades_{};
   std::vector<MerchantProductRuntimeConfig> merchant_products_{};
   std::unordered_map<std::int32_t, std::int32_t> merchant_prices_{};
   std::vector<std::int32_t> deal_std_modes_{};
   std::vector<NpcDialogSectionConfig> dialog_sections_{};
   std::int32_t price_rate_percent_{100};
   bool buy_enabled_{false};
+  bool weapon_upgrade_enabled_{false};
   std::int64_t run_time_ms_{0};
   std::uint64_t run_next_tick_ms_{1000};
   std::uint64_t search_time_ms_{0};

@@ -40,6 +40,21 @@ const ItemConfig* find_item_config_by_name(
   return nullptr;
 }
 
+bool dialog_has_weapon_upgrade_link(const std::vector<NpcDialogSectionConfig>& sections) {
+  for (const auto& section : sections) {
+    const auto action = util::lower_copy(section.action);
+    if (action == "@upgradenow" || action == "@getbackupgnow") {
+      return true;
+    }
+    const auto text = util::lower_copy(section.text);
+    if (text.find("@upgradenow") != std::string::npos ||
+        text.find("@getbackupgnow") != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
 MonsterAiProfile infer_monster_ai_profile(const MonsterDefConfig& def) {
   switch (def.race_server) {
     case 50:
@@ -435,7 +450,8 @@ void LogicRuntime::initialize() {
     auto [map_it, inserted] = maps_.emplace(
         map.id, std::make_unique<MapActor>(map, config_.budgets, item_configs_, magic_configs_,
                                            config_.map_quests, castle_dialog_context_,
-                                           monster_defs_, &make_index_allocator_));
+                                           monster_defs_, &make_index_allocator_,
+                                           config_.runtime.black_stone_name));
     map_it->second->set_legacy_random(&legacy_random_);
     if (inserted) {
       map_order_.push_back(map.id);
@@ -502,6 +518,7 @@ void LogicRuntime::initialize() {
     if (const auto state = merchant_states_.find(mail.merchant_key); state != merchant_states_.end()) {
       mail.merchant_items = state->second.goods;
       mail.merchant_prices = state->second.prices;
+      mail.weapon_upgrades = state->second.weapon_upgrades;
     }
     mail.x = npc.x;
     mail.y = npc.y;
@@ -704,8 +721,10 @@ bool LogicRuntime::is_merchant_npc_config(const NpcConfig& npc, const ActorMail&
          service.find("sell") != std::string::npos ||
          service.find("repair") != std::string::npos ||
          service.find("storage") != std::string::npos ||
+         service.find("upgrade") != std::string::npos ||
          service.find("merchant") != std::string::npos ||
-         service.find("shop") != std::string::npos;
+         service.find("shop") != std::string::npos ||
+         dialog_has_weapon_upgrade_link(npc.dialog_sections);
 }
 
 void LogicRuntime::add_stage_trace(RuntimeDispatch& dispatch, std::string stage,

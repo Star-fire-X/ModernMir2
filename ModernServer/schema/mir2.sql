@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS characters (
   script_param_blob BLOB NOT NULL DEFAULT X'',
   daily_quest INTEGER NOT NULL DEFAULT 0,
   slave_blob BLOB NOT NULL DEFAULT X'',
+  body_luck REAL NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (account_id, character_name),
   FOREIGN KEY (account_id) REFERENCES accounts(account_id)
@@ -91,6 +92,7 @@ CREATE TABLE IF NOT EXISTS merchant_state (
   npc_id TEXT NOT NULL DEFAULT '',
   map_id TEXT NOT NULL DEFAULT '',
   goods_blob BLOB NOT NULL,
+  upgrade_blob BLOB NOT NULL DEFAULT X'',
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

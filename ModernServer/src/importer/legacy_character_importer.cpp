@@ -292,6 +292,7 @@ CharacterRecord to_character_record(const LegacyMirRecord& record,
   character.attack_mode = static_cast<std::uint8_t>(std::clamp<std::int32_t>(human.attack_mode, 0, 4));
   character.pk_point = human.pk_point;
   character.daily_quest = human.daily_quest;
+  character.body_luck = human.body_luck;
   character.ability.level = std::max<std::uint8_t>(human.level, 1);
   character.ability.hp = human.hp;
   character.ability.mp = human.mp;

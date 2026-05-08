@@ -767,6 +767,12 @@ LegacyPacket make_level_up_packet(std::uint64_t session_id, const Player& player
                            player.character().ability.level, 0, 0));
 }
 
+LegacyPacket make_break_weapon_packet(std::uint64_t session_id, const Player& player) {
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmBreakWeapon, static_cast<std::int32_t>(player.id()), 0, 0, 0));
+}
+
 LegacyPacket make_sub_ability_packet(std::uint64_t session_id, const Player& player) {
   const auto hit_point =
       static_cast<std::uint8_t>(std::clamp(player.accuracy_point(), 0, 255));

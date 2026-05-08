@@ -93,7 +93,11 @@ void MapActor::handle_player_status_effects(Player& player, RuntimeDispatch& dis
           current_tick * static_cast<std::uint64_t>(std::max<std::uint32_t>(budgets_.tick_ms, 1)));
     }
     if (died) {
-      player.mark_dead(current_tick * static_cast<std::uint64_t>(std::max<std::uint32_t>(budgets_.tick_ms, 1)));
+      const auto now_ms = current_tick *
+                          static_cast<std::uint64_t>(
+                              std::max<std::uint32_t>(budgets_.tick_ms, 1));
+      player.mark_dead(now_ms);
+      static_cast<void>(settle_player_death(player, dispatch, current_tick, now_ms));
     }
     for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
       if (watcher.id() != player.id() && !is_legacy_visible_to(watcher, player)) {
