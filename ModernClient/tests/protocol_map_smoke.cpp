@@ -16,6 +16,16 @@ bool has_entry(const std::array<mir2::client::protocol_migration::MappingEntry, 
   });
 }
 
+template <std::size_t Size>
+const mir2::client::protocol_migration::MappingEntry* find_entry(
+    const std::array<mir2::client::protocol_migration::MappingEntry, Size>& entries,
+    const std::string_view name) {
+  const auto it = std::find_if(entries.begin(), entries.end(), [&](const auto& entry) {
+    return entry.delphi_entry == name;
+  });
+  return it == entries.end() ? nullptr : &*it;
+}
+
 }  // namespace
 
 int main() {
@@ -32,6 +42,20 @@ int main() {
   assert(has_entry(kDelphiClientGetMappings, "ClientGetNeedUpdateAccount"));
   assert(has_entry(kDelphiClientGetMappings, "ClientGetSelectServer"));
   assert(has_entry(kDelphiClientGetMappings, "ClientGetStartPlay"));
+
+  const auto assert_not_planned = [](const auto* entry) {
+    assert(entry != nullptr);
+    assert(entry->status != MigrationStatus::planned);
+  };
+  assert_not_planned(find_entry(kDelphiSendMappings, "SendTakeOnItem"));
+  assert_not_planned(find_entry(kDelphiSendMappings, "SendTakeOffItem"));
+  assert_not_planned(find_entry(kDelphiSendMappings, "SendDropItem"));
+  assert_not_planned(find_entry(kDelphiSendMappings, "SendBuyItem"));
+  assert_not_planned(find_entry(kDelphiSendMappings, "SendStorageItem"));
+  assert_not_planned(find_entry(kDelphiSendMappings, "SendDealTry"));
+  assert_not_planned(find_entry(kDelphiClientGetMappings, "ClientGetBagItmes"));
+  assert_not_planned(find_entry(kDelphiClientGetMappings, "ClientGetSenduseItems"));
+  assert_not_planned(find_entry(kDelphiClientGetMappings, "ClientGetReadMiniMap"));
 
   SelectServerRequest request;
   request.name = "ModernServer";

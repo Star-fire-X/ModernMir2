@@ -305,7 +305,8 @@ int main() {
   send_message(*socket, mir2::client_v1::NpcClickRequest{1}, sequence);
   const auto dialog = reader.wait_for_matching<mir2::client_v1::NpcDialog>(
       [](const mir2::client_v1::NpcDialog& message) {
-        return message.merchant_id == 1 && message.text.find("<Buy/@buy>") != std::string::npos;
+        return message.merchant_id == 1 && message.text.find("Trader/") == 0 &&
+               message.text.find("<Buy/@buy>") != std::string::npos;
       });
   if (!dialog.has_value()) {
     stop_services();

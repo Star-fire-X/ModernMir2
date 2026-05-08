@@ -426,12 +426,7 @@ std::vector<std::pair<std::int32_t, LegacyClientItem>> decode_equipment_item_lis
 }
 
 std::string merchant_dialog_text(std::string_view body) {
-  auto decoded = legacy_decode_string(body);
-  const auto slash = decoded.find('/');
-  if (slash != std::string::npos) {
-    decoded.erase(0, slash + 1);
-  }
-  return decoded;
+  return legacy_decode_string(body);
 }
 
 std::vector<client_v1::MerchantGoodsItem> merchant_goods_from_legacy_body(
