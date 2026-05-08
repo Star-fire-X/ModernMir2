@@ -188,6 +188,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         queue_packet(dispatch, requester->session_id(),
                      make_send_user_sell_packet(requester->session_id(), target_it->second->id()));
       } else if (merchant->supports_repair()) {
+        requester->set_legacy_repair_mode(LegacyRepairMode::normal);
         queue_packet(dispatch, requester->session_id(),
                      make_send_user_repair_packet(requester->session_id(), target_it->second->id()));
       }
@@ -830,24 +831,28 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
       }
 
-      if (mail.payload == "@buy" && merchant->supports_buy()) {
+      if (lowered_payload == "@buy" && merchant->supports_buy()) {
         queue_packet(dispatch, requester->session_id(),
                      make_send_goods_list_packet(requester->session_id(), target_it->second->id(),
                                                  *merchant, item_configs_));
-      } else if (mail.payload == "@sell" && merchant->supports_sell()) {
+      } else if (lowered_payload == "@sell" && merchant->supports_sell()) {
         queue_packet(dispatch, requester->session_id(),
                      make_send_user_sell_packet(requester->session_id(), target_it->second->id()));
-      } else if (mail.payload == "@repair" && merchant->supports_repair()) {
+      } else if ((lowered_payload == "@repair" || lowered_payload == "@s_repair") &&
+                 merchant->supports_repair()) {
+        requester->set_legacy_repair_mode(lowered_payload == "@s_repair"
+                                              ? LegacyRepairMode::special
+                                              : LegacyRepairMode::normal);
         queue_packet(dispatch, requester->session_id(),
                      make_send_user_repair_packet(requester->session_id(), target_it->second->id()));
-      } else if (mail.payload == "@storage" && merchant->supports_storage()) {
+      } else if (lowered_payload == "@storage" && merchant->supports_storage()) {
         const auto storage_count = static_cast<std::uint16_t>(std::count_if(
             requester->character().storage_items.begin(), requester->character().storage_items.end(),
             [](const LegacyUserItem& item) { return !is_empty(item); }));
         queue_packet(dispatch, requester->session_id(),
                      make_send_user_storage_packet(requester->session_id(), target_it->second->id(),
                                                    storage_count));
-      } else if (mail.payload == "@getback" && merchant->supports_storage()) {
+      } else if (lowered_payload == "@getback" && merchant->supports_storage()) {
         queue_packet(dispatch, requester->session_id(),
                      make_save_item_list_packet(requester->session_id(), target_it->second->id(),
                                                 *requester, item_configs_));
@@ -916,7 +921,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       const auto* item = requester->bag_item_mutable(mail.item_make_index, mail.payload, item_configs_);
-      const auto cost = item != nullptr ? compute_repair_cost(*item, item_configs_) : -1;
+      const auto cost = item != nullptr
+                            ? compute_repair_cost(*item, item_configs_, *merchant,
+                                                  requester->legacy_repair_mode())
+                            : -1;
       queue_packet(dispatch, requester->session_id(),
                    make_send_repair_cost_packet(requester->session_id(), cost));
       break;
@@ -1119,17 +1127,21 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                      make_user_repair_result_packet(requester->session_id(), false, 0, 0, 0));
         break;
       }
-      const auto cost = compute_repair_cost(*item, item_configs_);
+      const auto repair_mode = requester->legacy_repair_mode();
+      const auto cost = compute_repair_cost(*item, item_configs_, *merchant, repair_mode);
       if (cost < 0 || (cost > 0 && !requester->can_spend_gold(cost))) {
         queue_packet(dispatch, requester->session_id(),
                      make_user_repair_result_packet(requester->session_id(), false, 0, 0, 0));
         break;
       }
       requester->spend_gold(cost);
-      const auto dura_gap = static_cast<std::int32_t>(item->dura_max) - static_cast<std::int32_t>(item->dura);
-      if (dura_gap > 0) {
-        item->dura_max =
-            static_cast<std::uint16_t>(std::max(0, static_cast<std::int32_t>(item->dura_max) - dura_gap / 30));
+      if (repair_mode == LegacyRepairMode::normal) {
+        const auto dura_gap =
+            static_cast<std::int32_t>(item->dura_max) - static_cast<std::int32_t>(item->dura);
+        if (dura_gap > 0) {
+          item->dura_max = static_cast<std::uint16_t>(
+              std::max(0, static_cast<std::int32_t>(item->dura_max) - dura_gap / 30));
+        }
       }
       item->dura = item->dura_max;
       queue_packet(dispatch, requester->session_id(),
@@ -2124,21 +2136,6 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       add_legacy_trace(dispatch, "LegacyCombat", "ack", effective_mail, current_tick, now_ms, true, 0, 0,
                        "attack");
 
-      if (auto* weapon = attacker->equipped_item_mutable(static_cast<std::size_t>(kEquipWeapon));
-          weapon != nullptr && !is_empty(*weapon) && weapon->dura > 0) {
-        const auto before = *weapon;
-        weapon->dura = weapon->dura > 100 ? static_cast<std::uint16_t>(weapon->dura - 100) : 0;
-        queue_packet(dispatch, attacker->session_id(),
-                     make_update_item_packet(attacker->session_id(), attacker->id(), *weapon,
-                                             item_configs_));
-        if (display_dura_units(before.dura) != display_dura_units(weapon->dura) ||
-            weapon->dura == 0) {
-          queue_packet(dispatch, attacker->session_id(),
-                       make_dura_change_packet(attacker->session_id(), kEquipWeapon, *weapon,
-                                               item_configs_));
-        }
-      }
-
       for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
         if (watcher.id() != attacker->id() && !is_legacy_visible_to(watcher, *attacker)) {
           return;
@@ -2189,6 +2186,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       std::string shield_name{};
       bool target_died = false;
       Monster* slain_monster = nullptr;
+      std::int32_t weapon_durability_loss = 0;
 
       if (auto* player_target = as_player(target); player_target != nullptr) {
         if (!config_.fight_zone && !config_.fight3_zone && player_target->pk_level() < 2) {
@@ -2201,54 +2199,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         shield_name = damage_result.shield_name;
         target_died = player_target->is_dead();
         if (applied_damage > 0) {
-          const auto struck_wdam =
-              legacy_random_value(dispatch, "LegacyCombat", "struck_dura_damage", 10,
-                                  attacker->id(), player_target->id(), "StruckDamage",
-                                  now_ms, current_tick) +
-              5;
-          auto apply_struck_dura = [&](std::size_t slot, bool force) {
-            auto* item = player_target->equipped_item_mutable(slot);
-            if (item == nullptr || is_empty(*item) || item->dura == 0) {
-              return;
-            }
-            if (!force) {
-              const auto chance =
-                  legacy_random_value(dispatch, "LegacyCombat", "struck_dura_gate", 8,
-                                      attacker->id(), player_target->id(), "StruckDamage",
-                                      now_ms, current_tick);
-              if (chance != 0) {
-                return;
-              }
-            }
-            const auto before = *item;
-            item->dura = item->dura > struck_wdam
-                             ? static_cast<std::uint16_t>(item->dura - struck_wdam)
-                             : 0;
-            queue_packet(dispatch, player_target->session_id(),
-                         make_update_item_packet(player_target->session_id(), player_target->id(),
-                                                 *item, item_configs_));
-            if (display_dura_units(before.dura) != display_dura_units(item->dura) ||
-                item->dura == 0) {
-              queue_packet(dispatch, player_target->session_id(),
-                           make_dura_change_packet(player_target->session_id(), slot, *item,
-                                                   item_configs_));
-            }
-            if (item->dura == 0) {
-              player_target->refresh_derived_state(item_configs_);
-              queue_packet(dispatch, player_target->session_id(),
-                           make_ability_packet(player_target->session_id(),
-                                               player_target->character()));
-              queue_packet(dispatch, player_target->session_id(),
-                           make_sub_ability_packet(player_target->session_id(), *player_target));
-            }
-          };
-          apply_struck_dura(kEquipDress, true);
-          for (std::size_t slot = 1; slot <= kEquipBoots; ++slot) {
-            if (slot == kEquipBujuk) {
-              continue;
-            }
-            apply_struck_dura(slot, false);
-          }
+          weapon_durability_loss = roll_legacy_weapon_durability_loss(
+              *attacker, *target, dispatch, current_tick, now_ms);
+          static_cast<void>(apply_legacy_struck_equipment_durability(
+              *player_target, attacker->id(), dispatch, current_tick, now_ms,
+              "LegacyCombat"));
         }
         if (target_died) {
           player_target->mark_dead(now_ms);
@@ -2265,6 +2220,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         applied_damage = apply_legacy_monster_damage(
             objects_, *monster_target, damage, attacker->id(), now_ms);
         if (applied_damage > 0) {
+          weapon_durability_loss = roll_legacy_weapon_durability_loss(
+              *attacker, *target, dispatch, current_tick, now_ms);
           notify_owned_slaves_target(*attacker, monster_target->id(), now_ms);
         }
         target_died = monster_target->is_dead();
@@ -2287,6 +2244,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
         break;
       }
+
+      static_cast<void>(
+          apply_legacy_weapon_durability_loss(*attacker, weapon_durability_loss, dispatch));
 
       for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
         if (watcher.id() != target->id() && !is_legacy_visible_to(watcher, *target)) {

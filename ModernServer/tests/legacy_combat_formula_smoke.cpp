@@ -35,6 +35,11 @@ std::optional<mir2::DecodedLegacyGamePacket> find_packet(const mir2::RuntimeDisp
   return packets.front();
 }
 
+bool has_packet(const mir2::RuntimeDispatch& dispatch, std::uint16_t ident,
+                std::uint64_t session_id) {
+  return find_packet(dispatch, ident, session_id).has_value();
+}
+
 template <typename T>
 std::optional<T> decode_body(std::string_view body) {
   T value{};
@@ -247,6 +252,218 @@ int main() {
     if (!item.has_value() || item->make_index != 2001 || item->dura >= 500 ||
         dura->message.param != 0 || dura->message.tag != 1000) {
       return fail(6);
+    }
+  }
+
+  {
+    mir2::HostConfig config;
+    config.runtime.legacy_random_seed = 2;
+    mir2::MapConfig map{"0", "SlotDuraMap", {}, 20, 20, 10, 10};
+    map.allow_pk = true;
+    map.fight_zone = true;
+    config.maps.push_back(map);
+    config.items.push_back(mir2::ItemConfig{3, "Training Necklace", 1, 10, 19, 0, 0, 1000, 0, 0, 0});
+
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto attacker = make_player("SlotAttacker", 10, 10);
+    attacker.ability.dc = mir2::make_word(10, 10);
+    auto target = make_player("SlotTarget", 10, 9);
+    target.equipped_items[mir2::kEquipNecklace].index = 3;
+    target.equipped_items[mir2::kEquipNecklace].make_index = 3001;
+    target.equipped_items[mir2::kEquipNecklace].dura = 500;
+    target.equipped_items[mir2::kEquipNecklace].dura_max = 1000;
+    static_cast<void>(runtime.route_logic_command(make_enter(106, attacker)));
+    static_cast<void>(runtime.tick());
+    static_cast<void>(runtime.route_logic_command(make_enter(107, target)));
+    const auto target_login = runtime.tick();
+    const auto target_map = find_packet(target_login, mir2::kSmNewMap, 107);
+    if (!target_map.has_value()) {
+      return fail(7);
+    }
+    const auto target_actor_id =
+        static_cast<std::uint64_t>(static_cast<std::uint32_t>(target_map->message.recog));
+
+    static_cast<void>(runtime.route_logic_command(make_attack(106, 0, 10, 9, target_actor_id)));
+    const auto dispatch = runtime.tick();
+    const auto update = find_packet(dispatch, mir2::kSmUpdateItem, 107);
+    if (!update.has_value()) {
+      return fail(8);
+    }
+    const auto item = decode_body<mir2::LegacyClientItem>(update->body);
+    if (!item.has_value() || item->make_index != 3001 || item->dura >= 500) {
+      return fail(9);
+    }
+  }
+
+  {
+    mir2::HostConfig config;
+    config.runtime.legacy_random_seed = 2;
+    mir2::MapConfig map{"0", "BujukSkipMap", {}, 20, 20, 10, 10};
+    map.allow_pk = true;
+    map.fight_zone = true;
+    config.maps.push_back(map);
+    config.items.push_back(mir2::ItemConfig{4, "Training Bujuk", 1, 10, 25, 0, 0, 1000, 0, 0, 0});
+
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto attacker = make_player("BujukAttacker", 10, 10);
+    attacker.ability.dc = mir2::make_word(10, 10);
+    auto target = make_player("BujukTarget", 10, 9);
+    target.equipped_items[mir2::kEquipBujuk].index = 4;
+    target.equipped_items[mir2::kEquipBujuk].make_index = 4001;
+    target.equipped_items[mir2::kEquipBujuk].dura = 500;
+    target.equipped_items[mir2::kEquipBujuk].dura_max = 1000;
+    static_cast<void>(runtime.route_logic_command(make_enter(108, attacker)));
+    static_cast<void>(runtime.tick());
+    static_cast<void>(runtime.route_logic_command(make_enter(109, target)));
+    const auto target_login = runtime.tick();
+    const auto target_map = find_packet(target_login, mir2::kSmNewMap, 109);
+    if (!target_map.has_value()) {
+      return fail(10);
+    }
+    const auto target_actor_id =
+        static_cast<std::uint64_t>(static_cast<std::uint32_t>(target_map->message.recog));
+
+    static_cast<void>(runtime.route_logic_command(make_attack(108, 0, 10, 9, target_actor_id)));
+    const auto dispatch = runtime.tick();
+    if (has_packet(dispatch, mir2::kSmUpdateItem, 109) ||
+        has_packet(dispatch, mir2::kSmDuraChange, 109)) {
+      return fail(11);
+    }
+  }
+
+  {
+    mir2::HostConfig config;
+    config.runtime.legacy_random_seed = 1;
+    mir2::MapConfig map{"0", "DuraOrderMap", {}, 20, 20, 10, 10};
+    map.allow_pk = true;
+    map.fight_zone = true;
+    config.maps.push_back(map);
+    config.items.push_back(mir2::ItemConfig{5, "Training Sword", 1, 100, 5, 0, 10, 1000, 1, 0, 0});
+    config.items.push_back(mir2::ItemConfig{6, "Training Armor", 1, 10, 10, 0, 0, 1000, 0, 0, 0});
+
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto attacker = make_player("OrderAttacker", 10, 10);
+    attacker.ability.dc = mir2::make_word(10, 10);
+    attacker.equipped_items[mir2::kEquipWeapon] = mir2::LegacyUserItem{5001, 5, 1000, 1000};
+    auto target = make_player("OrderTarget", 10, 9);
+    target.equipped_items[mir2::kEquipDress] = mir2::LegacyUserItem{6001, 6, 500, 1000};
+    static_cast<void>(runtime.route_logic_command(make_enter(110, attacker)));
+    static_cast<void>(runtime.tick());
+    static_cast<void>(runtime.route_logic_command(make_enter(111, target)));
+    const auto target_login = runtime.tick();
+    const auto target_map = find_packet(target_login, mir2::kSmNewMap, 111);
+    if (!target_map.has_value()) {
+      return fail(12);
+    }
+    const auto target_actor_id =
+        static_cast<std::uint64_t>(static_cast<std::uint32_t>(target_map->message.recog));
+
+    static_cast<void>(runtime.route_logic_command(make_attack(110, 0, 10, 9, target_actor_id)));
+    const auto dispatch = runtime.tick();
+    std::optional<std::size_t> weapon_trace;
+    std::optional<std::size_t> struck_trace;
+    for (std::size_t i = 0; i < dispatch.legacy_traces.size(); ++i) {
+      if (dispatch.legacy_traces[i].action == "weapon_dura_damage") {
+        weapon_trace = i;
+      } else if (dispatch.legacy_traces[i].action == "struck_dura_damage") {
+        struck_trace = i;
+      }
+    }
+    if (!weapon_trace.has_value() || !struck_trace.has_value() ||
+        *weapon_trace >= *struck_trace) {
+      return fail(13);
+    }
+  }
+
+  {
+    mir2::HostConfig config;
+    config.runtime.legacy_random_seed = 1;
+    config.maps.push_back(mir2::MapConfig{"0", "WeaponDuraMap", {}, 20, 20, 10, 10});
+    config.spawns.push_back(
+        mir2::SpawnConfig{"0", "monster", "Dummy", 10, 9, 30000, 1, 30, 0, 0, 0, 20});
+    config.items.push_back(mir2::ItemConfig{4, "Training Sword", 1, 100, 5, 0, 10, 1000, 1, 0, 0});
+
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto hero = make_player("WeaponWear", 10, 10);
+    hero.ability.dc = mir2::make_word(10, 10);
+    hero.equipped_items[mir2::kEquipWeapon] = mir2::LegacyUserItem{4001, 4, 1000, 1000};
+    static_cast<void>(runtime.route_logic_command(make_enter(107, hero)));
+    static_cast<void>(runtime.tick());
+
+    static_cast<void>(runtime.route_logic_command(make_attack(107, 0, 10, 9, 1)));
+    const auto dispatch = runtime.tick();
+    const auto update = find_packet(dispatch, mir2::kSmUpdateItem, 107);
+    if (!update.has_value() || has_packet(dispatch, mir2::kSmDuraChange, 107)) {
+      return fail(14);
+    }
+    const auto item = decode_body<mir2::LegacyClientItem>(update->body);
+    if (!item.has_value() || item->make_index != 4001 || item->dura >= 1000 ||
+        item->dura < 994) {
+      return fail(15);
+    }
+  }
+
+  {
+    mir2::HostConfig config;
+    config.runtime.legacy_random_seed = 1;
+    config.maps.push_back(mir2::MapConfig{"0", "StrongWeaponMap", {}, 20, 20, 10, 10});
+    config.spawns.push_back(
+        mir2::SpawnConfig{"0", "monster", "Dummy", 10, 9, 30000, 1, 30, 0, 0, 0, 20});
+    mir2::ItemConfig sword{5, "Strong Sword", 1, 100, 5, 0, 10, 1000, 1, 0, 0};
+    sword.special_pwr = 10;
+    config.items.push_back(sword);
+
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto hero = make_player("StrongWeapon", 10, 10);
+    hero.ability.dc = mir2::make_word(10, 10);
+    hero.equipped_items[mir2::kEquipWeapon] = mir2::LegacyUserItem{5001, 5, 1000, 1000};
+    static_cast<void>(runtime.route_logic_command(make_enter(108, hero)));
+    static_cast<void>(runtime.tick());
+
+    static_cast<void>(runtime.route_logic_command(make_attack(108, 0, 10, 9, 1)));
+    const auto dispatch = runtime.tick();
+    if (has_packet(dispatch, mir2::kSmUpdateItem, 108) ||
+        has_packet(dispatch, mir2::kSmDuraChange, 108)) {
+      return fail(16);
+    }
+  }
+
+  {
+    mir2::HostConfig config;
+    config.runtime.legacy_random_seed = 1;
+    config.maps.push_back(mir2::MapConfig{"0", "WeaponBreakMap", {}, 20, 20, 10, 10});
+    config.spawns.push_back(
+        mir2::SpawnConfig{"0", "monster", "Dummy", 10, 9, 30000, 1, 30, 0, 0, 0, 20});
+    config.items.push_back(mir2::ItemConfig{6, "Fragile Sword", 1, 100, 5, 0, 10, 1000, 1, 0, 0});
+
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto hero = make_player("Breaker", 10, 10);
+    hero.ability.dc = mir2::make_word(10, 10);
+    hero.equipped_items[mir2::kEquipWeapon] = mir2::LegacyUserItem{6001, 6, 2, 1000};
+    static_cast<void>(runtime.route_logic_command(make_enter(109, hero)));
+    static_cast<void>(runtime.tick());
+
+    static_cast<void>(runtime.route_logic_command(make_attack(109, 0, 10, 9, 1)));
+    const auto dispatch = runtime.tick();
+    const auto update = find_packet(dispatch, mir2::kSmUpdateItem, 109);
+    const auto dura = find_packet(dispatch, mir2::kSmDuraChange, 109);
+    if (!update.has_value() || !dura.has_value() ||
+        !has_packet(dispatch, mir2::kSmAbility, 109) ||
+        !has_packet(dispatch, mir2::kSmSubAbility, 109) ||
+        has_packet(dispatch, mir2::kSmFeatureChanged, 109)) {
+      return fail(17);
+    }
+    const auto item = decode_body<mir2::LegacyClientItem>(update->body);
+    if (!item.has_value() || item->make_index != 6001 || item->dura != 0 ||
+        dura->message.recog != 0 || dura->message.param != mir2::kEquipWeapon ||
+        dura->message.tag != 1000 || dura->message.series != 0) {
+      return fail(18);
     }
   }
 

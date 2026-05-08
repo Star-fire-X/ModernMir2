@@ -1072,6 +1072,10 @@ bool Player::clear_legacy_transparent(std::uint64_t current_tick) {
   return true;
 }
 
+bool Player::legacy_poison_damage_armor_active(std::uint64_t current_tick) const {
+  return legacy_buffs_.active(LegacyBuffKind::poison_damage_armor, current_tick);
+}
+
 std::size_t Player::clear_negative_status_effects(std::uint64_t current_tick) {
   const auto before = status_effects_.size();
   status_effects_.erase(
