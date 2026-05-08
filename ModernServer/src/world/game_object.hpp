@@ -60,9 +60,23 @@ struct ExperienceResult {
 
 struct DamageResult {
   std::int32_t hp_damage{0};
+  std::int32_t mp_damage{0};
   std::int32_t absorbed_damage{0};
   bool shield_broken{false};
   std::string shield_name{};
+};
+
+struct LegacyEquipmentSpecials {
+  std::int32_t luck{0};
+  std::int32_t unluck{0};
+  std::int32_t anti_poison{0};
+  std::int32_t undead_power{0};
+  std::int32_t mana_to_health{0};
+  std::int32_t suck_health_rate{0};
+  bool make_stone{false};
+  bool revival{false};
+  bool magic_shield{false};
+  bool equipment_transparent{false};
 };
 
 struct TimedStatusEffect {
@@ -256,6 +270,33 @@ class Player : public GameObject {
   [[nodiscard]] bool can_spend_gold(std::int32_t amount) const;
   [[nodiscard]] std::int32_t accuracy_point() const { return accuracy_point_; }
   [[nodiscard]] std::int32_t speed_point() const { return speed_point_; }
+  [[nodiscard]] const LegacyEquipmentSpecials& legacy_equipment_specials() const {
+    return legacy_equipment_specials_;
+  }
+  [[nodiscard]] std::int32_t legacy_luck() const {
+    return legacy_equipment_specials_.luck - legacy_equipment_specials_.unluck;
+  }
+  [[nodiscard]] std::int32_t legacy_anti_poison() const {
+    return legacy_equipment_specials_.anti_poison;
+  }
+  [[nodiscard]] std::int32_t legacy_undead_power() const {
+    return legacy_equipment_specials_.undead_power;
+  }
+  [[nodiscard]] bool legacy_make_stone() const {
+    return legacy_equipment_specials_.make_stone;
+  }
+  [[nodiscard]] bool legacy_revival_active() const {
+    return legacy_equipment_specials_.revival;
+  }
+  [[nodiscard]] bool legacy_magic_shield_active() const {
+    return legacy_equipment_specials_.magic_shield;
+  }
+  [[nodiscard]] bool legacy_equipment_transparent_active() const {
+    return legacy_equipment_specials_.equipment_transparent;
+  }
+  [[nodiscard]] bool legacy_revival_available(std::uint64_t now_ms) const;
+  void mark_legacy_revival(std::uint64_t now_ms);
+  [[nodiscard]] std::int32_t apply_legacy_suck_health(std::int32_t damage);
   [[nodiscard]] std::uint8_t attack_mode() const { return character_.attack_mode; }
   [[nodiscard]] std::int32_t pk_point() const { return character_.pk_point; }
   [[nodiscard]] std::int32_t pk_level() const;
@@ -326,6 +367,7 @@ class Player : public GameObject {
   [[nodiscard]] bool clear_legacy_transparent(std::uint64_t current_tick);
   [[nodiscard]] bool legacy_poison_damage_armor_active(std::uint64_t current_tick) const;
   [[nodiscard]] std::size_t clear_negative_status_effects(std::uint64_t current_tick);
+  [[nodiscard]] std::size_t clear_negative_legacy_buffs(std::uint64_t current_tick);
   [[nodiscard]] StatusTickResult clear_legacy_buffs_on_death(std::uint64_t current_tick);
   [[nodiscard]] StatusTickResult clear_legacy_buffs_on_leave_map(std::uint64_t current_tick);
   [[nodiscard]] StatusTickResult clear_legacy_buffs_on_logout(std::uint64_t current_tick);
@@ -412,6 +454,9 @@ class Player : public GameObject {
   bool in_safe_zone_{false};
   std::int32_t accuracy_point_{10};
   std::int32_t speed_point_{10};
+  LegacyEquipmentSpecials legacy_equipment_specials_{};
+  double legacy_suck_health_accumulator_{0.0};
+  std::uint64_t latest_legacy_revival_time_ms_{0};
   std::vector<PkHiterInfo> pk_hiters_{};
   std::vector<TimedStatusEffect> status_effects_{};
   std::uint64_t next_move_tick_{0};

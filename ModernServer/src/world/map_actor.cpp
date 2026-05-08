@@ -484,30 +484,10 @@ std::pair<std::int32_t, std::int32_t> actor_physical_defense_range(const GameObj
   return {defense, defense};
 }
 
-std::int32_t legacy_packed_attack_power(const Player& attacker, std::uint16_t ident,
-                                        std::int32_t roll) {
-  const auto low = packed_min(attacker.character().ability.dc);
-  const auto high = std::max(low, packed_max(attacker.character().ability.dc));
-  const auto raw = low + std::clamp(roll, 0, high - low);
-  return std::max(0, static_cast<std::int32_t>(
-                         std::lround(static_cast<double>(raw) * resolve_attack_multiplier(ident))));
-}
-
 std::int32_t legacy_player_undead_power(
     const Player& attacker, const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
-  std::int32_t power = 0;
-  for (const auto& item : attacker.character().equipped_items) {
-    if (is_empty(item) || item.dura == 0) {
-      continue;
-    }
-    const auto* config = find_item_config(item_configs, item.index);
-    if (config == nullptr) {
-      continue;
-    }
-    const auto upgraded = legacy_upgraded_item_config(*config, item);
-    power += std::max(upgraded.undead, 0);
-  }
-  return power;
+  static_cast<void>(item_configs);
+  return attacker.legacy_undead_power();
 }
 
 std::int32_t legacy_physical_struck_damage(const GameObject& target, std::int32_t damage,
@@ -653,8 +633,100 @@ struct LegacyMagicDamageResult {
   std::uint64_t slain_monster_id{0};
 };
 
+bool try_legacy_revival_impl(
+    std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
+    const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
+    const std::string& map_id,
+    Player& player, RuntimeDispatch& dispatch,
+    std::uint64_t current_tick, std::uint64_t now_ms) {
+  if (!player.is_dead() || !player.legacy_revival_available(now_ms)) {
+    return false;
+  }
+
+  std::size_t revival_slot = kMaxEquipSlots;
+  for (std::size_t slot = 0; slot < player.character().equipped_items.size(); ++slot) {
+    const auto* item = player.equipped_item(slot);
+    if (item == nullptr || is_empty(*item) || item->dura == 0) {
+      continue;
+    }
+    const auto* config = find_item_config(item_configs, item->index);
+    if (config != nullptr && config->shape == kLegacyRingRevivalItem) {
+      revival_slot = slot;
+      break;
+    }
+  }
+  if (revival_slot == kMaxEquipSlots) {
+    return false;
+  }
+
+  player.mark_legacy_revival(now_ms);
+  const auto previous_status = player.character().status;
+  if (auto* item = player.equipped_item_mutable(revival_slot); item != nullptr) {
+    const auto before = *item;
+    if (item->dura <= 1000) {
+      *item = LegacyUserItem{};
+      queue_packet(dispatch, player.session_id(),
+                   make_del_item_packet(player.session_id(), player.id(), before,
+                                        item_configs));
+    } else {
+      item->dura = static_cast<std::uint16_t>(item->dura - 1000);
+      queue_packet(dispatch, player.session_id(),
+                   make_update_item_packet(player.session_id(), player.id(), *item,
+                                           item_configs));
+      queue_packet(dispatch, player.session_id(),
+                   make_dura_change_packet(player.session_id(), revival_slot, *item,
+                                           item_configs));
+    }
+  }
+
+  static_cast<void>(player.clear_negative_status_effects(current_tick));
+  static_cast<void>(player.clear_negative_legacy_buffs(current_tick));
+  player.refresh_derived_state(item_configs);
+  static_cast<void>(player.apply_heal(player.character().ability.max_hp));
+  queue_packet(dispatch, player.session_id(),
+               make_health_spell_changed_packet(player.session_id(), player));
+  queue_packet(dispatch, player.session_id(),
+               make_ability_packet(player.session_id(), player.character()));
+  queue_packet(dispatch, player.session_id(),
+               make_sub_ability_packet(player.session_id(), player));
+  if (player.character().status != previous_status) {
+    queue_packet(dispatch, player.session_id(),
+                 make_char_status_changed_packet(player.session_id(), player));
+    for_each_player(objects, [&](std::uint64_t actor_id, const Player& watcher) {
+      if (actor_id == player.id() || !is_legacy_visible_to(watcher, player)) {
+        return;
+      }
+      queue_packet(dispatch, watcher.session_id(),
+                   make_char_status_changed_packet(watcher.session_id(), player));
+    });
+  }
+  queue_save_character(dispatch, player);
+
+  dispatch.legacy_traces.push_back(LegacyRuntimeTrace{
+      "LegacyCombat",
+      "revival_ring",
+      map_id,
+      {},
+      player.id(),
+      now_ms,
+      current_tick,
+      0,
+      0,
+      0,
+      0,
+      {},
+      "RING_REVIVAL_ITEM",
+      0,
+      0,
+      static_cast<std::int32_t>(revival_slot),
+      static_cast<std::int32_t>(player.character().ability.hp),
+      true});
+  return true;
+}
+
 LegacyMagicDamageResult apply_legacy_magic_damage(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
+    const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
     RuntimeDispatch& dispatch, Player& caster, GameObject& target, const MapConfig& map_config,
     std::int32_t damage, std::uint64_t current_tick, std::uint64_t now_ms) {
   LegacyMagicDamageResult result;
@@ -669,6 +741,11 @@ LegacyMagicDamageResult apply_legacy_magic_damage(
     const auto damage_result = player_target->apply_damage(damage, current_tick);
     result.applied_damage = damage_result.hp_damage;
     result.target_died = player_target->is_dead();
+    if (result.target_died &&
+        try_legacy_revival_impl(objects, item_configs, map_config.id, *player_target, dispatch,
+                                current_tick, now_ms)) {
+      result.target_died = false;
+    }
     if (result.target_died) {
       player_target->mark_dead(now_ms);
       if (!map_config.fight_zone && !map_config.fight3_zone && player_target->pk_level() < 2 &&
@@ -1915,11 +1992,15 @@ bool MapActor::apply_equipped_item_durability_loss(Player& player, std::size_t s
                  make_dura_change_packet(player.session_id(), slot, *item, item_configs_));
   }
   if (item->dura == 0) {
+    const auto previous_status = player.character().status;
     player.refresh_derived_state(item_configs_);
     queue_packet(dispatch, player.session_id(),
                  make_ability_packet(player.session_id(), player.character()));
     queue_packet(dispatch, player.session_id(),
                  make_sub_ability_packet(player.session_id(), player));
+    if (player.character().status != previous_status) {
+      broadcast_legacy_char_status_changed(dispatch, player);
+    }
   }
   return true;
 }
@@ -1994,6 +2075,115 @@ bool MapActor::apply_legacy_struck_equipment_durability(Player& target,
     queue_save_character(dispatch, target);
   }
   return changed;
+}
+
+std::int32_t MapActor::roll_legacy_player_attack_power(
+    const Player& attacker, const GameObject& target, std::uint16_t ident,
+    RuntimeDispatch& dispatch, std::string stage, std::string command,
+    std::uint64_t current_tick, std::uint64_t now_ms) {
+  const auto dc_min = packed_min(attacker.character().ability.dc);
+  const auto dc_max = std::max(dc_min, packed_max(attacker.character().ability.dc));
+  const auto range = std::max(0, dc_max - dc_min);
+  const auto luck = attacker.legacy_luck();
+  auto raw = dc_min;
+  if (luck > 0) {
+    const auto gate_range = std::max(1, 10 - std::min(9, luck));
+    const auto gate = legacy_random_value(dispatch, stage, "attack_luck_gate",
+                                          gate_range, attacker.id(), target.id(),
+                                          command, now_ms, current_tick);
+    if (gate == 0) {
+      raw = dc_min + range;
+    } else {
+      const auto roll = legacy_random_value(dispatch, stage, "attack_power_roll",
+                                            range + 1, attacker.id(), target.id(),
+                                            command, now_ms, current_tick);
+      raw = dc_min + std::clamp(roll, 0, range);
+    }
+  } else {
+    const auto roll = legacy_random_value(dispatch, stage, "attack_power_roll",
+                                          range + 1, attacker.id(), target.id(),
+                                          command, now_ms, current_tick);
+    raw = dc_min + std::clamp(roll, 0, range);
+    if (luck < 0) {
+      const auto gate_range = 10 - std::max(0, -luck);
+      const auto gate = gate_range <= 0
+                            ? 0
+                            : legacy_random_value(dispatch, stage, "attack_luck_gate",
+                                                  gate_range, attacker.id(), target.id(),
+                                                  command, now_ms, current_tick);
+      if (gate == 0) {
+        raw = dc_min;
+      }
+    }
+  }
+  return std::max(0, static_cast<std::int32_t>(
+                         std::lround(static_cast<double>(raw) *
+                                     resolve_attack_multiplier(ident))));
+}
+
+bool MapActor::apply_legacy_physical_equipment_specials(Player& attacker,
+                                                        GameObject& target,
+                                                        std::int32_t hit_damage,
+                                                        std::int32_t suck_damage,
+                                                        RuntimeDispatch& dispatch,
+                                                        std::string stage,
+                                                        std::uint64_t current_tick,
+                                                        std::uint64_t now_ms) {
+  if (hit_damage <= 0) {
+    return false;
+  }
+  auto changed = false;
+  ActorMail trace_mail;
+  trace_mail.kind = ActorMailKind::attack;
+  trace_mail.map_id = config_.id;
+  trace_mail.actor_id = attacker.id();
+  trace_mail.target_actor_id = target.id();
+
+  if (attacker.legacy_make_stone() && is_alive(target)) {
+    const auto anti_poison = legacy_actor_anti_poison(target);
+    const auto gate_range = std::max(1, 5 + anti_poison);
+    const auto gate = legacy_random_value(dispatch, stage, "make_stone_gate",
+                                          gate_range, attacker.id(), target.id(),
+                                          "RING_MAKESTONE", now_ms, current_tick);
+    auto applied = false;
+    if (gate == 0) {
+      const auto duration_ticks = legacy_delay_ms_to_ticks(5000, budgets_.tick_ms);
+      const auto poison_tick_interval = legacy_delay_ms_to_ticks(2500, budgets_.tick_ms);
+      if (auto* player_target = as_player(&target); player_target != nullptr) {
+        applied = player_target->apply_legacy_poison(
+            kLegacyPoisonStone, duration_ticks, 0, poison_tick_interval,
+            attacker.id(), current_tick);
+        if (applied) {
+          broadcast_legacy_char_status_changed(dispatch, *player_target);
+        }
+      } else if (auto* monster_target = as_monster(&target); monster_target != nullptr) {
+        applied = monster_target->apply_legacy_poison(
+            kLegacyPoisonStone, duration_ticks, 0, poison_tick_interval,
+            attacker.id(), current_tick);
+        monster_target->schedule_next_ai_tick(current_tick);
+      }
+    }
+    add_legacy_trace(dispatch, stage, "make_stone", trace_mail, current_tick,
+                     now_ms, applied, gate, anti_poison, "Random(5+AntiPoison)");
+    changed = changed || applied;
+  }
+
+  const auto healed = suck_damage > 0 ? attacker.apply_legacy_suck_health(suck_damage) : 0;
+  if (healed > 0) {
+    queue_packet(dispatch, attacker.session_id(),
+                 make_health_spell_changed_packet(attacker.session_id(), attacker));
+    add_legacy_trace(dispatch, stage, "suck_health", trace_mail, current_tick,
+                     now_ms, true, attacker.legacy_equipment_specials().suck_health_rate,
+                     healed, "SuckupEnemyHealth");
+    changed = true;
+  }
+  return changed;
+}
+
+bool MapActor::try_legacy_revival(Player& player, RuntimeDispatch& dispatch,
+                                  std::uint64_t current_tick, std::uint64_t now_ms) {
+  return try_legacy_revival_impl(objects_, item_configs_, config_.id, player, dispatch,
+                                 current_tick, now_ms);
 }
 
 #include "world/map_actor_npc.hpp"

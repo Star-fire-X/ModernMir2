@@ -417,6 +417,11 @@ if(BUILD_TESTING)
     target_link_libraries(mir2_equipment_derived_upgrade_stats_smoke PRIVATE mir2_hostlib)
     add_test(NAME mir2_equipment_derived_upgrade_stats_smoke
       COMMAND mir2_equipment_derived_upgrade_stats_smoke)
+  add_executable(mir2_equipment_special_combat_smoke
+      tests/equipment_special_combat_smoke.cpp)
+    target_link_libraries(mir2_equipment_special_combat_smoke PRIVATE mir2_hostlib)
+    add_test(NAME mir2_equipment_special_combat_smoke
+      COMMAND mir2_equipment_special_combat_smoke)
 
   add_executable(mir2_pk_attack_mode_rules_smoke tests/pk_attack_mode_rules_smoke.cpp)
   target_link_libraries(mir2_pk_attack_mode_rules_smoke PRIVATE mir2_hostlib)
@@ -762,6 +767,7 @@ if(BUILD_TESTING)
       mir2_skill_protocol_golden_smoke
       mir2_skill_status_poison_buff_hide_shield_smoke
       mir2_equipment_cantakeon_legacy_smoke
+      mir2_equipment_special_combat_smoke
       mir2_item_phase2_ground_smoke
       mir2_item_phase2_use_smoke
       mir2_special_consumables_legacy_smoke

@@ -771,9 +771,12 @@ LegacyPacket make_sub_ability_packet(std::uint64_t session_id, const Player& pla
   const auto hit_point =
       static_cast<std::uint8_t>(std::clamp(player.accuracy_point(), 0, 255));
   const auto speed_point = static_cast<std::uint8_t>(std::clamp(player.speed_point(), 0, 255));
+  const auto anti_poison =
+      static_cast<std::uint8_t>(std::clamp(player.legacy_anti_poison(), 0, 255));
   return make_legacy_game_packet(
       session_id, 0, 0,
-      make_default_message(kSmSubAbility, 0, make_word(hit_point, speed_point), 0, 0));
+      make_default_message(kSmSubAbility, 0, make_word(hit_point, speed_point),
+                           make_word(anti_poison, 0), 0));
 }
 
 void dispatch_login_sequence(RuntimeDispatch& dispatch, const Player& player,

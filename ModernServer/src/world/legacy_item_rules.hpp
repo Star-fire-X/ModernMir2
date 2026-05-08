@@ -13,6 +13,16 @@ namespace mir2 {
 
 constexpr std::int32_t kLegacyItemUnableTakeOff = 0x02;
 constexpr std::int32_t kLegacyItemNeverTakeOff = 0x04;
+constexpr std::int32_t kLegacyRingTransparentItem = 111;
+constexpr std::int32_t kLegacyRingMakeStoneItem = 113;
+constexpr std::int32_t kLegacyRingRevivalItem = 114;
+constexpr std::int32_t kLegacyRingMagicShieldItem = 118;
+constexpr std::int32_t kLegacyRingManaToHealthItem = 133;
+constexpr std::int32_t kLegacyBraceletManaToHealthItem = 134;
+constexpr std::int32_t kLegacyNecklaceManaToHealthItem = 135;
+constexpr std::int32_t kLegacyRingSuckHealthItem = 136;
+constexpr std::int32_t kLegacyBraceletSuckHealthItem = 137;
+constexpr std::int32_t kLegacyNecklaceSuckHealthItem = 138;
 
 std::int32_t legacy_resolve_slot_from_std_mode(std::int32_t std_mode);
 bool legacy_item_fits_slot(const ItemConfig& item_config, std::int32_t slot);
