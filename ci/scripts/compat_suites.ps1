@@ -57,6 +57,7 @@ function Get-CiBuildTargets {
     "mir2_skill_protocol_golden_smoke",
     "mir2_skill_status_poison_buff_hide_shield_smoke",
     "mir2_equipment_cantakeon_legacy_smoke",
+    "mir2_equipment_special_combat_smoke",
     "mir2_item_phase2_ground_smoke",
     "mir2_item_phase2_use_smoke",
     "mir2_special_consumables_legacy_smoke",

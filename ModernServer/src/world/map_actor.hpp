@@ -329,6 +329,19 @@ class MapActor {
                                                 std::uint64_t current_tick,
                                                 std::uint64_t now_ms,
                                                 std::string stage);
+  [[nodiscard]] std::int32_t roll_legacy_player_attack_power(
+      const Player& attacker, const GameObject& target, std::uint16_t ident,
+      RuntimeDispatch& dispatch, std::string stage, std::string command,
+      std::uint64_t current_tick, std::uint64_t now_ms);
+  bool apply_legacy_physical_equipment_specials(Player& attacker, GameObject& target,
+                                                std::int32_t hit_damage,
+                                                std::int32_t suck_damage,
+                                                RuntimeDispatch& dispatch,
+                                                std::string stage,
+                                                std::uint64_t current_tick,
+                                                std::uint64_t now_ms);
+  bool try_legacy_revival(Player& player, RuntimeDispatch& dispatch,
+                          std::uint64_t current_tick, std::uint64_t now_ms);
   [[nodiscard]] std::int32_t legacy_random_value(RuntimeDispatch& dispatch,
                                                  std::string stage,
                                                  std::string action,

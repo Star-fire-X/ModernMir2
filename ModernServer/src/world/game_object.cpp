@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "world/legacy_item_rules.hpp"
+#include "world/legacy_skill_formula.hpp"
 
 namespace mir2 {
 
@@ -71,6 +72,34 @@ std::uint16_t add_packed_range(std::uint16_t lhs, std::uint16_t rhs) {
                     std::max(packed_max(rhs), packed_min(rhs));
   return static_cast<std::uint16_t>((std::clamp(high, 0, 255) << 8) |
                                     std::clamp(low, 0, 255));
+}
+
+bool legacy_mana_to_health_shape(std::int32_t shape) {
+  return shape == kLegacyRingManaToHealthItem ||
+         shape == kLegacyBraceletManaToHealthItem ||
+         shape == kLegacyNecklaceManaToHealthItem;
+}
+
+bool legacy_suck_health_shape(std::int32_t shape) {
+  return shape == kLegacyRingSuckHealthItem ||
+         shape == kLegacyBraceletSuckHealthItem ||
+         shape == kLegacyNecklaceSuckHealthItem;
+}
+
+bool legacy_shape_matches_slot(std::size_t slot, std::int32_t shape) {
+  switch (shape) {
+    case kLegacyRingManaToHealthItem:
+    case kLegacyRingSuckHealthItem:
+      return slot == kEquipRingLeft || slot == kEquipRingRight;
+    case kLegacyBraceletManaToHealthItem:
+    case kLegacyBraceletSuckHealthItem:
+      return slot == kEquipArmRingLeft || slot == kEquipArmRingRight;
+    case kLegacyNecklaceManaToHealthItem:
+    case kLegacyNecklaceSuckHealthItem:
+      return slot == kEquipNecklace;
+    default:
+      return false;
+  }
 }
 
 std::uint32_t next_level_exp(std::uint8_t level) {
@@ -824,6 +853,24 @@ DamageResult Player::apply_damage(std::int32_t amount, std::uint64_t current_tic
     }
   }
 
+  if (remaining > 0 && legacy_equipment_specials_.magic_shield && character_.ability.mp > 0) {
+    auto spdam = delphi_round(static_cast<double>(remaining) * 1.5);
+    const auto before_mp = static_cast<std::int32_t>(character_.ability.mp);
+    if (before_mp >= spdam) {
+      character_.ability.mp = clamp_u16(before_mp - spdam);
+      result.mp_damage += spdam;
+      result.absorbed_damage += remaining;
+      remaining = 0;
+    } else {
+      spdam -= before_mp;
+      character_.ability.mp = 0;
+      result.mp_damage += before_mp;
+      const auto hp_remaining = delphi_round(static_cast<double>(spdam) / 1.5);
+      result.absorbed_damage += std::max(0, remaining - hp_remaining);
+      remaining = hp_remaining;
+    }
+  }
+
   if (remaining > 0) {
     const auto before = static_cast<std::int32_t>(character_.ability.hp);
     character_.ability.hp = clamp_u16(before - remaining);
@@ -956,6 +1003,31 @@ bool Player::spend_mp(std::int32_t amount) {
   return true;
 }
 
+bool Player::legacy_revival_available(std::uint64_t now_ms) const {
+  return legacy_equipment_specials_.revival &&
+         now_ms > latest_legacy_revival_time_ms_ + 60ULL * 1000ULL;
+}
+
+void Player::mark_legacy_revival(std::uint64_t now_ms) {
+  latest_legacy_revival_time_ms_ = now_ms;
+}
+
+std::int32_t Player::apply_legacy_suck_health(std::int32_t damage) {
+  if (damage <= 0 || legacy_equipment_specials_.suck_health_rate <= 0 ||
+      character_.ability.hp == 0) {
+    return 0;
+  }
+  legacy_suck_health_accumulator_ +=
+      static_cast<double>(damage) / 100.0 *
+      static_cast<double>(legacy_equipment_specials_.suck_health_rate);
+  if (legacy_suck_health_accumulator_ < 2.0) {
+    return 0;
+  }
+  const auto amount = static_cast<std::int32_t>(legacy_suck_health_accumulator_);
+  legacy_suck_health_accumulator_ -= static_cast<double>(amount);
+  return apply_heal(amount);
+}
+
 ExperienceResult Player::gain_experience(std::int32_t amount) {
   ExperienceResult result;
   result.gained = std::clamp(amount, 0, 60000);
@@ -1048,7 +1120,9 @@ bool Player::activate_legacy_magic_defence_up(std::uint64_t duration_ticks,
 }
 
 bool Player::legacy_transparent_active(std::uint64_t current_tick) const {
-  return legacy_buffs_.active(LegacyBuffKind::transparent, current_tick);
+  return character_.ability.hp > 0 &&
+         (legacy_equipment_specials_.equipment_transparent ||
+          legacy_buffs_.active(LegacyBuffKind::transparent, current_tick));
 }
 
 bool Player::activate_legacy_transparent(std::uint64_t duration_ticks,
@@ -1064,11 +1138,12 @@ bool Player::activate_legacy_transparent(std::uint64_t duration_ticks,
 }
 
 bool Player::clear_legacy_transparent(std::uint64_t current_tick) {
-  if (!legacy_transparent_active(current_tick)) {
+  if (!legacy_buffs_.active(LegacyBuffKind::transparent, current_tick)) {
     return false;
   }
   static_cast<void>(legacy_buffs_.clear(LegacyBuffKind::transparent));
-  set_legacy_status_bit(character_.status, kStateTransparent, false);
+  set_legacy_status_bit(character_.status, kStateTransparent,
+                        legacy_equipment_specials_.equipment_transparent);
   return true;
 }
 
@@ -1086,6 +1161,20 @@ std::size_t Player::clear_negative_status_effects(std::uint64_t current_tick) {
     next_move_tick_ = std::min(next_move_tick_, current_tick);
   }
   return before - status_effects_.size();
+}
+
+std::size_t Player::clear_negative_legacy_buffs(std::uint64_t) {
+  std::size_t cleared = 0;
+  for (const auto kind : {LegacyBuffKind::poison_dechealth,
+                          LegacyBuffKind::poison_damage_armor,
+                          LegacyBuffKind::poison_dont_move,
+                          LegacyBuffKind::poison_stone}) {
+    if (legacy_buffs_.clear(kind)) {
+      ++cleared;
+      set_legacy_status_bit(character_.status, static_cast<std::int32_t>(kind), false);
+    }
+  }
+  return cleared;
 }
 
 StatusTickResult Player::clear_legacy_buffs_on_death(std::uint64_t) {
@@ -1167,6 +1256,9 @@ StatusTickResult Player::tick_status_effects(std::uint64_t current_tick) {
   const auto expired_buffs = legacy_buffs_.expire_due(current_tick);
   if (!expired_buffs.empty()) {
     clear_player_status_bits(character_.status, expired_buffs);
+    if (legacy_equipment_specials_.equipment_transparent) {
+      set_legacy_status_bit(character_.status, kStateTransparent, true);
+    }
     result.legacy_status_changed = true;
     result.ability_changed =
         std::any_of(expired_buffs.begin(), expired_buffs.end(),
@@ -1298,8 +1390,12 @@ void Player::refresh_derived_state(
   const auto current_hp = character_.ability.hp;
   const auto current_mp = character_.ability.mp;
   auto derived = base_ability_;
+  LegacyEquipmentSpecials specials;
+  auto mana_to_health_ring = false;
+  auto mana_to_health_bracelet = false;
+  auto mana_to_health_necklace = false;
 
-  auto add_equipment_stats = [&](const LegacyUserItem& item) {
+  auto add_equipment_stats = [&](std::size_t slot, const LegacyUserItem& item) {
     if (is_empty(item) || item.dura == 0) {
       return;
     }
@@ -1312,6 +1408,12 @@ void Player::refresh_derived_state(
       case 5:
       case 6:
         accuracy_point_ += packed_max(upgraded.ac);
+        specials.luck += packed_min(upgraded.ac);
+        specials.unluck += packed_min(upgraded.mac);
+        break;
+      case 19:
+        specials.unluck += packed_min(upgraded.mac);
+        specials.luck += packed_max(upgraded.mac);
         break;
       case 20:
       case 24:
@@ -1336,10 +1438,11 @@ void Player::refresh_derived_state(
         derived.ac = add_packed_range(derived.ac, upgraded.ac);
         derived.mac = add_packed_range(derived.mac, upgraded.mac);
         break;
-      case 19:
       case 21:
-      case 23:
       case 53:
+        break;
+      case 23:
+        specials.anti_poison += packed_max(upgraded.ac);
         break;
       default:
         derived.ac = add_packed_range(derived.ac, upgraded.ac);
@@ -1353,13 +1456,66 @@ void Player::refresh_derived_state(
       derived.max_hp = clamp_u16(static_cast<std::int32_t>(derived.max_hp) + upgraded.hp_add);
       derived.max_mp = clamp_u16(static_cast<std::int32_t>(derived.max_mp) + upgraded.mp_add);
     }
+    specials.undead_power += std::max(upgraded.undead, 0);
+    if (slot == kEquipWeapon) {
+      if (config->special_pwr <= -1 && config->special_pwr >= -50) {
+        specials.undead_power += -config->special_pwr;
+      } else if (config->special_pwr <= -51 && config->special_pwr >= -100) {
+        specials.undead_power += config->special_pwr + 50;
+      }
+    }
+    if ((slot == kEquipRingLeft || slot == kEquipRingRight) &&
+        config->shape == kLegacyRingTransparentItem) {
+      specials.equipment_transparent = true;
+    }
+    if ((slot == kEquipRingLeft || slot == kEquipRingRight) &&
+        config->shape == kLegacyRingMakeStoneItem) {
+      specials.make_stone = true;
+    }
+    if ((slot == kEquipRingLeft || slot == kEquipRingRight) &&
+        config->shape == kLegacyRingRevivalItem) {
+      specials.revival = true;
+    }
+    if ((slot == kEquipRingLeft || slot == kEquipRingRight) &&
+        config->shape == kLegacyRingMagicShieldItem) {
+      specials.magic_shield = true;
+    }
+    if (legacy_shape_matches_slot(slot, config->shape)) {
+      if (legacy_mana_to_health_shape(config->shape)) {
+        specials.mana_to_health += std::max(config->ani_count, 0);
+        mana_to_health_ring = mana_to_health_ring ||
+                              config->shape == kLegacyRingManaToHealthItem;
+        mana_to_health_bracelet =
+            mana_to_health_bracelet ||
+            config->shape == kLegacyBraceletManaToHealthItem;
+        mana_to_health_necklace =
+            mana_to_health_necklace ||
+            config->shape == kLegacyNecklaceManaToHealthItem;
+      } else if (legacy_suck_health_shape(config->shape)) {
+        specials.suck_health_rate += std::max(config->ani_count, 0);
+      }
+    }
   };
 
   accuracy_point_ = base_ability_.reserved1 > 0 ? base_ability_.reserved1 : 10;
   speed_point_ = base_ability_.exp_count > 0 ? base_ability_.exp_count : 10;
-  for (const auto& item : character_.equipped_items) {
-    add_equipment_stats(item);
+  for (std::size_t slot = 0; slot < character_.equipped_items.size(); ++slot) {
+    add_equipment_stats(slot, character_.equipped_items[slot]);
   }
+  if (mana_to_health_ring && mana_to_health_bracelet && mana_to_health_necklace) {
+    specials.mana_to_health += 50;
+  }
+  if (specials.mana_to_health > 0 && derived.max_mp > 1) {
+    const auto convert =
+        std::min(specials.mana_to_health, static_cast<std::int32_t>(derived.max_mp) - 1);
+    derived.max_mp = clamp_u16(static_cast<std::int32_t>(derived.max_mp) - convert);
+    derived.max_hp = clamp_u16(static_cast<std::int32_t>(derived.max_hp) + convert);
+    specials.mana_to_health = convert;
+  } else if (specials.mana_to_health > 0) {
+    specials.mana_to_health = 0;
+  }
+  legacy_equipment_specials_ = specials;
+  legacy_suck_health_accumulator_ = 0.0;
 
   std::int32_t bag_weight = 0;
   for (const auto& item : character_.bag_items) {
@@ -1386,6 +1542,9 @@ void Player::refresh_derived_state(
   derived.reserved1 = clamp_u8(accuracy_point_);
   derived.exp_count = clamp_u8(speed_point_);
   character_.ability = derived;
+  set_legacy_status_bit(character_.status, kStateTransparent,
+                        legacy_equipment_specials_.equipment_transparent ||
+                            legacy_buffs_.has(LegacyBuffKind::transparent));
 
   const auto dress_feature =
       resolve_shape_feature(character_.sex, character_.equipped_items[kEquipDress], item_configs);

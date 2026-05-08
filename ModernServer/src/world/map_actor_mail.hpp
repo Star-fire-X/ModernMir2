@@ -1644,6 +1644,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
 
       std::optional<LegacyUserItem> swapped_item;
+      const auto previous_status = player->character().status;
       if (const auto* equipped = player->equipped_item(static_cast<std::size_t>(mail.item_slot));
           equipped != nullptr && !is_empty(*equipped)) {
         swapped_item =
@@ -1691,6 +1692,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                   player->character().feature));
         });
       }
+      if (player->character().status != previous_status) {
+        broadcast_legacy_char_status_changed(dispatch, *player);
+      }
       queue_save_character(dispatch, *player);
       add_legacy_trace(dispatch, "LegacyItem", "success", mail, current_tick, now_ms, true,
                        player->character().feature, 0, "take_on_item");
@@ -1732,6 +1736,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       const auto previous_feature = player->character().feature;
+      const auto previous_status = player->character().status;
       const auto removed = player->remove_equipped_item(static_cast<std::size_t>(mail.item_slot),
                                                         mail.item_make_index, mail.payload,
                                                         item_configs_);
@@ -1770,6 +1775,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                        make_feature_changed_packet(watcher.session_id(), player->id(),
                                                   player->character().feature));
         });
+      }
+      if (player->character().status != previous_status) {
+        broadcast_legacy_char_status_changed(dispatch, *player);
       }
       queue_save_character(dispatch, *player);
       add_legacy_trace(dispatch, "LegacyItem", "success", mail, current_tick, now_ms, true,
@@ -2152,14 +2160,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
-      const auto dc_min = packed_min(attacker->character().ability.dc);
-      const auto dc_max = std::max(dc_min, packed_max(attacker->character().ability.dc));
-      const auto attack_roll =
-          legacy_random_value(dispatch, "LegacyCombat", "attack_power_roll",
-                              std::max(1, dc_max - dc_min + 1), attacker->id(),
-                              target->id(), "attack", now_ms, current_tick);
       const auto attack_power =
-          legacy_packed_attack_power(*attacker, effective_ident, attack_roll);
+          roll_legacy_player_attack_power(*attacker, *target, effective_ident, dispatch,
+                                          "LegacyCombat", "attack", current_tick, now_ms);
       const auto undead_power = legacy_player_undead_power(*attacker, item_configs_);
       const auto hit_roll =
           legacy_random_value(dispatch, "LegacyCombat", "hit_check",
@@ -2198,12 +2201,18 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         shield_broken = damage_result.shield_broken;
         shield_name = damage_result.shield_name;
         target_died = player_target->is_dead();
-        if (applied_damage > 0) {
+        if (target_died && try_legacy_revival(*player_target, dispatch, current_tick, now_ms)) {
+          target_died = false;
+        }
+        if (damage > 0) {
           weapon_durability_loss = roll_legacy_weapon_durability_loss(
               *attacker, *target, dispatch, current_tick, now_ms);
           static_cast<void>(apply_legacy_struck_equipment_durability(
               *player_target, attacker->id(), dispatch, current_tick, now_ms,
               "LegacyCombat"));
+          static_cast<void>(apply_legacy_physical_equipment_specials(
+              *attacker, *target, damage, applied_damage, dispatch, "LegacyCombat",
+              current_tick, now_ms));
         }
         if (target_died) {
           player_target->mark_dead(now_ms);
@@ -2223,10 +2232,16 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           weapon_durability_loss = roll_legacy_weapon_durability_loss(
               *attacker, *target, dispatch, current_tick, now_ms);
           notify_owned_slaves_target(*attacker, monster_target->id(), now_ms);
+          static_cast<void>(apply_legacy_physical_equipment_specials(
+              *attacker, *target, applied_damage, applied_damage, dispatch,
+              "LegacyCombat", current_tick, now_ms));
         }
         target_died = monster_target->is_dead();
         slain_monster = target_died ? monster_target : nullptr;
       }
+
+      static_cast<void>(
+          apply_legacy_weapon_durability_loss(*attacker, weapon_durability_loss, dispatch));
 
       if (applied_damage <= 0) {
         add_legacy_trace(dispatch, "LegacyCombat", "absorbed", effective_mail, current_tick, now_ms,
@@ -2245,8 +2260,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
-      static_cast<void>(
-          apply_legacy_weapon_durability_loss(*attacker, weapon_durability_loss, dispatch));
+      if (const auto* player_target = as_player(target);
+          player_target != nullptr && absorbed_damage > 0) {
+        queue_packet(dispatch, player_target->session_id(),
+                     make_health_spell_changed_packet(player_target->session_id(),
+                                                      *player_target));
+      }
 
       for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
         if (watcher.id() != target->id() && !is_legacy_visible_to(watcher, *target)) {
@@ -2284,12 +2303,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                              "WideHit AccuracyPoint<=Random(SpeedPoint)");
             continue;
           }
-          const auto extra_attack_roll =
-              legacy_random_value(dispatch, "LegacyCombat", "attack_power_roll",
-                                  std::max(1, dc_max - dc_min + 1), attacker->id(),
-                                  extra_target->id(), "wide_hit", now_ms, current_tick);
           const auto extra_attack_power =
-              legacy_packed_attack_power(*attacker, effective_ident, extra_attack_roll);
+              roll_legacy_player_attack_power(*attacker, *extra_target, effective_ident,
+                                              dispatch, "LegacyCombat", "wide_hit",
+                                              current_tick, now_ms);
           const auto [extra_ac_min, extra_ac_max] = actor_physical_defense_range(*extra_target);
           const auto extra_armor_roll =
               legacy_random_value(dispatch, "LegacyCombat", "armor_roll",
@@ -2309,6 +2326,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             const auto damage_result = player_target->apply_damage(extra_damage, current_tick);
             extra_applied_damage = damage_result.hp_damage;
             extra_target_died = player_target->is_dead();
+            if (extra_target_died &&
+                try_legacy_revival(*player_target, dispatch, current_tick, now_ms)) {
+              extra_target_died = false;
+            }
             if (extra_target_died) {
               player_target->mark_dead(now_ms);
             }
@@ -2321,6 +2342,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             extra_target_died = monster_target->is_dead();
             extra_slain_monster = extra_target_died ? monster_target : nullptr;
           }
+          static_cast<void>(apply_legacy_physical_equipment_specials(
+              *attacker, *extra_target, extra_damage, extra_applied_damage, dispatch,
+              "LegacyCombat", current_tick, now_ms));
           if (extra_applied_damage <= 0) {
             continue;
           }
@@ -2674,7 +2698,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                       std::string_view label) {
           const auto damage = legacy_magic_defense_damage(hit_target, raw_power, random,
                                                           current_tick, budgets_.tick_ms);
-          const auto result = apply_legacy_magic_damage(objects_, dispatch, *attacker,
+          const auto result = apply_legacy_magic_damage(objects_, item_configs_, dispatch, *attacker,
                                                         hit_target, config_, damage,
                                                         current_tick, now_ms);
           if (result.applied_damage > 0 && as_monster(&hit_target) != nullptr) {
@@ -3216,7 +3240,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                 if (success) {
                   const auto damage = monster_target->hp();
                   const auto result = apply_legacy_magic_damage(
-                      objects_, dispatch, *attacker, *monster_target, config_, damage,
+                      objects_, item_configs_, dispatch, *attacker, *monster_target, config_, damage,
                       current_tick, now_ms);
                   if (result.applied_damage > 0) {
                     notify_owned_slaves_target(*attacker, monster_target->id(), now_ms);
@@ -3417,6 +3441,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
           }
           target_died = player_target->is_dead();
+          if (target_died &&
+              try_legacy_revival(*player_target, dispatch, current_tick, now_ms)) {
+            target_died = false;
+          }
           if (target_died) {
             player_target->mark_dead(now_ms);
             if (!config_.fight_zone && !config_.fight3_zone && player_target->pk_level() < 2 &&
@@ -4026,6 +4054,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         const auto damage_result = player_target->apply_damage(damage, current_tick);
         applied_damage = damage_result.hp_damage;
         target_died = player_target->is_dead();
+        if (target_died &&
+            try_legacy_revival(*player_target, dispatch, current_tick, now_ms)) {
+          target_died = false;
+        }
         if (target_died) {
           player_target->mark_dead(now_ms);
           if (!config_.fight_zone && !config_.fight3_zone && player_target->pk_level() < 2 &&

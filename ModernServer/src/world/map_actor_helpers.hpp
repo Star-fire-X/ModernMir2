@@ -360,6 +360,7 @@ bool is_legacy_response_compensated_command(ActorMailKind kind) {
     case ActorMailKind::run:
     case ActorMailKind::attack:
     case ActorMailKind::spell:
+    case ActorMailKind::revive:
       return true;
     default:
       return false;
@@ -420,7 +421,10 @@ std::int32_t legacy_actor_anti_magic(const GameObject& object) {
   return 0;
 }
 
-std::int32_t legacy_actor_anti_poison(const GameObject&) {
+std::int32_t legacy_actor_anti_poison(const GameObject& object) {
+  if (const auto* player = as_player(&object); player != nullptr) {
+    return std::max(player->legacy_anti_poison(), 0);
+  }
   return 0;
 }
 

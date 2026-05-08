@@ -1129,9 +1129,16 @@ void MapActor::legacy_monster_temp_attack(Monster& monster, Player& target,
   static_cast<void>(apply_legacy_struck_equipment_durability(
       target, monster.id(), dispatch, current_tick, now_ms, "MonsterCombat"));
 
-  const auto died = target.is_dead();
+  auto died = target.is_dead();
+  if (died && try_legacy_revival(target, dispatch, current_tick, now_ms)) {
+    died = false;
+  }
   if (died) {
     target.mark_dead(now_ms);
+  }
+  if (absorbed_damage > 0) {
+    queue_packet(dispatch, target.session_id(),
+                 make_health_spell_changed_packet(target.session_id(), target));
   }
   for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
     if (watcher.id() != target.id() && !is_legacy_visible_to(watcher, target)) {
@@ -1403,7 +1410,13 @@ bool MapActor::legacy_monster_special_attack_target(Monster& monster,
     const auto damage_result = player.apply_damage(damage, current_tick);
     const auto applied_damage = damage_result.hp_damage;
     if (player.is_dead()) {
-      player.mark_dead(now_ms);
+      if (!try_legacy_revival(player, dispatch, current_tick, now_ms)) {
+        player.mark_dead(now_ms);
+      }
+    }
+    if (damage_result.absorbed_damage > 0) {
+      queue_packet(dispatch, player.session_id(),
+                   make_health_spell_changed_packet(player.session_id(), player));
     }
     schedule_struck(player, applied_damage, delay_ms, magical, std::move(label));
     return applied_damage;
@@ -1709,7 +1722,13 @@ bool MapActor::legacy_monster_special_run(Monster& monster, RuntimeDispatch& dis
                                                       budgets_.tick_ms);
       const auto damage_result = player->apply_damage(damage, current_tick);
       if (player->is_dead()) {
-        player->mark_dead(now_ms);
+        if (!try_legacy_revival(*player, dispatch, current_tick, now_ms)) {
+          player->mark_dead(now_ms);
+        }
+      }
+      if (damage_result.absorbed_damage > 0) {
+        queue_packet(dispatch, player->session_id(),
+                     make_health_spell_changed_packet(player->session_id(), *player));
       }
       ActorMail delayed;
       delayed.kind = ActorMailKind::legacy_delayed_effect;

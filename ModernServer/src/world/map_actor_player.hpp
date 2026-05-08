@@ -86,7 +86,12 @@ void MapActor::handle_player_status_effects(Player& player, RuntimeDispatch& dis
   }
 
   if (tick_result.damage > 0) {
-    const auto died = player.is_dead();
+    auto died = player.is_dead();
+    if (died) {
+      died = !try_legacy_revival(
+          player, dispatch, current_tick,
+          current_tick * static_cast<std::uint64_t>(std::max<std::uint32_t>(budgets_.tick_ms, 1)));
+    }
     if (died) {
       player.mark_dead(current_tick * static_cast<std::uint64_t>(std::max<std::uint32_t>(budgets_.tick_ms, 1)));
     }
