@@ -1265,7 +1265,8 @@ std::string join_dialog_lines(const std::vector<std::string>& lines) {
 bool legacy_script_action_uses_existing_business(std::string_view lowered_payload, const Npc& npc) {
   if ((lowered_payload == "@buy" && npc.supports_buy()) ||
       (lowered_payload == "@sell" && npc.supports_sell()) ||
-      (lowered_payload == "@repair" && npc.supports_repair()) ||
+      ((lowered_payload == "@repair" || lowered_payload == "@s_repair") &&
+       npc.supports_repair()) ||
       ((lowered_payload == "@storage" || lowered_payload == "@getback") &&
        npc.supports_storage())) {
     return true;

@@ -1126,6 +1126,9 @@ void MapActor::legacy_monster_temp_attack(Monster& monster, Player& target,
     return;
   }
 
+  static_cast<void>(apply_legacy_struck_equipment_durability(
+      target, monster.id(), dispatch, current_tick, now_ms, "MonsterCombat"));
+
   const auto died = target.is_dead();
   if (died) {
     target.mark_dead(now_ms);

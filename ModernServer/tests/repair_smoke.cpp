@@ -79,12 +79,25 @@ mir2::LogicCommand make_repair_command(mir2::LogicCommandKind kind, std::uint64_
   return command;
 }
 
+mir2::LogicCommand make_menu_command(std::uint64_t session_id, std::uint64_t merchant_id,
+                                     std::string action) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::merchant_select;
+  command.session_id = session_id;
+  command.target_actor_id = merchant_id;
+  command.text = std::move(action);
+  return command;
+}
+
 }  // namespace
 
 int main() {
   mir2::HostConfig config;
   config.maps.push_back(mir2::MapConfig{"0", "RepairMap", {}, 0, 0, 10, 10});
   config.items.push_back(mir2::ItemConfig{1, "Repair Sword", 3, 90, 5, 1, 1, 1000, 1, 0, 0});
+  config.items.push_back(mir2::ItemConfig{2, "Repair Axe", 3, 90, 6, 1, 1, 1000, 1, 0, 0});
+  config.items.push_back(mir2::ItemConfig{3, "Repair Armor", 3, 90, 10, 1, 1, 1000, 0, 0, 0});
+  config.items.push_back(mir2::ItemConfig{4, "No Repair Gem", 1, 90, 43, 1, 1, 1000, -1, 0, 0});
   config.npcs.push_back(
       mir2::NpcConfig{"merchant_1", "0", "Repairman", 11, 10, "merchant_1.txt", "repair"});
 
@@ -108,6 +121,18 @@ int main() {
   hero.bag_items[0].make_index = 1001;
   hero.bag_items[0].dura = 600;
   hero.bag_items[0].dura_max = 1000;
+  hero.bag_items[1].index = 2;
+  hero.bag_items[1].make_index = 1002;
+  hero.bag_items[1].dura = 600;
+  hero.bag_items[1].dura_max = 1000;
+  hero.bag_items[2].index = 3;
+  hero.bag_items[2].make_index = 1003;
+  hero.bag_items[2].dura = 600;
+  hero.bag_items[2].dura_max = 1000;
+  hero.bag_items[3].index = 4;
+  hero.bag_items[3].make_index = 1004;
+  hero.bag_items[3].dura = 600;
+  hero.bag_items[3].dura_max = 1000;
 
   mir2::LogicCommand enter;
   enter.kind = mir2::LogicCommandKind::enter_world;
@@ -140,7 +165,7 @@ int main() {
       mir2::LogicCommandKind::query_repair_cost, 7, 1, 1001, "Repair Sword")));
   const auto query_dispatch = run_legacy_ticks(runtime);
   const auto repair_cost = find_packet(query_dispatch, mir2::kSmSendRepairCost);
-  if (!repair_cost.has_value() || repair_cost->message.recog != 12) {
+  if (!repair_cost.has_value() || repair_cost->message.recog != 10) {
     return 1;
   }
 
@@ -148,7 +173,7 @@ int main() {
       make_repair_command(mir2::LogicCommandKind::repair_item, 7, 1, 1001, "Repair Sword")));
   const auto repair_dispatch = run_legacy_ticks(runtime);
   const auto repair_ok = find_packet(repair_dispatch, mir2::kSmUserRepairItemOk);
-  if (!repair_ok.has_value() || repair_ok->message.recog != 88 || repair_ok->message.param != 987 ||
+  if (!repair_ok.has_value() || repair_ok->message.recog != 90 || repair_ok->message.param != 987 ||
       repair_ok->message.tag != 987 || !has_save_character(repair_dispatch, "Hero")) {
     return 1;
   }
@@ -173,6 +198,47 @@ int main() {
       make_repair_command(mir2::LogicCommandKind::repair_item, 7, 1, 9999, "Missing Sword")));
   const auto repair_fail_dispatch = run_legacy_ticks(runtime);
   if (!find_packet(repair_fail_dispatch, mir2::kSmUserRepairItemFail).has_value()) {
+    return 1;
+  }
+
+  static_cast<void>(runtime.route_logic_command(make_menu_command(7, 1, "@s_repair")));
+  const auto special_menu_dispatch = run_legacy_ticks(runtime);
+  const auto special_menu = find_packet(special_menu_dispatch, mir2::kSmSendUserRepair);
+  if (!special_menu.has_value() || special_menu->message.recog != 1) {
+    return 1;
+  }
+
+  static_cast<void>(runtime.route_logic_command(make_repair_command(
+      mir2::LogicCommandKind::query_repair_cost, 7, 1, 1002, "Repair Axe")));
+  const auto special_query_dispatch = run_legacy_ticks(runtime);
+  const auto special_cost = find_packet(special_query_dispatch, mir2::kSmSendRepairCost);
+  if (!special_cost.has_value() || special_cost->message.recog != 30) {
+    return 1;
+  }
+
+  static_cast<void>(runtime.route_logic_command(
+      make_repair_command(mir2::LogicCommandKind::repair_item, 7, 1, 1002, "Repair Axe")));
+  const auto special_repair_dispatch = run_legacy_ticks(runtime);
+  const auto special_ok = find_packet(special_repair_dispatch, mir2::kSmUserRepairItemOk);
+  if (!special_ok.has_value() || special_ok->message.recog != 60 ||
+      special_ok->message.param != 1000 || special_ok->message.tag != 1000 ||
+      !has_save_character(special_repair_dispatch, "Hero")) {
+    return 1;
+  }
+
+  static_cast<void>(runtime.route_logic_command(make_repair_command(
+      mir2::LogicCommandKind::query_repair_cost, 7, 1, 1003, "Repair Armor")));
+  const auto special_non_weapon_query = run_legacy_ticks(runtime);
+  const auto special_non_weapon_cost =
+      find_packet(special_non_weapon_query, mir2::kSmSendRepairCost);
+  if (!special_non_weapon_cost.has_value() || special_non_weapon_cost->message.recog != -1) {
+    return 1;
+  }
+
+  static_cast<void>(runtime.route_logic_command(
+      make_repair_command(mir2::LogicCommandKind::repair_item, 7, 1, 1004, "No Repair Gem")));
+  const auto no_repair_dispatch = run_legacy_ticks(runtime);
+  if (!find_packet(no_repair_dispatch, mir2::kSmUserRepairItemFail).has_value()) {
     return 1;
   }
 

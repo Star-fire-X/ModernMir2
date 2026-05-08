@@ -316,6 +316,19 @@ class MapActor {
   [[nodiscard]] LegacyMovingObjectState moving_state_for(const GameObject& object) const;
   [[nodiscard]] std::vector<const GroundItem*> ordered_ground_items() const;
   [[nodiscard]] std::int32_t allocate_make_index();
+  bool apply_equipped_item_durability_loss(Player& player, std::size_t slot,
+                                           std::int32_t loss,
+                                           RuntimeDispatch& dispatch);
+  [[nodiscard]] std::int32_t roll_legacy_weapon_durability_loss(
+      const Player& attacker, const GameObject& target, RuntimeDispatch& dispatch,
+      std::uint64_t current_tick, std::uint64_t now_ms);
+  bool apply_legacy_weapon_durability_loss(Player& attacker, std::int32_t loss,
+                                           RuntimeDispatch& dispatch);
+  bool apply_legacy_struck_equipment_durability(Player& target, std::uint64_t hitter_id,
+                                                RuntimeDispatch& dispatch,
+                                                std::uint64_t current_tick,
+                                                std::uint64_t now_ms,
+                                                std::string stage);
   [[nodiscard]] std::int32_t legacy_random_value(RuntimeDispatch& dispatch,
                                                  std::string stage,
                                                  std::string action,

@@ -239,25 +239,14 @@ int main() {
   attack.game_message.ident = mir2::kCmHit;
   static_cast<void>(runtime.route_logic_command(attack));
   const auto attack_dispatch_1 = tick_player_due(runtime, now_ms);
-  const auto attack_update_1 = find_packet(attack_dispatch_1, mir2::kSmUpdateItem);
-  if (!attack_update_1.has_value() || has_packet(attack_dispatch_1, mir2::kSmDuraChange)) {
-    return 1;
-  }
-  const auto attack_item_1 = decode_client_item(attack_update_1->body);
-  if (!attack_item_1.has_value() || attack_item_1->make_index != 1001 || attack_item_1->dura != 500) {
+  if (has_packet(attack_dispatch_1, mir2::kSmUpdateItem) ||
+      has_packet(attack_dispatch_1, mir2::kSmDuraChange)) {
     return 1;
   }
   static_cast<void>(runtime.route_logic_command(attack));
   const auto attack_dispatch_2 = tick_player_due(runtime, now_ms);
-  const auto attack_update_2 = find_packet(attack_dispatch_2, mir2::kSmUpdateItem);
-  const auto attack_dura = find_packet(attack_dispatch_2, mir2::kSmDuraChange);
-  if (!attack_update_2.has_value() || !attack_dura.has_value()) {
-    return 1;
-  }
-  const auto attack_item_2 = decode_client_item(attack_update_2->body);
-  if (!attack_item_2.has_value() || attack_item_2->make_index != 1001 || attack_item_2->dura != 400 ||
-      attack_dura->message.recog != 400 || attack_dura->message.param != 1 ||
-      attack_dura->message.tag != 1000 || attack_dura->message.series != 0) {
+  if (has_packet(attack_dispatch_2, mir2::kSmUpdateItem) ||
+      has_packet(attack_dispatch_2, mir2::kSmDuraChange)) {
     return 1;
   }
   static_cast<void>(runtime.route_logic_command(make_item_command(
@@ -284,7 +273,7 @@ int main() {
   const auto taken_off_item = decode_client_item(take_off_add->body);
   if (!take_off_removed.has_value() || take_off_removed->make_index != 1001 ||
       !taken_off_item.has_value() || taken_off_item->make_index != 1001 ||
-      taken_off_item->dura != 400 ||
+      taken_off_item->dura != 600 ||
       take_off_ok->message.recog != mir2::make_feature(0, 0, 0, 4) ||
       take_off_weight->message.recog != 4 || take_off_weight->message.param != 0 ||
       take_off_weight->message.tag != 0 ||

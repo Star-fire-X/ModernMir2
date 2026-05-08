@@ -169,6 +169,11 @@ enum class LegacyPlayerState {
   closed
 };
 
+enum class LegacyRepairMode {
+  normal,
+  special
+};
+
 struct LegacyQueuedCommand {
   ActorMail mail{};
   std::uint64_t received_ms{0};
@@ -319,6 +324,7 @@ class Player : public GameObject {
   [[nodiscard]] bool activate_legacy_transparent(std::uint64_t duration_ticks,
                                                  std::uint64_t current_tick);
   [[nodiscard]] bool clear_legacy_transparent(std::uint64_t current_tick);
+  [[nodiscard]] bool legacy_poison_damage_armor_active(std::uint64_t current_tick) const;
   [[nodiscard]] std::size_t clear_negative_status_effects(std::uint64_t current_tick);
   [[nodiscard]] StatusTickResult clear_legacy_buffs_on_death(std::uint64_t current_tick);
   [[nodiscard]] StatusTickResult clear_legacy_buffs_on_leave_map(std::uint64_t current_tick);
@@ -360,6 +366,8 @@ class Player : public GameObject {
   void set_legacy_see_health_gauge(bool value) { legacy_see_health_gauge_ = value; }
   [[nodiscard]] bool legacy_slave_relax() const { return slave_relax_; }
   void set_legacy_slave_relax(bool value) { slave_relax_ = value; }
+  [[nodiscard]] LegacyRepairMode legacy_repair_mode() const { return legacy_repair_mode_; }
+  void set_legacy_repair_mode(LegacyRepairMode mode) { legacy_repair_mode_ = mode; }
   [[nodiscard]] bool legacy_magic_bubble_active(std::uint64_t current_tick) const;
   [[nodiscard]] std::int32_t legacy_magic_bubble_level() const;
   [[nodiscard]] bool activate_legacy_magic_bubble(std::int32_t level,
@@ -421,6 +429,7 @@ class Player : public GameObject {
   bool ghost_{false};
   bool legacy_see_health_gauge_{false};
   bool slave_relax_{false};
+  LegacyRepairMode legacy_repair_mode_{LegacyRepairMode::normal};
   LegacyBuffContainer legacy_buffs_{};
   std::int32_t legacy_prepared_sword_magic_id_{0};
   std::uint64_t legacy_prepared_sword_expire_tick_{0};

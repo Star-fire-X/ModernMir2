@@ -2,7 +2,9 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 
+#include "protocol/legacy_edcode.hpp"
 #include "protocol/legacy_game_codec.hpp"
 #include "protocol/legacy_types.hpp"
 #include "world/map_actor.hpp"
@@ -40,6 +42,29 @@ std::optional<mir2::LegacyRuntimeTrace> find_trace(const mir2::RuntimeDispatch& 
   return std::nullopt;
 }
 
+std::optional<mir2::DecodedLegacyGamePacket> find_packet_for_session(
+    const mir2::RuntimeDispatch& dispatch, std::uint16_t ident, std::uint64_t session_id) {
+  for (const auto& event : dispatch.session_events) {
+    if (event.session_id != session_id) {
+      continue;
+    }
+    const auto decoded = mir2::decode_legacy_game_packet(event.packet);
+    if (decoded.has_value() && decoded->message.ident == ident) {
+      return decoded;
+    }
+  }
+  return std::nullopt;
+}
+
+template <typename T>
+std::optional<T> decode_body(std::string_view body) {
+  T value{};
+  if (!mir2::legacy_decode_buffer(body, &value, sizeof(value))) {
+    return std::nullopt;
+  }
+  return value;
+}
+
 mir2::ActorMail make_monster(std::uint64_t actor_id, std::int32_t accuracy) {
   mir2::ActorMail mail;
   mail.kind = mir2::ActorMailKind::spawn_monster;
@@ -63,7 +88,8 @@ mir2::ActorMail make_monster(std::uint64_t actor_id, std::int32_t accuracy) {
   return mail;
 }
 
-mir2::ActorMail make_player(std::uint64_t actor_id, std::uint64_t session_id) {
+mir2::ActorMail make_player(std::uint64_t actor_id, std::uint64_t session_id,
+                            std::optional<mir2::LegacyUserItem> dress = std::nullopt) {
   mir2::CharacterRecord hero;
   hero.account_id = "guest";
   hero.character_name = "Hero";
@@ -80,6 +106,9 @@ mir2::ActorMail make_player(std::uint64_t actor_id, std::uint64_t session_id) {
   hero.ability.max_weight = 100;
   hero.ability.max_wear_weight = 100;
   hero.ability.max_hand_weight = 100;
+  if (dress.has_value()) {
+    hero.equipped_items[mir2::kEquipDress] = *dress;
+  }
 
   mir2::ActorMail mail;
   mail.kind = mir2::ActorMailKind::spawn_player;
@@ -126,6 +155,27 @@ int main() {
     const auto player = map.snapshot_player(player_id);
     assert(player.has_value());
     assert(player->ability.hp == 39);
+  }
+
+  {
+    auto map = make_map();
+    constexpr std::uint64_t monster_id = 102;
+    constexpr std::uint64_t player_id = 3;
+    constexpr std::uint64_t session_id = 30;
+    map.enqueue_mail(make_monster(monster_id, 20));
+    map.enqueue_mail(make_player(player_id, session_id,
+                                 mir2::LegacyUserItem{3001, 1, 500, 1000}));
+    static_cast<void>(map.tick(1, 0));
+
+    const auto dispatch = map.legacy_process_monster(monster_id, 2, 1001, 0, 0);
+    assert(find_packet_by_recog(dispatch, mir2::kSmStruck,
+                                static_cast<std::int32_t>(player_id)).has_value());
+    const auto update = find_packet_for_session(dispatch, mir2::kSmUpdateItem, session_id);
+    assert(update.has_value());
+    const auto item = decode_body<mir2::LegacyClientItem>(update->body);
+    assert(item.has_value());
+    assert(item->make_index == 3001);
+    assert(item->dura < 500);
   }
 
   {

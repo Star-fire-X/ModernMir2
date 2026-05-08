@@ -31,22 +31,6 @@ namespace mir2 {
 #include "world/map_actor_packets.hpp"
 
 namespace {
-std::int32_t compute_repair_cost(const LegacyUserItem& item,
-                                 const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
-  const auto* config = find_item_config(item_configs, item.index);
-  const auto price = config != nullptr ? std::max(config->price, 0) : 0;
-  const auto dura_max = static_cast<std::int32_t>(item_dura_max(item, item_configs));
-  const auto dura = static_cast<std::int32_t>(item.dura);
-  if (price <= 0 || dura_max <= 0 || dura >= dura_max) {
-    return price > 0 && dura_max > 0 ? 0 : -1;
-  }
-  const auto price_div3 = price / 3;
-  const auto wear = dura_max - dura;
-  return static_cast<std::int32_t>(
-      std::lround((static_cast<double>(price_div3) / static_cast<double>(dura_max)) *
-                  static_cast<double>(wear)));
-}
-
 std::int32_t compute_goods_price(const LegacyUserItem& item,
                                  const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
                                  std::optional<std::int32_t> dynamic_price = std::nullopt) {
@@ -118,6 +102,36 @@ std::int32_t compute_merchant_sell_price(
   return std::max(0, static_cast<std::int32_t>(std::lround(
                          static_cast<double>(goods_price) *
                          static_cast<double>(std::max(merchant.price_rate_percent(), 0)) / 100.0)));
+}
+
+std::int32_t compute_repair_cost(const LegacyUserItem& item,
+                                 const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
+                                 const Npc& merchant,
+                                 LegacyRepairMode repair_mode) {
+  const auto* config = find_item_config(item_configs, item.index);
+  if (config == nullptr || config->std_mode == 43) {
+    return -1;
+  }
+  if (repair_mode == LegacyRepairMode::special &&
+      config->std_mode != 5 && config->std_mode != 6) {
+    return -1;
+  }
+  const auto price = compute_merchant_sell_price(merchant, item, item_configs);
+  const auto dura_max = static_cast<std::int32_t>(item.dura_max);
+  const auto dura = static_cast<std::int32_t>(item.dura);
+  if (price <= 0) {
+    return -1;
+  }
+  if (dura_max <= 0) {
+    return repair_mode == LegacyRepairMode::special ? price * 3 : price;
+  }
+  if (dura >= dura_max) {
+    return 0;
+  }
+  const auto cost = static_cast<std::int32_t>(
+      std::lround((static_cast<double>(price / 3) / static_cast<double>(dura_max)) *
+                  static_cast<double>(dura_max - dura)));
+  return repair_mode == LegacyRepairMode::special ? cost * 3 : cost;
 }
 
 PersistRequest make_save_merchant_state_request(const Npc& merchant) {
@@ -1877,6 +1891,109 @@ std::vector<const MapActor::GroundItem*> MapActor::ordered_ground_items() const 
     }
   }
   return ordered;
+}
+
+bool MapActor::apply_equipped_item_durability_loss(Player& player, std::size_t slot,
+                                                   std::int32_t loss,
+                                                   RuntimeDispatch& dispatch) {
+  if (loss <= 0) {
+    return false;
+  }
+  auto* item = player.equipped_item_mutable(slot);
+  if (item == nullptr || is_empty(*item) || item->dura == 0) {
+    return false;
+  }
+
+  const auto before = *item;
+  item->dura = item->dura > loss ? static_cast<std::uint16_t>(item->dura - loss) : 0;
+  queue_packet(dispatch, player.session_id(),
+               make_update_item_packet(player.session_id(), player.id(), *item,
+                                       item_configs_));
+  if (display_dura_units(before.dura) != display_dura_units(item->dura) ||
+      item->dura == 0) {
+    queue_packet(dispatch, player.session_id(),
+                 make_dura_change_packet(player.session_id(), slot, *item, item_configs_));
+  }
+  if (item->dura == 0) {
+    player.refresh_derived_state(item_configs_);
+    queue_packet(dispatch, player.session_id(),
+                 make_ability_packet(player.session_id(), player.character()));
+    queue_packet(dispatch, player.session_id(),
+                 make_sub_ability_packet(player.session_id(), player));
+  }
+  return true;
+}
+
+std::int32_t MapActor::roll_legacy_weapon_durability_loss(const Player& attacker,
+                                                          const GameObject& target,
+                                                          RuntimeDispatch& dispatch,
+                                                          std::uint64_t current_tick,
+                                                          std::uint64_t now_ms) {
+  const auto* weapon =
+      attacker.equipped_item(static_cast<std::size_t>(kEquipWeapon));
+  if (weapon == nullptr || is_empty(*weapon) || weapon->dura == 0) {
+    return 0;
+  }
+
+  std::int32_t weapon_strong = 0;
+  if (const auto* config = find_item_config(item_configs_, weapon->index);
+      config != nullptr && config->special_pwr >= 1 && config->special_pwr <= 10) {
+    weapon_strong = config->special_pwr;
+  }
+  return legacy_random_value(dispatch, "LegacyCombat", "weapon_dura_damage", 5,
+                             attacker.id(), target.id(), "DoDamageWeapon",
+                             now_ms, current_tick) +
+         2 - weapon_strong;
+}
+
+bool MapActor::apply_legacy_weapon_durability_loss(Player& attacker,
+                                                   std::int32_t loss,
+                                                   RuntimeDispatch& dispatch) {
+  const auto changed =
+      apply_equipped_item_durability_loss(attacker, kEquipWeapon, loss, dispatch);
+  if (changed) {
+    queue_save_character(dispatch, attacker);
+  }
+  return changed;
+}
+
+bool MapActor::apply_legacy_struck_equipment_durability(Player& target,
+                                                        std::uint64_t hitter_id,
+                                                        RuntimeDispatch& dispatch,
+                                                        std::uint64_t current_tick,
+                                                        std::uint64_t now_ms,
+                                                        std::string stage) {
+  auto loss =
+      legacy_random_value(dispatch, stage, "struck_dura_damage", 10,
+                          hitter_id, target.id(), "StruckDamage", now_ms,
+                          current_tick) +
+      5;
+  if (target.legacy_poison_damage_armor_active(current_tick)) {
+    loss = (loss * 6 + 2) / 5;
+  }
+
+  auto changed = apply_equipped_item_durability_loss(target, kEquipDress, loss, dispatch);
+  for (std::size_t slot = 1; slot <= kEquipBoots; ++slot) {
+    if (slot == kEquipBujuk) {
+      continue;
+    }
+    const auto* item = target.equipped_item(slot);
+    if (item == nullptr || is_empty(*item) || item->dura == 0) {
+      continue;
+    }
+    const auto chance =
+        legacy_random_value(dispatch, stage, "struck_dura_gate", 8,
+                            hitter_id, target.id(), "StruckDamage", now_ms,
+                            current_tick);
+    if (chance == 0) {
+      changed = apply_equipped_item_durability_loss(target, slot, loss, dispatch) ||
+                changed;
+    }
+  }
+  if (changed) {
+    queue_save_character(dispatch, target);
+  }
+  return changed;
 }
 
 #include "world/map_actor_npc.hpp"
