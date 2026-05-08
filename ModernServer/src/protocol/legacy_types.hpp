@@ -48,6 +48,7 @@ constexpr std::uint16_t kSmFeatureChanged = 41;
 constexpr std::uint16_t kSmUsername = 42;
 constexpr std::uint16_t kSmWinExp = 44;
 constexpr std::uint16_t kSmLevelUp = 45;
+constexpr std::uint16_t kSmBreakWeapon = 1102;
 constexpr std::uint16_t kSmDayChanging = 46;
 constexpr std::uint16_t kSmLogon = 50;
 constexpr std::uint16_t kSmNewMap = 51;

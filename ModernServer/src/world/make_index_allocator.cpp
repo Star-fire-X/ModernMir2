@@ -47,6 +47,9 @@ void MakeIndexAllocator::observe(const CharacterRecord& character) {
 
 void MakeIndexAllocator::observe(const MerchantStateRecord& merchant_state) {
   observe_items(*this, merchant_state.goods);
+  for (const auto& record : merchant_state.weapon_upgrades) {
+    observe(record.item);
+  }
 }
 
 std::int32_t MakeIndexAllocator::allocate() {

@@ -162,7 +162,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       auto* requester = as_player(requester_it->second.get());
-      const auto* merchant = as_npc(target_it->second.get());
+      auto* merchant = as_npc(target_it->second.get());
       if (requester == nullptr || merchant == nullptr || !in_interaction_range(*requester, *target_it->second)) {
         break;
       }
@@ -202,7 +202,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       auto* requester = as_player(requester_it->second.get());
-      const auto* merchant = as_npc(target_it->second.get());
+      auto* merchant = as_npc(target_it->second.get());
       if (requester == nullptr || merchant == nullptr || !in_interaction_range(*requester, *target_it->second)) {
         break;
       }
@@ -210,7 +210,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       const auto lowered_payload = util::lower_copy(mail.payload);
       const auto script_handled = legacy_execute_npc_script(
           *requester, *merchant, mail.payload, dispatch, current_tick, now_ms);
-      if (script_handled && !legacy_script_action_uses_existing_business(lowered_payload, *merchant)) {
+      const auto uses_existing_business =
+          legacy_script_action_uses_existing_business(lowered_payload, *merchant);
+      if (script_handled && !uses_existing_business) {
         break;
       }
       if (mail.payload == "@guild_menu" && merchant->supports_guild()) {
@@ -845,6 +847,16 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                               : LegacyRepairMode::normal);
         queue_packet(dispatch, requester->session_id(),
                      make_send_user_repair_packet(requester->session_id(), target_it->second->id()));
+      } else if (lowered_payload == "@upgradenow" && merchant->supports_weapon_upgrade()) {
+        if (!reject_trade_locked_item_change(requester)) {
+          static_cast<void>(handle_weapon_upgrade_start(*requester, *merchant, dispatch,
+                                                        current_tick, now_ms));
+        }
+      } else if (lowered_payload == "@getbackupgnow" && merchant->supports_weapon_upgrade()) {
+        if (!reject_trade_locked_item_change(requester)) {
+          static_cast<void>(handle_weapon_upgrade_get_back(*requester, *merchant, dispatch,
+                                                           current_tick, now_ms));
+        }
       } else if (lowered_payload == "@storage" && merchant->supports_storage()) {
         const auto storage_count = static_cast<std::uint16_t>(std::count_if(
             requester->character().storage_items.begin(), requester->character().storage_items.end(),
@@ -1880,6 +1892,31 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
+      if (item_config != nullptr && legacy_is_blessed_oil(*item_config)) {
+        if (!apply_legacy_weapon_good_luck(*player, dispatch, current_tick, now_ms)) {
+          add_legacy_trace(dispatch, "LegacyWeaponLuck", "blessed_oil_reject", mail,
+                           current_tick, now_ms, false, removed->index, 0,
+                           "MakeWeaponGoodLock");
+          static_cast<void>(player->add_bag_item(*removed));
+          queue_packet(dispatch, player->session_id(),
+                       make_eat_result_packet(player->session_id(), false));
+          break;
+        }
+        player->refresh_derived_state(item_configs_);
+        queue_packet(dispatch, player->session_id(),
+                     make_del_item_packet(player->session_id(), player->id(), *removed,
+                                          item_configs_));
+        queue_packet(dispatch, player->session_id(),
+                     make_eat_result_packet(player->session_id(), true));
+        queue_packet(dispatch, player->session_id(),
+                     make_weight_changed_packet(player->session_id(), player->character()));
+        queue_save_character(dispatch, *player);
+        add_legacy_trace(dispatch, "LegacyWeaponLuck", "blessed_oil_success", mail,
+                         current_tick, now_ms, true, removed->index, 0,
+                         "MakeWeaponGoodLock");
+        break;
+      }
+
       if (item_config != nullptr && legacy_item_is_magic_book(*item_config)) {
         const auto book_result = legacy_read_magic_book(*player, *item_config, magic_configs_);
         if (book_result.status != LegacyReadBookStatus::learned) {
@@ -2159,6 +2196,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                          false, 0, 0, "attack");
         break;
       }
+      static_cast<void>(apply_pending_weapon_upgrade_result(*attacker, dispatch,
+                                                            current_tick, now_ms));
 
       const auto attack_power =
           roll_legacy_player_attack_power(*attacker, *target, effective_ident, dispatch,
@@ -2216,14 +2255,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
         if (target_died) {
           player_target->mark_dead(now_ms);
-          if (!config_.fight_zone && !config_.fight3_zone && player_target->pk_level() < 2 &&
-              player_target->has_recent_pk_hiter(attacker->id(), now_ms)) {
-            attacker->inc_pk_point(100);
-            queue_packet(dispatch, attacker->session_id(),
-                         make_username_packet(attacker->session_id(), attacker->id(),
-                                              attacker->character().character_name,
-                                              actor_name_color(*attacker)));
-          }
+          apply_bad_kill_penalty(*attacker, *player_target, dispatch, current_tick,
+                                 now_ms, "LegacyCombat");
+          static_cast<void>(settle_player_death(*player_target, dispatch, current_tick,
+                                                now_ms));
         }
       } else if (auto* monster_target = as_monster(target); monster_target != nullptr) {
         applied_damage = apply_legacy_monster_damage(
@@ -2332,6 +2367,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
             if (extra_target_died) {
               player_target->mark_dead(now_ms);
+              apply_bad_kill_penalty(*attacker, *player_target, dispatch,
+                                     current_tick, now_ms, "LegacyCombat");
+              static_cast<void>(settle_player_death(*player_target, dispatch,
+                                                    current_tick, now_ms));
             }
           } else if (auto* monster_target = as_monster(extra_target); monster_target != nullptr) {
             extra_applied_damage = apply_legacy_monster_damage(
@@ -2703,6 +2742,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                         current_tick, now_ms);
           if (result.applied_damage > 0 && as_monster(&hit_target) != nullptr) {
             notify_owned_slaves_target(*attacker, hit_target.id(), now_ms);
+          }
+          if (result.target_died) {
+            if (auto* player_target = as_player(&hit_target); player_target != nullptr) {
+              apply_bad_kill_penalty(*attacker, *player_target, dispatch, current_tick,
+                                     now_ms, "LegacySpell");
+              static_cast<void>(settle_player_death(*player_target, dispatch, current_tick,
+                                                    now_ms));
+            }
           }
           add_legacy_trace(dispatch, "LegacySpell",
                            result.target_died ? "death" : "mag_struck", mail,
@@ -3447,14 +3494,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           }
           if (target_died) {
             player_target->mark_dead(now_ms);
-            if (!config_.fight_zone && !config_.fight3_zone && player_target->pk_level() < 2 &&
-                player_target->has_recent_pk_hiter(attacker->id(), now_ms)) {
-              attacker->inc_pk_point(100);
-              queue_packet(dispatch, attacker->session_id(),
-                           make_username_packet(attacker->session_id(), attacker->id(),
-                                                attacker->character().character_name,
-                                                actor_name_color(*attacker)));
-            }
+            apply_bad_kill_penalty(*attacker, *player_target, dispatch, current_tick,
+                                   now_ms, "LegacySpell");
+            static_cast<void>(settle_player_death(*player_target, dispatch, current_tick,
+                                                  now_ms));
           }
         } else if (auto* monster_target = as_monster(&resolved_target); monster_target != nullptr) {
           if (harmful_spell) {
@@ -4060,14 +4103,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
         if (target_died) {
           player_target->mark_dead(now_ms);
-          if (!config_.fight_zone && !config_.fight3_zone && player_target->pk_level() < 2 &&
-              player_target->has_recent_pk_hiter(caster->id(), now_ms)) {
-            caster->inc_pk_point(100);
-            queue_packet(dispatch, caster->session_id(),
-                         make_username_packet(caster->session_id(), caster->id(),
-                                              caster->character().character_name,
-                                              actor_name_color(*caster)));
-          }
+          apply_bad_kill_penalty(*caster, *player_target, dispatch, current_tick,
+                                 now_ms, "LegacySpell");
+          static_cast<void>(settle_player_death(*player_target, dispatch, current_tick,
+                                                now_ms));
         }
         if (damage_result.absorbed_damage > 0) {
           queue_packet(dispatch, player_target->session_id(),

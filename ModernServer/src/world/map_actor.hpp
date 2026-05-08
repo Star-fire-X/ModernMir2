@@ -51,7 +51,8 @@ class MapActor {
            std::vector<MapQuestConfig> map_quests = {},
            CastleDialogContext castle_dialog_context = {},
            std::unordered_map<std::string, MonsterDefConfig> monster_defs = {},
-           MakeIndexAllocator* make_index_allocator = nullptr);
+           MakeIndexAllocator* make_index_allocator = nullptr,
+           std::string black_stone_name = "BlackStone");
 
   void enqueue_mail(ActorMail mail);
   void set_legacy_random(LegacyRandom* legacy_random);
@@ -340,6 +341,22 @@ class MapActor {
                                                 std::string stage,
                                                 std::uint64_t current_tick,
                                                 std::uint64_t now_ms);
+  bool handle_weapon_upgrade_start(Player& player, Npc& npc, RuntimeDispatch& dispatch,
+                                   std::uint64_t current_tick, std::uint64_t now_ms);
+  bool handle_weapon_upgrade_get_back(Player& player, Npc& npc, RuntimeDispatch& dispatch,
+                                      std::uint64_t current_tick, std::uint64_t now_ms);
+  bool apply_pending_weapon_upgrade_result(Player& attacker, RuntimeDispatch& dispatch,
+                                           std::uint64_t current_tick, std::uint64_t now_ms);
+  bool apply_legacy_weapon_good_luck(Player& player, RuntimeDispatch& dispatch,
+                                     std::uint64_t current_tick, std::uint64_t now_ms);
+  bool apply_legacy_weapon_unlock(Player& player, RuntimeDispatch& dispatch,
+                                  std::uint64_t current_tick, std::uint64_t now_ms,
+                                  std::string stage);
+  void apply_bad_kill_penalty(Player& killer, const Player& victim, RuntimeDispatch& dispatch,
+                              std::uint64_t current_tick, std::uint64_t now_ms,
+                              std::string stage);
+  bool settle_player_death(Player& player, RuntimeDispatch& dispatch,
+                           std::uint64_t current_tick, std::uint64_t now_ms);
   bool try_legacy_revival(Player& player, RuntimeDispatch& dispatch,
                           std::uint64_t current_tick, std::uint64_t now_ms);
   [[nodiscard]] std::int32_t legacy_random_value(RuntimeDispatch& dispatch,
@@ -367,6 +384,7 @@ class MapActor {
   std::unordered_map<std::int32_t, MagicConfig> magic_configs_{};
   std::unordered_map<std::string, MonsterDefConfig> monster_defs_{};
   std::vector<MapQuestConfig> map_quests_{};
+  std::string black_stone_name_{"BlackStone"};
   std::shared_ptr<const legacy::MapDocument> movement_map_{};
   LegacyMapEnvironment environment_{};
   CastleDialogContext castle_dialog_context_{};

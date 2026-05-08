@@ -90,6 +90,7 @@ struct RuntimeConfig {
   std::int32_t guild_war_fee{30000};
   std::int32_t upgrade_weapon_fee{10000};
   std::int32_t guild_create_fee{10000};
+  std::string black_stone_name{"BlackStone"};
   std::int32_t legacy_user_full_count{500};
   std::int32_t legacy_zen_fast_step{300};
   std::optional<std::uint32_t> legacy_random_seed{};

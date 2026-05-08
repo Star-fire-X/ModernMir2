@@ -1135,6 +1135,7 @@ void MapActor::legacy_monster_temp_attack(Monster& monster, Player& target,
   }
   if (died) {
     target.mark_dead(now_ms);
+    static_cast<void>(settle_player_death(target, dispatch, current_tick, now_ms));
   }
   if (absorbed_damage > 0) {
     queue_packet(dispatch, target.session_id(),
@@ -1412,6 +1413,7 @@ bool MapActor::legacy_monster_special_attack_target(Monster& monster,
     if (player.is_dead()) {
       if (!try_legacy_revival(player, dispatch, current_tick, now_ms)) {
         player.mark_dead(now_ms);
+        static_cast<void>(settle_player_death(player, dispatch, current_tick, now_ms));
       }
     }
     if (damage_result.absorbed_damage > 0) {
@@ -1724,6 +1726,7 @@ bool MapActor::legacy_monster_special_run(Monster& monster, RuntimeDispatch& dis
       if (player->is_dead()) {
         if (!try_legacy_revival(*player, dispatch, current_tick, now_ms)) {
           player->mark_dead(now_ms);
+          static_cast<void>(settle_player_death(*player, dispatch, current_tick, now_ms));
         }
       }
       if (damage_result.absorbed_damage > 0) {

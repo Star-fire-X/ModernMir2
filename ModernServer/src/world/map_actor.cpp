@@ -10,6 +10,7 @@
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <sstream>
 #include <string_view>
@@ -139,6 +140,118 @@ PersistRequest make_save_merchant_state_request(const Npc& merchant) {
   request.kind = PersistRequestKind::save_merchant_state;
   request.merchant_state = merchant.snapshot_merchant_state();
   return request;
+}
+
+std::uint8_t clamp_desc_value(std::int32_t value) {
+  return static_cast<std::uint8_t>(std::clamp(value, 0, 255));
+}
+
+std::uint16_t clamp_dura_value(std::int32_t value) {
+  return static_cast<std::uint16_t>(std::clamp(value, 0, 65000));
+}
+
+bool item_name_equals(std::string_view left, std::string_view right) {
+  return util::lower_copy(util::trim(std::string(left))) ==
+         util::lower_copy(util::trim(std::string(right)));
+}
+
+struct LegacyWeaponUpgradePreparation {
+  std::uint8_t updc{0};
+  std::uint8_t upsc{0};
+  std::uint8_t upmc{0};
+  std::uint8_t durapoint{0};
+  bool has_black_stone{false};
+  std::vector<std::size_t> consume_slots{};
+};
+
+LegacyWeaponUpgradePreparation prepare_weapon_upgrade(
+    const Player& player, const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
+    std::string_view black_stone_name) {
+  LegacyWeaponUpgradePreparation result;
+  std::vector<std::int32_t> black_stone_points;
+  std::int32_t dc_top = 0;
+  std::int32_t dc_second = 0;
+  std::int32_t sc_top = 0;
+  std::int32_t sc_second = 0;
+  std::int32_t mc_top = 0;
+  std::int32_t mc_second = 0;
+
+  const auto update_top_two = [](std::int32_t value, std::int32_t& top,
+                                 std::int32_t& second) {
+    if (value > top) {
+      second = top;
+      top = value;
+    } else if (value > second) {
+      second = value;
+    }
+  };
+
+  const auto& bag_items = player.character().bag_items;
+  for (std::size_t slot = 0; slot < bag_items.size(); ++slot) {
+    const auto& item = bag_items[slot];
+    if (is_empty(item)) {
+      continue;
+    }
+    const auto* config = find_item_config(item_configs, item.index);
+    if (config == nullptr) {
+      continue;
+    }
+    if (item_name_equals(config->name, black_stone_name)) {
+      result.has_black_stone = true;
+      black_stone_points.push_back(static_cast<std::int32_t>(
+          std::lround(static_cast<double>(item.dura) / 1000.0)));
+      result.consume_slots.push_back(slot);
+      continue;
+    }
+    if (!legacy_is_upgrade_weapon_stuff(*config)) {
+      continue;
+    }
+    const auto upgraded = legacy_upgraded_item_config(*config, item);
+    std::int32_t dc = 0;
+    std::int32_t sc = 0;
+    std::int32_t mc = 0;
+    switch (upgraded.std_mode) {
+      case 19:
+      case 20:
+      case 21:
+      case 22:
+      case 23:
+      case 24:
+      case 26:
+        dc = packed_min(upgraded.dc) + packed_max(upgraded.dc);
+        sc = packed_min(upgraded.sc) + packed_max(upgraded.sc);
+        mc = packed_min(upgraded.mc) + packed_max(upgraded.mc);
+        if (upgraded.std_mode == 24 || upgraded.std_mode == 26) {
+          ++dc;
+          ++sc;
+          ++mc;
+        }
+        break;
+      default:
+        break;
+    }
+    update_top_two(dc, dc_top, dc_second);
+    update_top_two(sc, sc_top, sc_second);
+    update_top_two(mc, mc_top, mc_second);
+    result.consume_slots.push_back(slot);
+  }
+
+  std::sort(black_stone_points.begin(), black_stone_points.end(), std::greater<>());
+  const auto count = std::min<std::size_t>(black_stone_points.size(), 5);
+  if (count > 0) {
+    const auto sum = std::accumulate(black_stone_points.begin(), black_stone_points.begin() + count, 0);
+    result.durapoint = clamp_desc_value(static_cast<std::int32_t>(
+        std::lround(static_cast<double>(count) +
+                    (static_cast<double>(sum) / static_cast<double>(count)) / 5.0 *
+                        static_cast<double>(count))));
+  }
+  result.updc = clamp_desc_value(dc_top + dc_top / 5 + dc_second / 3);
+  result.upsc = clamp_desc_value(sc_top + sc_top / 5 + sc_second / 3);
+  result.upmc = clamp_desc_value(mc_top + mc_top / 5 + mc_second / 3);
+  std::sort(result.consume_slots.begin(), result.consume_slots.end(), std::greater<>());
+  result.consume_slots.erase(std::unique(result.consume_slots.begin(), result.consume_slots.end()),
+                             result.consume_slots.end());
+  return result;
 }
 
 LegacyUserItem make_runtime_merchant_item(const ItemConfig& item_config, std::int32_t make_index) {
@@ -748,14 +861,6 @@ LegacyMagicDamageResult apply_legacy_magic_damage(
     }
     if (result.target_died) {
       player_target->mark_dead(now_ms);
-      if (!map_config.fight_zone && !map_config.fight3_zone && player_target->pk_level() < 2 &&
-          player_target->has_recent_pk_hiter(caster.id(), now_ms)) {
-        caster.inc_pk_point(100);
-        queue_packet(dispatch, caster.session_id(),
-                     make_username_packet(caster.session_id(), caster.id(),
-                                          caster.character().character_name,
-                                          actor_name_color(caster)));
-      }
     }
     if (damage_result.absorbed_damage > 0) {
       queue_packet(dispatch, player_target->session_id(),
@@ -1021,13 +1126,15 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
                    std::vector<MapQuestConfig> map_quests,
                    CastleDialogContext castle_dialog_context,
                    std::unordered_map<std::string, MonsterDefConfig> monster_defs,
-                   MakeIndexAllocator* make_index_allocator)
+                   MakeIndexAllocator* make_index_allocator,
+                   std::string black_stone_name)
     : config_(std::move(config)),
       budgets_(std::move(budgets)),
       item_configs_(std::move(item_configs)),
       magic_configs_(std::move(magic_configs)),
       monster_defs_(std::move(monster_defs)),
       map_quests_(std::move(map_quests)),
+      black_stone_name_(std::move(black_stone_name)),
       castle_dialog_context_(std::move(castle_dialog_context)),
       make_index_allocator_(make_index_allocator) {
   movement_map_ = legacy::decode_map_file(config_.source_map);
@@ -2177,6 +2284,558 @@ bool MapActor::apply_legacy_physical_equipment_specials(Player& attacker,
                      healed, "SuckupEnemyHealth");
     changed = true;
   }
+  return changed;
+}
+
+bool MapActor::handle_weapon_upgrade_start(Player& player, Npc& npc,
+                                           RuntimeDispatch& dispatch,
+                                           std::uint64_t current_tick,
+                                           std::uint64_t now_ms) {
+  if (!npc.supports_weapon_upgrade() || player.is_dead() ||
+      trade_session_for(player.id()) != nullptr) {
+    queue_system_notice(dispatch, player, "Weapon upgrade failed.");
+    return false;
+  }
+  const auto existing = std::find_if(npc.weapon_upgrades().begin(), npc.weapon_upgrades().end(),
+                                    [&](const LegacyWeaponUpgradeRecord& record) {
+                                      return record.character_name == player.character().character_name;
+                                    });
+  const auto* weapon = player.equipped_item(kEquipWeapon);
+  const auto* weapon_config =
+      weapon != nullptr ? find_item_config(item_configs_, weapon->index) : nullptr;
+  if (existing != npc.weapon_upgrades().end() || weapon == nullptr || is_empty(*weapon) ||
+      weapon_config == nullptr || (weapon_config->std_mode != 5 && weapon_config->std_mode != 6) ||
+      !player.can_spend_gold(castle_dialog_context_.upgrade_weapon_fee)) {
+    queue_system_notice(dispatch, player, "Weapon upgrade failed.");
+    return false;
+  }
+
+  auto preparation = prepare_weapon_upgrade(player, item_configs_, black_stone_name_);
+  if (!preparation.has_black_stone) {
+    queue_system_notice(dispatch, player, "Weapon upgrade failed.");
+    return false;
+  }
+
+  const auto previous_feature = player.character().feature;
+  const auto previous_status = player.character().status;
+  player.spend_gold(castle_dialog_context_.upgrade_weapon_fee);
+  queue_packet(dispatch, player.session_id(),
+               make_gold_changed_packet(player.session_id(), player.character().gold));
+
+  for (const auto slot : preparation.consume_slots) {
+    if (auto removed = player.remove_bag_item_at(slot); removed.has_value()) {
+      queue_packet(dispatch, player.session_id(),
+                   make_del_item_packet(player.session_id(), player.id(), *removed,
+                                        item_configs_));
+    }
+  }
+
+  auto removed_weapon = player.remove_equipped_item(kEquipWeapon, weapon->make_index, {},
+                                                   item_configs_);
+  if (!removed_weapon.has_value()) {
+    queue_system_notice(dispatch, player, "Weapon upgrade failed.");
+    return false;
+  }
+
+  LegacyWeaponUpgradeRecord record;
+  record.character_name = player.character().character_name;
+  record.item = *removed_weapon;
+  record.updc = preparation.updc;
+  record.upsc = preparation.upsc;
+  record.upmc = preparation.upmc;
+  record.durapoint = preparation.durapoint;
+  record.ready_time_ms = now_ms + 60ULL * 60ULL * 1000ULL;
+  npc.weapon_upgrades_mutable().push_back(record);
+
+  queue_packet(dispatch, player.session_id(),
+               make_del_item_packet(player.session_id(), player.id(), *removed_weapon,
+                                    item_configs_));
+  player.refresh_derived_state(item_configs_);
+  queue_packet(dispatch, player.session_id(),
+               make_ability_packet(player.session_id(), player.character()));
+  queue_packet(dispatch, player.session_id(),
+               make_sub_ability_packet(player.session_id(), player));
+  queue_packet(dispatch, player.session_id(),
+               make_use_items_packet(player.session_id(), player, item_configs_));
+  queue_packet(dispatch, player.session_id(),
+               make_weight_changed_packet(player.session_id(), player.character()));
+  if (player.character().feature != previous_feature) {
+    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+      if (is_legacy_visible_to(watcher, player)) {
+        queue_packet(dispatch, watcher.session_id(),
+                     make_feature_changed_packet(watcher.session_id(), player.id(),
+                                                 player.character().feature));
+      }
+    });
+  }
+  if (player.character().status != previous_status) {
+    broadcast_legacy_char_status_changed(dispatch, player);
+  }
+  queue_save_character(dispatch, player);
+  dispatch.persist_requests.push_back(make_save_merchant_state_request(npc));
+  queue_system_notice(dispatch, player, "Weapon upgrade started.");
+  return true;
+}
+
+bool MapActor::handle_weapon_upgrade_get_back(Player& player, Npc& npc,
+                                              RuntimeDispatch& dispatch,
+                                              std::uint64_t current_tick,
+                                              std::uint64_t now_ms) {
+  if (!npc.supports_weapon_upgrade() || player.is_dead() || !player.has_free_bag_slot()) {
+    queue_system_notice(dispatch, player, "Weapon upgrade failed.");
+    return false;
+  }
+  auto& records = npc.weapon_upgrades_mutable();
+  const auto record_it = std::find_if(records.begin(), records.end(),
+                                     [&](const LegacyWeaponUpgradeRecord& record) {
+                                       return record.character_name ==
+                                              player.character().character_name;
+                                     });
+  if (record_it == records.end()) {
+    queue_system_notice(dispatch, player, "Weapon upgrade failed.");
+    return false;
+  }
+  if (record_it->ready_time_ms != 0 && now_ms < record_it->ready_time_ms) {
+    queue_system_notice(dispatch, player, "Weapon upgrade is not ready.");
+    return false;
+  }
+
+  auto item = record_it->item;
+  const auto durapoint = static_cast<std::int32_t>(record_it->durapoint);
+  if (durapoint <= 8) {
+    item.dura_max = item.dura_max > 3000
+                        ? clamp_dura_value(static_cast<std::int32_t>(item.dura_max) - 3000)
+                        : clamp_dura_value(static_cast<std::int32_t>(item.dura_max) / 2);
+    if (item.dura > item.dura_max) {
+      item.dura = item.dura_max;
+    }
+  } else if (durapoint <= 15) {
+    const auto roll = legacy_random_value(dispatch, "LegacyWeaponUpgrade", "dura_down_gate",
+                                          std::max(durapoint, 1), player.id(), npc.id(),
+                                          "@getbackupgnow", now_ms, current_tick);
+    if (roll < 6) {
+      item.dura_max = clamp_dura_value(static_cast<std::int32_t>(item.dura_max) - 1000);
+      if (item.dura > item.dura_max) {
+        item.dura = item.dura_max;
+      }
+    }
+  } else if (durapoint >= 18) {
+    const auto roll = legacy_random_value(dispatch, "LegacyWeaponUpgrade", "dura_up_roll",
+                                          std::max(durapoint - 18, 1), player.id(), npc.id(),
+                                          "@getbackupgnow", now_ms, current_tick);
+    if (roll >= 1 && roll <= 4) {
+      item.dura_max = clamp_dura_value(static_cast<std::int32_t>(item.dura_max) + 1000);
+    } else if (roll >= 5 && roll <= 7) {
+      item.dura_max = clamp_dura_value(static_cast<std::int32_t>(item.dura_max) + 2000);
+    } else if (roll >= 8) {
+      item.dura_max = clamp_dura_value(static_cast<std::int32_t>(item.dura_max) + 4000);
+    }
+  }
+
+  const auto equal_power =
+      record_it->updc == record_it->upmc && record_it->upmc == record_it->upsc;
+  const auto rand = equal_power ? legacy_random_value(dispatch, "LegacyWeaponUpgrade",
+                                                       "equal_power_roll", 3, player.id(),
+                                                       npc.id(), "@getbackupgnow",
+                                                       now_ms, current_tick)
+                                : -1;
+  auto roll_upgrade = [&](std::uint8_t power, std::uint8_t success_code,
+                          std::int32_t rand_value) {
+    const auto per = std::min(85, 10 + std::min(11, static_cast<std::int32_t>(power)) * 7 +
+                                      static_cast<std::int32_t>(item.desc[3]) -
+                                      static_cast<std::int32_t>(item.desc[4]) +
+                                      player.body_luck_level());
+    const auto gate = legacy_random_value(dispatch, "LegacyWeaponUpgrade", "success_gate",
+                                          100, player.id(), npc.id(), "@getbackupgnow",
+                                          now_ms, current_tick);
+    if (gate < per) {
+      item.desc[10] = success_code;
+      if (per > 63 &&
+          legacy_random_value(dispatch, "LegacyWeaponUpgrade", "rare_gate",
+                              30, player.id(), npc.id(), "@getbackupgnow",
+                              now_ms, current_tick) == 0) {
+        item.desc[10] = static_cast<std::uint8_t>(success_code + 1);
+      }
+      if (per > 79 &&
+          legacy_random_value(dispatch, "LegacyWeaponUpgrade", "epic_gate",
+                              200, player.id(), npc.id(), "@getbackupgnow",
+                              now_ms, current_tick) == 0) {
+        item.desc[10] = static_cast<std::uint8_t>(success_code + 2);
+      }
+    } else {
+      item.desc[10] = 1;
+    }
+    static_cast<void>(rand_value);
+  };
+  if ((record_it->updc >= record_it->upmc && record_it->updc >= record_it->upsc) ||
+      rand == 0) {
+    roll_upgrade(record_it->updc, 10, rand);
+  }
+  if ((record_it->upmc >= record_it->updc && record_it->upmc >= record_it->upsc) ||
+      rand == 1) {
+    roll_upgrade(record_it->upmc, 20, rand);
+  }
+  if ((record_it->upsc >= record_it->upmc && record_it->upsc >= record_it->updc) ||
+      rand == 2) {
+    roll_upgrade(record_it->upsc, 30, rand);
+  }
+
+  records.erase(record_it);
+  static_cast<void>(player.add_bag_item(item));
+  queue_packet(dispatch, player.session_id(),
+               make_add_item_packet(player.session_id(), item, item_configs_));
+  player.refresh_derived_state(item_configs_);
+  queue_packet(dispatch, player.session_id(),
+               make_weight_changed_packet(player.session_id(), player.character()));
+  queue_save_character(dispatch, player);
+  dispatch.persist_requests.push_back(make_save_merchant_state_request(npc));
+  queue_system_notice(dispatch, player, "Weapon upgrade complete.");
+  return true;
+}
+
+bool MapActor::apply_pending_weapon_upgrade_result(Player& attacker,
+                                                   RuntimeDispatch& dispatch,
+                                                   std::uint64_t current_tick,
+                                                   std::uint64_t now_ms) {
+  auto* weapon = attacker.equipped_item_mutable(kEquipWeapon);
+  if (weapon == nullptr || is_empty(*weapon) || weapon->desc[10] == 0) {
+    return false;
+  }
+
+  const auto previous_feature = attacker.character().feature;
+  const auto old_weapon = *weapon;
+  if (weapon->desc[0] + weapon->desc[1] + weapon->desc[2] < 20) {
+    const auto code = weapon->desc[10];
+    if (code >= 10 && code <= 13) {
+      weapon->desc[0] = clamp_desc_value(weapon->desc[0] + code - 9);
+    } else if (code >= 20 && code <= 23) {
+      weapon->desc[1] = clamp_desc_value(weapon->desc[1] + code - 19);
+    } else if (code >= 30 && code <= 33) {
+      weapon->desc[2] = clamp_desc_value(weapon->desc[2] + code - 29);
+    } else if (code == 1) {
+      *weapon = LegacyUserItem{};
+    }
+  } else {
+    *weapon = LegacyUserItem{};
+  }
+  if (!is_empty(*weapon)) {
+    weapon->desc[10] = 0;
+    queue_packet(dispatch, attacker.session_id(),
+                 make_update_item_packet(attacker.session_id(), attacker.id(), *weapon,
+                                         item_configs_));
+  } else {
+    queue_packet(dispatch, attacker.session_id(),
+                 make_del_item_packet(attacker.session_id(), attacker.id(), old_weapon,
+                                      item_configs_));
+    queue_packet(dispatch, attacker.session_id(),
+                 make_break_weapon_packet(attacker.session_id(), attacker));
+  }
+
+  attacker.refresh_derived_state(item_configs_);
+  queue_packet(dispatch, attacker.session_id(),
+               make_ability_packet(attacker.session_id(), attacker.character()));
+  queue_packet(dispatch, attacker.session_id(),
+               make_sub_ability_packet(attacker.session_id(), attacker));
+  queue_packet(dispatch, attacker.session_id(),
+               make_use_items_packet(attacker.session_id(), attacker, item_configs_));
+  if (attacker.character().feature != previous_feature) {
+    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+      if (is_legacy_visible_to(watcher, attacker)) {
+        queue_packet(dispatch, watcher.session_id(),
+                     make_feature_changed_packet(watcher.session_id(), attacker.id(),
+                                                 attacker.character().feature));
+      }
+    });
+  }
+  queue_save_character(dispatch, attacker);
+  add_legacy_trace(dispatch, "LegacyWeaponUpgrade", "identify_result", ActorMail{},
+                   current_tick, now_ms, !is_empty(*weapon), old_weapon.desc[10], 0,
+                   "CheckWeaponUpgradeResult");
+  return true;
+}
+
+bool MapActor::apply_legacy_weapon_unlock(Player& player, RuntimeDispatch& dispatch,
+                                          std::uint64_t current_tick,
+                                          std::uint64_t now_ms,
+                                          std::string stage) {
+  auto* weapon = player.equipped_item_mutable(kEquipWeapon);
+  if (weapon == nullptr || is_empty(*weapon)) {
+    return false;
+  }
+  if (weapon->desc[3] > 0) {
+    --weapon->desc[3];
+  } else if (weapon->desc[4] < 10) {
+    ++weapon->desc[4];
+  }
+  player.refresh_derived_state(item_configs_);
+  queue_packet(dispatch, player.session_id(),
+               make_update_item_packet(player.session_id(), player.id(), *weapon,
+                                       item_configs_));
+  queue_packet(dispatch, player.session_id(),
+               make_ability_packet(player.session_id(), player.character()));
+  queue_packet(dispatch, player.session_id(),
+               make_sub_ability_packet(player.session_id(), player));
+  add_legacy_trace(dispatch, std::move(stage), "weapon_unlock", ActorMail{},
+                   current_tick, now_ms, true, weapon->desc[3], weapon->desc[4],
+                   "MakeWeaponUnlock");
+  return true;
+}
+
+bool MapActor::apply_legacy_weapon_good_luck(Player& player, RuntimeDispatch& dispatch,
+                                             std::uint64_t current_tick,
+                                             std::uint64_t now_ms) {
+  auto* weapon = player.equipped_item_mutable(kEquipWeapon);
+  if (weapon == nullptr || is_empty(*weapon)) {
+    return false;
+  }
+  std::int32_t difficulty = 0;
+  if (const auto* config = find_item_config(item_configs_, weapon->index); config != nullptr) {
+    difficulty = std::abs(packed_max(config->dc) - packed_min(config->dc)) / 5;
+  }
+  if (legacy_random_value(dispatch, "LegacyWeaponLuck", "curse_gate", 20,
+                          player.id(), 0, "MakeWeaponGoodLock", now_ms,
+                          current_tick) == 1) {
+    static_cast<void>(apply_legacy_weapon_unlock(player, dispatch, current_tick, now_ms,
+                                                 "LegacyWeaponLuck"));
+    return true;
+  }
+  if (weapon->desc[4] > 0) {
+    --weapon->desc[4];
+  } else if (weapon->desc[3] < 1) {
+    ++weapon->desc[3];
+  } else if (weapon->desc[3] < 3 &&
+             legacy_random_value(dispatch, "LegacyWeaponLuck", "luck_3_gate",
+                                 6 + difficulty, player.id(), 0,
+                                 "MakeWeaponGoodLock", now_ms, current_tick) == 1) {
+    ++weapon->desc[3];
+  } else if (weapon->desc[3] < 7 &&
+             legacy_random_value(dispatch, "LegacyWeaponLuck", "luck_7_gate",
+                                 30 + difficulty * 5, player.id(), 0,
+                                 "MakeWeaponGoodLock", now_ms, current_tick) == 1) {
+    ++weapon->desc[3];
+  }
+  player.refresh_derived_state(item_configs_);
+  queue_packet(dispatch, player.session_id(),
+               make_update_item_packet(player.session_id(), player.id(), *weapon,
+                                       item_configs_));
+  queue_packet(dispatch, player.session_id(),
+               make_ability_packet(player.session_id(), player.character()));
+  queue_packet(dispatch, player.session_id(),
+               make_sub_ability_packet(player.session_id(), player));
+  add_legacy_trace(dispatch, "LegacyWeaponLuck", "weapon_good_luck", ActorMail{},
+                   current_tick, now_ms, true, weapon->desc[3], weapon->desc[4],
+                   "MakeWeaponGoodLock");
+  return true;
+}
+
+void MapActor::apply_bad_kill_penalty(Player& killer, const Player& victim,
+                                      RuntimeDispatch& dispatch,
+                                      std::uint64_t current_tick,
+                                      std::uint64_t now_ms,
+                                      std::string stage) {
+  if (config_.fight_zone || config_.fight3_zone || victim.pk_level() >= 2 ||
+      !victim.has_recent_pk_hiter(killer.id(), now_ms)) {
+    return;
+  }
+  killer.inc_pk_point(100);
+  killer.add_body_luck(-500.0);
+  auto weapon_changed = false;
+  if (victim.pk_level() < 1 &&
+      legacy_random_value(dispatch, stage, "weapon_unlock_gate", 5,
+                          killer.id(), victim.id(), "MakeWeaponUnlock", now_ms,
+                          current_tick) == 0) {
+    weapon_changed = apply_legacy_weapon_unlock(killer, dispatch, current_tick, now_ms,
+                                                std::move(stage));
+  }
+  queue_packet(dispatch, killer.session_id(),
+               make_username_packet(killer.session_id(), killer.id(),
+                                    killer.character().character_name,
+                                    actor_name_color(killer)));
+  if (!weapon_changed) {
+    queue_packet(dispatch, killer.session_id(),
+                 make_ability_packet(killer.session_id(), killer.character()));
+    queue_packet(dispatch, killer.session_id(),
+                 make_sub_ability_packet(killer.session_id(), killer));
+  }
+  queue_save_character(dispatch, killer);
+}
+
+bool MapActor::settle_player_death(Player& player, RuntimeDispatch& dispatch,
+                                   std::uint64_t current_tick,
+                                   std::uint64_t now_ms) {
+  if (!player.is_dead() || player.legacy_death_drop_settled()) {
+    return false;
+  }
+  player.mark_legacy_death_drop_settled();
+  player.add_body_luck(-static_cast<double>(player.character().ability.level) * 5.0);
+  if (config_.fight_zone || config_.fight3_zone) {
+    queue_save_character(dispatch, player);
+    return false;
+  }
+
+  auto changed = false;
+  const auto previous_feature = player.character().feature;
+  const auto previous_status = player.character().status;
+  auto drop_position = [&](std::int32_t wide) -> std::pair<std::int32_t, std::int32_t> {
+    std::optional<std::pair<std::int32_t, std::int32_t>> best;
+    std::size_t best_count = std::numeric_limits<std::size_t>::max();
+    for (std::int32_t dy = -wide; dy <= wide; ++dy) {
+      for (std::int32_t dx = -wide; dx <= wide; ++dx) {
+        const auto try_x = player.x() + dx;
+        const auto try_y = player.y() + dy;
+        if (!environment_.in_bounds(try_x, try_y) ||
+            !environment_.static_can_move(try_x, try_y)) {
+          continue;
+        }
+        const auto item_count = environment_.item_object_count(try_x, try_y);
+        if (!item_count.has_value()) {
+          continue;
+        }
+        if (*item_count == 0) {
+          return std::pair{try_x, try_y};
+        }
+        if (*item_count < best_count) {
+          best_count = *item_count;
+          best = std::pair{try_x, try_y};
+        }
+      }
+    }
+    if (best.has_value() && best_count < 8) {
+      return *best;
+    }
+    return std::pair{player.x(), player.y()};
+  };
+  auto place_item = [&](const LegacyUserItem& item) -> bool {
+    if (is_empty(item)) {
+      return false;
+    }
+    GroundItem ground_item;
+    ground_item.id = next_ground_item_id_;
+    ground_item.item = item;
+    ground_item.name = item_name(item, item_configs_);
+    ground_item.count = 1;
+    ground_item.looks = item_looks(item, item_configs_);
+    if (const auto* config = find_item_config(item_configs_, item.index); config != nullptr) {
+      ground_item.ani_count = config->ani_count;
+    }
+    ground_item.drop_time_ms = now_ms;
+    ground_item.expire_time_ms = now_ms + kLegacyGroundItemExpireMs;
+    ground_item.dropper_actor_id = player.id();
+    ground_item.dropper_name = player.name();
+    ground_item.death_drop = true;
+
+    const auto [drop_x, drop_y] = drop_position(2);
+    ground_item.x = drop_x;
+    ground_item.y = drop_y;
+    const auto add_result =
+        environment_.add_item_object(ground_item.x, ground_item.y, ground_item.id,
+                                     LegacyMapItemState{}, now_ms);
+    if (!add_result.ok || add_result.merged) {
+      return false;
+    }
+    const auto item_id = ground_item.id;
+    const auto item_x = ground_item.x;
+    const auto item_y = ground_item.y;
+    ++next_ground_item_id_;
+    ground_items_[item_id] = std::move(ground_item);
+    sync_visibility_after_item_change(item_x, item_y, dispatch, item_id);
+    return true;
+  };
+
+  const auto equip_ran = player.pk_level() > 2 ? 15 : 30;
+  for (std::size_t slot = 0; slot < kMaxEquipSlots; ++slot) {
+    auto* item = player.equipped_item_mutable(slot);
+    if (item == nullptr || is_empty(*item)) {
+      continue;
+    }
+    const auto* config = find_item_config(item_configs_, item->index);
+    if (config != nullptr && (config->item_desc & kLegacyItemDieAndBreak) != 0) {
+      const auto old = *item;
+      *item = LegacyUserItem{};
+      queue_packet(dispatch, player.session_id(),
+                   make_del_item_packet(player.session_id(), player.id(), old,
+                                        item_configs_));
+      changed = true;
+      continue;
+    }
+    if (legacy_random_value(dispatch, "LegacyDeathDrop", "equip_drop_gate",
+                            equip_ran, player.id(), slot, "DropUseItems",
+                            now_ms, current_tick) != 0) {
+      continue;
+    }
+    if (config != nullptr && (config->item_desc & kLegacyItemNeverLose) != 0) {
+      continue;
+    }
+    const auto old = *item;
+    if (place_item(old)) {
+      *item = LegacyUserItem{};
+      queue_packet(dispatch, player.session_id(),
+                   make_del_item_packet(player.session_id(), player.id(), old,
+                                        item_configs_));
+      changed = true;
+    }
+  }
+
+  const auto all_bag_drop = player.pk_level() > 1;
+  for (std::size_t slot = player.character().bag_items.size(); slot > 0; --slot) {
+    const auto index = slot - 1;
+    const auto& item = player.character().bag_items[index];
+    if (is_empty(item)) {
+      continue;
+    }
+    const auto* config = find_item_config(item_configs_, item.index);
+    if (config != nullptr && (config->item_desc & kLegacyItemDieAndBreak) != 0) {
+      if (auto removed = player.remove_bag_item_at(index); removed.has_value()) {
+        queue_packet(dispatch, player.session_id(),
+                     make_del_item_packet(player.session_id(), player.id(), *removed,
+                                          item_configs_));
+        changed = true;
+      }
+      continue;
+    }
+    if (!all_bag_drop &&
+        legacy_random_value(dispatch, "LegacyDeathDrop", "bag_drop_gate", 3,
+                            player.id(), index, "DropBagItems", now_ms,
+                            current_tick) != 0) {
+      continue;
+    }
+    if (config != nullptr && (config->item_desc & kLegacyItemNeverLose) != 0) {
+      continue;
+    }
+    const auto old = item;
+    if (place_item(old)) {
+      static_cast<void>(player.remove_bag_item_at(index));
+      queue_packet(dispatch, player.session_id(),
+                   make_del_item_packet(player.session_id(), player.id(), old,
+                                        item_configs_));
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    player.refresh_derived_state(item_configs_);
+    queue_packet(dispatch, player.session_id(),
+                 make_use_items_packet(player.session_id(), player, item_configs_));
+    queue_packet(dispatch, player.session_id(),
+                 make_weight_changed_packet(player.session_id(), player.character()));
+    queue_packet(dispatch, player.session_id(),
+                 make_ability_packet(player.session_id(), player.character()));
+    queue_packet(dispatch, player.session_id(),
+                 make_sub_ability_packet(player.session_id(), player));
+    if (player.character().feature != previous_feature) {
+      for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+        if (is_legacy_visible_to(watcher, player)) {
+          queue_packet(dispatch, watcher.session_id(),
+                       make_feature_changed_packet(watcher.session_id(), player.id(),
+                                                   player.character().feature));
+        }
+      });
+    }
+    if (player.character().status != previous_status) {
+      broadcast_legacy_char_status_changed(dispatch, player);
+    }
+  }
+  queue_save_character(dispatch, player);
   return changed;
 }
 

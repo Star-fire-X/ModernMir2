@@ -295,7 +295,8 @@ std::unique_ptr<GameObject> make_object(const ActorMail& mail) {
                                    mail.npc_service, mail.merchant_items,
                                    mail.npc_dialog_sections, mail.npc_price_rate_percent,
                                    mail.merchant_key, mail.merchant_products,
-                                   mail.merchant_prices, mail.legacy_deal_std_modes);
+                                   mail.merchant_prices, mail.legacy_deal_std_modes,
+                                   mail.weapon_upgrades);
     default:
       return std::make_unique<EventObject>(mail.actor_id, mail.name, mail.map_id, mail.x, mail.y);
   }
@@ -1272,7 +1273,9 @@ bool legacy_script_action_uses_existing_business(std::string_view lowered_payloa
       ((lowered_payload == "@repair" || lowered_payload == "@s_repair") &&
        npc.supports_repair()) ||
       ((lowered_payload == "@storage" || lowered_payload == "@getback") &&
-       npc.supports_storage())) {
+       npc.supports_storage()) ||
+      ((lowered_payload == "@upgradenow" || lowered_payload == "@getbackupgnow") &&
+       npc.supports_weapon_upgrade())) {
     return true;
   }
   if (util::starts_with(lowered_payload, "@guild_") && npc.supports_guild()) {
@@ -4648,11 +4651,6 @@ bool handle_castle_admin_command(const Player& speaker, const std::string& paylo
     return false;
   }
 
-  if (!is_admin_account(speaker.character().account_id)) {
-    queue_system_notice(dispatch, speaker, "GM castle commands are not allowed for this account.");
-    return true;
-  }
-
   const auto tokens = util::split(payload, ' ');
   if (tokens.empty()) {
     return false;
@@ -4682,6 +4680,15 @@ bool handle_castle_admin_command(const Player& speaker, const std::string& paylo
   }
 
   const auto normalized_root = util::lower_copy(normalized_tokens[0]);
+  if (normalized_root != "@castle" && normalized_root != "@guild") {
+    return false;
+  }
+
+  if (!is_admin_account(speaker.character().account_id)) {
+    queue_system_notice(dispatch, speaker, "GM castle commands are not allowed for this account.");
+    return true;
+  }
+
   if (normalized_root == "@castle") {
     if (normalized_tokens.size() >= 2 && util::lower_copy(normalized_tokens[1]) == "show") {
       queue_system_notice(dispatch, speaker, build_castle_show_line(castle_dialog_context));

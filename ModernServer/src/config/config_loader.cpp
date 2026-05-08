@@ -1262,6 +1262,8 @@ HostConfig ConfigLoader::load(const std::filesystem::path& root) const {
       value_or<std::int32_t>(server, "upgrade_weapon_fee", 10000);
   config.runtime.guild_create_fee =
       value_or<std::int32_t>(server, "guild_create_fee", 10000);
+  config.runtime.black_stone_name =
+      value_or<std::string>(server, "black_stone_name", "BlackStone");
   config.runtime.legacy_user_full_count =
       value_or<std::int32_t>(server, "legacy_user_full_count", 500);
   config.runtime.legacy_zen_fast_step =

@@ -145,6 +145,79 @@ std::int32_t read_i32_le(const std::uint8_t* data) {
   return static_cast<std::int32_t>(bits);
 }
 
+void write_u64_le(std::vector<std::uint8_t>& out, std::uint64_t value) {
+  for (int shift = 0; shift < 64; shift += 8) {
+    out.push_back(static_cast<std::uint8_t>((value >> shift) & 0xffu));
+  }
+}
+
+std::uint64_t read_u64_le(const std::uint8_t* data) {
+  std::uint64_t value = 0;
+  for (int shift = 0; shift < 64; shift += 8) {
+    value |= static_cast<std::uint64_t>(data[shift / 8]) << shift;
+  }
+  return value;
+}
+
+std::vector<std::uint8_t> encode_weapon_upgrade_blob(
+    const std::vector<LegacyWeaponUpgradeRecord>& records) {
+  constexpr std::size_t kNameBytes = 32;
+  std::vector<std::uint8_t> blob;
+  write_i32_le(blob, static_cast<std::int32_t>(records.size()));
+  for (const auto& record : records) {
+    std::array<std::uint8_t, kNameBytes> name{};
+    const auto copy_size = std::min(kNameBytes, record.character_name.size());
+    std::memcpy(name.data(), record.character_name.data(), copy_size);
+    blob.insert(blob.end(), name.begin(), name.end());
+    const auto* item_bytes = reinterpret_cast<const std::uint8_t*>(&record.item);
+    blob.insert(blob.end(), item_bytes, item_bytes + sizeof(LegacyUserItem));
+    blob.push_back(record.updc);
+    blob.push_back(record.upsc);
+    blob.push_back(record.upmc);
+    blob.push_back(record.durapoint);
+    write_u64_le(blob, record.ready_time_ms);
+  }
+  return blob;
+}
+
+std::vector<LegacyWeaponUpgradeRecord> decode_weapon_upgrade_blob(sqlite3_stmt* statement,
+                                                                  int column) {
+  constexpr std::size_t kNameBytes = 32;
+  constexpr std::size_t kRecordBytes = kNameBytes + sizeof(LegacyUserItem) + 4 + 8;
+  std::vector<LegacyWeaponUpgradeRecord> records;
+  const auto* raw = static_cast<const std::uint8_t*>(sqlite3_column_blob(statement, column));
+  const auto bytes = sqlite3_column_bytes(statement, column);
+  if (raw == nullptr || bytes <= 4) {
+    return records;
+  }
+  const auto available = static_cast<std::size_t>(bytes);
+  const auto count = std::max(read_i32_le(raw), 0);
+  std::size_t offset = 4;
+  records.reserve(static_cast<std::size_t>(count));
+  for (std::int32_t index = 0; index < count; ++index) {
+    if (available < offset + kRecordBytes) {
+      spdlog::warn("Merchant upgrade blob column {} ended early at record {}", column, index);
+      break;
+    }
+    LegacyWeaponUpgradeRecord record;
+    const auto* name = raw + offset;
+    const auto name_len = std::find(name, name + kNameBytes, std::uint8_t{0}) - name;
+    record.character_name.assign(reinterpret_cast<const char*>(name), name_len);
+    offset += kNameBytes;
+    std::memcpy(&record.item, raw + offset, sizeof(LegacyUserItem));
+    offset += sizeof(LegacyUserItem);
+    record.updc = raw[offset++];
+    record.upsc = raw[offset++];
+    record.upmc = raw[offset++];
+    record.durapoint = raw[offset++];
+    static_cast<void>(read_u64_le(raw + offset));
+    offset += 8;
+    record.ready_time_ms = 0;
+    records.push_back(record);
+  }
+  return records;
+}
+
 std::vector<std::uint8_t> encode_slave_blob(
     const std::array<CharacterSlaveRecord, kMaxLegacySlaves>& slaves) {
   constexpr std::size_t kNameBytes = 32;
@@ -600,6 +673,7 @@ CharacterRecord read_character_row(sqlite3_stmt* statement) {
   read_blob_array(statement, 43, record.script_params);
   record.daily_quest = static_cast<std::uint32_t>(std::max<std::int64_t>(0, sqlite3_column_int64(statement, 44)));
   decode_slave_blob(statement, 45, record.slaves);
+  record.body_luck = sqlite3_column_double(statement, 46);
   return record;
 }
 
@@ -695,6 +769,7 @@ void bind_character_fields(sqlite3_stmt* statement, const CharacterRecord& chara
   sqlite3_bind_int64(statement, 45, static_cast<sqlite3_int64>(character.daily_quest));
   const auto slave_blob = encode_slave_blob(character.slaves);
   bind_blob_vector(statement, 46, slave_blob);
+  sqlite3_bind_double(statement, 47, character.body_luck);
 }
 
 AccountRecord make_default_account(const std::string& account_id, const std::string& password) {
@@ -853,6 +928,13 @@ void ensure_characters_columns(sqlite3* database) {
                 "ALTER TABLE characters ADD COLUMN daily_quest INTEGER NOT NULL DEFAULT 0;");
   ensure_column(database, "characters", "slave_blob",
                 "ALTER TABLE characters ADD COLUMN slave_blob BLOB NOT NULL DEFAULT X'';");
+  ensure_column(database, "characters", "body_luck",
+                "ALTER TABLE characters ADD COLUMN body_luck REAL NOT NULL DEFAULT 0;");
+}
+
+void ensure_merchant_state_columns(sqlite3* database) {
+  ensure_column(database, "merchant_state", "upgrade_blob",
+                "ALTER TABLE merchant_state ADD COLUMN upgrade_blob BLOB NOT NULL DEFAULT X'';");
 }
 
 void ensure_accounts_columns(sqlite3* database) {
@@ -924,6 +1006,7 @@ void Repository::ensure_schema(const std::filesystem::path& schema_path) {
   migrate_legacy_characters_table(database_, schema_sql);
   ensure_accounts_columns(database_);
   ensure_characters_columns(database_);
+  ensure_merchant_state_columns(database_);
 }
 
 void Repository::seed_runtime() {
@@ -1144,7 +1227,8 @@ void Repository::save_castle_state(const std::string& castle_name, const std::st
 
 std::vector<MerchantStateRecord> Repository::load_merchant_states() {
   static constexpr const char* kStateSql =
-      "SELECT merchant_key, npc_id, map_id, goods_blob FROM merchant_state ORDER BY merchant_key;";
+      "SELECT merchant_key, npc_id, map_id, goods_blob, upgrade_blob FROM merchant_state"
+      " ORDER BY merchant_key;";
   sqlite3_stmt* statement = nullptr;
   if (sqlite3_prepare_v2(database_, kStateSql, -1, &statement, nullptr) != SQLITE_OK) {
     throw std::runtime_error("Failed to prepare load_merchant_states statement.");
@@ -1157,6 +1241,7 @@ std::vector<MerchantStateRecord> Repository::load_merchant_states() {
     state.npc_id = column_text(statement, 1);
     state.map_id = column_text(statement, 2);
     state.goods = decode_merchant_goods_blob(statement, 3);
+    state.weapon_upgrades = decode_weapon_upgrade_blob(statement, 4);
     states.push_back(std::move(state));
   }
   finalize_statement(statement);
@@ -1192,20 +1277,23 @@ void Repository::save_merchant_state(const MerchantStateRecord& state) {
   exec_or_throw(database_, "BEGIN IMMEDIATE;");
   try {
     static constexpr const char* kStateSql =
-        "INSERT INTO merchant_state(merchant_key, npc_id, map_id, goods_blob)"
-        " VALUES(?1, ?2, ?3, ?4)"
+        "INSERT INTO merchant_state(merchant_key, npc_id, map_id, goods_blob, upgrade_blob)"
+        " VALUES(?1, ?2, ?3, ?4, ?5)"
         " ON CONFLICT(merchant_key) DO UPDATE SET npc_id = excluded.npc_id,"
         " map_id = excluded.map_id, goods_blob = excluded.goods_blob,"
+        " upgrade_blob = excluded.upgrade_blob,"
         " updated_at = CURRENT_TIMESTAMP;";
     sqlite3_stmt* statement = nullptr;
     if (sqlite3_prepare_v2(database_, kStateSql, -1, &statement, nullptr) != SQLITE_OK) {
       throw std::runtime_error("Failed to prepare save_merchant_state statement.");
     }
     const auto goods_blob = encode_merchant_goods_blob(state.goods);
+    const auto upgrade_blob = encode_weapon_upgrade_blob(state.weapon_upgrades);
     bind_text(statement, 1, state.merchant_key);
     bind_text(statement, 2, state.npc_id);
     bind_text(statement, 3, state.map_id);
     bind_blob_vector(statement, 4, goods_blob);
+    bind_blob_vector(statement, 5, upgrade_blob);
     if (sqlite3_step(statement) != SQLITE_DONE) {
       finalize_statement(statement);
       throw std::runtime_error("Failed to execute save_merchant_state statement.");
@@ -1391,7 +1479,7 @@ std::optional<CharacterRecord> Repository::load_character(const std::string& acc
       " max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight, equipped_blob,"
       " bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode, pk_point,"
       " death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob FROM characters"
+      " daily_quest, slave_blob, body_luck FROM characters"
       " WHERE account_id = ?1 AND character_name = ?2"
       " LIMIT 1;";
 
@@ -1422,7 +1510,7 @@ std::optional<CharacterRecord> Repository::load_character_by_name(
       " max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight, equipped_blob,"
       " bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode, pk_point,"
       " death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob FROM characters"
+      " daily_quest, slave_blob, body_luck FROM characters"
       " WHERE character_name = ?1"
       " ORDER BY updated_at DESC, account_id ASC"
       " LIMIT 1;";
@@ -1450,7 +1538,7 @@ std::vector<CharacterRecord> Repository::list_characters(const std::string& acco
       " max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight, equipped_blob,"
       " bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode, pk_point,"
       " death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob FROM characters WHERE account_id = ?1"
+      " daily_quest, slave_blob, body_luck FROM characters WHERE account_id = ?1"
       " ORDER BY updated_at DESC, character_name ASC;";
 
   sqlite3_stmt* statement = nullptr;
@@ -1476,10 +1564,10 @@ bool Repository::create_character(const CharacterRecord& character) {
       " weight, max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight,"
       " equipped_blob, bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode,"
       " pk_point, death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob)"
+      " daily_quest, slave_blob, body_luck)"
       " VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,"
       " ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36,"
-      " ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46);";
+      " ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47);";
 
   sqlite3_stmt* statement = nullptr;
   if (sqlite3_prepare_v2(database_, kSql, -1, &statement, nullptr) != SQLITE_OK) {
@@ -1519,10 +1607,10 @@ void Repository::save_character(const CharacterRecord& character) {
       " weight, max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight,"
       " equipped_blob, bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode,"
       " pk_point, death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob)"
+      " daily_quest, slave_blob, body_luck)"
       " VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,"
       " ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36,"
-      " ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46)"
+      " ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47)"
       " ON CONFLICT(account_id, character_name) DO UPDATE SET map_id = excluded.map_id,"
       " x = excluded.x, y = excluded.y, dir = excluded.dir, light = excluded.light, job = excluded.job,"
       " sex = excluded.sex, hair = excluded.hair, gold = excluded.gold,"
@@ -1540,7 +1628,7 @@ void Repository::save_character(const CharacterRecord& character) {
       " death_time_ms = excluded.death_time_ms, quest_blob = excluded.quest_blob,"
       " quest_open_blob = excluded.quest_open_blob, quest_unit_blob = excluded.quest_unit_blob,"
       " script_param_blob = excluded.script_param_blob, daily_quest = excluded.daily_quest,"
-      " slave_blob = excluded.slave_blob,"
+      " slave_blob = excluded.slave_blob, body_luck = excluded.body_luck,"
       " updated_at = CURRENT_TIMESTAMP;";
 
   sqlite3_stmt* statement = nullptr;

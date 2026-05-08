@@ -75,6 +75,7 @@ int main() {
   updated.slaves[0].remain_royalty_sec = 86400;
   updated.slaves[0].hp = 77;
   updated.slaves[0].mp = 3;
+  updated.body_luck = 12500.0;
   repository.save_character(updated);
 
   const auto loaded = repository.load_character("guest", "Mage");
@@ -91,7 +92,45 @@ int main() {
       loaded->slaves[0].slave_exp_level != 2 ||
       loaded->slaves[0].slave_make_level != 1 ||
       loaded->slaves[0].remain_royalty_sec != 86400 ||
-      loaded->slaves[0].hp != 77 || loaded->slaves[0].mp != 3) {
+      loaded->slaves[0].hp != 77 || loaded->slaves[0].mp != 3 ||
+      loaded->body_luck != 12500.0) {
+    return 1;
+  }
+
+  mir2::MerchantStateRecord merchant;
+  merchant.merchant_key = "smith-0";
+  merchant.npc_id = "smith";
+  merchant.map_id = "0";
+  merchant.goods.push_back(mir2::LegacyUserItem{});
+  merchant.goods.front().index = 7;
+  merchant.goods.front().make_index = 7001;
+  mir2::LegacyWeaponUpgradeRecord upgrade;
+  upgrade.character_name = "Mage";
+  upgrade.item.index = 8;
+  upgrade.item.make_index = 8001;
+  upgrade.updc = 9;
+  upgrade.upsc = 3;
+  upgrade.upmc = 4;
+  upgrade.durapoint = 15;
+  upgrade.ready_time_ms = 123456;
+  merchant.weapon_upgrades.push_back(upgrade);
+  repository.save_merchant_state(merchant);
+  const auto merchants = repository.load_merchant_states();
+  const auto merchant_it =
+      std::find_if(merchants.begin(), merchants.end(),
+                   [](const mir2::MerchantStateRecord& state) {
+                     return state.merchant_key == "smith-0";
+                   });
+  if (merchant_it == merchants.end() || merchant_it->goods.size() != 1 ||
+      merchant_it->goods.front().make_index != 7001 ||
+      merchant_it->weapon_upgrades.size() != 1 ||
+      merchant_it->weapon_upgrades.front().character_name != "Mage" ||
+      merchant_it->weapon_upgrades.front().item.make_index != 8001 ||
+      merchant_it->weapon_upgrades.front().updc != 9 ||
+      merchant_it->weapon_upgrades.front().upsc != 3 ||
+      merchant_it->weapon_upgrades.front().upmc != 4 ||
+      merchant_it->weapon_upgrades.front().durapoint != 15 ||
+      merchant_it->weapon_upgrades.front().ready_time_ms != 0) {
     return 1;
   }
 

@@ -206,6 +206,32 @@ bool legacy_item_is_unbind_bundle(const ItemConfig& item_config) {
   return !item_config.unbind_item.empty() && item_config.unbind_count > 0;
 }
 
+bool legacy_is_upgrade_weapon_stuff(const ItemConfig& item_config) {
+  switch (item_config.std_mode) {
+    case 19:
+    case 20:
+    case 21:
+    case 22:
+    case 23:
+    case 24:
+    case 26:
+    case 52:
+    case 53:
+    case 54:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool legacy_is_blessed_oil(const ItemConfig& item_config) {
+  if (item_config.std_mode == 3 && item_config.shape == 4) {
+    return true;
+  }
+  return !item_config.scroll_kind.empty() &&
+         util::lower_copy(item_config.scroll_kind) == "blessed_oil";
+}
+
 std::string legacy_scroll_kind(const ItemConfig& item_config) {
   if (!item_config.scroll_kind.empty()) {
     return util::lower_copy(item_config.scroll_kind);

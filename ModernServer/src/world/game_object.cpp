@@ -153,6 +153,21 @@ std::string lower_ascii_copy(std::string_view value) {
   return lowered;
 }
 
+bool dialog_supports_weapon_upgrade(const std::vector<NpcDialogSectionConfig>& sections) {
+  for (const auto& section : sections) {
+    const auto action = lower_ascii_copy(section.action);
+    if (action == "@upgradenow" || action == "@getbackupgnow") {
+      return true;
+    }
+    const auto text = lower_ascii_copy(section.text);
+    if (text.find("@upgradenow") != std::string::npos ||
+        text.find("@getbackupgnow") != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool legacy_special_slave_name(std::string_view name) {
   const auto lowered = lower_ascii_copy(name);
   return lowered == "__whiteskeleton" || lowered == "__elf" || lowered == "__elfwarrior";
@@ -599,6 +614,10 @@ bool Player::can_spend_gold(std::int32_t amount) const {
 }
 
 std::int32_t Player::pk_level() const { return std::max(character_.pk_point, 0) / 100; }
+
+std::int32_t Player::body_luck_level() const {
+  return std::clamp(static_cast<std::int32_t>(std::trunc(character_.body_luck / 5000.0)), -10, 5);
+}
 
 std::uint8_t Player::quest_mark(std::int32_t index) const {
   if (index < 0 || static_cast<std::size_t>(index) >= character_.quest_marks.size()) {
@@ -1577,6 +1596,7 @@ void Player::revive_at(std::string map_id, std::int32_t x, std::int32_t y,
   character_.ability.mp = std::min<std::uint16_t>(mp, character_.ability.max_mp);
   character_.death_time_ms = 0;
   ghost_ = false;
+  legacy_death_drop_settled_ = false;
   ghost_time_ms_ = 0;
   legacy_state_ = LegacyPlayerState::running;
   next_move_tick_ = 0;
@@ -1585,6 +1605,13 @@ void Player::revive_at(std::string map_id, std::int32_t x, std::int32_t y,
 
 void Player::inc_pk_point(std::int32_t amount) {
   character_.pk_point = std::max(0, character_.pk_point + amount);
+}
+
+void Player::add_body_luck(double amount) {
+  if ((amount > 0.0 && character_.body_luck < 25000.0) ||
+      (amount < 0.0 && character_.body_luck > -50000.0)) {
+    character_.body_luck += amount;
+  }
 }
 
 void Player::record_pk_hiter(std::uint64_t actor_id, std::uint64_t now_ms) {
@@ -2516,17 +2543,21 @@ Npc::Npc(std::uint64_t id, std::string name, std::string map_id, std::int32_t x,
          std::int32_t price_rate_percent, std::string merchant_key,
          std::vector<MerchantProductRuntimeConfig> merchant_products,
          std::unordered_map<std::int32_t, std::int32_t> merchant_prices,
-         std::vector<std::int32_t> deal_std_modes)
+         std::vector<std::int32_t> deal_std_modes,
+         std::vector<LegacyWeaponUpgradeRecord> weapon_upgrades)
     : GameObject(id, GameObjectKind::npc, std::move(name), std::move(map_id), x, y),
       service_(normalize_service(std::move(service))),
       merchant_key_(std::move(merchant_key)),
       merchant_items_(std::move(merchant_items)),
+      weapon_upgrades_(std::move(weapon_upgrades)),
       merchant_products_(std::move(merchant_products)),
       merchant_prices_(std::move(merchant_prices)),
       deal_std_modes_(std::move(deal_std_modes)),
       dialog_sections_(std::move(dialog_sections)),
       price_rate_percent_(std::max(price_rate_percent, 0)),
-      buy_enabled_(!merchant_items_.empty() || !merchant_products_.empty()) {}
+      buy_enabled_(!merchant_items_.empty() || !merchant_products_.empty()),
+      weapon_upgrade_enabled_(service_.find("upgrade") != std::string::npos ||
+                              dialog_supports_weapon_upgrade(dialog_sections_)) {}
 
 bool Npc::supports_buy() const { return buy_enabled_; }
 
@@ -2539,6 +2570,8 @@ bool Npc::supports_storage() const { return service_.find("storage") != std::str
 bool Npc::supports_guild() const { return service_.find("guild") != std::string::npos; }
 
 bool Npc::supports_castle() const { return service_.find("castle") != std::string::npos; }
+
+bool Npc::supports_weapon_upgrade() const { return weapon_upgrade_enabled_; }
 
 bool Npc::legacy_due(std::uint64_t now_ms) const {
   return static_cast<std::int64_t>(now_ms) - run_time_ms_ >
@@ -2586,6 +2619,7 @@ void Npc::apply_merchant_state(const MerchantStateRecord& state) {
     return;
   }
   merchant_items_ = state.goods;
+  weapon_upgrades_ = state.weapon_upgrades;
   merchant_prices_ = state.prices;
   buy_enabled_ = !merchant_items_.empty() || !merchant_products_.empty();
 }
@@ -2596,6 +2630,7 @@ MerchantStateRecord Npc::snapshot_merchant_state() const {
   state.npc_id = std::to_string(id());
   state.map_id = map_id();
   state.goods = merchant_items_;
+  state.weapon_upgrades = weapon_upgrades_;
   state.prices = merchant_prices_;
   return state;
 }
