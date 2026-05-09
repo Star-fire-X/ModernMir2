@@ -1,38 +1,15 @@
 #pragma once
 
-#include <cstdint>
 #include <optional>
-#include <string>
 #include <vector>
 
 #include "world/game_object.hpp"
 
 namespace mir2 {
 
-enum class LegacyEventType {
-  stone_mine,
-  pile_stones,
-  holy_curtain,
-  fire_burn
-};
-
-struct LegacyEventRecord {
-  std::uint64_t id{0};
-  std::string map_id{};
-  std::int32_t x{0};
-  std::int32_t y{0};
-  LegacyEventType type{LegacyEventType::stone_mine};
-  std::uint64_t open_start_ms{0};
-  std::uint64_t continue_ms{0};
-  std::uint64_t close_time_ms{0};
-  std::uint64_t run_start_ms{0};
-  std::uint64_t run_tick_ms{500};
-  bool active{true};
-  bool closed{false};
-};
-
 struct LegacyEventManagerRun {
   RuntimeDispatch dispatch{};
+  std::vector<LegacyEventRecord> fire_burn_events{};
   std::vector<LegacyEventRecord> closed_events{};
   std::vector<LegacyEventRecord> cleaned_events{};
 };
@@ -40,10 +17,19 @@ struct LegacyEventManagerRun {
 class LegacyEventManager {
  public:
   [[nodiscard]] std::uint64_t enqueue(LegacyEventRecord record, std::uint64_t now_ms);
+  [[nodiscard]] std::uint64_t enqueue_holy_curtain_group(
+      LegacyHolyCurtainGroup group, std::uint64_t now_ms);
   [[nodiscard]] std::optional<LegacyEventRecord> find(const std::string& map_id,
                                                       std::int32_t x,
                                                       std::int32_t y,
                                                       LegacyEventType type) const;
+  [[nodiscard]] bool has_active_event(const std::string& map_id,
+                                      std::int32_t x,
+                                      std::int32_t y) const;
+  [[nodiscard]] std::vector<LegacyHolyCurtainGroup> active_holy_groups() const;
+  [[nodiscard]] LegacyEventManagerRun update_holy_group_seized(
+      std::uint64_t group_id, std::vector<std::uint64_t> seized_actor_ids,
+      std::uint64_t now_ms, std::uint64_t current_tick);
   [[nodiscard]] LegacyEventManagerRun run(std::uint64_t now_ms, std::uint64_t current_tick);
   [[nodiscard]] std::size_t active_count() const { return active_events_.size(); }
   [[nodiscard]] std::size_t closed_count() const { return closed_events_.size(); }
@@ -53,10 +39,19 @@ class LegacyEventManager {
   void add_trace(RuntimeDispatch& dispatch, const LegacyEventRecord& event,
                  std::string action, std::uint64_t now_ms, std::uint64_t current_tick,
                  bool success = true) const;
+  void add_group_trace(RuntimeDispatch& dispatch, const LegacyHolyCurtainGroup& group,
+                       std::string action, std::uint64_t now_ms,
+                       std::uint64_t current_tick, bool success = true) const;
+  void close_event_at(std::size_t index, LegacyEventManagerRun& result,
+                      std::uint64_t now_ms, std::uint64_t current_tick);
+  void close_holy_group_events(LegacyHolyCurtainGroup& group, LegacyEventManagerRun& result,
+                               std::uint64_t now_ms, std::uint64_t current_tick);
 
   std::vector<LegacyEventRecord> active_events_{};
   std::vector<LegacyEventRecord> closed_events_{};
   std::uint64_t next_event_id_{1};
+  std::vector<LegacyHolyCurtainGroup> holy_groups_{};
+  std::uint64_t next_holy_group_id_{1};
 };
 
 }  // namespace mir2

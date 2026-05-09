@@ -364,6 +364,12 @@ if(BUILD_TESTING)
   add_test(NAME mir2_skill_bujuk_status_phase4_smoke
     COMMAND mir2_skill_bujuk_status_phase4_smoke)
 
+  add_executable(mir2_skill_event_spell_phase4_smoke
+    tests/skill_event_spell_phase4_smoke.cpp)
+  target_link_libraries(mir2_skill_event_spell_phase4_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_skill_event_spell_phase4_smoke
+    COMMAND mir2_skill_event_spell_phase4_smoke)
+
   add_executable(mir2_skill_summon_slave_smoke
     tests/skill_summon_slave_smoke.cpp)
   target_link_libraries(mir2_skill_summon_slave_smoke PRIVATE mir2_hostlib)

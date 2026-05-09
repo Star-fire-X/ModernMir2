@@ -44,11 +44,58 @@ struct LegacyRuntimeTrace {
   bool success{false};
 };
 
+enum class LegacyEventType {
+  stone_mine,
+  pile_stones,
+  holy_curtain,
+  fire_burn
+};
+
+struct LegacyEventRecord {
+  std::uint64_t id{0};
+  std::string map_id{};
+  std::int32_t x{0};
+  std::int32_t y{0};
+  LegacyEventType type{LegacyEventType::stone_mine};
+  std::uint64_t open_start_ms{0};
+  std::uint64_t continue_ms{0};
+  std::uint64_t close_time_ms{0};
+  std::uint64_t run_start_ms{0};
+  std::uint64_t run_tick_ms{500};
+  std::uint64_t owner_actor_id{0};
+  std::uint64_t holy_group_id{0};
+  std::uint64_t last_damage_ms{0};
+  std::int32_t damage{0};
+  bool blocks_walk{false};
+  bool skip_if_occupied{false};
+  bool active{true};
+  bool closed{false};
+};
+
+struct LegacyHolyCurtainGroup {
+  std::uint64_t id{0};
+  std::string map_id{};
+  std::uint64_t open_start_ms{0};
+  std::uint64_t seize_ms{0};
+  std::vector<std::uint64_t> event_ids{};
+  std::vector<std::uint64_t> seized_actor_ids{};
+};
+
+struct LegacyRandomSpaceMoveRequest {
+  std::string source_map_id{};
+  std::string target_map_id{};
+  std::uint64_t actor_id{0};
+  std::int32_t magic_id{0};
+};
+
 struct RuntimeDispatch {
   std::vector<SessionEvent> session_events{};
   std::vector<AuditEvent> audit_events{};
   std::vector<PersistRequest> persist_requests{};
   std::vector<ActorMail> cross_map_mails{};
+  std::vector<LegacyEventRecord> legacy_event_creates{};
+  std::vector<LegacyHolyCurtainGroup> legacy_holy_curtain_groups{};
+  std::vector<LegacyRandomSpaceMoveRequest> legacy_random_space_moves{};
   std::vector<LegacyRuntimeTrace> legacy_traces{};
 };
 

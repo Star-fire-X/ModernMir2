@@ -2605,8 +2605,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
         if (fire_x == 0 && fire_y == 0 &&
             (magic_id == 8 || magic_id == 14 || magic_id == 15 || magic_id == 18 ||
-             magic_id == 19 || magic_id == 24 || magic_id == 31 || magic_id == 36 ||
-             magic_id == 17 || magic_id == 30)) {
+             magic_id == 19 || magic_id == 21 || magic_id == 22 || magic_id == 24 ||
+             magic_id == 31 || magic_id == 36 || magic_id == 16 || magic_id == 17 ||
+             magic_id == 30)) {
           fire_x = attacker->x();
           fire_y = attacker->y();
         }
@@ -2772,6 +2773,15 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         bool send_magic_fire = true;
         bool spell_branch_aborted = false;
         std::uint64_t fire_target_id = target != nullptr ? target->id() : 0;
+        auto send_magic_fire_now = [&]() {
+          queue_actor_origin_packet(objects_, dispatch, *attacker, true, [&](const Player& watcher) {
+            queue_packet(dispatch, watcher.session_id(),
+                         make_magic_fire_packet(watcher.session_id(), *attacker, fire_x, fire_y,
+                                                magic_it->second, fire_target_id));
+          });
+          add_legacy_trace(dispatch, "LegacySpell", "magic_fire", mail, current_tick, now_ms,
+                           true, magic_id, 0, "SM_MAGICFIRE");
+        };
         switch (magic_id) {
           case 1:
           case 5: {
@@ -2994,6 +3004,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           case 17:
           case 14:
           case 15:
+          case 16:
           case 30:
           case 36:
           case 18:
@@ -3021,6 +3032,98 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                              now_ms, true, magic_id,
                              bujuk_slot->item != nullptr ? bujuk_slot->item->dura : 0,
                              bujuk_slot->slot == kEquipBujuk ? "U_BUJUK" : "U_ARMRINGL");
+
+            if (magic_id == 16) {
+              if (!environment_.can_walk(fire_x, fire_y, true)) {
+                add_legacy_trace(dispatch, "LegacySpell", "holy_curtain_center_reject",
+                                 mail, current_tick, now_ms, false, magic_id, 0,
+                                 "CanWalk");
+                break;
+              }
+
+              const auto seconds = legacy_holy_curtain_seconds(
+                  *attacker, magic_it->second.legacy, user_magic->level, random);
+              const auto duration_ms =
+                  static_cast<std::uint64_t>(std::max(seconds, 1)) * 1000ULL;
+              std::vector<std::uint64_t> seized_ids;
+              bool holy_ok = true;
+              for (std::int32_t hx = fire_x - 1; hx <= fire_x + 1 && holy_ok; ++hx) {
+                for (std::int32_t hy = fire_y - 1; hy <= fire_y + 1 && holy_ok; ++hy) {
+                  std::vector<std::uint64_t> ids_at_cell;
+                  for (const auto& [actor_id, object] : objects_) {
+                    if (object->x() == hx && object->y() == hy &&
+                        as_monster(object.get()) != nullptr) {
+                      ids_at_cell.push_back(actor_id);
+                    }
+                  }
+                  std::sort(ids_at_cell.begin(), ids_at_cell.end(), std::greater<>());
+                  for (const auto actor_id : ids_at_cell) {
+                    auto* monster = as_monster(objects_.at(actor_id).get());
+                    const auto level_roll = random.random(4);
+                    const auto pass =
+                        monster != nullptr && monster->master_actor_id() == 0 &&
+                        monster->level() <
+                            static_cast<std::int32_t>(attacker->character().ability.level) - 1 +
+                                level_roll &&
+                        monster->level() < 50;
+                    add_legacy_trace(dispatch, "LegacySpell", "holy_curtain_gate",
+                                     mail, current_tick, now_ms, pass, level_roll,
+                                     monster != nullptr ? monster->level() : 0,
+                                     "Random(4)");
+                    if (!pass) {
+                      holy_ok = false;
+                      break;
+                    }
+                    monster->make_legacy_holy_seize(duration_ms, now_ms);
+                    seized_ids.push_back(monster->id());
+                  }
+                }
+              }
+
+              if (holy_ok && !seized_ids.empty()) {
+                const auto group_id =
+                    (attacker->id() << 32U) ^ static_cast<std::uint64_t>(now_ms) ^
+                    current_tick;
+                constexpr std::array<std::pair<std::int32_t, std::int32_t>, 8> kOffsets{{
+                    {-1, -2},
+                    {1, -2},
+                    {-2, -1},
+                    {2, -1},
+                    {-2, 1},
+                    {2, 1},
+                    {-1, 2},
+                    {1, 2},
+                }};
+                for (const auto& [dx, dy] : kOffsets) {
+                  LegacyEventRecord event;
+                  event.map_id = config_.id;
+                  event.x = fire_x + dx;
+                  event.y = fire_y + dy;
+                  event.type = LegacyEventType::holy_curtain;
+                  event.open_start_ms = now_ms;
+                  event.continue_ms = duration_ms;
+                  event.run_start_ms = now_ms;
+                  event.run_tick_ms = 500;
+                  event.owner_actor_id = attacker->id();
+                  event.holy_group_id = group_id;
+                  event.blocks_walk = true;
+                  dispatch.legacy_event_creates.push_back(event);
+                }
+                LegacyHolyCurtainGroup group;
+                group.id = group_id;
+                group.map_id = config_.id;
+                group.open_start_ms = now_ms;
+                group.seize_ms = duration_ms;
+                group.seized_actor_ids = seized_ids;
+                dispatch.legacy_holy_curtain_groups.push_back(std::move(group));
+                train = true;
+              }
+              add_legacy_trace(dispatch, "LegacySpell", "holy_curtain", mail,
+                               current_tick, now_ms, train,
+                               static_cast<std::int32_t>(seized_ids.size()), seconds,
+                               "MagMakeHolyCurtain");
+              break;
+            }
 
             if (magic_id == 17) {
               train = summon_player_slave(*attacker, "__WhiteSkeleton", user_magic->level, 1,
@@ -3327,6 +3430,64 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             train = true;
             break;
           }
+          case 21: {
+            send_magic_fire_now();
+            send_magic_fire = false;
+            const auto space_roll = random.random(11);
+            train = space_roll < 4 + static_cast<std::int32_t>(user_magic->level) * 2;
+            add_legacy_trace(dispatch, "LegacySpell", "space_move_gate", mail,
+                             current_tick, now_ms, train, space_roll,
+                             static_cast<std::int32_t>(user_magic->level),
+                             "Random(11)");
+            if (train) {
+              queue_actor_origin_packet(objects_, dispatch, *attacker, true,
+                                        [&](const Player& watcher) {
+                queue_packet(dispatch, watcher.session_id(),
+                             make_space_move_hide2_packet(watcher.session_id(), *attacker));
+              });
+              dispatch.legacy_random_space_moves.push_back(LegacyRandomSpaceMoveRequest{
+                  config_.id,
+                  {},
+                  attacker->id(),
+                  magic_id});
+            }
+            break;
+          }
+          case 22: {
+            const auto power = legacy_fireball_power(*attacker, magic_it->second.legacy,
+                                                     user_magic->level, random);
+            const auto seconds = legacy_fire_wall_seconds(*attacker, magic_it->second.legacy,
+                                                          user_magic->level, random);
+            constexpr std::array<std::pair<std::int32_t, std::int32_t>, 5> kOffsets{{
+                {0, -1},
+                {-1, 0},
+                {0, 0},
+                {1, 0},
+                {0, 1},
+            }};
+            for (const auto& [dx, dy] : kOffsets) {
+              LegacyEventRecord event;
+              event.map_id = config_.id;
+              event.x = fire_x + dx;
+              event.y = fire_y + dy;
+              event.type = LegacyEventType::fire_burn;
+              event.open_start_ms = now_ms;
+              event.continue_ms =
+                  static_cast<std::uint64_t>(std::max(seconds, 1)) * 1000ULL;
+              event.run_start_ms = now_ms;
+              event.run_tick_ms = 500;
+              event.owner_actor_id = attacker->id();
+              event.damage = power;
+              event.blocks_walk = false;
+              event.skip_if_occupied = true;
+              dispatch.legacy_event_creates.push_back(event);
+            }
+            train = true;
+            add_legacy_trace(dispatch, "LegacySpell", "fire_wall", mail,
+                             current_tick, now_ms, true, power, seconds,
+                             "MagMakeFireCross");
+            break;
+          }
           case 23:
           case 33: {
             const auto power = legacy_fireball_power(*attacker, magic_it->second.legacy,
@@ -3485,13 +3646,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           break;
         }
         if (send_magic_fire) {
-          queue_actor_origin_packet(objects_, dispatch, *attacker, true, [&](const Player& watcher) {
-            queue_packet(dispatch, watcher.session_id(),
-                         make_magic_fire_packet(watcher.session_id(), *attacker, fire_x, fire_y,
-                                                magic_it->second, fire_target_id));
-          });
-          add_legacy_trace(dispatch, "LegacySpell", "magic_fire", mail, current_tick, now_ms,
-                           true, magic_id, 0, "SM_MAGICFIRE");
+          send_magic_fire_now();
         }
         if (train) {
           const auto training =

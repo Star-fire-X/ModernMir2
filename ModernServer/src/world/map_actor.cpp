@@ -643,10 +643,13 @@ bool legacy_spell_supported(std::int32_t magic_id, const MagicConfig& magic) {
     case 13:
     case 14:
     case 15:
+    case 16:
     case 17:
     case 18:
     case 19:
     case 20:
+    case 21:
+    case 22:
     case 23:
     case 24:
     case 28:
@@ -1130,6 +1133,21 @@ std::int32_t legacy_transparent_seconds(const Player& caster,
   return legacy_power13(magic, level, 30, random_value) + 3 * sc;
 }
 
+std::int32_t legacy_fire_wall_seconds(const Player& caster,
+                                      const LegacyMagicDefinition& magic,
+                                      std::uint8_t level, LegacyRandom& random) {
+  const auto mc = legacy_random_packed_power(caster.character().ability.mc, random);
+  return legacy_power(magic, level, 10, random) + mc / 2;
+}
+
+std::int32_t legacy_holy_curtain_seconds(const Player& caster,
+                                         const LegacyMagicDefinition& magic,
+                                         std::uint8_t level, LegacyRandom& random) {
+  const auto sc = legacy_random_packed_power(caster.character().ability.sc, random);
+  const auto random_value = random.random(magic.def_max_power - magic.def_min_power);
+  return legacy_power13(magic, level, 40, random_value) + 3 * sc;
+}
+
 std::int32_t calc_get_exp(std::int32_t attacker_level, std::int32_t target_level,
                           std::int32_t fight_exp) {
   const auto base = std::max(fight_exp, 1);
@@ -1227,9 +1245,10 @@ bool MapActor::apply_merchant_state(const MerchantStateRecord& state) {
 }
 
 bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, std::int32_t y,
-                                       std::uint64_t now_ms, RuntimeDispatch* dispatch) {
+                                       std::uint64_t now_ms, bool blocks_walk,
+                                       RuntimeDispatch* dispatch) {
   const auto added = environment_.add_placeholder_object(x, y, LegacyMapObjectShape::event_object,
-                                                        event_id, now_ms);
+                                                        event_id, now_ms, blocks_walk);
   if (added) {
     event_objects_[event_id] = {x, y};
     if (dispatch != nullptr) {
@@ -1250,6 +1269,218 @@ void MapActor::legacy_remove_event_object(std::uint64_t event_id, std::int32_t x
     }
     sync_visibility_after_event_change(x, y, *dispatch);
   }
+}
+
+RuntimeDispatch MapActor::legacy_apply_fire_burn_event(const LegacyEventRecord& event,
+                                                       std::uint64_t current_tick,
+                                                       std::uint64_t now_ms) {
+  RuntimeDispatch dispatch;
+  if (event.type != LegacyEventType::fire_burn || event.map_id != config_.id ||
+      event.damage <= 0) {
+    return dispatch;
+  }
+  auto* caster = find_player(event.owner_actor_id);
+  if (caster == nullptr || caster->is_dead()) {
+    return dispatch;
+  }
+
+  LegacyRandom fallback_random;
+  auto& random = legacy_random_ != nullptr ? *legacy_random_ : fallback_random;
+  std::vector<std::uint64_t> ids_at_cell;
+  for (const auto& [actor_id, object] : objects_) {
+    if (object->x() == event.x && object->y() == event.y) {
+      ids_at_cell.push_back(actor_id);
+    }
+  }
+  std::sort(ids_at_cell.begin(), ids_at_cell.end(), std::greater<>());
+  for (const auto target_id : ids_at_cell) {
+    const auto target_it = objects_.find(target_id);
+    if (target_it == objects_.end()) {
+      continue;
+    }
+    auto& target = *target_it->second;
+    if (target.id() == caster->id() || target.x() != event.x || target.y() != event.y ||
+        !is_attackable_target(target)) {
+      continue;
+    }
+    if (auto* player_target = as_player(&target); player_target != nullptr) {
+      if (!resolve_pk_block_reason(config_, *caster, *player_target, now_ms).empty()) {
+        continue;
+      }
+    }
+
+    const auto damage =
+        legacy_magic_defense_damage(target, event.damage, random, current_tick, budgets_.tick_ms);
+    const auto result = apply_legacy_magic_damage(objects_, item_configs_, dispatch, *caster,
+                                                  target, config_, damage, current_tick, now_ms);
+    if (result.applied_damage > 0 && as_monster(&target) != nullptr) {
+      notify_owned_slaves_target(*caster, target.id(), now_ms);
+    }
+    if (result.target_died) {
+      if (auto* player_target = as_player(&target); player_target != nullptr) {
+        apply_bad_kill_penalty(*caster, *player_target, dispatch, current_tick, now_ms,
+                               "LegacyFireBurn");
+        static_cast<void>(settle_player_death(*player_target, dispatch, current_tick, now_ms));
+      }
+    }
+    if (result.slain_monster_id != 0) {
+      finalize_monster_death(result.slain_monster_id, caster->id(), dispatch, current_tick);
+      add_legacy_trace(dispatch, "LegacyEventManager", "fire_burn_exp", ActorMail{},
+                       current_tick, now_ms, true, static_cast<std::int32_t>(event.id),
+                       result.applied_damage, "WinExp");
+    }
+    if (result.applied_damage > 0) {
+      add_legacy_trace(dispatch, "LegacyEventManager",
+                       result.target_died ? "fire_burn_death" : "fire_burn_struck",
+                       ActorMail{}, current_tick, now_ms, true,
+                       static_cast<std::int32_t>(target.id()), result.applied_damage,
+                       "RM_MAGSTRUCK_MINE");
+    }
+  }
+  return dispatch;
+}
+
+std::vector<std::uint64_t> MapActor::legacy_active_holy_seize_actor_ids(
+    const std::vector<std::uint64_t>& actor_ids, std::uint64_t now_ms) const {
+  std::vector<std::uint64_t> active;
+  for (const auto actor_id : actor_ids) {
+    const auto it = objects_.find(actor_id);
+    const auto* monster = it != objects_.end() ? as_monster(it->second.get()) : nullptr;
+    if (monster != nullptr && !monster->is_dead() &&
+        monster->legacy_holy_seize_active(now_ms)) {
+      active.push_back(actor_id);
+    }
+  }
+  return active;
+}
+
+std::optional<std::pair<std::int32_t, std::int32_t>>
+MapActor::legacy_random_space_move_target(LegacyRandom& random) const {
+  const auto width = movement_width();
+  const auto height = movement_height();
+  if (width <= 0 || height <= 0) {
+    return std::nullopt;
+  }
+  const auto edge_y = height < 150 ? (height < 30 ? 2 : 20) : 50;
+  auto nx = edge_y + random.random(std::max(1, width - edge_y - 1));
+  auto ny = edge_y + random.random(std::max(1, height - edge_y - 1));
+  const auto step = width < 80 ? 3 : 10;
+  const auto edge = height < 150 ? (height < 50 ? 2 : 15) : 50;
+  for (std::int32_t attempt = 0; attempt <= 200; ++attempt) {
+    if (environment_.can_walk(nx, ny, true)) {
+      return std::pair{nx, ny};
+    }
+    if (nx < width - edge - 1) {
+      nx += step;
+    } else {
+      nx = random.random(std::max(1, width));
+      if (ny < height - edge - 1) {
+        ny += step;
+      } else {
+        ny = random.random(std::max(1, height));
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+RuntimeDispatch MapActor::legacy_space_move_player(
+    std::uint64_t actor_id, const std::string& target_map_id, std::int32_t target_x,
+    std::int32_t target_y, bool show2, std::uint64_t current_tick, std::uint64_t now_ms) {
+  RuntimeDispatch dispatch;
+  auto* player = find_player(actor_id);
+  if (player == nullptr) {
+    return dispatch;
+  }
+
+  auto snapshot = player->persistent_snapshot();
+  snapshot.map_id = target_map_id.empty() ? config_.id : target_map_id;
+  snapshot.x = target_x;
+  snapshot.y = target_y;
+  snapshot.dir = player->character().dir;
+  snapshot.slaves = snapshot_owned_slaves(*player, now_ms);
+
+  if (snapshot.map_id == config_.id) {
+    if (!environment_.in_bounds(snapshot.x, snapshot.y) ||
+        !environment_.can_walk(snapshot.x, snapshot.y, true)) {
+      return dispatch;
+    }
+    const auto old_x = player->x();
+    const auto old_y = player->y();
+    if (environment_.move_to_moving_object(old_x, old_y, player->id(), snapshot.x, snapshot.y,
+                                           true, now_ms, moving_state_for(*player)) != 1) {
+      return dispatch;
+    }
+    ActorMail move_mail;
+    move_mail.kind = ActorMailKind::move;
+    move_mail.map_id = config_.id;
+    move_mail.actor_id = player->id();
+    move_mail.session_id = player->session_id();
+    move_mail.x = snapshot.x;
+    move_mail.y = snapshot.y;
+    move_mail.dir = snapshot.dir;
+    MapContext context;
+    context.tick = current_tick;
+    context.map_id = config_.id;
+    context.dispatch = &dispatch;
+    context.items = &item_configs_;
+    context.magics = &magic_configs_;
+    player->on_mail(move_mail, context);
+    force_refresh_after_same_map_transfer(*player, old_x, old_y, dispatch, now_ms);
+    if (show2) {
+      bool sent_self = false;
+      for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+        if (!is_legacy_visible_to(watcher, *player)) {
+          return;
+        }
+        if (watcher.session_id() == player->session_id()) {
+          sent_self = true;
+        }
+        queue_packet(dispatch, watcher.session_id(),
+                     make_space_move_show2_packet(watcher.session_id(), *player));
+      });
+      if (!sent_self) {
+        queue_packet(dispatch, player->session_id(),
+                     make_space_move_show2_packet(player->session_id(), *player));
+      }
+    }
+    recall_owned_slaves_to_master(*player, dispatch, current_tick, now_ms);
+    dispatch.audit_events.push_back(AuditEvent{
+        "world.space_move", snapshot.account_id + ":" + snapshot.character_name, config_.id});
+    return dispatch;
+  }
+
+  const auto leave_clear = player->clear_legacy_buffs_on_leave_map(current_tick);
+  dispatch_player_status_tick_result(*player, leave_clear, dispatch, false);
+
+  ActorMail transfer;
+  transfer.kind = ActorMailKind::spawn_player;
+  transfer.map_id = snapshot.map_id;
+  transfer.actor_id = player->id();
+  transfer.session_id = player->session_id();
+  transfer.name = snapshot.character_name;
+  transfer.x = snapshot.x;
+  transfer.y = snapshot.y;
+  transfer.dir = snapshot.dir;
+  transfer.character = snapshot;
+  transfer.legacy_buffs = player->legacy_buffs_for_transfer(current_tick);
+  transfer.legacy_space_move_show2 = show2;
+
+  queue_packet(dispatch, player->session_id(), make_clear_objects_packet(player->session_id()));
+  queue_packet(dispatch, player->session_id(),
+               make_change_map_packet(player->session_id(), snapshot.map_id));
+  queue_save_character(dispatch, snapshot);
+  detach_owned_slaves(*player, dispatch, now_ms, true);
+  remove_actor_from_visibility(player->id(), dispatch);
+  static_cast<void>(environment_.delete_from_map(player->x(), player->y(),
+                                                 LegacyMapObjectShape::moving_object,
+                                                 player->id()));
+  visibility_.erase(player->id());
+  objects_.erase(actor_id);
+  dispatch.cross_map_mails.push_back(std::move(transfer));
+  dispatch.audit_events.push_back(AuditEvent{
+      "world.space_move", snapshot.account_id + ":" + snapshot.character_name, snapshot.map_id});
+  return dispatch;
 }
 
 void MapActor::set_castle_dialog_context(CastleDialogContext castle_dialog_context) {
@@ -1286,6 +1517,23 @@ RuntimeDispatch MapActor::legacy_spawn_player(const ActorMail& mail,
   if (fast_initialize) {
     dispatch_legacy_run_notice(*player, dispatch, now_ms);
     dispatch_legacy_initialize(*player, dispatch, now_ms);
+  }
+  if (mail.legacy_space_move_show2) {
+    bool sent_self = false;
+    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+      if (!is_legacy_visible_to(watcher, *player)) {
+        return;
+      }
+      if (watcher.session_id() == player->session_id()) {
+        sent_self = true;
+      }
+      queue_packet(dispatch, watcher.session_id(),
+                   make_space_move_show2_packet(watcher.session_id(), *player));
+    });
+    if (!sent_self) {
+      queue_packet(dispatch, player->session_id(),
+                   make_space_move_show2_packet(player->session_id(), *player));
+    }
   }
   static_cast<void>(
       trigger_map_quest(*player, {}, {}, false, "enter", dispatch, current_tick, now_ms));

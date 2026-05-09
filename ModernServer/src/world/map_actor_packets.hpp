@@ -742,6 +742,23 @@ LegacyPacket make_death_packet(std::uint64_t session_id, const GameObject& targe
       legacy_encode_buffer(&desc, sizeof(desc)));
 }
 
+LegacyPacket make_space_move_hide2_packet(std::uint64_t session_id, const GameObject& object) {
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmSpaceMoveHide2, static_cast<std::int32_t>(object.id()), 0, 0, 0));
+}
+
+LegacyPacket make_space_move_show2_packet(std::uint64_t session_id, const GameObject& object) {
+  const auto desc = make_char_desc(object);
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmSpaceMoveShow2, static_cast<std::int32_t>(object.id()),
+                           static_cast<std::uint16_t>(object.x()),
+                           static_cast<std::uint16_t>(object.y()),
+                           make_word(actor_dir(object), actor_light(object))),
+      legacy_encode_buffer(&desc, sizeof(desc)));
+}
+
 LegacyPacket make_alive_packet(std::uint64_t session_id, const Player& player) {
   const auto desc = make_char_desc(player);
   return make_legacy_game_packet(

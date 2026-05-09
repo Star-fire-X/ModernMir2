@@ -88,9 +88,20 @@ class MapActor {
                                                    std::size_t cursor);
   [[nodiscard]] bool legacy_add_event_object(std::uint64_t event_id, std::int32_t x,
                                              std::int32_t y, std::uint64_t now_ms,
+                                             bool blocks_walk = false,
                                              RuntimeDispatch* dispatch = nullptr);
   void legacy_remove_event_object(std::uint64_t event_id, std::int32_t x, std::int32_t y,
                                   RuntimeDispatch* dispatch = nullptr);
+  [[nodiscard]] RuntimeDispatch legacy_apply_fire_burn_event(const LegacyEventRecord& event,
+                                                             std::uint64_t current_tick,
+                                                             std::uint64_t now_ms);
+  [[nodiscard]] std::vector<std::uint64_t> legacy_active_holy_seize_actor_ids(
+      const std::vector<std::uint64_t>& actor_ids, std::uint64_t now_ms) const;
+  [[nodiscard]] std::optional<std::pair<std::int32_t, std::int32_t>>
+  legacy_random_space_move_target(LegacyRandom& random) const;
+  [[nodiscard]] RuntimeDispatch legacy_space_move_player(
+      std::uint64_t actor_id, const std::string& target_map_id, std::int32_t target_x,
+      std::int32_t target_y, bool show2, std::uint64_t current_tick, std::uint64_t now_ms);
   bool enqueue_legacy_player_command(const ActorMail& mail, std::uint64_t now_ms);
   bool mark_legacy_player_ghost(std::uint64_t actor_id, std::uint64_t now_ms);
   [[nodiscard]] RuntimeDispatch legacy_disconnect_player(std::uint64_t actor_id,
