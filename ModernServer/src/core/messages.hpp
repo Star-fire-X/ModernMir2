@@ -336,6 +336,7 @@ struct ActorMail {
   LegacyDelayedEffectKind delayed_effect_kind{LegacyDelayedEffectKind::none};
   std::int32_t magic_id{0};
   std::int32_t power{0};
+  std::int32_t undead_power{0};
   std::int32_t range{0};
   std::int32_t magic_level{0};
   std::int32_t magic_train{0};

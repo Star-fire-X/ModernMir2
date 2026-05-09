@@ -723,7 +723,8 @@ std::int32_t legacy_magic_defense_damage(GameObject& target, std::int32_t damage
                                          LegacyRandom& random,
                                          std::uint64_t current_tick,
                                          std::uint32_t tick_ms,
-                                         bool damage_magic_bubble = true) {
+                                         bool damage_magic_bubble = true,
+                                         std::int32_t undead_power = 0) {
   const auto [mac_min, mac_max] = actor_magic_defense_range(target);
   const auto armor_random = random.random(std::max(0, mac_max - mac_min) + 1);
   auto* player_target = as_player(&target);
@@ -731,7 +732,7 @@ std::int32_t legacy_magic_defense_damage(GameObject& target, std::int32_t damage
       player_target != nullptr && player_target->legacy_magic_bubble_active(current_tick);
   const auto bubble_level = bubble_active ? player_target->legacy_magic_bubble_level() : 0;
   const auto result = legacy_mag_struck_damage(damage, mac_min, mac_max, armor_random,
-                                               actor_undead(target), 0, bubble_active,
+                                               actor_undead(target), undead_power, bubble_active,
                                                bubble_level);
   if (result > 0 && bubble_active && damage_magic_bubble) {
     const auto bubble_damage_ticks = legacy_delay_ms_to_ticks(3000, tick_ms);

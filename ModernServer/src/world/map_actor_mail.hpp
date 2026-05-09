@@ -2688,6 +2688,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           delayed.delayed_effect_kind = kind;
           delayed.target_actor_id = hit_target.id();
           delayed.power = power;
+          delayed.undead_power = legacy_player_undead_power(*attacker, item_configs_);
           delayed.range = range;
           delayed_mail_wheel_.schedule(current_tick,
                                        legacy_delay_ms_to_ticks(delay_ms, budgets_.tick_ms),
@@ -4073,7 +4074,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (mail.delayed_effect_kind == LegacyDelayedEffectKind::delay_magic) {
         const auto check_damage = legacy_magic_defense_damage(target, mail.power, random,
                                                               current_tick, budgets_.tick_ms,
-                                                              false);
+                                                              false, mail.undead_power);
         if (check_damage <= 0) {
           add_legacy_trace(dispatch, "LegacySpell", "delay_magic_absorbed", mail,
                            current_tick, now_ms, false, mail.magic_id, 0, "GetMagStruckDamage");
@@ -4086,7 +4087,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         raw_power = delphi_round(static_cast<double>(raw_power) * 1.2);
       }
       const auto damage = legacy_magic_defense_damage(target, raw_power, random,
-                                                      current_tick, budgets_.tick_ms);
+                                                      current_tick, budgets_.tick_ms, true,
+                                                      mail.undead_power);
       std::int32_t applied_damage = 0;
       bool target_died = false;
       Monster* slain_monster = nullptr;
