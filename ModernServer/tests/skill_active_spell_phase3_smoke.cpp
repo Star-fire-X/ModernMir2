@@ -3,10 +3,13 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "protocol/legacy_game_codec.hpp"
@@ -23,6 +26,30 @@
   } while (false)
 
 namespace {
+
+void write_u16(std::vector<std::uint8_t>& bytes, std::size_t offset, std::uint16_t value) {
+  bytes[offset] = static_cast<std::uint8_t>(value & 0xffU);
+  bytes[offset + 1] = static_cast<std::uint8_t>((value >> 8U) & 0xffU);
+}
+
+std::filesystem::path write_test_map(
+    int width, int height, const std::vector<std::pair<int, int>>& blocked) {
+  const auto path = std::filesystem::temp_directory_path() / "mir2_skill_line_block.map";
+  std::vector<std::uint8_t> bytes(52U + static_cast<std::size_t>(width) *
+                                            static_cast<std::size_t>(height) * 12U);
+  write_u16(bytes, 0, static_cast<std::uint16_t>(width));
+  write_u16(bytes, 2, static_cast<std::uint16_t>(height));
+  for (const auto& [x, y] : blocked) {
+    const auto offset = 52U +
+        (static_cast<std::size_t>(x) * static_cast<std::size_t>(height) +
+         static_cast<std::size_t>(y)) *
+            12U;
+    write_u16(bytes, offset + 4U, 0x8000U);
+  }
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+  return path;
+}
 
 mir2::MagicConfig make_phase3_magic(std::int32_t id, std::string name) {
   mir2::MagicConfig magic;
@@ -268,6 +295,23 @@ int main() {
     const auto delayed = advance_ticks(runtime, 30);
     assert(has_trace(delayed, "mag_struck"));
     assert(has_packet(delayed, mir2::kSmStruck));
+  }
+
+  {
+    auto config = base_config();
+    config.maps[0].source_map = write_test_map(24, 24, {{10, 8}});
+    config.spawns.push_back(make_spawn("BlockedLineTarget", 10, 7, 1, 100));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(
+        make_enter(916, make_character("LineBlock", 10, 10, 20, 30, 30, 100, {9}))));
+    static_cast<void>(runtime.tick());
+    static_cast<void>(runtime.route_logic_command(make_spell(916, 9, 10, 5)));
+    const auto dispatch = runtime.tick();
+
+    assert(has_trace(dispatch, "line_blocked"));
+    assert(!has_trace(dispatch, "mag_struck_queued"));
+    assert(!has_trace(dispatch, "train_skill"));
   }
 
   {

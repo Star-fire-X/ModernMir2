@@ -269,7 +269,8 @@ LegacyBuffState make_legacy_buff(LegacyBuffKind kind, std::uint64_t expire_tick,
                                  std::uint64_t tick_interval = 1,
                                  std::int32_t level = 0,
                                  std::uint64_t source_actor_id = 0) {
-  const auto status_bit = static_cast<std::int32_t>(kind);
+  const auto status_bit =
+      kind == LegacyBuffKind::dc_up ? -1 : static_cast<std::int32_t>(kind);
   return LegacyBuffState{kind,
                          expire_tick,
                          next_tick,
@@ -278,7 +279,8 @@ LegacyBuffState make_legacy_buff(LegacyBuffKind kind, std::uint64_t expire_tick,
                          source_actor_id,
                          status_bit,
                          kind == LegacyBuffKind::defence_up ||
-                             kind == LegacyBuffKind::magic_defence_up,
+                             kind == LegacyBuffKind::magic_defence_up ||
+                             kind == LegacyBuffKind::dc_up,
                          kind == LegacyBuffKind::poison_dechealth ||
                              kind == LegacyBuffKind::poison_damage_armor ||
                              kind == LegacyBuffKind::poison_dont_move ||
@@ -288,6 +290,9 @@ LegacyBuffState make_legacy_buff(LegacyBuffKind kind, std::uint64_t expire_tick,
 
 void clear_player_status_bits(std::int32_t& status, const std::vector<LegacyBuffState>& states) {
   for (const auto& state : states) {
+    if (state.status_bit < 0) {
+      continue;
+    }
     set_legacy_status_bit(status, state.status_bit, false);
   }
 }
@@ -739,7 +744,13 @@ bool Player::add_storage_item(const LegacyUserItem& item) {
 }
 
 std::int32_t Player::melee_power() const {
-  return std::max(1, std::max(packed_min(character_.ability.dc), packed_max(character_.ability.dc)));
+  return std::max(1, std::max(packed_min(character_.ability.dc),
+                              packed_max(character_.ability.dc) + legacy_dc_up_bonus()));
+}
+
+std::int32_t Player::legacy_dc_up_bonus() const {
+  const auto* buff = legacy_buffs_.get(LegacyBuffKind::dc_up);
+  return buff != nullptr ? std::max(buff->level, 0) : 0;
 }
 
 std::int32_t Player::spell_power(std::int32_t base_power) const {
@@ -1136,6 +1147,17 @@ bool Player::activate_legacy_magic_defence_up(std::uint64_t duration_ticks,
       make_legacy_buff(LegacyBuffKind::magic_defence_up, expire_tick), current_tick);
   set_legacy_status_bit(character_.status, kStateMagicDefenceUp, true);
   return changed;
+}
+
+bool Player::activate_legacy_dc_up(std::uint64_t duration_ticks,
+                                   std::uint64_t current_tick,
+                                   std::int32_t bonus) {
+  if (duration_ticks == 0 || bonus <= 0) {
+    return false;
+  }
+  const auto expire_tick = current_tick + duration_ticks;
+  return legacy_buffs_.activate_or_refresh(
+      make_legacy_buff(LegacyBuffKind::dc_up, expire_tick, 0, 1, bonus), current_tick);
 }
 
 bool Player::legacy_transparent_active(std::uint64_t current_tick) const {
@@ -2081,6 +2103,36 @@ bool Monster::legacy_walk_wait_elapsed(std::uint64_t now_ms) const {
          static_cast<std::int64_t>(std::max(walk_wait_ms_, 0));
 }
 
+bool Monster::legacy_holy_seize_active(std::uint64_t now_ms) const {
+  return legacy_holy_seize_until_ms_ != 0 && now_ms <= legacy_holy_seize_until_ms_;
+}
+
+bool Monster::legacy_crazy_active(std::uint64_t now_ms) const {
+  return legacy_crazy_until_ms_ != 0 && now_ms <= legacy_crazy_until_ms_;
+}
+
+void Monster::make_legacy_holy_seize(std::uint64_t duration_ms, std::uint64_t now_ms) {
+  legacy_holy_seize_until_ms_ =
+      std::max(legacy_holy_seize_until_ms_, now_ms + std::max<std::uint64_t>(duration_ms, 1));
+  lose_target();
+  clear_target_xy();
+}
+
+void Monster::break_legacy_holy_seize() {
+  legacy_holy_seize_until_ms_ = 0;
+}
+
+void Monster::make_legacy_crazy(std::uint64_t duration_ms, std::uint64_t now_ms) {
+  legacy_crazy_until_ms_ =
+      std::max(legacy_crazy_until_ms_, now_ms + std::max<std::uint64_t>(duration_ms, 1));
+  lose_target();
+  clear_target_xy();
+}
+
+void Monster::break_legacy_crazy() {
+  legacy_crazy_until_ms_ = 0;
+}
+
 std::int32_t Monster::apply_damage(std::int32_t amount, std::uint64_t attacker_id) {
   return apply_damage(amount, attacker_id, 0);
 }
@@ -2143,6 +2195,58 @@ bool Monster::apply_legacy_poison(std::int32_t poison_kind, std::uint64_t durati
   return changed;
 }
 
+std::int32_t Monster::legacy_dc_up_bonus() const {
+  const auto* buff = legacy_buffs_.get(LegacyBuffKind::dc_up);
+  return buff != nullptr ? std::max(buff->level, 0) : 0;
+}
+
+std::int32_t Monster::physical_defense() const {
+  auto defense = defense_;
+  if (legacy_buffs_.has(LegacyBuffKind::defence_up)) {
+    defense += 2 + level_ / 7;
+  }
+  return std::max(defense, 0);
+}
+
+std::int32_t Monster::magical_defense() const {
+  auto defense = magic_defense_;
+  if (legacy_buffs_.has(LegacyBuffKind::magic_defence_up)) {
+    defense += 2 + level_ / 7;
+  }
+  return std::max(defense, 0);
+}
+
+bool Monster::activate_legacy_defence_up(std::uint64_t duration_ticks,
+                                         std::uint64_t current_tick) {
+  if (duration_ticks == 0) {
+    return false;
+  }
+  const auto expire_tick = current_tick + duration_ticks;
+  return legacy_buffs_.activate_or_refresh(
+      make_legacy_buff(LegacyBuffKind::defence_up, expire_tick), current_tick);
+}
+
+bool Monster::activate_legacy_magic_defence_up(std::uint64_t duration_ticks,
+                                               std::uint64_t current_tick) {
+  if (duration_ticks == 0) {
+    return false;
+  }
+  const auto expire_tick = current_tick + duration_ticks;
+  return legacy_buffs_.activate_or_refresh(
+      make_legacy_buff(LegacyBuffKind::magic_defence_up, expire_tick), current_tick);
+}
+
+bool Monster::activate_legacy_dc_up(std::uint64_t duration_ticks,
+                                    std::uint64_t current_tick,
+                                    std::int32_t bonus) {
+  if (duration_ticks == 0 || bonus <= 0) {
+    return false;
+  }
+  const auto expire_tick = current_tick + duration_ticks;
+  return legacy_buffs_.activate_or_refresh(
+      make_legacy_buff(LegacyBuffKind::dc_up, expire_tick, 0, 1, bonus), current_tick);
+}
+
 StatusTickResult Monster::clear_legacy_buffs_on_death(std::uint64_t) {
   StatusTickResult result;
   const auto cleared = legacy_buffs_.clear_by_policy(LegacyBuffClearPolicy::death);
@@ -2189,6 +2293,9 @@ StatusTickResult Monster::tick_status_effects(std::uint64_t current_tick) {
   }
   const auto expired_buffs = legacy_buffs_.expire_due(current_tick);
   result.legacy_status_changed = result.legacy_status_changed || !expired_buffs.empty();
+  result.ability_changed =
+      std::any_of(expired_buffs.begin(), expired_buffs.end(),
+                  [](const LegacyBuffState& state) { return state.affects_ability; });
   while (hp_ > 0) {
     auto* poison = legacy_buffs_.tick_due(LegacyBuffKind::poison_dechealth, current_tick);
     if (poison == nullptr) {

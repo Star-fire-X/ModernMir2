@@ -913,6 +913,9 @@ std::vector<GameObject*> collect_legacy_area_targets(
         if (friends) {
           if (as_player(&object) != nullptr) {
             targets.push_back(&object);
+          } else if (const auto* monster = as_monster(&object);
+                     monster != nullptr && monster->master_actor_id() == caster.id()) {
+            targets.push_back(&object);
           }
           continue;
         }
@@ -1019,7 +1022,7 @@ std::optional<LegacyBujukSlot> find_legacy_bujuk_slot(
     if (!item_is_bujuk_shape(*item, config, 5)) {
       continue;
     }
-    if (delphi_round(static_cast<double>(item->dura) / 100.0) >= count) {
+    if (delphi_round(static_cast<double>(item->dura) / 100.0) >= std::max(count - 1, 0)) {
       return LegacyBujukSlot{slot, item, config};
     }
   }
@@ -1050,6 +1053,16 @@ void consume_legacy_bujuk_slot(LegacyBujukSlot& slot, std::int32_t count) {
   slot.item->dura = slot.item->dura >= cost
                         ? static_cast<std::uint16_t>(slot.item->dura - cost)
                         : static_cast<std::uint16_t>(0);
+}
+
+std::optional<LegacyUserItem> clear_legacy_bujuk_slot_if_spent(LegacyBujukSlot& slot) {
+  if (slot.item == nullptr || slot.item->dura >= 100) {
+    return std::nullopt;
+  }
+  auto removed = *slot.item;
+  removed.dura = 0;
+  *slot.item = LegacyUserItem{};
+  return removed;
 }
 
 std::int32_t legacy_soul_fire_power(const Player& caster, const LegacyMagicDefinition& magic,
@@ -2190,7 +2203,9 @@ std::int32_t MapActor::roll_legacy_player_attack_power(
     RuntimeDispatch& dispatch, std::string stage, std::string command,
     std::uint64_t current_tick, std::uint64_t now_ms) {
   const auto dc_min = packed_min(attacker.character().ability.dc);
-  const auto dc_max = std::max(dc_min, packed_max(attacker.character().ability.dc));
+  const auto dc_max =
+      std::max(dc_min, packed_max(attacker.character().ability.dc) +
+                           attacker.legacy_dc_up_bonus());
   const auto range = std::max(0, dc_max - dc_min);
   const auto luck = attacker.legacy_luck();
   auto raw = dc_min;
