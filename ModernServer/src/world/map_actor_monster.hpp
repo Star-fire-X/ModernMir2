@@ -48,7 +48,7 @@ bool MapActor::handle_monster_status_effects(Monster& monster, RuntimeDispatch& 
       tick_result.source_actor_id != 0 ? tick_result.source_actor_id : monster.last_hitter_id();
   const auto target_died = monster.is_dead();
   if (target_died && monster.death_time_ms() == 0) {
-    monster.mark_legacy_death(now_ms);
+    static_cast<void>(monster.mark_legacy_death(now_ms));
     refresh_moving_object_state(monster, now_ms);
   }
   for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
@@ -480,9 +480,9 @@ bool MapActor::handle_slave_lifecycle(Monster& monster, RuntimeDispatch& dispatc
   monster.set_no_item(true);
   auto* master = find_player(monster.master_actor_id());
   if (master == nullptr || master->is_dead() ||
-      (master->legacy_ghost() && now_ms > master->legacy_ghost_time_ms() + 1000ULL)) {
+    (master->legacy_ghost() && now_ms > master->legacy_ghost_time_ms() + 1000ULL)) {
     remove_slave_from_master(monster);
-    monster.mark_legacy_death(now_ms);
+    static_cast<void>(monster.mark_legacy_death(now_ms));
     refresh_moving_object_state(monster, now_ms);
     return true;
   }
@@ -502,7 +502,7 @@ bool MapActor::handle_slave_lifecycle(Monster& monster, RuntimeDispatch& dispatc
   if (monster.slave_life_time_ms() != 0 &&
       now_ms > monster.slave_life_time_ms() + 12ULL * 60ULL * 60ULL * 1000ULL) {
     remove_slave_from_master(monster);
-    monster.mark_legacy_death(now_ms);
+    static_cast<void>(monster.mark_legacy_death(now_ms));
     refresh_moving_object_state(monster, now_ms);
     return true;
   }
@@ -558,9 +558,9 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
 
   const auto now_ms = current_tick * static_cast<std::uint64_t>(std::max<std::uint32_t>(budgets_.tick_ms, 1));
   if (!monster->is_dead()) {
-    monster->mark_legacy_death(now_ms);
+    static_cast<void>(monster->mark_legacy_death(now_ms));
   } else if (monster->death_time_ms() == 0) {
-    monster->mark_legacy_death(now_ms);
+    static_cast<void>(monster->mark_legacy_death(now_ms));
   }
   refresh_moving_object_state(*monster, now_ms);
 
@@ -1134,7 +1134,8 @@ void MapActor::legacy_monster_temp_attack(Monster& monster, Player& target,
     died = false;
   }
   if (died) {
-    target.mark_dead(now_ms);
+    const auto death_clear = target.mark_dead(now_ms);
+    dispatch_player_status_tick_result(target, death_clear, dispatch, false);
     static_cast<void>(settle_player_death(target, dispatch, current_tick, now_ms));
   }
   if (absorbed_damage > 0) {
@@ -1412,7 +1413,8 @@ bool MapActor::legacy_monster_special_attack_target(Monster& monster,
     const auto applied_damage = damage_result.hp_damage;
     if (player.is_dead()) {
       if (!try_legacy_revival(player, dispatch, current_tick, now_ms)) {
-        player.mark_dead(now_ms);
+        const auto death_clear = player.mark_dead(now_ms);
+        dispatch_player_status_tick_result(player, death_clear, dispatch, false);
         static_cast<void>(settle_player_death(player, dispatch, current_tick, now_ms));
       }
     }
@@ -1725,7 +1727,8 @@ bool MapActor::legacy_monster_special_run(Monster& monster, RuntimeDispatch& dis
       const auto damage_result = player->apply_damage(damage, current_tick);
       if (player->is_dead()) {
         if (!try_legacy_revival(*player, dispatch, current_tick, now_ms)) {
-          player->mark_dead(now_ms);
+          const auto death_clear = player->mark_dead(now_ms);
+          dispatch_player_status_tick_result(*player, death_clear, dispatch, false);
           static_cast<void>(settle_player_death(*player, dispatch, current_tick, now_ms));
         }
       }

@@ -43,6 +43,11 @@ bool MapActor::try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
     return false;
   }
 
+  if (gate->gate.target_map_id != config_.id) {
+    const auto leave_clear = player.clear_legacy_buffs_on_leave_map(current_tick);
+    dispatch_player_status_tick_result(player, leave_clear, dispatch, false);
+  }
+
   auto snapshot = player.persistent_snapshot();
   snapshot.map_id = gate->gate.target_map_id;
   snapshot.x = gate->gate.target_x;
@@ -94,6 +99,7 @@ bool MapActor::try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
   transfer.y = snapshot.y;
   transfer.dir = snapshot.dir;
   transfer.character = snapshot;
+  transfer.legacy_buffs = player.legacy_buffs_for_transfer(current_tick);
 
   queue_packet(dispatch, player.session_id(), make_clear_objects_packet(player.session_id()));
   queue_packet(dispatch, player.session_id(),
@@ -141,6 +147,11 @@ bool MapActor::try_item_map_move(Player& player, std::string target_map_id,
                                  std::uint64_t now_ms) {
   if (target_map_id.empty()) {
     target_map_id = config_.id;
+  }
+
+  if (target_map_id != config_.id) {
+    const auto leave_clear = player.clear_legacy_buffs_on_leave_map(current_tick);
+    dispatch_player_status_tick_result(player, leave_clear, dispatch, false);
   }
 
   auto snapshot = player.persistent_snapshot();
@@ -192,6 +203,7 @@ bool MapActor::try_item_map_move(Player& player, std::string target_map_id,
   transfer.y = snapshot.y;
   transfer.dir = snapshot.dir;
   transfer.character = snapshot;
+  transfer.legacy_buffs = player.legacy_buffs_for_transfer(current_tick);
 
   queue_packet(dispatch, player.session_id(), make_clear_objects_packet(player.session_id()));
   queue_packet(dispatch, player.session_id(),

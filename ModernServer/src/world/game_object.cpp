@@ -1204,16 +1204,23 @@ std::size_t Player::clear_negative_status_effects(std::uint64_t current_tick) {
   return before - status_effects_.size();
 }
 
-std::size_t Player::clear_negative_legacy_buffs(std::uint64_t) {
+std::size_t Player::clear_negative_legacy_buffs(std::uint64_t current_tick) {
   std::size_t cleared = 0;
+  auto movement_released = false;
   for (const auto kind : {LegacyBuffKind::poison_dechealth,
                           LegacyBuffKind::poison_damage_armor,
                           LegacyBuffKind::poison_dont_move,
                           LegacyBuffKind::poison_stone}) {
     if (legacy_buffs_.clear(kind)) {
       ++cleared;
+      movement_released = movement_released ||
+                          kind == LegacyBuffKind::poison_dont_move ||
+                          kind == LegacyBuffKind::poison_stone;
       set_legacy_status_bit(character_.status, static_cast<std::int32_t>(kind), false);
     }
+  }
+  if (movement_released) {
+    next_move_tick_ = std::min(next_move_tick_, current_tick);
   }
   return cleared;
 }
@@ -1251,6 +1258,55 @@ StatusTickResult Player::clear_legacy_buffs_on_logout(std::uint64_t) {
   }
   result.ability_changed = cleared.ability_changed;
   return result;
+}
+
+std::vector<LegacyBuffTransferState> Player::legacy_buffs_for_transfer(
+    std::uint64_t current_tick) const {
+  std::vector<LegacyBuffTransferState> result;
+  for (const auto& state : legacy_buffs_.snapshot()) {
+    if (state.expire_tick == 0 || state.expire_tick < current_tick) {
+      continue;
+    }
+    result.push_back(LegacyBuffTransferState{
+        static_cast<std::int32_t>(state.kind),
+        state.expire_tick,
+        state.next_tick,
+        state.tick_interval,
+        state.level,
+        state.source_actor_id});
+  }
+  return result;
+}
+
+void Player::restore_legacy_buffs_from_transfer(
+    const std::vector<LegacyBuffTransferState>& states,
+    std::uint64_t current_tick) {
+  for (const auto& transfer : states) {
+    const auto kind = static_cast<LegacyBuffKind>(transfer.kind);
+    switch (kind) {
+      case LegacyBuffKind::poison_dechealth:
+      case LegacyBuffKind::poison_damage_armor:
+      case LegacyBuffKind::poison_dont_move:
+      case LegacyBuffKind::poison_stone:
+      case LegacyBuffKind::transparent:
+      case LegacyBuffKind::defence_up:
+      case LegacyBuffKind::magic_defence_up:
+      case LegacyBuffKind::bubble_defence_up:
+      case LegacyBuffKind::dc_up:
+        break;
+      default:
+        continue;
+    }
+    if (transfer.expire_tick == 0 || transfer.expire_tick < current_tick) {
+      continue;
+    }
+    auto state = make_legacy_buff(kind, transfer.expire_tick, transfer.next_tick,
+                                  transfer.tick_interval, transfer.level,
+                                  transfer.source_actor_id);
+    if (legacy_buffs_.activate_or_refresh(state, current_tick) && state.status_bit >= 0) {
+      set_legacy_status_bit(character_.status, state.status_bit, true);
+    }
+  }
 }
 
 StatusTickResult Player::tick_status_effects(std::uint64_t current_tick) {
@@ -1597,15 +1653,16 @@ void Player::refresh_derived_state(
   character_.feature = make_feature(0, dress_feature, weapon_feature, face_feature);
 }
 
-void Player::mark_dead(std::uint64_t now_ms) {
+StatusTickResult Player::mark_dead(std::uint64_t now_ms) {
   if (character_.ability.hp != 0) {
     character_.ability.hp = 0;
   }
   if (character_.death_time_ms == 0) {
     character_.death_time_ms = now_ms;
   }
-  static_cast<void>(clear_legacy_buffs_on_death(0));
+  auto result = clear_legacy_buffs_on_death(0);
   next_move_tick_ = std::numeric_limits<std::uint64_t>::max();
+  return result;
 }
 
 void Player::revive_at(std::string map_id, std::int32_t x, std::int32_t y,
@@ -2151,7 +2208,7 @@ std::int32_t Monster::apply_damage(std::int32_t amount, std::uint64_t attacker_i
     record_legacy_hitter(attacker_id, now_ms);
   }
   if (hp_ == 0 && now_ms != 0) {
-    mark_legacy_death(now_ms);
+    static_cast<void>(mark_legacy_death(now_ms));
   }
   return before - hp_;
 }
@@ -2415,17 +2472,18 @@ void Monster::expire_legacy_hitters(std::uint64_t now_ms) {
   }
 }
 
-void Monster::mark_legacy_death(std::uint64_t now_ms) {
+StatusTickResult Monster::mark_legacy_death(std::uint64_t now_ms) {
   hp_ = 0;
   if (death_time_ms_ == 0) {
     death_time_ms_ = now_ms;
   }
-  static_cast<void>(clear_legacy_buffs_on_death(0));
+  auto result = clear_legacy_buffs_on_death(0);
   aggro_target_id_ = 0;
   target_focus_time_ms_ = 0;
   clear_target_xy();
   walk_wait_mode_ = false;
   walk_wait_cur_time_ms_ = 0;
+  return result;
 }
 
 void Monster::mark_legacy_ghost(std::uint64_t now_ms) {

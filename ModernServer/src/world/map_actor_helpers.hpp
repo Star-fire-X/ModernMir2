@@ -597,7 +597,7 @@ std::int32_t apply_legacy_monster_damage(
   }
 
   if (!was_dead && monster.is_dead() && monster.death_time_ms() == 0) {
-    monster.mark_legacy_death(now_ms);
+    static_cast<void>(monster.mark_legacy_death(now_ms));
   }
   return applied;
 }

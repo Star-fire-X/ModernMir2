@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -49,6 +50,18 @@ mir2::LogicCommand make_spell_command(std::uint64_t session_id, std::uint64_t ta
   return command;
 }
 
+mir2::LogicCommand make_turn_command(std::uint64_t session_id, std::uint8_t dir,
+                                     std::int32_t x, std::int32_t y) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::turn;
+  command.session_id = session_id;
+  command.dir = dir;
+  command.x = x;
+  command.y = y;
+  command.game_message.ident = mir2::kCmTurn;
+  return command;
+}
+
 }  // namespace
 
 int main() {
@@ -59,7 +72,7 @@ int main() {
   map.allow_pk = false;
   config.maps.push_back(map);
   config.magics.push_back(
-      mir2::MagicConfig{5, "Regeneration", 4, 0, 0, true, false, 2, 2, false, 0, 60, 20, 0});
+      mir2::MagicConfig{105, "Regeneration", 4, 0, 0, true, false, 2, 2, false, 0, 1000, 20, 0});
 
   mir2::LogicRuntime runtime(config);
   runtime.initialize();
@@ -78,7 +91,7 @@ int main() {
   hero.ability.max_weight = 30;
   hero.ability.max_wear_weight = 100;
   hero.ability.max_hand_weight = 100;
-  hero.magics[0].magic_id = 5;
+  hero.magics[0].magic_id = 105;
 
   mir2::LogicCommand hero_enter;
   hero_enter.kind = mir2::LogicCommandKind::enter_world;
@@ -125,7 +138,7 @@ int main() {
   const auto ally_actor_id =
       static_cast<std::uint64_t>(static_cast<std::uint32_t>(ally_map->message.recog));
 
-  static_cast<void>(runtime.route_logic_command(make_spell_command(60, ally_actor_id, 2, 11, 10, 5)));
+  static_cast<void>(runtime.route_logic_command(make_spell_command(60, ally_actor_id, 2, 11, 10, 105)));
   const auto buff_dispatch = runtime.tick();
   const auto hero_hpmp = find_packet(buff_dispatch, mir2::kSmHealthSpellChanged, 60);
   const auto ally_hpmp = find_packet(buff_dispatch, mir2::kSmHealthSpellChanged, 61);
@@ -143,24 +156,27 @@ int main() {
     return fail(5);
   }
 
-  const auto hot_1 = runtime.tick();
-  const auto hot_2 = runtime.tick();
-  const auto hot_3 = runtime.tick();
-  const auto ally_hot_1 = find_packet(hot_1, mir2::kSmHealthSpellChanged, 61);
-  const auto ally_hot_2 = find_packet(hot_2, mir2::kSmHealthSpellChanged, 61);
-  const auto ally_hot_3 = find_packet(hot_3, mir2::kSmHealthSpellChanged, 61);
-  if (!ally_hot_1.has_value() || !ally_hot_2.has_value() || !ally_hot_3.has_value()) {
+  std::vector<std::int32_t> ally_hot_values;
+  bool saw_hot_struck = false;
+  for (int step = 0; step < 12 && ally_hot_values.size() < 3; ++step) {
+    static_cast<void>(runtime.route_logic_command(make_turn_command(61, 2, 11, 10)));
+    const auto hot_dispatch = runtime.tick();
+    if (const auto ally_hot = find_packet(hot_dispatch, mir2::kSmHealthSpellChanged, 61);
+        ally_hot.has_value()) {
+      ally_hot_values.push_back(ally_hot->message.param);
+    }
+    saw_hot_struck = saw_hot_struck ||
+                     find_packet(hot_dispatch, mir2::kSmStruck, 61).has_value();
+  }
+  if (ally_hot_values.size() != 3) {
     return fail(6);
   }
-  if (ally_hot_1->message.param != 9 || ally_hot_2->message.param != 11 ||
-      ally_hot_3->message.param != 13) {
+  if (ally_hot_values[0] != 9 || ally_hot_values[1] != 11 ||
+      ally_hot_values[2] != 13) {
     return fail(7);
   }
 
-  if (find_packet(buff_dispatch, mir2::kSmStruck, 61).has_value() ||
-      find_packet(hot_1, mir2::kSmStruck, 61).has_value() ||
-      find_packet(hot_2, mir2::kSmStruck, 61).has_value() ||
-      find_packet(hot_3, mir2::kSmStruck, 61).has_value()) {
+  if (find_packet(buff_dispatch, mir2::kSmStruck, 61).has_value() || saw_hot_struck) {
     return fail(8);
   }
 
