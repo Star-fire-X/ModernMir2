@@ -955,6 +955,7 @@ constexpr int kEquipBujuk = 9;
 constexpr int kEquipBelt = 10;
 constexpr int kEquipBoots = 11;
 constexpr int kEquipCharm = 12;
+constexpr int kVisibleEquipmentSlotCount = 9;
 
 /// 检查装备槽位是否接受指定 std_mode 类型的物品
 bool equipment_slot_accepts_std_mode(const int slot, const std::uint8_t std_mode,
@@ -992,6 +993,14 @@ bool belt_slot_accepts_item(const client_v1::ItemState& item) { return item.std_
 
 bool item_usable_from_bag(const client_v1::ItemState& item) {
   return !item_empty(item) && (item.std_mode <= 4 || item.std_mode == 31);
+}
+
+int item_stack_count(const client_v1::ItemState& item) {
+  if (item.std_mode > 3 || item.dura == 0 || item.dura_max == 0) {
+    return 0;
+  }
+  const auto count = item.dura / 1000;
+  return count > 1 ? count : 0;
 }
 
 std::shared_ptr<const SpriteFrame> item_icon_frame(AssetManager* assets,
@@ -1242,12 +1251,9 @@ class LegacyBottomStatusNode final : public ui::UiNode {
       if (!item_empty(item)) {
         draw_bag_item_icon(renderer, item_icon_frame(assets, item, ArchiveId::items), cell,
                            item_low_dura(item));
-        if (item.dura > 0 && item.dura_max > 0) {
-          const auto count = item.dura / 1000;
-          if (count > 1) {
-            draw_legacy_text(renderer, cell.x + 18, cell.y + 19,
-                             std::to_wstring(count));
-          }
+        if (const auto count = item_stack_count(item); count > 0) {
+          draw_legacy_text(renderer, cell.x + 18, cell.y + 19,
+                           std::to_wstring(count));
         }
       }
       draw_legacy_text(renderer, cell.x + 13, cell.y + 19, std::to_wstring(slot + 1));
@@ -1790,6 +1796,10 @@ class LegacyHud final {
         if (!item_empty(item)) {
           draw_bag_item_icon(renderer, item_icon_frame(assets_, item, ArchiveId::items), rect,
                              item_low_dura(item));
+          if (const auto count = item_stack_count(item); count > 0) {
+            draw_legacy_text(renderer, rect.x + 22, rect.y + 20,
+                             std::to_wstring(count));
+          }
         }
       }
       if (selected) {
@@ -2311,6 +2321,10 @@ class LegacyHud final {
     pending_bag_click_slot_ = -1;
     pending_bag_double_click_slot_ = -1;
     pending_equipment_click_slot_ = -1;
+    context_menu_ = ItemContextMenu{};
+    context_menu_window_ = nullptr;
+    context_menu_pointer_consumed_ = false;
+    suppress_item_click_until_left_release_ = false;
     pending_chat_send_.clear();
     pending_npc_select_.clear();
     pending_npc_select_merchant_id_ = 0;
@@ -2383,8 +2397,20 @@ class LegacyHud final {
     update_hover_state(*context.input, world);
     update_drag_overlay(*context.input, world);
     update_tooltip(*context.input, world);
+    if (context.input->left_pressed && context_menu_.visible &&
+        !context_menu_contains(context.input->mouse_x, context.input->mouse_y)) {
+      hide_context_menu(*tree_);
+      clear_pending_item_clicks();
+      context_menu_pointer_consumed_ = true;
+      suppress_item_click_until_left_release_ = true;
+    }
     if (context.input->right_pressed && !world.moving_item.active) {
-      handle_right_click(*context.input, *tree_);
+      const auto opened_menu = handle_right_click(*context.input, *tree_);
+      if (!opened_menu && context_menu_.visible &&
+          !context_menu_contains(context.input->mouse_x, context.input->mouse_y)) {
+        hide_context_menu(*tree_);
+        context_menu_pointer_consumed_ = true;
+      }
     }
   }
 
@@ -2412,6 +2438,18 @@ class LegacyHud final {
     }
     auto& world = context.state->world;
     auto consumed = false;
+    const auto context_menu_pointer_consumed =
+        std::exchange(context_menu_pointer_consumed_, false);
+    if (context_menu_pointer_consumed) {
+      consumed = true;
+    }
+    if (suppress_item_click_until_left_release_) {
+      clear_pending_item_clicks();
+      consumed = true;
+      if (!context.input->left_down) {
+        suppress_item_click_until_left_release_ = false;
+      }
+    }
     if (process_waiting_item_timeout(context)) {
       consumed = true;
     }
@@ -2449,12 +2487,13 @@ class LegacyHud final {
       handle_equipment_click(context, slot);
       consumed = true;
     }
-    if (context.input->right_pressed && world.moving_item.active && !context.ui_input.text_focus) {
+    if (!context_menu_pointer_consumed && context.input->right_pressed &&
+        world.moving_item.active && !context.ui_input.text_focus) {
       cancel_moving_item(context);
       consumed = true;
     }
-    if (context.input->left_pressed && world.moving_item.active && !context.ui_input.consumed &&
-        context.app != nullptr) {
+    if (!context_menu_pointer_consumed && context.input->left_pressed &&
+        world.moving_item.active && !context.ui_input.consumed && context.app != nullptr) {
       const auto item = world.moving_item.item;
       if (!item_empty(item) && world.moving_item.source == MovingItemSource::bag) {
         context.state->begin_pending_item_action(PendingItemActionKind::drop,
@@ -2502,6 +2541,10 @@ class LegacyHud final {
     }
     if (context.ui_input.text_focus || tree.modal() != nullptr) {
       return false;
+    }
+    if (context_menu_.visible && context.input->key_pressed[VK_ESCAPE]) {
+      hide_context_menu(tree);
+      return true;
     }
     if (key_select_dialog_ != nullptr && key_select_dialog_->visible) {
       if (context.input->key_pressed[VK_ESCAPE]) {
@@ -3473,7 +3516,7 @@ class LegacyHud final {
 
   // ---- 右键快捷菜单 ----
 
-  void handle_right_click(const InputState& input, ui::UiTree& tree) {
+  bool handle_right_click(const InputState& input, ui::UiTree& tree) {
     // 背包格子右键
     if (item_bag_ != nullptr && item_bag_->visible && item_grid_ != nullptr) {
       const auto cell = item_grid_->cell_at(input.mouse_x, input.mouse_y);
@@ -3484,7 +3527,7 @@ class LegacyHud final {
           if (!item_empty(item)) {
             show_context_menu(tree, slot, MovingItemSource::bag, item, input.mouse_x,
                               input.mouse_y);
-            return;
+            return true;
           }
         }
       }
@@ -3497,9 +3540,11 @@ class LegacyHud final {
         if (!item_empty(item)) {
           show_context_menu(tree, eq_slot, MovingItemSource::equipment, item, input.mouse_x,
                             input.mouse_y);
+          return true;
         }
       }
     }
+    return false;
   }
 
   void show_context_menu(ui::UiTree& tree, const int slot, const MovingItemSource source,
@@ -3512,8 +3557,7 @@ class LegacyHud final {
     menu.source = source;
     const auto is_bag = source == MovingItemSource::bag;
     menu.can_use = is_bag && item_usable_from_bag(item);
-    menu.can_equip = is_bag && equipment_slot_accepts_std_mode(
-        get_equipment_slot_for_item(item), item.std_mode);
+    menu.can_equip = is_bag && visible_equipment_slot_for_item(item) >= 0;
     menu.can_unequip = !is_bag;
     menu.can_drop = is_bag;
 
@@ -3544,6 +3588,42 @@ class LegacyHud final {
     if (context_menu_window_ != nullptr) {
       context_menu_window_->hide(tree);
     }
+  }
+
+  void clear_pending_item_clicks() {
+    pending_bag_click_slot_ = -1;
+    pending_bag_double_click_slot_ = -1;
+    pending_equipment_click_slot_ = -1;
+  }
+
+  [[nodiscard]] bool context_menu_contains(const int x, const int y) const {
+    return context_menu_window_ != nullptr && context_menu_window_->visible &&
+           context_menu_window_->resolved_bounds().contains(x, y);
+  }
+
+  [[nodiscard]] bool visible_equipment_slot(const int slot) const {
+    return slot >= 0 && slot < kVisibleEquipmentSlotCount &&
+           valid_equipment_slot(slot) &&
+           equipment_buttons_[static_cast<std::size_t>(slot)] != nullptr;
+  }
+
+  [[nodiscard]] int visible_equipment_slot_for_item(
+      const client_v1::ItemState& item) const {
+    if (state_ == nullptr || item_empty(item)) {
+      return -1;
+    }
+    const auto slot = get_equipment_slot_for_item(item);
+    if (!visible_equipment_slot(slot)) {
+      return -1;
+    }
+    const auto& world = state_->world;
+    if (!item_empty(world.equipment[static_cast<std::size_t>(slot)])) {
+      return -1;
+    }
+    return equipment_slot_accepts_std_mode(slot, item.std_mode,
+                                           world.self_ability_detail.sex)
+               ? slot
+               : -1;
   }
 
   void build_context_menu_buttons() {
@@ -3626,8 +3706,8 @@ class LegacyHud final {
       return;
     }
     const auto& item = state_->world.bag_items[static_cast<std::size_t>(slot)];
-    const auto equip_slot = get_equipment_slot_for_item(item);
-    if (!equipment_slot_accepts_std_mode(equip_slot, item.std_mode)) {
+    const auto equip_slot = visible_equipment_slot_for_item(item);
+    if (equip_slot < 0) {
       return;
     }
     if (app_ != nullptr) {
@@ -3985,7 +4065,23 @@ class LegacyHud final {
     if (using_moving_item) {
       item = world.moving_item.item;
     }
-    if (world.pending_item_action.active || !item_usable_from_bag(item)) {
+    if (world.pending_item_action.active) {
+      return;
+    }
+    if (!item_usable_from_bag(item)) {
+      const auto equip_slot = visible_equipment_slot_for_item(item);
+      if (equip_slot < 0) {
+        return;
+      }
+      context.state->begin_pending_item_action(PendingItemActionKind::equip,
+                                               MovingItemSource::bag, slot, equip_slot, item,
+                                               detail::monotonic_ms());
+      context.app->request_equip_item(
+          client_v1::EquipItemRequest{equip_slot, item.make_index, item.name});
+      play_item_click(audio_, item);
+      if (using_moving_item) {
+        world.moving_item = MovingItemState{};
+      }
       return;
     }
     play_item_use(audio_, item);
@@ -4191,6 +4287,8 @@ class LegacyHud final {
   };
   ItemContextMenu context_menu_{};
   ui::Window* context_menu_window_{nullptr};
+  bool context_menu_pointer_consumed_{false};
+  bool suppress_item_click_until_left_release_{false};
 
   std::string pending_chat_send_{};
   std::string pending_npc_select_{};
