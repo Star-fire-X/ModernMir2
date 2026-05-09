@@ -25,24 +25,15 @@
                         "constants_observed":  {
                                                    "kSmAddMagic":  210,
                                                    "kSmSendMyMagic":  211,
-                                                   "kSmAreaState":  212
+                                                   "kSmDelMagic":  212,
+                                                   "kSmMagicFire":  638,
+                                                   "kSmMagicFireFail":  639,
+                                                   "kSmMagicLvExp":  640,
+                                                   "kSmAreaState":  708
                                                },
-                        "missing_skill_constants":  [
-                                                        "kSmDelMagic=212",
-                                                        "kSmMagicFire=638",
-                                                        "kSmMagicFireFail=639",
-                                                        "kSmMagicLvExp=640"
-                                                    ]
+                        "missing_skill_constants":  []
                     },
-    "conflicts":  [
-                      {
-                          "id":  "sm_212_collision",
-                          "severity":  "blocking_before_phase1_protocol_work",
-                          "delphi":  "SM_DELMAGIC=212",
-                          "current_cpp":  "kSmAreaState=212",
-                          "expected":  "AreaState must align to Delphi SM_AREASTATE=708; 212 must be reserved for delete magic."
-                      }
-                  ],
+    "conflicts":  [],
     "packet_sequence_evidence":  [
                                      {
                                          "message":  "SM_SPELL",
