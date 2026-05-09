@@ -72,6 +72,18 @@ mir2::LogicCommand make_hit_command(std::uint64_t session_id, std::uint8_t dir, 
   return command;
 }
 
+mir2::LogicCommand make_turn_command(std::uint64_t session_id, std::uint8_t dir,
+                                     std::int32_t x, std::int32_t y) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::turn;
+  command.session_id = session_id;
+  command.dir = dir;
+  command.x = x;
+  command.y = y;
+  command.game_message.ident = mir2::kCmTurn;
+  return command;
+}
+
 }  // namespace
 
 int main() {
@@ -83,9 +95,9 @@ int main() {
   map.fight_zone = true;
   config.maps.push_back(map);
   config.magics.push_back(
-      mir2::MagicConfig{7, "Crippling Hex", 5, 1, 0, true, false, 0, 0, false, 2, 60, 20, 100, 0});
+      mir2::MagicConfig{107, "Crippling Hex", 5, 1, 0, true, false, 0, 0, false, 2, 120, 20, 100, 0});
   config.magics.push_back(
-      mir2::MagicConfig{8, "Holy Shield", 4, 0, 0, true, false, 0, 0, false, 0, 80, 20, 0, 8});
+      mir2::MagicConfig{108, "Holy Shield", 4, 0, 0, true, false, 0, 0, false, 0, 160, 20, 0, 8});
 
   mir2::LogicRuntime runtime(config);
   runtime.initialize();
@@ -106,7 +118,7 @@ int main() {
   hero.ability.max_weight = 30;
   hero.ability.max_wear_weight = 100;
   hero.ability.max_hand_weight = 100;
-  hero.magics[0].magic_id = 8;
+  hero.magics[0].magic_id = 108;
   hero.attack_mode = 0;
 
   mir2::LogicCommand hero_enter;
@@ -136,7 +148,7 @@ int main() {
   rival.ability.dc = mir2::make_word(5, 5);
   rival.ability.mp = 10;
   rival.ability.max_mp = 10;
-  rival.magics[0].magic_id = 7;
+  rival.magics[0].magic_id = 107;
   rival.attack_mode = 0;
 
   mir2::LogicCommand rival_enter;
@@ -156,7 +168,7 @@ int main() {
     return fail(2);
   }
 
-  static_cast<void>(runtime.route_logic_command(make_spell_command(80, hero_actor_id, 2, 10, 10, 8)));
+  static_cast<void>(runtime.route_logic_command(make_spell_command(80, hero_actor_id, 2, 10, 10, 108)));
   const auto shield_dispatch = runtime.tick();
   const auto hero_shield_hpmp = find_packet(shield_dispatch, mir2::kSmHealthSpellChanged, 80);
   if (!hero_shield_hpmp.has_value()) {
@@ -183,7 +195,7 @@ int main() {
     return fail(7);
   }
 
-  static_cast<void>(runtime.route_logic_command(make_spell_command(81, hero_actor_id, 6, 10, 10, 7)));
+  static_cast<void>(runtime.route_logic_command(make_spell_command(81, hero_actor_id, 6, 10, 10, 107)));
   const auto hex_dispatch = runtime.tick();
   const auto hero_hex_hpmp = find_packet(hex_dispatch, mir2::kSmHealthSpellChanged, 80);
   if (!hero_hex_hpmp.has_value()) {
@@ -194,42 +206,60 @@ int main() {
     return fail(9);
   }
 
-  const auto dot_1 = runtime.tick();
-  const auto hero_dot_absorb = find_packet(dot_1, mir2::kSmHealthSpellChanged, 80);
-  if (!hero_dot_absorb.has_value()) {
+  bool saw_dot_absorb = false;
+  bool saw_shatter_self = false;
+  bool saw_shatter_watcher = false;
+  for (int step = 0; step < 12 && !(saw_dot_absorb && saw_shatter_self && saw_shatter_watcher);
+       ++step) {
+    static_cast<void>(runtime.route_logic_command(make_turn_command(80, 2, 10, 10)));
+    const auto dot_dispatch = runtime.tick();
+    const auto hero_dot_absorb = find_packet(dot_dispatch, mir2::kSmHealthSpellChanged, 80);
+    if (hero_dot_absorb.has_value()) {
+      if (find_packet(dot_dispatch, mir2::kSmStruck, 80).has_value() ||
+          hero_dot_absorb->message.param != 20 || hero_dot_absorb->message.tag != 16) {
+        return fail(11);
+      }
+      saw_dot_absorb = true;
+    }
+    saw_shatter_self =
+        saw_shatter_self || has_notice(dot_dispatch, 80, "Your Holy Shield shatters");
+    saw_shatter_watcher =
+        saw_shatter_watcher || has_notice(dot_dispatch, 81, "Hero's Holy Shield shatters");
+  }
+  if (!saw_dot_absorb) {
     return fail(10);
   }
-  if (find_packet(dot_1, mir2::kSmStruck, 80).has_value() ||
-      hero_dot_absorb->message.param != 20 || hero_dot_absorb->message.tag != 16) {
-    return fail(11);
-  }
-  if (!has_notice(dot_1, 80, "Your Holy Shield shatters") ||
-      !has_notice(dot_1, 81, "Hero's Holy Shield shatters")) {
+  if (!saw_shatter_self || !saw_shatter_watcher) {
     return fail(12);
   }
 
-  const auto dot_2 = runtime.tick();
-  const auto hero_dot_struck = find_packet(dot_2, mir2::kSmStruck, 80);
-  if (!hero_dot_struck.has_value()) {
+  std::vector<std::int32_t> struck_hp_values;
+  for (int step = 0; step < 12 && struck_hp_values.size() < 2; ++step) {
+    static_cast<void>(runtime.route_logic_command(make_turn_command(80, 2, 10, 10)));
+    const auto dot_dispatch = runtime.tick();
+    const auto hero_dot_struck = find_packet(dot_dispatch, mir2::kSmStruck, 80);
+    if (hero_dot_struck.has_value()) {
+      if (hero_dot_struck->message.recog != static_cast<std::int32_t>(hero_actor_id) ||
+          hero_dot_struck->message.tag != 20 || hero_dot_struck->message.series != 2) {
+        return struck_hp_values.empty() ? fail(14) : fail(16);
+      }
+      struck_hp_values.push_back(hero_dot_struck->message.param);
+    }
+  }
+  if (struck_hp_values.empty()) {
     return fail(13);
   }
-  if (hero_dot_struck->message.recog != static_cast<std::int32_t>(hero_actor_id) ||
-      hero_dot_struck->message.param != 18 || hero_dot_struck->message.tag != 20 ||
-      hero_dot_struck->message.series != 2) {
+  if (struck_hp_values[0] != 18) {
     return fail(14);
   }
-
-  const auto dot_3 = runtime.tick();
-  const auto hero_dot_struck_2 = find_packet(dot_3, mir2::kSmStruck, 80);
-  if (!hero_dot_struck_2.has_value()) {
+  if (struck_hp_values.size() < 2) {
     return fail(15);
   }
-  if (hero_dot_struck_2->message.param != 16 || hero_dot_struck_2->message.tag != 20 ||
-      hero_dot_struck_2->message.series != 2) {
+  if (struck_hp_values[1] != 16) {
     return fail(16);
   }
 
-  static_cast<void>(runtime.route_logic_command(make_spell_command(80, hero_actor_id, 2, 10, 10, 8)));
+  static_cast<void>(runtime.route_logic_command(make_spell_command(80, hero_actor_id, 2, 10, 10, 108)));
   const auto shield_again_dispatch = runtime.tick();
   if (!has_notice(shield_again_dispatch, 80, "Holy Shield surrounds you") ||
       !has_notice(shield_again_dispatch, 81, "Hero is surrounded by Holy Shield")) {
@@ -238,7 +268,8 @@ int main() {
 
   bool saw_fade_self = false;
   bool saw_fade_watcher = false;
-  for (int step = 0; step < 6; ++step) {
+  for (int step = 0; step < 20; ++step) {
+    static_cast<void>(runtime.route_logic_command(make_turn_command(80, 2, 10, 10)));
     const auto fade_dispatch = runtime.tick();
     saw_fade_self = saw_fade_self || has_notice(fade_dispatch, 80, "Your Holy Shield fades");
     saw_fade_watcher =

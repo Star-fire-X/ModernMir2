@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -155,6 +156,22 @@ mir2::LogicCommand attack(std::uint64_t session_id, std::int32_t x, std::int32_t
   return command;
 }
 
+mir2::LogicCommand walk(std::uint64_t session_id, std::int32_t x, std::int32_t y) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::walk;
+  command.session_id = session_id;
+  command.x = x;
+  command.y = y;
+  return command;
+}
+
+mir2::LogicCommand logout(std::uint64_t session_id) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::logout;
+  command.session_id = session_id;
+  return command;
+}
+
 void append(mir2::RuntimeDispatch& target, mir2::RuntimeDispatch source) {
   target.session_events.insert(target.session_events.end(),
                                std::make_move_iterator(source.session_events.begin()),
@@ -186,6 +203,18 @@ bool has_packet(const mir2::RuntimeDispatch& dispatch, std::uint16_t ident) {
                        const auto decoded = mir2::decode_legacy_game_packet(event.packet);
                        return decoded.has_value() && decoded->message.ident == ident;
                      });
+}
+
+std::optional<mir2::CharacterRecord> saved_character(
+    const mir2::RuntimeDispatch& dispatch,
+    const std::string& name) {
+  for (const auto& request : dispatch.persist_requests) {
+    if (request.kind == mir2::PersistRequestKind::save_character &&
+        request.character.character_name == name) {
+      return request.character;
+    }
+  }
+  return std::nullopt;
 }
 
 }  // namespace
@@ -283,7 +312,7 @@ int main() {
     assert((status & static_cast<std::uint32_t>(kMagDefenceStatusBit)) != 0);
     assert((status & static_cast<std::uint32_t>(kMagicBubbleStatusBit)) != 0);
 
-    player.mark_dead(1000);
+    static_cast<void>(player.mark_dead(1000));
     status = static_cast<std::uint32_t>(player.character().status);
     assert((status & kPoisonDecHealthStatusBit) == 0);
     assert((status & kPoisonDamageArmorStatusBit) == 0);
@@ -359,10 +388,63 @@ int main() {
                           0, 0, 0, 0, 10);
     assert(monster.apply_legacy_poison(0, 20, 1, 1, 99, 1));
     assert(monster.apply_legacy_poison(5, 20, 0, 1, 99, 1));
-    monster.mark_legacy_death(1000);
+    static_cast<void>(monster.mark_legacy_death(1000));
     const auto tick_result = monster.tick_status_effects(2);
     assert(tick_result.damage == 0);
     assert(!tick_result.legacy_status_changed);
+  }
+
+  {
+    auto config = base_config();
+    config.maps[0].gates.push_back(mir2::MapGateConfig{11, 10, "1", 5, 5, false});
+    config.maps.push_back(mir2::MapConfig{"1", "TargetStatusMap", {}, 24, 24, 5, 5});
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(
+        enter(1511, character("TransferStatus", {18, 31}))));
+    static_cast<void>(runtime.tick());
+    auto dispatch = runtime.route_logic_command(spell(1511, 31));
+    append(dispatch, runtime.tick());
+    append(dispatch, runtime.route_logic_command(spell(1511, 18)));
+    append(dispatch, runtime.tick());
+    auto snapshot = runtime.snapshot_character_actor("TransferStatus");
+    assert(snapshot.has_value());
+    assert((snapshot->status & kTransparentStatusBit) != 0);
+    assert((snapshot->status & kMagicBubbleStatusBit) != 0);
+
+    append(dispatch, runtime.route_logic_command(walk(1511, 11, 10)));
+    append(dispatch, runtime.tick());
+    snapshot = runtime.snapshot_character_actor("TransferStatus");
+    assert(snapshot.has_value());
+    assert(snapshot->map_id == "1");
+    assert((snapshot->status & kTransparentStatusBit) == 0);
+    assert((snapshot->status & kMagicBubbleStatusBit) != 0);
+    assert(has_packet(dispatch, mir2::kSmCharStatusChanged));
+    assert(has_packet(dispatch, mir2::kSmChangeMap));
+  }
+
+  {
+    auto config = base_config();
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(
+        enter(1521, character("LogoutStatus", {18, 31}))));
+    static_cast<void>(runtime.tick());
+    auto dispatch = runtime.route_logic_command(spell(1521, 31));
+    append(dispatch, runtime.tick());
+    append(dispatch, runtime.route_logic_command(spell(1521, 18)));
+    append(dispatch, runtime.tick());
+    auto snapshot = runtime.snapshot_character_actor("LogoutStatus");
+    assert(snapshot.has_value());
+    assert((snapshot->status & kTransparentStatusBit) != 0);
+    assert((snapshot->status & kMagicBubbleStatusBit) != 0);
+
+    const auto logout_dispatch = runtime.route_logic_command(logout(1521));
+    const auto saved = saved_character(logout_dispatch, "LogoutStatus");
+    assert(saved.has_value());
+    assert((saved->status & kTransparentStatusBit) == 0);
+    assert((saved->status & kMagicBubbleStatusBit) == 0);
+    assert(has_packet(logout_dispatch, mir2::kSmCharStatusChanged));
   }
 
   return 0;

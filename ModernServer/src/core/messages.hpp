@@ -267,6 +267,15 @@ enum class LegacyDelayedEffectKind {
   transparent
 };
 
+struct LegacyBuffTransferState {
+  std::int32_t kind{0};
+  std::uint64_t expire_tick{0};
+  std::uint64_t next_tick{0};
+  std::uint64_t tick_interval{1};
+  std::int32_t level{0};
+  std::uint64_t source_actor_id{0};
+};
+
 struct ActorMail {
   ActorMailKind kind{ActorMailKind::say};
   std::string map_id{};
@@ -344,6 +353,7 @@ struct ActorMail {
   std::int32_t poison_kind{0};
   std::int32_t poison_level{0};
   std::uint64_t duration_ticks{0};
+  std::vector<LegacyBuffTransferState> legacy_buffs{};
   CharacterRecord character{};
   LegacyDefaultMessage game_message{};
   std::string payload{};

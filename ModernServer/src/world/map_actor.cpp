@@ -838,6 +838,35 @@ bool try_legacy_revival_impl(
   return true;
 }
 
+void queue_player_status_tick_result(
+    const std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
+    RuntimeDispatch& dispatch,
+    const Player& player,
+    const StatusTickResult& result,
+    bool include_health) {
+  if (include_health) {
+    queue_packet(dispatch, player.session_id(),
+                 make_health_spell_changed_packet(player.session_id(), player));
+  }
+  if (result.legacy_status_changed) {
+    queue_packet(dispatch, player.session_id(),
+                 make_char_status_changed_packet(player.session_id(), player));
+    for_each_player(objects, [&](std::uint64_t actor_id, const Player& watcher) {
+      if (actor_id == player.id() || !is_legacy_visible_to(watcher, player)) {
+        return;
+      }
+      queue_packet(dispatch, watcher.session_id(),
+                   make_char_status_changed_packet(watcher.session_id(), player));
+    });
+  }
+  if (result.ability_changed) {
+    queue_packet(dispatch, player.session_id(),
+                 make_ability_packet(player.session_id(), player.character()));
+    queue_packet(dispatch, player.session_id(),
+                 make_sub_ability_packet(player.session_id(), player));
+  }
+}
+
 LegacyMagicDamageResult apply_legacy_magic_damage(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
@@ -861,7 +890,8 @@ LegacyMagicDamageResult apply_legacy_magic_damage(
       result.target_died = false;
     }
     if (result.target_died) {
-      player_target->mark_dead(now_ms);
+      const auto death_clear = player_target->mark_dead(now_ms);
+      queue_player_status_tick_result(objects, dispatch, *player_target, death_clear, false);
     }
     if (damage_result.absorbed_damage > 0) {
       queue_packet(dispatch, player_target->session_id(),
@@ -1568,7 +1598,8 @@ RuntimeDispatch MapActor::legacy_disconnect_player(std::uint64_t actor_id, std::
     return dispatch;
   }
   const auto session_id = player->session_id();
-  static_cast<void>(player->clear_legacy_buffs_on_logout(0));
+  const auto logout_clear = player->clear_legacy_buffs_on_logout(0);
+  dispatch_player_status_tick_result(*player, logout_clear, dispatch, false);
   cancel_trade_for(actor_id, dispatch, true);
   queue_save_player_character(dispatch, *player, now_ms);
   detach_owned_slaves(*player, dispatch, now_ms, true);
@@ -1785,6 +1816,13 @@ void MapActor::notify_player_and_watchers(RuntimeDispatch& dispatch, const Playe
     queue_packet(dispatch, watcher.session_id(),
                  make_system_notice_packet(watcher.session_id(), watcher_message));
   });
+}
+
+void MapActor::dispatch_player_status_tick_result(Player& player,
+                                                  const StatusTickResult& result,
+                                                  RuntimeDispatch& dispatch,
+                                                  bool include_health) const {
+  queue_player_status_tick_result(objects_, dispatch, player, result, include_health);
 }
 
 void MapActor::broadcast_legacy_char_status_changed(RuntimeDispatch& dispatch,

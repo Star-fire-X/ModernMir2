@@ -63,6 +63,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (mail.kind == ActorMailKind::spawn_player) {
         auto* player = find_player(mail.actor_id);
         if (player != nullptr) {
+          player->restore_legacy_buffs_from_transfer(mail.legacy_buffs, current_tick);
           player->refresh_derived_state(item_configs_);
           player->set_in_safe_zone(is_safe_zone(config_, player->x(), player->y()));
           restore_saved_slaves(*player, dispatch, current_tick, now_ms);
@@ -2254,7 +2255,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
               current_tick, now_ms));
         }
         if (target_died) {
-          player_target->mark_dead(now_ms);
+          const auto death_clear = player_target->mark_dead(now_ms);
+          dispatch_player_status_tick_result(*player_target, death_clear, dispatch, false);
           apply_bad_kill_penalty(*attacker, *player_target, dispatch, current_tick,
                                  now_ms, "LegacyCombat");
           static_cast<void>(settle_player_death(*player_target, dispatch, current_tick,
@@ -2366,7 +2368,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
               extra_target_died = false;
             }
             if (extra_target_died) {
-              player_target->mark_dead(now_ms);
+              const auto death_clear = player_target->mark_dead(now_ms);
+              dispatch_player_status_tick_result(*player_target, death_clear, dispatch, false);
               apply_bad_kill_penalty(*attacker, *player_target, dispatch,
                                      current_tick, now_ms, "LegacyCombat");
               static_cast<void>(settle_player_death(*player_target, dispatch,
@@ -3621,9 +3624,17 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           }
           if (beneficial_spell) {
             applied_heal = player_target->apply_heal(std::max(magic_it->second.instant_heal, 0));
-            if (magic_it->second.dispel_negative &&
-                player_target->clear_negative_status_effects(current_tick) > 0) {
-              applied_player_effect = true;
+            if (magic_it->second.dispel_negative) {
+              const auto modern_cleared =
+                  player_target->clear_negative_status_effects(current_tick);
+              const auto legacy_cleared =
+                  player_target->clear_negative_legacy_buffs(current_tick);
+              if (legacy_cleared > 0) {
+                broadcast_legacy_char_status_changed(dispatch, *player_target);
+              }
+              if (modern_cleared > 0 || legacy_cleared > 0) {
+                applied_player_effect = true;
+              }
             }
           }
           if ((magic_it->second.dot_damage > 0 || magic_it->second.heal_per_tick > 0 ||
@@ -3658,7 +3669,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             target_died = false;
           }
           if (target_died) {
-            player_target->mark_dead(now_ms);
+            const auto death_clear = player_target->mark_dead(now_ms);
+            dispatch_player_status_tick_result(*player_target, death_clear, dispatch, false);
             apply_bad_kill_penalty(*attacker, *player_target, dispatch, current_tick,
                                    now_ms, "LegacySpell");
             static_cast<void>(settle_player_death(*player_target, dispatch, current_tick,
@@ -4269,7 +4281,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           target_died = false;
         }
         if (target_died) {
-          player_target->mark_dead(now_ms);
+          const auto death_clear = player_target->mark_dead(now_ms);
+          dispatch_player_status_tick_result(*player_target, death_clear, dispatch, false);
           apply_bad_kill_penalty(*caster, *player_target, dispatch, current_tick,
                                  now_ms, "LegacySpell");
           static_cast<void>(settle_player_death(*player_target, dispatch, current_tick,

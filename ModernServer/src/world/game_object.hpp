@@ -156,6 +156,7 @@ class LegacyBuffContainer {
   [[nodiscard]] std::vector<LegacyBuffState> expire_due(std::uint64_t current_tick);
   [[nodiscard]] std::uint64_t remaining_ticks(LegacyBuffKind kind,
                                               std::uint64_t current_tick) const;
+  [[nodiscard]] std::vector<LegacyBuffState> snapshot() const { return states_; }
   [[nodiscard]] const LegacyBuffState* get(LegacyBuffKind kind) const;
   [[nodiscard]] LegacyBuffState* get(LegacyBuffKind kind);
 
@@ -378,6 +379,10 @@ class Player : public GameObject {
   [[nodiscard]] StatusTickResult clear_legacy_buffs_on_leave_map(std::uint64_t current_tick);
   [[nodiscard]] StatusTickResult clear_legacy_buffs_on_logout(std::uint64_t current_tick);
   [[nodiscard]] StatusTickResult tick_status_effects(std::uint64_t current_tick);
+  [[nodiscard]] std::vector<LegacyBuffTransferState> legacy_buffs_for_transfer(
+      std::uint64_t current_tick) const;
+  void restore_legacy_buffs_from_transfer(const std::vector<LegacyBuffTransferState>& states,
+                                          std::uint64_t current_tick);
   void consume_move_action(std::uint64_t current_tick, bool running, std::uint32_t tick_ms);
   void restore_full_vitals();
   void equip_item(std::size_t slot, const LegacyUserItem& item);
@@ -392,7 +397,7 @@ class Player : public GameObject {
   bool set_script_param(std::int32_t index, std::int32_t value);
   void set_daily_quest(std::uint32_t value);
   void refresh_derived_state(const std::unordered_map<std::int32_t, ItemConfig>& item_configs);
-  void mark_dead(std::uint64_t now_ms);
+  [[nodiscard]] StatusTickResult mark_dead(std::uint64_t now_ms);
   [[nodiscard]] bool legacy_death_drop_settled() const { return legacy_death_drop_settled_; }
   void mark_legacy_death_drop_settled() { legacy_death_drop_settled_ = true; }
   void revive_at(std::string map_id, std::int32_t x, std::int32_t y,
@@ -745,7 +750,7 @@ class Monster : public GameObject {
   void clear_exp_hitter();
   void clear_legacy_hitters();
   void expire_legacy_hitters(std::uint64_t now_ms);
-  void mark_legacy_death(std::uint64_t now_ms);
+  [[nodiscard]] StatusTickResult mark_legacy_death(std::uint64_t now_ms);
   void mark_legacy_ghost(std::uint64_t now_ms);
   [[nodiscard]] bool death_due_for_ghost(std::uint64_t now_ms,
                                          std::uint64_t corpse_ms) const;

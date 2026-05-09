@@ -96,7 +96,8 @@ void MapActor::handle_player_status_effects(Player& player, RuntimeDispatch& dis
       const auto now_ms = current_tick *
                           static_cast<std::uint64_t>(
                               std::max<std::uint32_t>(budgets_.tick_ms, 1));
-      player.mark_dead(now_ms);
+      const auto death_clear = player.mark_dead(now_ms);
+      dispatch_player_status_tick_result(player, death_clear, dispatch, false);
       static_cast<void>(settle_player_death(player, dispatch, current_tick, now_ms));
     }
     for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
@@ -110,17 +111,7 @@ void MapActor::handle_player_status_effects(Player& player, RuntimeDispatch& dis
     });
   }
 
-  queue_packet(dispatch, player.session_id(),
-               make_health_spell_changed_packet(player.session_id(), player));
-  if (tick_result.legacy_status_changed) {
-    broadcast_legacy_char_status_changed(dispatch, player);
-  }
-  if (tick_result.ability_changed) {
-    queue_packet(dispatch, player.session_id(),
-                 make_ability_packet(player.session_id(), player.character()));
-    queue_packet(dispatch, player.session_id(),
-                 make_sub_ability_packet(player.session_id(), player));
-  }
+  dispatch_player_status_tick_result(player, tick_result, dispatch, true);
   if (tick_result.shield_broken) {
     notify_player_and_watchers(dispatch, player, make_shield_break_self_notice(tick_result.shield_name),
                                make_shield_break_watcher_notice(player, tick_result.shield_name));

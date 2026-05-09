@@ -257,6 +257,9 @@ class MapActor {
   void notify_player_and_watchers(RuntimeDispatch& dispatch, const Player& player,
                                   const std::string& self_message,
                                   const std::string& watcher_message) const;
+  void dispatch_player_status_tick_result(Player& player, const StatusTickResult& result,
+                                          RuntimeDispatch& dispatch,
+                                          bool include_health) const;
   void broadcast_legacy_char_status_changed(RuntimeDispatch& dispatch,
                                             const Player& player) const;
   void add_legacy_trace(RuntimeDispatch& dispatch,
