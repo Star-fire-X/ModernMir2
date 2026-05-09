@@ -160,6 +160,9 @@ class LogicRuntime {
   void process_merchants(std::uint64_t now_ms, RuntimeDispatch& dispatch);
   void process_npcs(std::uint64_t now_ms, RuntimeDispatch& dispatch);
   void process_user_engine_timers(std::uint64_t now_ms, RuntimeDispatch& dispatch);
+  void process_legacy_event_creates(RuntimeDispatch& dispatch, std::uint64_t now_ms);
+  void process_legacy_random_space_moves(RuntimeDispatch& dispatch, std::uint64_t now_ms);
+  void refresh_legacy_holy_curtain_groups(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void cleanup_close_records(std::uint64_t now_ms);
   void append_dispatch(RuntimeDispatch& target, RuntimeDispatch source);
 

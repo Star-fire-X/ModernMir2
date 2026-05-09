@@ -6,6 +6,7 @@
 #include <cmath>
 #include <iterator>
 #include <limits>
+#include <unordered_map>
 
 #include "spdlog/spdlog.h"
 #include "util/string_utils.hpp"
@@ -940,6 +941,9 @@ RuntimeDispatch LogicRuntime::tick(std::uint64_t now_ms, LegacyRuntimeContext co
     append_dispatch(combined, map_it->second->tick(current_tick_, now_ms));
   }
 
+  process_legacy_event_creates(combined, now_ms);
+  process_legacy_random_space_moves(combined, now_ms);
+
   while (!combined.cross_map_mails.empty()) {
     auto cross_map_mails = std::move(combined.cross_map_mails);
     combined.cross_map_mails.clear();
@@ -963,8 +967,16 @@ RuntimeDispatch LogicRuntime::tick(std::uint64_t now_ms, LegacyRuntimeContext co
 }
 
 RuntimeDispatch LogicRuntime::run_legacy_event_manager(std::uint64_t now_ms) {
+  RuntimeDispatch dispatch;
+  refresh_legacy_holy_curtain_groups(dispatch, now_ms);
   auto result = legacy_event_manager_.run(now_ms, current_tick_);
-  RuntimeDispatch dispatch = std::move(result.dispatch);
+  append_dispatch(dispatch, std::move(result.dispatch));
+  for (const auto& event : result.fire_burn_events) {
+    if (auto map_it = maps_.find(event.map_id); map_it != maps_.end()) {
+      append_dispatch(dispatch,
+                      map_it->second->legacy_apply_fire_burn_event(event, current_tick_, now_ms));
+    }
+  }
   for (const auto& event : result.closed_events) {
     if (auto map_it = maps_.find(event.map_id); map_it != maps_.end()) {
       map_it->second->legacy_remove_event_object(event.id, event.x, event.y, &dispatch);
@@ -976,9 +988,11 @@ RuntimeDispatch LogicRuntime::run_legacy_event_manager(std::uint64_t now_ms) {
 std::uint64_t LogicRuntime::enqueue_legacy_event(LegacyEventRecord record) {
   record.map_id = resolve_map_id(record.map_id);
   const auto event_id = legacy_event_manager_.enqueue(record, last_now_ms_);
-  if (auto map_it = maps_.find(record.map_id); map_it != maps_.end()) {
-    static_cast<void>(map_it->second->legacy_add_event_object(
-        event_id, record.x, record.y, last_now_ms_));
+  if (event_id != 0) {
+    if (auto map_it = maps_.find(record.map_id); map_it != maps_.end()) {
+      static_cast<void>(map_it->second->legacy_add_event_object(
+          event_id, record.x, record.y, last_now_ms_, record.blocks_walk));
+    }
   }
   return event_id;
 }
@@ -987,6 +1001,95 @@ std::optional<LegacyEventRecord> LogicRuntime::find_legacy_event(
     const std::string& map_id, std::int32_t x, std::int32_t y,
     LegacyEventType type) const {
   return legacy_event_manager_.find(resolve_map_id(map_id), x, y, type);
+}
+
+void LogicRuntime::process_legacy_event_creates(RuntimeDispatch& dispatch,
+                                                std::uint64_t now_ms) {
+  if (dispatch.legacy_event_creates.empty() &&
+      dispatch.legacy_holy_curtain_groups.empty()) {
+    return;
+  }
+  auto event_creates = std::move(dispatch.legacy_event_creates);
+  auto holy_groups = std::move(dispatch.legacy_holy_curtain_groups);
+  dispatch.legacy_event_creates.clear();
+  dispatch.legacy_holy_curtain_groups.clear();
+
+  std::unordered_map<std::uint64_t, std::vector<std::uint64_t>> group_event_ids;
+  for (auto& event : event_creates) {
+    event.map_id = resolve_map_id(event.map_id);
+    const auto event_id = enqueue_legacy_event(event);
+    if (event_id != 0 && event.holy_group_id != 0) {
+      group_event_ids[event.holy_group_id].push_back(event_id);
+    }
+  }
+
+  for (auto& group : holy_groups) {
+    group.map_id = resolve_map_id(group.map_id);
+    if (auto ids = group_event_ids.find(group.id); ids != group_event_ids.end()) {
+      group.event_ids = std::move(ids->second);
+    }
+    if (!group.event_ids.empty() && !group.seized_actor_ids.empty()) {
+      static_cast<void>(legacy_event_manager_.enqueue_holy_curtain_group(
+          std::move(group), now_ms));
+    }
+  }
+}
+
+void LogicRuntime::process_legacy_random_space_moves(RuntimeDispatch& dispatch,
+                                                     std::uint64_t now_ms) {
+  while (!dispatch.legacy_random_space_moves.empty()) {
+    auto requests = std::move(dispatch.legacy_random_space_moves);
+    dispatch.legacy_random_space_moves.clear();
+    for (auto& request : requests) {
+      const auto source_map_id = resolve_map_id(request.source_map_id);
+      const auto target_map_id = resolve_map_id(
+          request.target_map_id.empty() ? default_map_id_ : request.target_map_id);
+      const auto source_it = maps_.find(source_map_id);
+      const auto target_it = maps_.find(target_map_id);
+      if (source_it == maps_.end() || target_it == maps_.end()) {
+        continue;
+      }
+      const auto target = target_it->second->legacy_random_space_move_target(legacy_random_);
+      if (!target.has_value()) {
+        continue;
+      }
+      append_dispatch(dispatch,
+                      source_it->second->legacy_space_move_player(
+                          request.actor_id, target_map_id, target->first, target->second,
+                          true, current_tick_, now_ms));
+    }
+  }
+}
+
+void LogicRuntime::refresh_legacy_holy_curtain_groups(RuntimeDispatch& dispatch,
+                                                      std::uint64_t now_ms) {
+  const auto groups = legacy_event_manager_.active_holy_groups();
+  for (const auto& group : groups) {
+    const auto map_it = maps_.find(group.map_id);
+    if (map_it == maps_.end()) {
+      auto result = legacy_event_manager_.update_holy_group_seized(
+          group.id, {}, now_ms, current_tick_);
+      append_dispatch(dispatch, std::move(result.dispatch));
+      for (const auto& event : result.closed_events) {
+        if (auto event_map_it = maps_.find(event.map_id); event_map_it != maps_.end()) {
+          event_map_it->second->legacy_remove_event_object(event.id, event.x, event.y,
+                                                           &dispatch);
+        }
+      }
+      continue;
+    }
+    auto active_ids =
+        map_it->second->legacy_active_holy_seize_actor_ids(group.seized_actor_ids, now_ms);
+    auto result = legacy_event_manager_.update_holy_group_seized(
+        group.id, std::move(active_ids), now_ms, current_tick_);
+    append_dispatch(dispatch, std::move(result.dispatch));
+    for (const auto& event : result.closed_events) {
+      if (auto event_map_it = maps_.find(event.map_id); event_map_it != maps_.end()) {
+        event_map_it->second->legacy_remove_event_object(event.id, event.x, event.y,
+                                                         &dispatch);
+      }
+    }
+  }
 }
 
 void LogicRuntime::process_ready_users(std::uint64_t now_ms, RuntimeDispatch& dispatch) {
@@ -1722,6 +1825,18 @@ void LogicRuntime::append_dispatch(RuntimeDispatch& target, RuntimeDispatch sour
   target.cross_map_mails.insert(target.cross_map_mails.end(),
                                 std::make_move_iterator(source.cross_map_mails.begin()),
                                 std::make_move_iterator(source.cross_map_mails.end()));
+  target.legacy_event_creates.insert(
+      target.legacy_event_creates.end(),
+      std::make_move_iterator(source.legacy_event_creates.begin()),
+      std::make_move_iterator(source.legacy_event_creates.end()));
+  target.legacy_holy_curtain_groups.insert(
+      target.legacy_holy_curtain_groups.end(),
+      std::make_move_iterator(source.legacy_holy_curtain_groups.begin()),
+      std::make_move_iterator(source.legacy_holy_curtain_groups.end()));
+  target.legacy_random_space_moves.insert(
+      target.legacy_random_space_moves.end(),
+      std::make_move_iterator(source.legacy_random_space_moves.begin()),
+      std::make_move_iterator(source.legacy_random_space_moves.end()));
   target.legacy_traces.insert(target.legacy_traces.end(),
                               std::make_move_iterator(source.legacy_traces.begin()),
                               std::make_move_iterator(source.legacy_traces.end()));

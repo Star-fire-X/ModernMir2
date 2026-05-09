@@ -4,8 +4,8 @@
     "code": "Source\\M2Server",
     "data": "Release\\Mir200\\Data.mdb derived active magic config"
   },
-  "supported_magic_ids_added": [6, 13, 14, 15, 18, 19],
-  "still_deferred": [16, 17, 20, 21, 22, 30, 34, 35, 36, 37],
+  "supported_magic_ids_added": [6, 13, 14, 15, 16, 18, 19, 36],
+  "still_deferred": [34, 37],
   "shared_rules": {
     "bujuk": {
       "source": "Source\\M2Server\\Magic.pas:CanUseBujuk",
@@ -93,6 +93,19 @@
         "status": "STATE_DEFENCEUP",
         "effect": "high AC += 2 + Level div 7 while active",
         "training": "if at least one friend receives new or longer status"
+      }
+    },
+    {
+      "id": "holy_curtain_magic16",
+      "magic_id": 16,
+      "source": ["Source\\M2Server\\Magic.pas:case 16", "Source\\M2Server\\ObjBase.pas:MagMakeHolyCurtain"],
+      "random_calls": ["GetPower13(40)", "GetRPow(SC)", "Random(4) level gate per monster"],
+      "expected": {
+        "item": "CanUseBujuk count=1, deduct 100 dura",
+        "center": "requested xy must be walkable",
+        "monster_gate": "monster, no master, level < caster level - 1 + Random(4), level < 50",
+        "events": "create 8 blocking holy_curtain events on knight offsets when all gates pass",
+        "training": "only when curtain events are created"
       }
     },
     {

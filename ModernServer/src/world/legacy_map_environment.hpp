@@ -46,6 +46,7 @@ struct LegacyMapObject {
   LegacyMapObjectShape shape{LegacyMapObjectShape::moving_object};
   std::uint64_t object_id{0};
   std::uint64_t a_time_ms{0};
+  bool blocks_walk{false};
   LegacyMovingObjectState moving{};
   LegacyMapItemState item{};
   LegacyMapGateState gate{};
@@ -91,7 +92,8 @@ class LegacyMapEnvironment {
   [[nodiscard]] bool add_placeholder_object(std::int32_t x, std::int32_t y,
                                             LegacyMapObjectShape shape,
                                             std::uint64_t object_id,
-                                            std::uint64_t now_ms);
+                                            std::uint64_t now_ms,
+                                            bool blocks_walk = false);
   [[nodiscard]] bool add_gate_object(std::int32_t x, std::int32_t y,
                                      std::uint64_t object_id,
                                      LegacyMapGateState gate,

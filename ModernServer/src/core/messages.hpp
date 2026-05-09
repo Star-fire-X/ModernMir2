@@ -339,6 +339,7 @@ struct ActorMail {
   std::uint64_t slave_life_time_ms{0};
   bool monster_no_item{false};
   bool monster_tameable{true};
+  bool legacy_space_move_show2{false};
   std::uint32_t respawn_ms{0};
   std::uint8_t dir{0};
   std::uint8_t retry_count{0};

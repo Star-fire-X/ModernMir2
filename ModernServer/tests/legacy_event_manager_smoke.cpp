@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cassert>
 #include <string>
 #include <vector>
@@ -26,6 +27,10 @@ std::vector<std::string> event_actions(const mir2::RuntimeDispatch& dispatch) {
   return actions;
 }
 
+bool has_action(const std::vector<std::string>& actions, const std::string& action) {
+  return std::find(actions.begin(), actions.end(), action) != actions.end();
+}
+
 }  // namespace
 
 int main() {
@@ -42,6 +47,8 @@ int main() {
   first.type = mir2::LegacyEventType::fire_burn;
   first.run_tick_ms = 100;
   first.continue_ms = 250;
+  first.damage = 7;
+  first.skip_if_occupied = true;
 
   mir2::LegacyEventRecord second;
   second.map_id = "0";
@@ -52,6 +59,8 @@ int main() {
   second.continue_ms = 500;
 
   const auto first_id = runtime.enqueue_legacy_event(first);
+  const auto duplicate_id = runtime.enqueue_legacy_event(first);
+  assert(duplicate_id == 0);
   const auto second_id = runtime.enqueue_legacy_event(second);
   assert(first_id != second_id);
   assert(runtime.legacy_active_event_count() == 2);
@@ -59,16 +68,17 @@ int main() {
 
   const auto run_dispatch = runtime.run_legacy_event_manager(101);
   const auto run_actions = event_actions(run_dispatch);
-  assert(run_actions.size() == 2);
+  assert(run_actions.size() == 3);
   assert(run_actions[0] == "run:fire_burn:5,5");
-  assert(run_actions[1] == "run:holy_curtain:6,5");
+  assert(run_actions[1] == "fire_tick:fire_burn:5,5");
+  assert(run_actions[2] == "run:holy_curtain:6,5");
   assert(runtime.legacy_active_event_count() == 2);
 
   const auto close_dispatch = runtime.run_legacy_event_manager(301);
   const auto close_actions = event_actions(close_dispatch);
-  assert(close_actions.size() == 2);
-  assert(close_actions[0] == "run:fire_burn:5,5");
-  assert(close_actions[1] == "close:fire_burn:5,5");
+  assert(has_action(close_actions, "run:fire_burn:5,5"));
+  assert(!has_action(close_actions, "fire_tick:fire_burn:5,5"));
+  assert(has_action(close_actions, "close:fire_burn:5,5"));
   assert(runtime.legacy_active_event_count() == 1);
   assert(runtime.legacy_closed_event_count() == 1);
   assert(!runtime.find_legacy_event("0", 5, 5, mir2::LegacyEventType::fire_burn).has_value());
@@ -76,7 +86,10 @@ int main() {
   const auto cleanup_dispatch = runtime.run_legacy_event_manager(301 + 5ULL * 60ULL * 1000ULL + 1);
   const auto cleanup_actions = event_actions(cleanup_dispatch);
   assert(!cleanup_actions.empty());
-  assert(cleanup_actions.back() == "cleanup_closed:fire_burn:5,5");
+  assert(has_action(cleanup_actions, "cleanup_closed:fire_burn:5,5"));
+  assert(runtime.legacy_active_event_count() == 0);
+  static_cast<void>(
+      runtime.run_legacy_event_manager(301 + 10ULL * 60ULL * 1000ULL + 2));
   assert(runtime.legacy_closed_event_count() == 0);
 
   mir2::LegacyFrameDriver driver;

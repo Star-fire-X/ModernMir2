@@ -15,6 +15,10 @@
                                      "SM_MAGICFIRE_FAIL":  639,
                                      "SM_MAGIC_LVEXP":  640,
                                      "SM_AREASTATE":  708,
+                                     "SM_SPACEMOVE_HIDE":  800,
+                                     "SM_SPACEMOVE_SHOW":  801,
+                                     "SM_SPACEMOVE_HIDE2":  806,
+                                     "SM_SPACEMOVE_SHOW2":  807,
                                      "RM_MAGSTRUCK":  10025,
                                      "RM_MAGHEALING":  10026,
                                      "RM_DELAYMAGIC":  10154
@@ -29,7 +33,11 @@
                                                    "kSmMagicFire":  638,
                                                    "kSmMagicFireFail":  639,
                                                    "kSmMagicLvExp":  640,
-                                                   "kSmAreaState":  708
+                                                   "kSmAreaState":  708,
+                                                   "kSmSpaceMoveHide":  800,
+                                                   "kSmSpaceMoveShow":  801,
+                                                   "kSmSpaceMoveHide2":  806,
+                                                   "kSmSpaceMoveShow2":  807
                                                },
                         "missing_skill_constants":  []
                     },

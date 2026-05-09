@@ -140,6 +140,10 @@ int main() {
   assert(mir2::kSmMagicLvExp == 640);
   assert(mir2::kSmCharStatusChanged == 657);
   assert(mir2::kSmAreaState == 708);
+  assert(mir2::kSmSpaceMoveHide == 800);
+  assert(mir2::kSmSpaceMoveShow == 801);
+  assert(mir2::kSmSpaceMoveHide2 == 806);
+  assert(mir2::kSmSpaceMoveShow2 == 807);
   assert(mir2::kSmDelMagic != mir2::kSmAreaState);
 
   const auto loaded = mir2::ConfigLoader{}.load(std::filesystem::path(MIR2_CONFIG_DIR));
