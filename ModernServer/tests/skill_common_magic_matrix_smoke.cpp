@@ -196,13 +196,13 @@ int main() {
     static_cast<void>(runtime.tick());
     auto dispatch = runtime.route_logic_command(spell(1311, 36, 10, 10));
     append(dispatch, runtime.tick());
-    assert(has_trace(dispatch, "defence_area"));
+    assert(has_trace(dispatch, "dc_up"));
     assert(has_trace(dispatch, "train_skill"));
     const auto armor = runtime.snapshot_character_actor("Armor");
     const auto friend_record = runtime.snapshot_character_actor("Friend");
     assert(armor.has_value() && friend_record.has_value());
-    assert((armor->status & 0x00400000) != 0);
-    assert((friend_record->status & 0x00400000) != 0);
+    assert((armor->status & 0x00400000) == 0);
+    assert((friend_record->status & 0x00400000) == 0);
   }
 
   {

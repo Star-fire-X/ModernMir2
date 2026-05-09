@@ -254,6 +254,24 @@ int main() {
 
   {
     auto config = base_config();
+    config.spawns.push_back(make_spawn("SpentBujukTarget", 10, 8));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(
+        make_enter(1112, make_character("SpentBujuk", 10, 10, {13}, 501, 100))));
+    static_cast<void>(runtime.tick());
+    static_cast<void>(runtime.route_logic_command(make_spell(1112, 13, 10, 8, 1)));
+    const auto dispatch = runtime.tick();
+    const auto snapshot = runtime.snapshot_character_actor("SpentBujuk");
+
+    assert(has_packet(dispatch, mir2::kSmDuraChange));
+    assert(has_packet(dispatch, mir2::kSmDelItem));
+    assert(snapshot.has_value());
+    assert(mir2::is_empty(snapshot->equipped_items[mir2::kEquipBujuk]));
+  }
+
+  {
+    auto config = base_config();
     config.spawns.push_back(make_spawn("PoisonTarget", 10, 8, 100));
     mir2::LogicRuntime runtime(config);
     runtime.initialize();

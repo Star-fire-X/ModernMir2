@@ -332,6 +332,29 @@ int main() {
   }
 
   {
+    auto record = character("DcUp", {}, 0);
+    record.ability.dc = mir2::make_word(2, 5);
+    mir2::Player player(1, 1505, std::move(record));
+    assert(player.melee_power() == 5);
+    assert(player.activate_legacy_dc_up(2, 1, 3));
+    assert(player.legacy_dc_up_bonus() == 3);
+    assert(player.melee_power() == 8);
+    const auto tick_result = player.tick_status_effects(4);
+    assert(tick_result.ability_changed);
+    assert(player.legacy_dc_up_bonus() == 0);
+    assert(player.melee_power() == 5);
+
+    mir2::Monster monster(2, "DcUpSlave", "0", 10, 10, 1, 20, 0, 1, 4,
+                          0, 0, 0, 0, 10);
+    assert(monster.dc_max() == 4);
+    assert(monster.activate_legacy_dc_up(2, 1, 3));
+    assert(monster.dc_max() == 7);
+    const auto monster_tick = monster.tick_status_effects(4);
+    assert(monster_tick.ability_changed);
+    assert(monster.dc_max() == 4);
+  }
+
+  {
     mir2::Monster monster(1, "LifecycleMonster", "0", 10, 10, 1, 20, 0, 0, 0,
                           0, 0, 0, 0, 10);
     assert(monster.apply_legacy_poison(0, 20, 1, 1, 99, 1));

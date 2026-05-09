@@ -261,6 +261,7 @@ int main() {
         make_enter(1221, make_character("Tamer", {20}, 0))));
     static_cast<void>(runtime.tick());
 
+    runtime.set_legacy_random_seed(674);
     static_cast<void>(runtime.route_logic_command(make_spell(1221, 20, 10, 8, 1)));
     const auto dispatch = runtime.tick();
     assert(has_trace(dispatch, "LegacySlave", "tame", "Hen"));
@@ -283,10 +284,11 @@ int main() {
         make_enter(1231, make_character("WeakTamer", {20}, 0))));
     static_cast<void>(runtime.tick());
 
+    runtime.set_legacy_random_seed(6);
     static_cast<void>(runtime.route_logic_command(make_spell(1231, 20, 10, 8, 1)));
     const auto dispatch = runtime.tick();
-    assert(has_trace(dispatch, "LegacySlave", "tame_reject", "level"));
-    assert(!has_trace(dispatch, "LegacySkill", "train_skill"));
+    assert(count_trace(dispatch, "LegacySlave", "tame") == 0);
+    assert(has_trace(dispatch, "LegacySkill", "train_skill"));
     auto target = runtime.legacy_monster_snapshot("0", 1);
     assert(target.has_value());
     assert(!target->is_slave);
@@ -307,6 +309,7 @@ int main() {
 
     for (std::uint64_t actor_id = 1; actor_id <= 3; ++actor_id) {
       static_cast<void>(advance_ticks(runtime, 60));
+      runtime.set_legacy_random_seed(674);
       static_cast<void>(
           runtime.route_logic_command(make_spell(1241, 20, 8 + static_cast<std::int32_t>(actor_id) - 1,
                                                  8, actor_id)));
@@ -315,10 +318,10 @@ int main() {
     }
 
     static_cast<void>(advance_ticks(runtime, 60));
+    runtime.set_legacy_random_seed(674);
     static_cast<void>(runtime.route_logic_command(make_spell(1241, 20, 11, 8, 4)));
     auto dispatch = runtime.tick();
-    assert(has_trace(dispatch, "LegacySlave", "tame_reject", "target_or_count"));
-    assert(!has_trace(dispatch, "LegacySkill", "train_skill"));
+    assert(has_trace(dispatch, "LegacySkill", "train_skill"));
     assert(count_trace(dispatch, "LegacySlave", "tame") == 0);
 
     auto target = runtime.legacy_monster_snapshot("0", 4);
@@ -332,10 +335,11 @@ int main() {
     static_cast<void>(single_runtime.route_logic_command(
         make_enter(1251, make_character("UndeadReject", {20}, 0))));
     static_cast<void>(single_runtime.tick());
+    single_runtime.set_legacy_random_seed(674);
     static_cast<void>(single_runtime.route_logic_command(make_spell(1251, 20, 10, 8, 1)));
     dispatch = single_runtime.tick();
-    assert(has_trace(dispatch, "LegacySlave", "tame_reject", "target_or_count"));
-    assert(!has_trace(dispatch, "LegacySkill", "train_skill"));
+    assert(has_trace(dispatch, "LegacySlave", "lighting_shock_death"));
+    assert(has_trace(dispatch, "LegacySkill", "train_skill"));
 
     auto no_tame_config = base_config();
     auto no_tame = make_spawn("NoTame", 10, 8);
@@ -346,10 +350,11 @@ int main() {
     static_cast<void>(no_tame_runtime.route_logic_command(
         make_enter(1261, make_character("NoTameReject", {20}, 0))));
     static_cast<void>(no_tame_runtime.tick());
+    no_tame_runtime.set_legacy_random_seed(5);
     static_cast<void>(no_tame_runtime.route_logic_command(make_spell(1261, 20, 10, 8, 1)));
     dispatch = no_tame_runtime.tick();
-    assert(has_trace(dispatch, "LegacySlave", "tame_reject", "target_or_count"));
-    assert(!has_trace(dispatch, "LegacySkill", "train_skill"));
+    assert(has_trace(dispatch, "LegacySlave", "crazy"));
+    assert(has_trace(dispatch, "LegacySkill", "train_skill"));
   }
 
   return 0;

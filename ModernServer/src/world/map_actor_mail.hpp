@@ -2823,6 +2823,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             queue_packet(dispatch, attacker->session_id(),
                          make_dura_change_packet(attacker->session_id(), poison_slot->slot,
                                                  *poison_slot->item, item_configs_));
+            if (auto removed = clear_legacy_bujuk_slot_if_spent(*poison_slot);
+                removed.has_value()) {
+              queue_packet(dispatch, attacker->session_id(),
+                           make_del_item_packet(attacker->session_id(), attacker->id(),
+                                                *removed, item_configs_));
+            }
             add_legacy_trace(dispatch, "LegacySpell", "poison_powder_used", mail,
                              current_tick, now_ms, true, poison_shape,
                              poison_slot->item != nullptr ? poison_slot->item->dura : 0,
@@ -2929,6 +2935,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
               if (!environment_.in_bounds(sx, sy)) {
                 break;
               }
+              if (!environment_.can_fly_line(attacker->x(), attacker->y(), sx, sy)) {
+                add_legacy_trace(dispatch, "LegacySpell", "line_blocked", mail,
+                                 current_tick, now_ms, false, magic_id, step,
+                                 "CanFireFly");
+                break;
+              }
               auto* line_target = find_legacy_line_target(objects_, *attacker, sx, sy);
               std::string reason;
               if (line_target == nullptr || !harmful_target_ok(line_target, reason)) {
@@ -2994,6 +3006,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             queue_packet(dispatch, attacker->session_id(),
                          make_dura_change_packet(attacker->session_id(), bujuk_slot->slot,
                                                  *bujuk_slot->item, item_configs_));
+            if (bujuk_count == 1) {
+              if (auto removed = clear_legacy_bujuk_slot_if_spent(*bujuk_slot);
+                  removed.has_value()) {
+                queue_packet(dispatch, attacker->session_id(),
+                             make_del_item_packet(attacker->session_id(), attacker->id(),
+                                                  *removed, item_configs_));
+              }
+            }
             add_legacy_trace(dispatch, "LegacySpell", "bujuk_used", mail, current_tick,
                              now_ms, true, magic_id,
                              bujuk_slot->item != nullptr ? bujuk_slot->item->dura : 0,
@@ -3040,7 +3060,42 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
               break;
             }
 
-            if (magic_id == 14 || magic_id == 15 || magic_id == 36) {
+            if (magic_id == 36) {
+              const auto seconds = legacy_defence_status_seconds(
+                  *attacker, magic_it->second.legacy, user_magic->level, random);
+              const auto duration_ticks = legacy_delay_ms_to_ticks(
+                  static_cast<std::uint32_t>(std::max(seconds, 1) * 1000),
+                  budgets_.tick_ms);
+              const auto sc_max = packed_max(attacker->character().ability.sc);
+              const auto dc_up = std::min(8, ((sc_max - 1) / 5) + 1);
+              auto applied = 0;
+              if (attacker->activate_legacy_dc_up(duration_ticks, current_tick, dc_up)) {
+                ++applied;
+                queue_packet(dispatch, attacker->session_id(),
+                             make_ability_packet(attacker->session_id(),
+                                                 attacker->character()));
+                queue_packet(dispatch, attacker->session_id(),
+                             make_sub_ability_packet(attacker->session_id(), *attacker));
+              }
+              for (const auto slave_id : attacker->slave_actor_ids()) {
+                const auto slave_it = objects_.find(slave_id);
+                auto* slave = slave_it != objects_.end() ? as_monster(slave_it->second.get())
+                                                         : nullptr;
+                if (slave == nullptr || slave->master_actor_id() != attacker->id()) {
+                  continue;
+                }
+                if (slave->activate_legacy_dc_up(duration_ticks, current_tick, dc_up)) {
+                  ++applied;
+                }
+              }
+              add_legacy_trace(dispatch, "LegacySpell", "dc_up", mail,
+                               current_tick, now_ms, applied > 0, applied, dc_up,
+                               "MagDcUp");
+              train = applied > 0;
+              break;
+            }
+
+            if (magic_id == 14 || magic_id == 15) {
               const auto seconds = legacy_defence_status_seconds(
                   *attacker, magic_it->second.legacy, user_magic->level, random);
               auto targets = collect_legacy_area_targets(objects_, *attacker, config_,
@@ -3048,26 +3103,36 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
               auto applied = 0;
               for (auto* friend_target : targets) {
                 auto* player_target = as_player(friend_target);
-                if (player_target == nullptr) {
-                  continue;
-                }
                 const auto duration_ticks = legacy_delay_ms_to_ticks(
                     static_cast<std::uint32_t>(std::max(seconds, 1) * 1000),
                     budgets_.tick_ms);
-                const auto changed = magic_id == 14
-                                         ? player_target->activate_legacy_magic_defence_up(
-                                               duration_ticks, current_tick)
-                                         : player_target->activate_legacy_defence_up(
-                                               duration_ticks, current_tick);
+                auto changed = false;
+                if (player_target != nullptr) {
+                  changed = magic_id == 14
+                                ? player_target->activate_legacy_magic_defence_up(
+                                      duration_ticks, current_tick)
+                                : player_target->activate_legacy_defence_up(
+                                      duration_ticks, current_tick);
+                } else if (auto* monster_target = as_monster(friend_target);
+                           monster_target != nullptr &&
+                           monster_target->master_actor_id() == attacker->id()) {
+                  changed = magic_id == 14
+                                ? monster_target->activate_legacy_magic_defence_up(
+                                      duration_ticks, current_tick)
+                                : monster_target->activate_legacy_defence_up(
+                                      duration_ticks, current_tick);
+                }
                 if (changed) {
                   ++applied;
-                  broadcast_legacy_char_status_changed(dispatch, *player_target);
-                  queue_packet(dispatch, player_target->session_id(),
-                               make_ability_packet(player_target->session_id(),
-                                                   player_target->character()));
-                  queue_packet(dispatch, player_target->session_id(),
-                               make_sub_ability_packet(player_target->session_id(),
-                                                       *player_target));
+                  if (player_target != nullptr) {
+                    broadcast_legacy_char_status_changed(dispatch, *player_target);
+                    queue_packet(dispatch, player_target->session_id(),
+                                 make_ability_packet(player_target->session_id(),
+                                                     player_target->character()));
+                    queue_packet(dispatch, player_target->session_id(),
+                                 make_sub_ability_packet(player_target->session_id(),
+                                                         *player_target));
+                  }
                 }
               }
               add_legacy_trace(dispatch, "LegacySpell", "defence_area", mail,
@@ -3141,23 +3206,122 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           }
           case 20: {
             auto* monster_target = as_monster(target);
-            if (monster_target == nullptr) {
-              add_legacy_trace(dispatch, "LegacySlave", "tame_reject", mail,
-                               current_tick, now_ms, false, magic_id, 0, "target_missing");
+            std::string reason;
+            if (target == nullptr || !harmful_target_ok(target, reason)) {
+              add_legacy_trace(dispatch, "LegacySlave", "lighting_shock_reject", mail,
+                               current_tick, now_ms, false, magic_id, 0,
+                               reason.empty() ? "target_missing" : reason);
               break;
             }
-            const auto max_slaves = 2 + static_cast<std::int32_t>(user_magic->level);
-            const auto level_limit =
-                static_cast<std::int32_t>(attacker->character().ability.level) +
-                static_cast<std::int32_t>(user_magic->level) * 2 + 2;
-            if (monster_target->level() > level_limit) {
-              add_legacy_trace(dispatch, "LegacySlave", "tame_reject", mail,
-                               current_tick, now_ms, false, monster_target->level(),
-                               level_limit, "level");
+
+            const auto shock_level = static_cast<std::int32_t>(user_magic->level);
+            const auto top_roll = monster_target != nullptr
+                                      ? random.random(std::max(4 - shock_level, 1))
+                                      : 1;
+            if (monster_target == nullptr || top_roll != 0) {
+              const auto train_roll = random.random(2);
+              train = train_roll == 0;
+              add_legacy_trace(dispatch, "LegacySlave", "lighting_shock_no_effect",
+                               mail, current_tick, now_ms, train, train_roll, top_roll,
+                               "Random(2)");
               break;
             }
-            train = tame_player_slave(*attacker, *monster_target, user_magic->level,
-                                      max_slaves, dispatch, current_tick, now_ms, mail);
+
+            monster_target->lose_target();
+            monster_target->clear_target_xy();
+            if (monster_target->master_actor_id() == attacker->id()) {
+              monster_target->make_legacy_holy_seize(
+                  static_cast<std::uint64_t>(10 + shock_level * 5) * 1000ULL, now_ms);
+              add_legacy_trace(dispatch, "LegacySlave", "holy_seize", mail,
+                               current_tick, now_ms, true, magic_id, shock_level,
+                               "MakeHolySeize");
+              train = true;
+              break;
+            }
+
+            const auto action_roll = random.random(2);
+            if (action_roll == 0 &&
+                monster_target->level() <=
+                    static_cast<std::int32_t>(attacker->character().ability.level) + 2) {
+              const auto branch_roll = random.random(3);
+              if (branch_roll == 0) {
+                const auto power_roll =
+                    random.random(20 +
+                                  static_cast<std::int32_t>(attacker->character().ability.level) +
+                                  shock_level * 5);
+                if (10 + monster_target->level() < power_roll) {
+                  const auto max_slaves = 2 + shock_level;
+                  const auto can_tame =
+                      monster_target->tameable() && monster_target->life_attrib() == 0 &&
+                      monster_target->level() < 50 &&
+                      static_cast<std::int32_t>(attacker->slave_actor_ids().size()) < max_slaves;
+                  if (can_tame) {
+                    auto tame_roll_range = monster_target->max_hp() / 100;
+                    tame_roll_range = tame_roll_range <= 2 ? 2 : tame_roll_range * 2;
+                    const auto tame_roll = random.random(tame_roll_range);
+                    if (monster_target->master_actor_id() != attacker->id() && tame_roll == 0) {
+                      monster_target->break_legacy_crazy();
+                      monster_target->break_legacy_holy_seize();
+                      train = tame_player_slave(*attacker, *monster_target, shock_level,
+                                                max_slaves, dispatch, current_tick,
+                                                now_ms, mail);
+                      break;
+                    }
+                    const auto death_roll = random.random(20);
+                    if (death_roll == 0) {
+                      const auto result = apply_legacy_magic_damage(
+                          objects_, item_configs_, dispatch, *attacker, *monster_target,
+                          config_, monster_target->hp(), current_tick, now_ms);
+                      if (result.slain_monster_id != 0) {
+                        finalize_monster_death(result.slain_monster_id, attacker->id(),
+                                               dispatch, current_tick);
+                      }
+                      add_legacy_trace(dispatch, "LegacySlave", "lighting_shock_death",
+                                       mail, current_tick, now_ms, result.target_died,
+                                       magic_id, death_roll, "WAbil.HP:=0");
+                    }
+                  } else if (monster_target->legacy_undead()) {
+                    const auto undead_roll = random.random(2);
+                    if (undead_roll == 0) {
+                      const auto result = apply_legacy_magic_damage(
+                          objects_, item_configs_, dispatch, *attacker, *monster_target,
+                          config_, monster_target->hp(), current_tick, now_ms);
+                      if (result.slain_monster_id != 0) {
+                        finalize_monster_death(result.slain_monster_id, attacker->id(),
+                                               dispatch, current_tick);
+                      }
+                      add_legacy_trace(dispatch, "LegacySlave", "lighting_shock_death",
+                                       mail, current_tick, now_ms, result.target_died,
+                                       magic_id, undead_roll, "LA_UNDEAD");
+                    }
+                  }
+                } else if (!monster_target->legacy_undead()) {
+                  const auto crazy_roll = random.random(2);
+                  if (crazy_roll == 0) {
+                    const auto crazy_seconds = 10 + random.random(20);
+                    monster_target->make_legacy_crazy(
+                        static_cast<std::uint64_t>(crazy_seconds) * 1000ULL, now_ms);
+                    add_legacy_trace(dispatch, "LegacySlave", "crazy", mail,
+                                     current_tick, now_ms, true, magic_id,
+                                     crazy_seconds, "MakeCrazyMode");
+                  }
+                }
+              } else if (!monster_target->legacy_undead()) {
+                const auto crazy_seconds = 10 + random.random(20);
+                monster_target->make_legacy_crazy(
+                    static_cast<std::uint64_t>(crazy_seconds) * 1000ULL, now_ms);
+                add_legacy_trace(dispatch, "LegacySlave", "crazy", mail,
+                                 current_tick, now_ms, true, magic_id, crazy_seconds,
+                                 "MakeCrazyMode");
+              }
+            } else if (action_roll != 0) {
+              monster_target->make_legacy_holy_seize(
+                  static_cast<std::uint64_t>(10 + shock_level * 5) * 1000ULL, now_ms);
+              add_legacy_trace(dispatch, "LegacySlave", "holy_seize", mail,
+                               current_tick, now_ms, true, magic_id, shock_level,
+                               "MakeHolySeize");
+            }
+            train = true;
             break;
           }
           case 23:
@@ -4047,6 +4211,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
         const auto pending_before = player_target->legacy_healing_pending();
         player_target->queue_legacy_healing(mail.power, current_tick, 1);
+        handle_player_health_spell_tick(*player_target, dispatch, current_tick + 1);
         const auto queued = !pending_before || player_target->legacy_healing_pending();
         add_legacy_trace(dispatch, "LegacySpell", "healing_apply", mail, current_tick, now_ms,
                          queued && player_target->legacy_healing_pending(), mail.magic_id,

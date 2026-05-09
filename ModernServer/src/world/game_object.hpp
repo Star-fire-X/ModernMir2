@@ -117,7 +117,8 @@ enum class LegacyBuffKind : std::int32_t {
   transparent = 8,
   defence_up = 9,
   magic_defence_up = 10,
-  bubble_defence_up = 11
+  bubble_defence_up = 11,
+  dc_up = 12
 };
 
 enum class LegacyBuffClearPolicy {
@@ -326,6 +327,7 @@ class Player : public GameObject {
   [[nodiscard]] bool add_bag_item(const LegacyUserItem& item);
   [[nodiscard]] bool add_storage_item(const LegacyUserItem& item);
   [[nodiscard]] std::int32_t melee_power() const;
+  [[nodiscard]] std::int32_t legacy_dc_up_bonus() const;
   [[nodiscard]] std::int32_t spell_power(std::int32_t base_power) const;
   [[nodiscard]] std::int32_t physical_defense() const;
   [[nodiscard]] std::int32_t magic_defense() const;
@@ -362,6 +364,9 @@ class Player : public GameObject {
                                                 std::uint64_t current_tick);
   [[nodiscard]] bool activate_legacy_magic_defence_up(std::uint64_t duration_ticks,
                                                       std::uint64_t current_tick);
+  [[nodiscard]] bool activate_legacy_dc_up(std::uint64_t duration_ticks,
+                                           std::uint64_t current_tick,
+                                           std::int32_t bonus);
   [[nodiscard]] bool legacy_transparent_active(std::uint64_t current_tick) const;
   [[nodiscard]] bool activate_legacy_transparent(std::uint64_t duration_ticks,
                                                  std::uint64_t current_tick);
@@ -602,9 +607,10 @@ class Monster : public GameObject {
   [[nodiscard]] std::int32_t level() const { return level_; }
   [[nodiscard]] std::int32_t attack_power() const { return attack_power_; }
   [[nodiscard]] std::int32_t dc_min() const { return dc_min_; }
-  [[nodiscard]] std::int32_t dc_max() const { return dc_max_; }
-  [[nodiscard]] std::int32_t physical_defense() const { return defense_; }
-  [[nodiscard]] std::int32_t magical_defense() const { return magic_defense_; }
+  [[nodiscard]] std::int32_t dc_max() const { return dc_max_ + legacy_dc_up_bonus(); }
+  [[nodiscard]] std::int32_t legacy_dc_up_bonus() const;
+  [[nodiscard]] std::int32_t physical_defense() const;
+  [[nodiscard]] std::int32_t magical_defense() const;
   [[nodiscard]] std::int32_t mc() const { return mc_; }
   [[nodiscard]] std::int32_t sc() const { return sc_; }
   [[nodiscard]] std::int32_t exp_reward() const { return exp_reward_; }
@@ -695,6 +701,12 @@ class Monster : public GameObject {
   [[nodiscard]] bool legacy_walk_due_by_walk_time(std::uint64_t now_ms) const;
   [[nodiscard]] bool legacy_attack_due_by_hit_time(std::uint64_t now_ms) const;
   [[nodiscard]] bool legacy_walk_wait_elapsed(std::uint64_t now_ms) const;
+  [[nodiscard]] bool legacy_holy_seize_active(std::uint64_t now_ms) const;
+  [[nodiscard]] bool legacy_crazy_active(std::uint64_t now_ms) const;
+  void make_legacy_holy_seize(std::uint64_t duration_ms, std::uint64_t now_ms);
+  void break_legacy_holy_seize();
+  void make_legacy_crazy(std::uint64_t duration_ms, std::uint64_t now_ms);
+  void break_legacy_crazy();
   [[nodiscard]] std::int32_t apply_damage(std::int32_t amount, std::uint64_t attacker_id);
   [[nodiscard]] std::int32_t apply_damage(std::int32_t amount, std::uint64_t attacker_id,
                                           std::uint64_t now_ms);
@@ -705,6 +717,13 @@ class Monster : public GameObject {
                                          std::uint64_t poison_tick_interval,
                                          std::uint64_t source_actor_id,
                                          std::uint64_t current_tick);
+  [[nodiscard]] bool activate_legacy_defence_up(std::uint64_t duration_ticks,
+                                                std::uint64_t current_tick);
+  [[nodiscard]] bool activate_legacy_magic_defence_up(std::uint64_t duration_ticks,
+                                                      std::uint64_t current_tick);
+  [[nodiscard]] bool activate_legacy_dc_up(std::uint64_t duration_ticks,
+                                           std::uint64_t current_tick,
+                                           std::int32_t bonus);
   [[nodiscard]] StatusTickResult clear_legacy_buffs_on_death(std::uint64_t current_tick);
   [[nodiscard]] StatusTickResult clear_legacy_buffs_on_leave_map(std::uint64_t current_tick);
   [[nodiscard]] StatusTickResult clear_legacy_buffs_on_logout(std::uint64_t current_tick);
@@ -854,6 +873,8 @@ class Monster : public GameObject {
   std::uint64_t slave_life_time_ms_{0};
   bool no_item_{false};
   bool tameable_{true};
+  std::uint64_t legacy_holy_seize_until_ms_{0};
+  std::uint64_t legacy_crazy_until_ms_{0};
   std::int32_t base_max_hp_{12};
   std::int32_t base_dc_max_{3};
   std::int32_t base_magic_defense_{0};

@@ -1785,6 +1785,14 @@ void MapActor::handle_monster_ai(Monster& monster, RuntimeDispatch& dispatch,
   if (monster.is_dead()) {
     return;
   }
+  if (monster.legacy_holy_seize_active(now_ms)) {
+    monster.lose_target();
+    monster.clear_target_xy();
+    return;
+  }
+  if (monster.legacy_crazy_active(now_ms)) {
+    monster.lose_target();
+  }
 
   if (!monster.is_slave()) {
     legacy_active_search(monster, dispatch, current_tick, now_ms);
