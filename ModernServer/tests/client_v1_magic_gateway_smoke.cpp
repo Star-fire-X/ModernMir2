@@ -24,6 +24,8 @@ mir2::LegacyClientMagic make_client_magic(std::uint16_t magic_id, std::uint8_t l
   magic.cur_train = train;
   magic.def.magic_id = magic_id;
   magic.def.delay_time = 600;
+  magic.def.effect_type = 7;
+  magic.def.effect = 32;
   mir2::set_short_string(magic.def.magic_name, "Fireball");
   return magic;
 }
@@ -50,6 +52,14 @@ mir2::LegacyPacket make_del_magic_packet(std::uint64_t session_id, std::int32_t 
       mir2::make_default_message(mir2::kSmDelMagic, magic_id, 0, 0, 1));
 }
 
+mir2::LegacyPacket make_magic_fire_packet(std::uint64_t session_id) {
+  std::int32_t target = 77;
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0,
+      mir2::make_default_message(mir2::kSmMagicFire, 42, 12, 13, mir2::make_word(7, 32)),
+      mir2::legacy_encode_buffer(&target, sizeof(target)));
+}
+
 const mir2::client_v1::MagicList& only_magic_list(
     const std::vector<mir2::client_v1::Message>& messages) {
   assert(messages.size() == 1);
@@ -74,6 +84,8 @@ int main() {
   assert(add_list.magics.front().magic_id == 1);
   assert(add_list.magics.front().level == 0);
   assert(add_list.magics.front().train == 0);
+  assert(add_list.magics.front().effect_type == 7);
+  assert(add_list.magics.front().effect == 32);
   auto character = service.session_character_for_test(kSessionId);
   assert(character.has_value());
   if (character->magics[0].magic_id != 1) {
@@ -103,5 +115,18 @@ int main() {
   if (!mir2::is_empty(character->magics[0])) {
     return 1;
   }
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_magic_fire_packet(kSessionId),
+                                           messages);
+  assert(messages.size() == 1);
+  const auto* magic_fire = std::get_if<mir2::client_v1::ActorMagicFire>(&messages.front());
+  assert(magic_fire != nullptr);
+  assert(magic_fire->actor_id == 42);
+  assert(magic_fire->target_actor_id == 77);
+  assert(magic_fire->x == 12);
+  assert(magic_fire->y == 13);
+  assert(magic_fire->effect_type == 7);
+  assert(magic_fire->effect == 32);
   return 0;
 }

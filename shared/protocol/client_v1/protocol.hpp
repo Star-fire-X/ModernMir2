@@ -66,6 +66,7 @@ enum class MessageId : std::uint16_t {
   self_ability_detail = 312,
   mini_map_request = 313,
   mini_map_data = 314,
+  actor_magic_fire = 315,
   move_intent = 400,
   action_intent = 401,
   spell_intent = 402,
@@ -473,6 +474,16 @@ struct ActorAction {
   std::uint16_t legacy_ident{0};
   std::uint16_t magic_id{0};
   bool magic{false};
+  std::uint16_t magic_effect{0};
+};
+
+struct ActorMagicFire {
+  std::uint64_t actor_id{0};
+  std::uint64_t target_actor_id{0};
+  std::int32_t x{0};
+  std::int32_t y{0};
+  std::uint8_t effect_type{0};
+  std::uint8_t effect{0};
 };
 
 /// 角色生命/魔法值：服务端同步角色的 HP/MP 变化
@@ -505,6 +516,7 @@ struct MagicEntry {
   std::string name{};
   std::int32_t effect{0};
   std::int32_t max_train{0};
+  std::int32_t effect_type{0};
 };
 
 /// 魔法列表：服务端同步角色的所有魔法
@@ -973,6 +985,7 @@ using Message = std::variant<ClientHello,
                              LoginNoticeOk,
                              ActorUpsert,
                              ActorAction,
+                             ActorMagicFire,
                              ActorVitals,
                              ActorDeath,
                              MagicList,
@@ -1225,6 +1238,7 @@ MIR2_CLIENT_V1_TRAIT(LoginNotice, login_notice);
 MIR2_CLIENT_V1_TRAIT(LoginNoticeOk, login_notice_ok);
 MIR2_CLIENT_V1_TRAIT(ActorUpsert, actor_upsert);
 MIR2_CLIENT_V1_TRAIT(ActorAction, actor_action);
+MIR2_CLIENT_V1_TRAIT(ActorMagicFire, actor_magic_fire);
 MIR2_CLIENT_V1_TRAIT(ActorVitals, actor_vitals);
 MIR2_CLIENT_V1_TRAIT(ActorDeath, actor_death);
 MIR2_CLIENT_V1_TRAIT(MagicList, magic_list);
@@ -1362,13 +1376,15 @@ inline void encode(ByteWriter& writer, const MagicEntry& value) {
   writer.write_string(value.name);
   writer.write_i32(value.effect);
   writer.write_i32(value.max_train);
+  writer.write_i32(value.effect_type);
 }
 
 inline bool decode(ByteReader& reader, MagicEntry& value) {
   return reader.read_u16(value.magic_id) && reader.read_u8(value.key) &&
          reader.read_u8(value.level) && reader.read_i32(value.train) &&
          reader.read_i32(value.delay_ms) && reader.read_string(value.name) &&
-         reader.read_i32(value.effect) && reader.read_i32(value.max_train);
+         reader.read_i32(value.effect) && reader.read_i32(value.max_train) &&
+         reader.read_i32(value.effect_type);
 }
 
 inline void encode(ByteWriter& writer, const ClientHello& value) {
@@ -1842,6 +1858,7 @@ inline void encode(ByteWriter& writer, const ActorAction& value) {
   writer.write_u16(value.legacy_ident);
   writer.write_u16(value.magic_id);
   writer.write_bool(value.magic);
+  writer.write_u16(value.magic_effect);
 }
 
 inline bool decode(ByteReader& reader, ActorAction& value) {
@@ -1850,11 +1867,26 @@ inline bool decode(ByteReader& reader, ActorAction& value) {
         reader.read_i32(value.y) && reader.read_u8(value.dir) &&
         reader.read_u64(value.target_actor_id) && reader.read_i32(value.value) &&
         reader.read_u16(value.legacy_ident) && reader.read_u16(value.magic_id) &&
-        reader.read_bool(value.magic))) {
+        reader.read_bool(value.magic) && reader.read_u16(value.magic_effect))) {
     return false;
   }
   value.kind = static_cast<ActorActionKind>(kind);
   return true;
+}
+
+inline void encode(ByteWriter& writer, const ActorMagicFire& value) {
+  writer.write_u64(value.actor_id);
+  writer.write_u64(value.target_actor_id);
+  writer.write_i32(value.x);
+  writer.write_i32(value.y);
+  writer.write_u8(value.effect_type);
+  writer.write_u8(value.effect);
+}
+
+inline bool decode(ByteReader& reader, ActorMagicFire& value) {
+  return reader.read_u64(value.actor_id) && reader.read_u64(value.target_actor_id) &&
+         reader.read_i32(value.x) && reader.read_i32(value.y) &&
+         reader.read_u8(value.effect_type) && reader.read_u8(value.effect);
 }
 
 inline void encode(ByteWriter& writer, const ActorVitals& value) {
@@ -2857,6 +2889,9 @@ inline std::optional<Message> decode_any(const Frame& frame) {
       break;
     case MessageId::actor_action:
       if (auto value = decode_message<ActorAction>(frame); value.has_value()) return Message{*value};
+      break;
+    case MessageId::actor_magic_fire:
+      if (auto value = decode_message<ActorMagicFire>(frame); value.has_value()) return Message{*value};
       break;
     case MessageId::actor_vitals:
       if (auto value = decode_message<ActorVitals>(frame); value.has_value()) return Message{*value};

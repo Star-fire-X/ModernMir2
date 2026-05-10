@@ -199,13 +199,18 @@ int main() {
   assert(state.world.actors[2000].max_hp == 12);
   assert(state.world.actors[2000].last_damage == 5);
 
-  state.apply(ActorAction{1000, ActorActionKind::spell, 335, 272, 3, 2000, 0, 0, 1, true});
+  state.apply(ActorAction{1000, ActorActionKind::spell, 335, 272, 3, 2000, 0, 0, 1, true, 3});
   assert(state.world.actors[1000].current_action == ActorActionKind::spell);
   assert(state.world.actors[1000].magic_id == 1);
+  assert(state.world.actors[1000].action_magic_effect == 3);
   assert(state.world.actors[1000].x == 330 && state.world.actors[1000].y == 270);
   assert(state.world.actors[1000].action_target_x == 335);
   assert(state.world.actors[1000].action_target_y == 272);
   assert(state.world.actors[1000].action_target_actor_id == 2000);
+  state.apply(ActorMagicFire{1000, 2000, 336, 273, 7, 32});
+  assert(state.world.actors[1000].action_magic_effect_type == 7);
+  assert(state.world.actors[1000].action_magic_effect == 32);
+  assert(state.world.actors[1000].action_target_x == 336);
 
   state.apply(ActorDeath{2000, 332, 271, 4});
   assert(state.world.actors[2000].dead);
@@ -213,13 +218,14 @@ int main() {
 
   MagicList magics;
   magics.magics.push_back(
-      MagicEntry{1, 1, 2, 300, 1000, "Fire", 15, 900});
+      MagicEntry{1, 1, 2, 300, 1000, "Fire", 15, 900, 1});
   state.apply(magics);
   assert(state.world.magics.size() == 1);
   assert(state.world.magics.front().magic_id == 1);
   assert(state.world.magics.front().key == 1);
   assert(state.world.magics.front().effect == 15);
   assert(state.world.magics.front().max_train == 900);
+  assert(state.world.magics.front().effect_type == 1);
 
   MerchantGoodsList goods;
   goods.merchant_id = 2000;

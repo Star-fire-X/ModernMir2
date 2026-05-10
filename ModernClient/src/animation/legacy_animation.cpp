@@ -411,21 +411,20 @@ constexpr int kMagicFlyBase = 10;       ///< 魔法飞行帧基址偏移（effec
 constexpr int kMagicExplosionBase = 170; ///< 魔法爆炸帧基址偏移（effect_base + 170 开始爆炸帧）
 constexpr std::uint64_t kMagicTimeoutMs = 10000;  ///< 魔法特效超时时间（10秒，防止永久残留）
 
-/// 魔法效果帧基址表：索引 = magic_id
-/// 每个魔法的精灵帧在 Magic.wil 中的起始偏移
-/// 值为 0 的项表示该魔法无独立精灵区（复用其他魔法的帧）
+/// 魔法效果帧基址表：索引 = MagicDB.Effect - 1
+/// 值为 0 的项表示该特效无独立精灵区（复用其他特效的帧）
 constexpr std::array<int, 36> kEffectBase = {
     0,    200, 400, 600, 0,    900, 920, 940, 20,   940, 940, 940,
     0,    1380, 1500, 1520, 940, 1560, 1590, 1620, 1650, 1680, 0, 0,
     0,    3960, 1790, 0,    3880, 3920, 3840, 0,    40,   130, 160, 190};
 
-/// 命中效果帧基址表（针对 effect_type=1 的魔法，如火球命中、雷电劈中）
-/// 索引 0-5 对应 magic_id 0-5 的命中特效
+/// 命中效果帧基址表（针对武器命中特效）
+/// 索引 = HitEffectNumber - 1
 constexpr std::array<int, 6> kHitEffectBase = {800, 1410, 1700, 3480, 3390, 40};
 
 // ====================================================================
 // 魔法特效参数表（kMagicEffectParams）
-// 每个 magic_id 的爆炸帧偏移、帧间隔、爆炸帧数、光照强度等参数。
+// 索引 = MagicDB.Effect - 1，用于覆盖爆炸帧偏移、帧间隔、爆炸帧数和光照。
 // 值与 Delphi PlayScn.pas NewMagic() 中 mtExplosion 分支的硬编码参数一致。
 // 字段为 0 时表示使用通用默认值（explosion_base=effect_base+170, light=1, etc.）。
 // ====================================================================
@@ -438,8 +437,8 @@ struct LegacyMagicEffectParams {
   int light{1};                         ///< 光照强度 (1=默认, 2=中, 3=高)
 };
 
-/// 魔法特效参数表：索引 = magic_id
-/// 未列出的 magic_id 使用全零默认值（即沿用通用参数）
+/// 魔法特效参数表：索引 = MagicDB.Effect - 1
+/// 未列出的特效使用全零默认值（即沿用通用参数）
 constexpr std::array<LegacyMagicEffectParams, 36> kMagicEffectParams = {{
     // 0-17: 大部分使用通用默认
     {}, {}, {}, {}, {}, {}, {}, {},
@@ -552,6 +551,14 @@ LegacyMagicType spell_magic_type(const int magic_id, const bool same_tile) {
     return LegacyMagicType::ground_effect; // 火墙：地面持续效果
   }
   return same_tile ? LegacyMagicType::explosion : LegacyMagicType::fly;
+}
+
+LegacyMagicType magic_type_from_effect_type(const int effect_type,
+                                            const LegacyMagicType fallback) {
+  if (effect_type >= 0 && effect_type < 15) {
+    return static_cast<LegacyMagicType>(effect_type);
+  }
+  return fallback;
 }
 
 /// 从怪物动作表中取出指定动作
@@ -1121,41 +1128,39 @@ int legacy_fly_direction16(const int sx, const int sy, const int tx, const int t
 // ====================================================================
 // 魔法效果基址查询
 //
-// 根据魔法 ID 和效果类型返回精灵归档和帧基址。
+// 根据 MagicDB.Effect - 1 和效果表类型返回精灵归档和帧基址。
 // 经典传奇中，不同的魔法效果分布在不同的 WIL 归档中：
 //   Magic.wil:  大多数魔法的飞行+爆炸效果（主归档）
-//   Magic2.wil: 高级魔法的效果（冰咆哮/magic_id=8,33-35,27）
-//   Mon21.wil:  火墙的地面火焰（magic_id=31，复用怪物精灵）
+//   Magic2.wil: 高级魔法的效果（EffectBase 索引 8,27,33-35）
+//   Mon21.wil:  特殊地面效果（EffectBase 索引 31，复用怪物精灵）
 //
-// effect_type 含义：
-//   type=0: 魔法本身的飞行/爆炸效果（飞行弹道+命中后爆炸）
-//   type=1: 魔法对目标的命中效果（如目标身上的灼烧/冰霜光效）
+// effect_kind 含义：
+//   0: 魔法本身的飞行/爆炸效果（飞行弹道+命中后爆炸）
+//   1: 武器/命中特效表
 // ====================================================================
 
-LegacyMagicEffectBase legacy_magic_effect_base(const int magic_id, const int effect_type) {
+LegacyMagicEffectBase legacy_magic_effect_base(const int effect_index, const int effect_kind) {
   LegacyMagicEffectBase result;
-  if (effect_type == 1) {
-    // 命中特效（effect_type=1）：目标身上的受击光效
-    // magic_id=5（雷电术）的命中效果比较特殊，在 Magic2.wil 中
-    result.archive = magic_id == 5 ? ArchiveId::magic2 : ArchiveId::magic;
-    if (magic_id >= 0 && magic_id < static_cast<int>(kHitEffectBase.size())) {
-      result.frame_base = kHitEffectBase[static_cast<std::size_t>(magic_id)];
+  if (effect_kind == 1) {
+    // 命中特效：目标身上的受击光效；HitEffectNumber=6 使用 Magic2.wil。
+    result.archive = effect_index == 5 ? ArchiveId::magic2 : ArchiveId::magic;
+    if (effect_index >= 0 && effect_index < static_cast<int>(kHitEffectBase.size())) {
+      result.frame_base = kHitEffectBase[static_cast<std::size_t>(effect_index)];
     }
     return result;
   }
 
-  // 一般魔法特效：根据 magic_id 选择归档
-  // magic_id 33-35 和 8, 27 使用 Magic2.wil（高级魔法专用归档）
-  // magic_id 31（火墙地面火焰）在 Mon21.wil 中
-  if (magic_id == 33 || magic_id == 34 || magic_id == 35 || magic_id == 8 || magic_id == 27) {
+  // 一般魔法特效：按 Delphi GetEffectBase 的 EffectBase 索引选择归档。
+  if (effect_index == 33 || effect_index == 34 || effect_index == 35 || effect_index == 8 ||
+      effect_index == 27) {
     result.archive = ArchiveId::magic2;
-  } else if (magic_id == 31) {
+  } else if (effect_index == 31) {
     result.archive = ArchiveId::mon21;
   } else {
     result.archive = ArchiveId::magic;
   }
-  if (magic_id >= 0 && magic_id < static_cast<int>(kEffectBase.size())) {
-    result.frame_base = kEffectBase[static_cast<std::size_t>(magic_id)];
+  if (effect_index >= 0 && effect_index < static_cast<int>(kEffectBase.size())) {
+    result.frame_base = kEffectBase[static_cast<std::size_t>(effect_index)];
   }
   return result;
 }
@@ -1826,12 +1831,14 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_char_effect(
 
 /// 生成飞行魔法特效（完整接口）：计算弹道参数、帧数、爆炸帧数
 LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const MagicCreate& create) {
-  auto base = legacy_magic_effect_base(create.magic_id, 0);
+  const auto effect_index = create.effect > 0 ? create.effect - 1 : create.magic_id;
+  auto base = legacy_magic_effect_base(effect_index, 0);
+  const auto magic_type = magic_type_from_effect_type(create.effect_type, create.magic_type);
 
   Effect effect;
   effect.archive = create.effect_base >= 0 ? create.archive : base.archive;
   effect.kind = EffectKind::magic;
-  effect.magic_type = create.magic_type;
+  effect.magic_type = magic_type;
   effect.effect_base = create.effect_base >= 0 ? create.effect_base : base.frame_base;
   effect.explosion_base = effect.effect_base + kMagicExplosionBase;
   effect.magic_id = create.magic_id;
@@ -1858,7 +1865,7 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
   effect.blend = true;
 
   // 根据魔法类型设置帧数和飞行/固定模式
-  switch (create.magic_type) {
+  switch (magic_type) {
     case LegacyMagicType::fly:
     case LegacyMagicType::bujauk_ground_effect:
     case LegacyMagicType::explo_bujauk:
@@ -1921,8 +1928,8 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
 
   // 查找魔法特定参数，覆盖按类型分配的通用默认值
   // 这些参数来自 Delphi PlayScn.pas NewMagic() 中的硬编码值
-  if (create.magic_id >= 0 && create.magic_id < static_cast<int>(kMagicEffectParams.size())) {
-    const auto& params = kMagicEffectParams[static_cast<std::size_t>(create.magic_id)];
+  if (effect_index >= 0 && effect_index < static_cast<int>(kMagicEffectParams.size())) {
+    const auto& params = kMagicEffectParams[static_cast<std::size_t>(effect_index)];
     if (params.explosion_base > 0) {
       effect.explosion_base = params.explosion_base;
     }
@@ -2169,6 +2176,9 @@ void AnimationManager::spawn_spell_effects(const WorldViewState& world,
     if (last_started == actor.action_started_ms) {
       continue;  // 已生成过特效（通过时间戳去重）
     }
+    if (actor.action_magic_effect > 0 && actor.action_magic_effect_type < 0) {
+      continue;  // 等待 SM_MAGICFIRE 提供 Delphi EffectType。
+    }
     last_started = actor.action_started_ms;
 
     auto target_actor_id = actor.action_target_actor_id;
@@ -2189,24 +2199,28 @@ void AnimationManager::spawn_spell_effects(const WorldViewState& world,
     target_y = std::clamp(target_y, 0, std::max(0, world.height - 1));
 
     const auto magic_id = static_cast<int>(actor.magic_id);
+    const auto has_effect = actor.action_magic_effect > 0;
+    const auto effect = has_effect ? actor.action_magic_effect : magic_id;
+    const auto effect_index = has_effect ? std::max(0, effect - 1) : magic_id;
+    const auto has_server_effect_type = actor.action_magic_effect_type >= 0;
     magic_audio_cues_.push_back(LegacyMagicAudioCue{
         actor_id,
         magic_id,
         LegacyMagicAudioCuePhase::fire,
     });
     // 角色附着特效（如火球/雷电/冰咆哮的命中效果）
-    if (spell_prefers_char_effect(magic_id)) {
+    if (!has_server_effect_type && spell_prefers_char_effect(magic_id)) {
       if (target_actor_id == 0) {
         target_actor_id = actor_id;
       }
-      const auto base = legacy_magic_effect_base(magic_id, 1);
+      const auto base = legacy_magic_effect_base(effect_index, 1);
       effects_.spawn_char_effect(target_actor_id, base.archive, base.frame_base, 10, now_ms, 80);
       continue;
     }
 
     // 地图地面特效（如火墙）
-    if (spell_prefers_map_effect(magic_id)) {
-      const auto base = legacy_magic_effect_base(magic_id, 0);
+    if (!has_server_effect_type && spell_prefers_map_effect(magic_id)) {
+      const auto base = legacy_magic_effect_base(effect_index, 0);
       effects_.spawn_map_effect(base.archive, base.frame_base, 10, target_x, target_y, now_ms, 80);
       continue;
     }
@@ -2216,6 +2230,8 @@ void AnimationManager::spawn_spell_effects(const WorldViewState& world,
     create.magic_id = magic_id;
     create.server_magic_id = static_cast<int>(
         ((actor_id & 0x7FFFU) << 16U) ^ (actor.action_started_ms & 0xFFFFU));
+    create.effect_type = actor.action_magic_effect_type;
+    create.effect = effect;
     create.source_x = actor.x;
     create.source_y = actor.y;
     create.target_x = target_x;

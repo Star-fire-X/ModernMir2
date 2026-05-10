@@ -207,6 +207,7 @@ client_v1::MagicEntry magic_entry_from_legacy(const LegacyClientMagic& legacy_ma
   entry.delay_ms = legacy_magic.def.delay_time;
   entry.name = to_string(legacy_magic.def.magic_name);
   entry.effect = legacy_magic.def.effect;
+  entry.effect_type = legacy_magic.def.effect_type;
   const auto level = std::clamp<int>(entry.level, 0, 3);
   entry.max_train = legacy_magic.def.max_train[static_cast<std::size_t>(level)];
   return entry;
@@ -1813,7 +1814,20 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       const auto magic_id = parse_i32(decoded->body).value_or(decoded->message.series);
       messages.push_back(client_v1::ActorAction{
           actor_id, client_v1::ActorActionKind::spell, decoded->message.param, decoded->message.tag,
-          0, 0, 0, decoded->message.ident, static_cast<std::uint16_t>(magic_id), true});
+          0, 0, 0, decoded->message.ident, static_cast<std::uint16_t>(magic_id), true,
+          decoded->message.series});
+      break;
+    }
+    case kSmMagicFire: {
+      std::int32_t target = 0;
+      static_cast<void>(legacy_decode_buffer(decoded->body, &target, sizeof(target)));
+      messages.push_back(client_v1::ActorMagicFire{
+          actor_id,
+          static_cast<std::uint64_t>(static_cast<std::uint32_t>(target)),
+          decoded->message.param,
+          decoded->message.tag,
+          static_cast<std::uint8_t>(decoded->message.series & 0xFFU),
+          static_cast<std::uint8_t>((decoded->message.series >> 8U) & 0xFFU)});
       break;
     }
     case kSmStruck: {

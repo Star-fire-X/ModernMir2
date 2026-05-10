@@ -341,6 +341,14 @@ if(BUILD_TESTING)
     PRIVATE "MIR2_CONFIG_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/config\"")
   add_test(NAME mir2_skill_protocol_golden_smoke COMMAND mir2_skill_protocol_golden_smoke)
 
+  add_executable(mir2_skill_magicfire_effect_params_smoke
+    tests/skill_magicfire_effect_params_smoke.cpp)
+  target_link_libraries(mir2_skill_magicfire_effect_params_smoke PRIVATE mir2_hostlib)
+  target_compile_definitions(mir2_skill_magicfire_effect_params_smoke
+    PRIVATE "MIR2_CONFIG_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/config\"")
+  add_test(NAME mir2_skill_magicfire_effect_params_smoke
+    COMMAND mir2_skill_magicfire_effect_params_smoke)
+
   add_executable(mir2_magic_config_golden_smoke tests/magic_config_golden_smoke.cpp)
   target_link_libraries(mir2_magic_config_golden_smoke PRIVATE mir2_hostlib)
   target_compile_definitions(mir2_magic_config_golden_smoke
