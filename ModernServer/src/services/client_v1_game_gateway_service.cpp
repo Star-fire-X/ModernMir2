@@ -6,6 +6,7 @@
 #include <cstring>
 #include <utility>
 
+#include "protocol/canonical_login_error.hpp"
 #include "protocol/client_v1_legacy_command_decoder.hpp"
 #include "protocol/legacy_edcode.hpp"
 #include "protocol/legacy_game_codec.hpp"
@@ -46,6 +47,10 @@ std::uint8_t normalize_magic_key(const char key) {
     return static_cast<std::uint8_t>(raw - static_cast<unsigned char>('0'));
   }
   return 0;
+}
+
+CanonicalClientV1LoginErrorResponse client_error(CanonicalLoginErrorKind kind) {
+  return canonical_login_error_mapping(kind).client_v1;
 }
 
 client_v1::SelfAbility self_ability_from_character(const CharacterRecord& character) {
@@ -615,7 +620,8 @@ void ClientV1GameGatewayService::handle_message(std::uint64_t session_id,
         } else if constexpr (std::is_same_v<T, client_v1::Ping>) {
           handle_ping(session_id, value);
         } else {
-          disconnect(session_id, 400, "unsupported_game_message");
+          const auto error = client_error(CanonicalLoginErrorKind::unsupported_game_message);
+          disconnect(session_id, error.code, std::string(error.text));
         }
       },
       message);
@@ -653,7 +659,8 @@ void ClientV1GameGatewayService::handle_disconnected(std::uint64_t session_id,
 void ClientV1GameGatewayService::handle_client_hello(std::uint64_t session_id,
                                                      const client_v1::ClientHello& hello) {
   if (hello.protocol_version != client_v1::kProtocolVersion) {
-    disconnect(session_id, 426, "protocol_version_mismatch");
+    const auto error = client_error(CanonicalLoginErrorKind::protocol_version_mismatch);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
   std::scoped_lock lock(mutex_);
@@ -664,24 +671,28 @@ void ClientV1GameGatewayService::handle_enter_world_request(
     std::uint64_t session_id, const client_v1::EnterWorldRequest& request) {
   auto session_state = session(session_id);
   if (!session_state.has_value() || !session_state->greeted) {
-    disconnect(session_id, 400, "missing_client_hello");
+    const auto error = client_error(CanonicalLoginErrorKind::missing_client_hello);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
   if (session_state->entered_world) {
-    disconnect(session_id, 409, "already_entered_world");
+    const auto error = client_error(CanonicalLoginErrorKind::already_entered_world);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
 
   const auto admission = admissions_->consume(request.token);
   if (!admission.has_value()) {
-    disconnect(session_id, 401, "invalid_enter_world_token");
+    const auto error = client_error(CanonicalLoginErrorKind::invalid_enter_world_token);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
 
   const auto character =
       repository_->load_character(admission->account_id, admission->character_name);
   if (!character.has_value()) {
-    disconnect(session_id, 404, "character_not_found");
+    const auto error = client_error(CanonicalLoginErrorKind::character_not_found);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
 

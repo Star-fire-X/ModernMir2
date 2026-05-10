@@ -139,6 +139,7 @@ int main() {
         sequence);
     auto create = reader.wait_for_message<mir2::client_v1::CreateAccountResult>();
     if (!create.has_value() || create->success ||
+        create->code != 0 ||
         create->error_message != "create_account_failed") {
       stop_services();
       return fail("invalid account id rejected");
@@ -176,7 +177,8 @@ int main() {
     mir2::tests::send_client_v1_message(
         *socket, mir2::client_v1::LoginRequest{"alpha", "badpw"}, sequence);
     const auto login = reader.wait_for_message<mir2::client_v1::LoginResult>();
-    if (!login.has_value() || login->success || login->error_message != "login_failed") {
+    if (!login.has_value() || login->success || login->code != -1 ||
+        login->error_message != "login_failed") {
       stop_services();
       return fail("bad login result");
     }
@@ -276,7 +278,8 @@ int main() {
       *socket, mir2::client_v1::ChangePasswordRequest{"alpha", "wrong", "newpw"},
       sequence);
   auto change = reader.wait_for_message<mir2::client_v1::ChangePasswordResult>();
-  if (!change.has_value() || change->success) {
+  if (!change.has_value() || change->success || change->code != -1 ||
+      change->error_message != "change_password_failed") {
     stop_services();
     return fail("change password rejects wrong old password");
   }
@@ -300,7 +303,8 @@ int main() {
   mir2::tests::send_client_v1_message(
       *relog_socket, mir2::client_v1::LoginRequest{"alpha", "oldpw"}, relog_sequence);
   auto relog = relog_reader.wait_for_message<mir2::client_v1::LoginResult>();
-  if (!relog.has_value() || relog->success) {
+  if (!relog.has_value() || relog->success || relog->code != -1 ||
+      relog->error_message != "login_failed") {
     stop_services();
     return fail("old password no longer works");
   }

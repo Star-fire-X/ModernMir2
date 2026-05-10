@@ -71,6 +71,7 @@ function Get-CiBuildTargets {
     "mir2_legacy_player_input_budget_smoke",
     "mir2_legacy_action_cadence_smoke",
     "mir2_canonical_login_state_smoke",
+    "mir2_canonical_login_error_smoke",
     "mir2_client_v1_canonical_command_smoke",
     "mir2_client_v1_auth_boundary_smoke",
     "mir2_client_v1_login_to_world_flow_smoke",

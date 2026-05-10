@@ -6,6 +6,7 @@
 
 #include "protocol/legacy_edcode.hpp"
 #include "protocol/legacy_game_codec.hpp"
+#include "protocol/canonical_login_error.hpp"
 #include "protocol/legacy_string.hpp"
 #include "util/string_utils.hpp"
 
@@ -22,6 +23,13 @@ LegacyPacket make_response_packet(std::uint64_t session_id, std::uint16_t ident,
                                   const std::string& body = {}) {
   return make_legacy_game_packet(session_id, 0, 0,
                                  make_default_message(ident, recog, param, tag, series), body);
+}
+
+LegacyPacket make_error_response_packet(std::uint64_t session_id,
+                                        CanonicalLoginErrorKind kind) {
+  const auto response = canonical_login_error_mapping(kind).legacy;
+  return make_response_packet(session_id, response.ident, response.recog, response.param,
+                              response.tag, response.series);
 }
 
 void post_gateway_packet(HostContext& context, std::uint64_t session_id, LegacyPacket packet) {
@@ -272,7 +280,9 @@ void AuthService::handle_session_event(const SessionEvent& event) {
       const auto password = fields.size() > 1 ? fields[1] : "";
       if (account_id.empty() || password.empty()) {
         post_gateway_packet(*context_, event.session_id,
-                            make_response_packet(event.session_id, kSmPasswdFail, -4));
+                            make_error_response_packet(
+                                event.session_id,
+                                CanonicalLoginErrorKind::login_empty_credentials));
         audit(*context_, "auth.login_fail", account_id, std::to_string(event.session_id));
         return;
       }
@@ -307,14 +317,18 @@ void AuthService::handle_session_event(const SessionEvent& event) {
       LegacyUserEntryAddInfo add_info{};
       if (!decode_user_entry_body(decoded->body, info, add_info)) {
         post_gateway_packet(*context_, event.session_id,
-                            make_response_packet(event.session_id, kSmNewIdFail, 0));
+                            make_error_response_packet(
+                                event.session_id,
+                                CanonicalLoginErrorKind::create_account_failed));
         return;
       }
 
       auto account = make_account_record(info, add_info);
       if (!is_valid_legacy_account_id(account.account_id)) {
         post_gateway_packet(*context_, event.session_id,
-                            make_response_packet(event.session_id, kSmNewIdFail, 0));
+                            make_error_response_packet(
+                                event.session_id,
+                                CanonicalLoginErrorKind::create_account_failed));
         return;
       }
 
@@ -347,7 +361,9 @@ void AuthService::handle_session_event(const SessionEvent& event) {
       LegacyUserEntryAddInfo add_info{};
       if (!decode_user_entry_body(decoded->body, info, add_info)) {
         post_gateway_packet(*context_, event.session_id,
-                            make_response_packet(event.session_id, kSmUpdateIdFail, -1));
+                            make_error_response_packet(
+                                event.session_id,
+                                CanonicalLoginErrorKind::update_account_failed));
         return;
       }
 
@@ -355,7 +371,9 @@ void AuthService::handle_session_event(const SessionEvent& event) {
       if (session.account_id.empty() || session.account_id != account.account_id ||
           !is_valid_legacy_account_id(account.account_id)) {
         post_gateway_packet(*context_, event.session_id,
-                            make_response_packet(event.session_id, kSmUpdateIdFail, -1));
+                            make_error_response_packet(
+                                event.session_id,
+                                CanonicalLoginErrorKind::update_account_failed));
         return;
       }
 
@@ -417,7 +435,9 @@ void AuthService::handle_session_event(const SessionEvent& event) {
           !can_accept(session->second.stage, CanonicalLoginRequest::select_server) ||
           admissions_.find(session->second.certification) == admissions_.end()) {
         post_gateway_packet(*context_, event.session_id,
-                            make_response_packet(event.session_id, kSmPasswdFail, -4));
+                            make_error_response_packet(
+                                event.session_id,
+                                CanonicalLoginErrorKind::select_server_rejected));
         return;
       }
 
@@ -449,7 +469,9 @@ void AuthService::handle_session_event(const SessionEvent& event) {
           admission == admissions_.end() ||
           admission->second.account_id != account_id) {
         post_gateway_packet(*context_, event.session_id,
-                            make_response_packet(event.session_id, kSmQueryChrFail, 0, 0, 0, 1));
+                            make_error_response_packet(
+                                event.session_id,
+                                CanonicalLoginErrorKind::query_characters_rejected));
         audit(*context_, "auth.query_chr_fail", account_id, std::to_string(event.session_id));
         return;
       }
@@ -489,7 +511,9 @@ void AuthService::handle_session_event(const SessionEvent& event) {
           !hair.has_value() || !job.has_value() || !sex.has_value() ||
           !is_valid_legacy_character_name(character_name)) {
         post_gateway_packet(*context_, event.session_id,
-                            make_response_packet(event.session_id, kSmNewChrFail, 0));
+                            make_error_response_packet(
+                                event.session_id,
+                                CanonicalLoginErrorKind::create_character_rejected));
         return;
       }
 
@@ -521,7 +545,9 @@ void AuthService::handle_session_event(const SessionEvent& event) {
           !can_accept(session->second.stage, CanonicalLoginRequest::delete_character) ||
           admissions_.find(session->second.certification) == admissions_.end()) {
         post_gateway_packet(*context_, event.session_id,
-                            make_response_packet(event.session_id, kSmDelChrFail, 0));
+                            make_error_response_packet(
+                                event.session_id,
+                                CanonicalLoginErrorKind::delete_character_rejected));
         return;
       }
 
@@ -555,7 +581,9 @@ void AuthService::handle_session_event(const SessionEvent& event) {
           !can_accept(session->second.stage, CanonicalLoginRequest::select_character) ||
           admissions_.find(session->second.certification) == admissions_.end()) {
         post_gateway_packet(*context_, event.session_id,
-                            make_response_packet(event.session_id, kSmStartFail, 0));
+                            make_error_response_packet(
+                                event.session_id,
+                                CanonicalLoginErrorKind::select_character_rejected));
         return;
       }
 
@@ -680,7 +708,9 @@ void AuthService::handle_persist_result(const PersistResult& result) {
           }
 
           post_gateway_packet(*context_, pending.session_id,
-                              make_response_packet(pending.session_id, kSmPasswdFail, -3));
+                              make_error_response_packet(
+                                  pending.session_id,
+                                  CanonicalLoginErrorKind::login_duplicate));
           audit(*context_, "auth.login_duplicate", pending.account_id,
                 std::to_string(pending.session_id));
           pending_requests_.erase(pending_it);
@@ -710,8 +740,10 @@ void AuthService::handle_persist_result(const PersistResult& result) {
         audit(*context_, "auth.login_ok", pending.account_id, std::to_string(pending.session_id));
       } else {
         post_gateway_packet(*context_, pending.session_id,
-                            make_response_packet(pending.session_id, kSmPasswdFail,
-                                                 result.result_code == 0 ? -4 : result.result_code));
+                            make_error_response_packet(
+                                pending.session_id,
+                                canonical_login_error_from_login_result_code(
+                                    result.result_code)));
         audit(*context_, "auth.login_fail", pending.account_id, std::to_string(pending.session_id));
       }
       pending_requests_.erase(pending_it);
@@ -719,29 +751,42 @@ void AuthService::handle_persist_result(const PersistResult& result) {
     }
 
     case PersistResultKind::account_created:
-      post_gateway_packet(*context_, pending.session_id,
-                          make_response_packet(pending.session_id,
-                                               result.result_code == 1 ? kSmNewIdSuccess : kSmNewIdFail,
-                                               result.result_code == 1 ? 0 : result.result_code));
+      if (result.result_code == 1) {
+        post_gateway_packet(*context_, pending.session_id,
+                            make_response_packet(pending.session_id, kSmNewIdSuccess, 0));
+      } else {
+        post_gateway_packet(*context_, pending.session_id,
+                            make_error_response_packet(
+                                pending.session_id,
+                                CanonicalLoginErrorKind::create_account_failed));
+      }
       pending_requests_.erase(pending_it);
       return;
 
     case PersistResultKind::account_updated:
-      post_gateway_packet(
-          *context_, pending.session_id,
-          make_response_packet(pending.session_id,
-                               result.result_code == 1 ? kSmUpdateIdSuccess : kSmUpdateIdFail,
-                               result.result_code == 1 ? 0 : result.result_code));
+      if (result.result_code == 1) {
+        post_gateway_packet(*context_, pending.session_id,
+                            make_response_packet(pending.session_id, kSmUpdateIdSuccess, 0));
+      } else {
+        post_gateway_packet(*context_, pending.session_id,
+                            make_error_response_packet(
+                                pending.session_id,
+                                CanonicalLoginErrorKind::update_account_failed));
+      }
       pending_requests_.erase(pending_it);
       return;
 
     case PersistResultKind::password_changed:
-      post_gateway_packet(
-          *context_, pending.session_id,
-          make_response_packet(
-              pending.session_id,
-              result.result_code == 1 ? kSmChgPasswdSuccess : kSmChgPasswdFail,
-              result.result_code == 1 ? 0 : result.result_code));
+      if (result.result_code == 1) {
+        post_gateway_packet(*context_, pending.session_id,
+                            make_response_packet(pending.session_id, kSmChgPasswdSuccess, 0));
+      } else {
+        post_gateway_packet(*context_, pending.session_id,
+                            make_error_response_packet(
+                                pending.session_id,
+                                canonical_login_error_from_change_password_result_code(
+                                    result.result_code)));
+      }
       pending_requests_.erase(pending_it);
       return;
 
@@ -766,16 +811,20 @@ void AuthService::handle_persist_result(const PersistResult& result) {
           const auto exists = std::any_of(result.characters.begin(), result.characters.end(),
                                           [&](const CharacterRecord& character) {
                                             return character.character_name == pending.character_name;
-                                          });
+          });
           if (exists) {
             post_gateway_packet(*context_, pending.session_id,
-                                make_response_packet(pending.session_id, kSmNewChrFail, 2));
+                                make_error_response_packet(
+                                    pending.session_id,
+                                    CanonicalLoginErrorKind::create_character_duplicate));
             pending_requests_.erase(pending_it);
             return;
           }
           if (result.characters.size() >= kMaxCharacterSlots) {
             post_gateway_packet(*context_, pending.session_id,
-                                make_response_packet(pending.session_id, kSmNewChrFail, 3));
+                                make_error_response_packet(
+                                    pending.session_id,
+                                    CanonicalLoginErrorKind::character_slots_full));
             pending_requests_.erase(pending_it);
             return;
           }
@@ -799,7 +848,9 @@ void AuthService::handle_persist_result(const PersistResult& result) {
                                           });
           if (found == result.characters.end()) {
             post_gateway_packet(*context_, pending.session_id,
-                                make_response_packet(pending.session_id, kSmStartFail, 0));
+                                make_error_response_packet(
+                                    pending.session_id,
+                                    CanonicalLoginErrorKind::character_not_found));
             pending_requests_.erase(pending_it);
             return;
           }
@@ -861,36 +912,52 @@ void AuthService::handle_persist_result(const PersistResult& result) {
       switch (pending.kind) {
         case PendingAuthRequestKind::authenticate_account:
           post_gateway_packet(*context_, pending.session_id,
-                              make_response_packet(pending.session_id, kSmPasswdFail, -4));
+                              make_error_response_packet(
+                                  pending.session_id,
+                                  CanonicalLoginErrorKind::login_account_missing));
           break;
         case PendingAuthRequestKind::create_account:
           post_gateway_packet(*context_, pending.session_id,
-                              make_response_packet(pending.session_id, kSmNewIdFail, 0));
+                              make_error_response_packet(
+                                  pending.session_id,
+                                  CanonicalLoginErrorKind::create_account_failed));
           break;
         case PendingAuthRequestKind::update_account:
           post_gateway_packet(*context_, pending.session_id,
-                              make_response_packet(pending.session_id, kSmUpdateIdFail, -1));
+                              make_error_response_packet(
+                                  pending.session_id,
+                                  CanonicalLoginErrorKind::update_account_failed));
           break;
         case PendingAuthRequestKind::change_password:
           post_gateway_packet(*context_, pending.session_id,
-                              make_response_packet(pending.session_id, kSmChgPasswdFail, 0));
+                              make_error_response_packet(
+                                  pending.session_id,
+                                  CanonicalLoginErrorKind::change_password_failed));
           break;
         case PendingAuthRequestKind::query_characters:
           post_gateway_packet(*context_, pending.session_id,
-                              make_response_packet(pending.session_id, kSmQueryChrFail, 0, 0, 0, 1));
+                              make_error_response_packet(
+                                  pending.session_id,
+                                  CanonicalLoginErrorKind::query_characters_rejected));
           break;
         case PendingAuthRequestKind::create_precheck:
         case PendingAuthRequestKind::create_commit:
           post_gateway_packet(*context_, pending.session_id,
-                              make_response_packet(pending.session_id, kSmNewChrFail, 4));
+                              make_error_response_packet(
+                                  pending.session_id,
+                                  CanonicalLoginErrorKind::create_character_failed));
           break;
         case PendingAuthRequestKind::delete_character:
           post_gateway_packet(*context_, pending.session_id,
-                              make_response_packet(pending.session_id, kSmDelChrFail, 0));
+                              make_error_response_packet(
+                                  pending.session_id,
+                                  CanonicalLoginErrorKind::delete_character_failed));
           break;
         case PendingAuthRequestKind::select_character:
           post_gateway_packet(*context_, pending.session_id,
-                              make_response_packet(pending.session_id, kSmStartFail, 0));
+                              make_error_response_packet(
+                                  pending.session_id,
+                                  CanonicalLoginErrorKind::character_not_found));
           break;
       }
       pending_requests_.erase(pending_it);

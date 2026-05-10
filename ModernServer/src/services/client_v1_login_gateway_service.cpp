@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 
+#include "protocol/canonical_login_error.hpp"
 #include "protocol/legacy_string.hpp"
 
 namespace mir2 {
@@ -81,6 +82,25 @@ bool needs_account_update(const AccountRecord& account) {
          account.answer.empty() || account.quiz2.empty() || account.answer2.empty();
 }
 
+CanonicalClientV1LoginErrorResponse client_error(CanonicalLoginErrorKind kind) {
+  return canonical_login_error_mapping(kind).client_v1;
+}
+
+template <typename Result>
+void apply_coded_error(Result& result, CanonicalLoginErrorKind kind) {
+  const auto error = client_error(kind);
+  result.success = false;
+  result.code = error.code;
+  result.error_message = std::string(error.text);
+}
+
+template <typename Result>
+void apply_text_error(Result& result, CanonicalLoginErrorKind kind) {
+  const auto error = client_error(kind);
+  result.success = false;
+  result.error_message = std::string(error.text);
+}
+
 }  // namespace
 
 ClientV1LoginGatewayService::ClientV1LoginGatewayService(
@@ -125,7 +145,8 @@ void ClientV1LoginGatewayService::handle_message(std::uint64_t session_id,
         } else if constexpr (std::is_same_v<T, client_v1::SelectCharacterRequest>) {
           handle_select_character_request(session_id, value);
         } else {
-          disconnect(session_id, 400, "unsupported_login_message");
+          const auto error = client_error(CanonicalLoginErrorKind::unsupported_login_message);
+          disconnect(session_id, error.code, std::string(error.text));
         }
       },
       message);
@@ -147,7 +168,8 @@ void ClientV1LoginGatewayService::handle_disconnected(std::uint64_t session_id,
 void ClientV1LoginGatewayService::handle_client_hello(std::uint64_t session_id,
                                                       const client_v1::ClientHello& hello) {
   if (hello.protocol_version != client_v1::kProtocolVersion) {
-    disconnect(session_id, 426, "protocol_version_mismatch");
+    const auto error = client_error(CanonicalLoginErrorKind::protocol_version_mismatch);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
   std::scoped_lock lock(mutex_);
@@ -157,7 +179,8 @@ void ClientV1LoginGatewayService::handle_client_hello(std::uint64_t session_id,
 void ClientV1LoginGatewayService::handle_login_request(std::uint64_t session_id,
                                                        const client_v1::LoginRequest& request) {
   if (!session_ready(session_id)) {
-    disconnect(session_id, 400, "missing_client_hello");
+    const auto error = client_error(CanonicalLoginErrorKind::missing_client_hello);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
 
@@ -178,7 +201,7 @@ void ClientV1LoginGatewayService::handle_login_request(std::uint64_t session_id,
         result.account->display_name.empty() ? result.account->account_id : result.account->display_name;
   }
   if (!response.success) {
-    response.error_message = "login_failed";
+    apply_coded_error(response, canonical_login_error_from_login_result_code(result.status_code));
   }
   send_message(session_id, response);
 
@@ -209,7 +232,8 @@ void ClientV1LoginGatewayService::handle_login_request(std::uint64_t session_id,
 void ClientV1LoginGatewayService::handle_create_account_request(
     std::uint64_t session_id, const client_v1::CreateAccountRequest& request) {
   if (!session_ready(session_id)) {
-    disconnect(session_id, 400, "missing_client_hello");
+    const auto error = client_error(CanonicalLoginErrorKind::missing_client_hello);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
 
@@ -220,14 +244,14 @@ void ClientV1LoginGatewayService::handle_create_account_request(
 
   client_v1::CreateAccountResult result;
   if (!is_valid_legacy_account_id(account.account_id)) {
-    result.error_message = "create_account_failed";
+    apply_coded_error(result, CanonicalLoginErrorKind::create_account_failed);
     send_message(session_id, result);
     return;
   }
   result.success = repository_->create_account(account);
   result.code = result.success ? 1 : 0;
   if (!result.success) {
-    result.error_message = "create_account_failed";
+    apply_coded_error(result, CanonicalLoginErrorKind::create_account_failed);
   }
   send_message(session_id, result);
 }
@@ -236,20 +260,21 @@ void ClientV1LoginGatewayService::handle_update_account_request(
     std::uint64_t session_id, const client_v1::UpdateAccountRequest& request) {
   const auto state = session(session_id);
   if (!state.has_value() || !state->authenticated) {
-    disconnect(session_id, 401, "not_authenticated");
+    const auto error = client_error(CanonicalLoginErrorKind::not_authenticated);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
   const auto account_id = copy_legacy_bytes(request.account_id);
   if (account_id != state->account_id) {
-    disconnect(session_id, 403, "account_mismatch");
+    const auto error = client_error(CanonicalLoginErrorKind::account_mismatch);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
 
   client_v1::UpdateAccountResult result;
   auto account = repository_->load_account(account_id);
   if (!account.has_value()) {
-    result.code = -4;
-    result.error_message = "account_not_found";
+    apply_coded_error(result, CanonicalLoginErrorKind::update_account_missing);
     send_message(session_id, result);
     return;
   }
@@ -262,7 +287,7 @@ void ClientV1LoginGatewayService::handle_update_account_request(
   result.success = repository_->update_account(*account);
   result.code = result.success ? 1 : 0;
   if (!result.success) {
-    result.error_message = "update_account_failed";
+    apply_coded_error(result, CanonicalLoginErrorKind::update_account_failed);
     send_message(session_id, result);
     return;
   }
@@ -280,7 +305,8 @@ void ClientV1LoginGatewayService::handle_update_account_request(
 void ClientV1LoginGatewayService::handle_change_password_request(
     std::uint64_t session_id, const client_v1::ChangePasswordRequest& request) {
   if (!session_ready(session_id)) {
-    disconnect(session_id, 400, "missing_client_hello");
+    const auto error = client_error(CanonicalLoginErrorKind::missing_client_hello);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
 
@@ -293,7 +319,8 @@ void ClientV1LoginGatewayService::handle_change_password_request(
           .count());
   result.success = result.code == 1;
   if (!result.success) {
-    result.error_message = "change_password_failed";
+    apply_coded_error(result,
+                      canonical_login_error_from_change_password_result_code(result.code));
   }
   send_message(session_id, result);
 }
@@ -303,7 +330,8 @@ void ClientV1LoginGatewayService::handle_select_server_request(
   const auto state = session(session_id);
   if (!state.has_value() || !state->authenticated ||
       !can_accept(state->stage, CanonicalLoginRequest::select_server)) {
-    disconnect(session_id, 401, "not_authenticated");
+    const auto error = client_error(CanonicalLoginErrorKind::select_server_rejected);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
 
@@ -325,7 +353,7 @@ void ClientV1LoginGatewayService::handle_select_server_request(
     result.port = entry.port;
     result.lobby_token = issue_lobby_token(selected_state, entry.name);
   } else {
-    result.error_message = "server_not_found";
+    apply_text_error(result, CanonicalLoginErrorKind::server_not_found);
   }
   send_message(session_id, result);
 }
@@ -338,7 +366,8 @@ void ClientV1LoginGatewayService::handle_character_list_request(
   }
   if (!state.has_value() || !state->authenticated ||
       !can_accept(state->stage, CanonicalLoginRequest::query_characters)) {
-    disconnect(session_id, 401, "not_authenticated");
+    const auto error = client_error(CanonicalLoginErrorKind::query_characters_rejected);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
 
@@ -358,18 +387,30 @@ void ClientV1LoginGatewayService::handle_create_character_request(
   const auto state = session(session_id);
   if (!state.has_value() || !state->authenticated ||
       !can_accept(state->stage, CanonicalLoginRequest::create_character)) {
-    disconnect(session_id, 401, "not_authenticated");
+    const auto error = client_error(CanonicalLoginErrorKind::create_character_rejected);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
 
   client_v1::CreateCharacterResult result;
   if (!is_valid_legacy_character_name(request.name)) {
-    result.error_message = "invalid_character_name";
+    apply_coded_error(result, CanonicalLoginErrorKind::invalid_character_name);
     send_message(session_id, result);
     return;
   }
-  if (repository_->list_characters(state->account_id).size() >= kMaxCharacterSlots) {
-    result.error_message = "character_slots_full";
+  const auto characters = repository_->list_characters(state->account_id);
+  const auto character_name = copy_legacy_bytes(request.name);
+  const auto exists = std::any_of(characters.begin(), characters.end(),
+                                  [&](const CharacterRecord& character) {
+                                    return character.character_name == character_name;
+                                  });
+  if (exists) {
+    apply_coded_error(result, CanonicalLoginErrorKind::create_character_duplicate);
+    send_message(session_id, result);
+    return;
+  }
+  if (characters.size() >= kMaxCharacterSlots) {
+    apply_coded_error(result, CanonicalLoginErrorKind::character_slots_full);
     send_message(session_id, result);
     return;
   }
@@ -379,7 +420,7 @@ void ClientV1LoginGatewayService::handle_create_character_request(
   result.code = result.success ? 1 : 0;
   result.character = to_summary(character);
   if (!result.success) {
-    result.error_message = "create_character_failed";
+    apply_coded_error(result, CanonicalLoginErrorKind::create_character_failed);
   }
   send_message(session_id, result);
 }
@@ -389,7 +430,8 @@ void ClientV1LoginGatewayService::handle_delete_character_request(
   const auto state = session(session_id);
   if (!state.has_value() || !state->authenticated ||
       !can_accept(state->stage, CanonicalLoginRequest::delete_character)) {
-    disconnect(session_id, 401, "not_authenticated");
+    const auto error = client_error(CanonicalLoginErrorKind::delete_character_rejected);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
 
@@ -399,7 +441,7 @@ void ClientV1LoginGatewayService::handle_delete_character_request(
   result.code = result.success ? 1 : 0;
   result.deleted_name = character_name;
   if (!result.success) {
-    result.error_message = "delete_character_failed";
+    apply_coded_error(result, CanonicalLoginErrorKind::delete_character_failed);
   }
   send_message(session_id, result);
 }
@@ -409,7 +451,8 @@ void ClientV1LoginGatewayService::handle_select_character_request(
   const auto state = session(session_id);
   if (!state.has_value() || !state->authenticated ||
       !can_accept(state->stage, CanonicalLoginRequest::select_character)) {
-    disconnect(session_id, 401, "not_authenticated");
+    const auto error = client_error(CanonicalLoginErrorKind::select_character_rejected);
+    disconnect(session_id, error.code, std::string(error.text));
     return;
   }
 
@@ -418,7 +461,7 @@ void ClientV1LoginGatewayService::handle_select_character_request(
   client_v1::SelectCharacterResult result;
   result.character_name = character_name;
   if (!character.has_value()) {
-    result.error_message = "character_not_found";
+    apply_text_error(result, CanonicalLoginErrorKind::character_not_found);
     send_message(session_id, result);
     return;
   }
