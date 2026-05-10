@@ -27,12 +27,14 @@ int main() {
   const auto& run = legacy_human_action_info(LegacyHumanAction::run);
   const auto& hit = legacy_human_action_info(LegacyHumanAction::hit);
   const auto& spell = legacy_human_action_info(LegacyHumanAction::spell);
+  const auto& struck = legacy_human_action_info(LegacyHumanAction::struck);
   const auto& die = legacy_human_action_info(LegacyHumanAction::die);
   assert(legacy_frame_index(stand, 2, 0) == 16);
   assert(legacy_frame_index(walk, 2, 3) == 83);
   assert(legacy_frame_index(run, 4, 5) == 165);
   assert(legacy_frame_index(hit, 7, 5) == 261);
   assert(legacy_frame_index(spell, 1, 2) == 402);
+  assert(legacy_frame_index(struck, 5, 1) == 513);
   assert(legacy_frame_index(die, 3, 3) == 563);
 
   const auto* ma10 = legacy_monster_action_table(10, 0);
@@ -193,6 +195,24 @@ int main() {
   assert(hit_body_index_for(25) ==
          legacy_frame_index(legacy_human_action_info(LegacyHumanAction::hit), 2, 0));
 
+  WorldViewState struck_world;
+  struck_world.self_actor_id = 1;
+  auto struck_actor = actor;
+  struck_world.actors[1] = struck_actor;
+  AnimationManager struck_animations;
+  struck_animations.reset(8900);
+  struck_animations.sync_world(struck_world, 8900);
+  struck_actor.current_action = mir2::client_v1::ActorActionKind::struck;
+  struck_actor.action_started_ms = 9000;
+  struck_world.actors[1] = struck_actor;
+  struck_animations.sync_world(struck_world, 9000);
+  struck_animations.update(struck_world, 9000);
+  const auto struck_pose = struck_animations.pose_for(1);
+  assert(struck_pose.has_value());
+  assert(struck_pose->body_index ==
+         appearance.body_offset +
+             legacy_frame_index(legacy_human_action_info(LegacyHumanAction::struck), 2, 0));
+
   WorldViewState monster_world;
   monster_world.self_actor_id = 10;
   ActorState monster;
@@ -218,6 +238,26 @@ int main() {
   monster_pose = monster_animations.pose_for(10);
   assert(monster_pose.has_value());
   assert(monster_pose->body_index == 272);
+
+  WorldViewState npc_world;
+  ActorState merchant;
+  merchant.actor_id = 30;
+  merchant.actor_type = mir2::client_v1::ActorType::npc;
+  merchant.x = 20;
+  merchant.y = 21;
+  merchant.from_x = 20;
+  merchant.from_y = 21;
+  merchant.dir = 5;
+  merchant.feature = make_legacy_feature(50, 0, 0, 0);
+  npc_world.self_actor_id = 1;
+  npc_world.actors[30] = merchant;
+  AnimationManager npc_animations;
+  npc_animations.reset(7100);
+  npc_animations.sync_world(npc_world, 7100);
+  const auto npc_pose = npc_animations.pose_for(30);
+  assert(npc_pose.has_value());
+  assert(npc_pose->body_archive == ArchiveId::npc);
+  assert(npc_pose->body_index == legacy_npc_offset(0) + 16);
 
   world.actors[1].from_x = 10;
   world.actors[1].from_y = 10;

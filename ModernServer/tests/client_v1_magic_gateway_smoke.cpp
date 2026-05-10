@@ -60,6 +60,11 @@ mir2::LegacyPacket make_magic_fire_packet(std::uint64_t session_id) {
       mir2::legacy_encode_buffer(&target, sizeof(target)));
 }
 
+mir2::LegacyPacket make_actor_hide_packet(std::uint64_t session_id, std::uint16_t ident) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(ident, 77, 12, 13, 0));
+}
+
 const mir2::client_v1::MagicList& only_magic_list(
     const std::vector<mir2::client_v1::Message>& messages) {
   assert(messages.size() == 1);
@@ -128,5 +133,21 @@ int main() {
   assert(magic_fire->y == 13);
   assert(magic_fire->effect_type == 7);
   assert(magic_fire->effect == 32);
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(
+      kSessionId, make_actor_hide_packet(kSessionId, mir2::kSmDisappear), messages);
+  assert(messages.size() == 1);
+  const auto* remove = std::get_if<mir2::client_v1::ActorRemove>(&messages.front());
+  assert(remove != nullptr);
+  assert(remove->actor_id == 77);
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(
+      kSessionId, make_actor_hide_packet(kSessionId, mir2::kSmSpaceMoveHide2), messages);
+  assert(messages.size() == 1);
+  remove = std::get_if<mir2::client_v1::ActorRemove>(&messages.front());
+  assert(remove != nullptr);
+  assert(remove->actor_id == 77);
   return 0;
 }

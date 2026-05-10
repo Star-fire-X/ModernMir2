@@ -1317,6 +1317,14 @@ void ClientApp::handle_protocol_events() {
               legacy_trace(out.str());
             }
             state_.apply(value);                    // 新增或更新角色
+          } else if constexpr (std::is_same_v<T, client_v1::ActorRemove>) {
+            if (legacy_trace_enabled()) {
+              std::ostringstream out;
+              out << "recv_actor_remove now=" << detail::monotonic_ms()
+                  << " actor=" << value.actor_id;
+              legacy_trace(out.str());
+            }
+            state_.apply(value);                    // 删除离开视野的角色
           } else if constexpr (std::is_same_v<T, client_v1::ActorAction>) {
             if (legacy_trace_enabled()) {
               std::ostringstream out;
@@ -1561,6 +1569,9 @@ void ClientApp::handle_protocol_events() {
         break;
       case client_v1::MessageId::actor_upsert:
         decoded = decode_and_dispatch.operator()<client_v1::ActorUpsert>();
+        break;
+      case client_v1::MessageId::actor_remove:
+        decoded = decode_and_dispatch.operator()<client_v1::ActorRemove>();
         break;
       case client_v1::MessageId::actor_action:
         decoded = decode_and_dispatch.operator()<client_v1::ActorAction>();

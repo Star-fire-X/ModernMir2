@@ -1678,6 +1678,11 @@ void ClientV1GameGatewayService::translate_legacy_packet(
         messages.push_back(client_v1::SysMessage{"You died.", 1});
       }
       break;
+    case kSmDisappear:
+    case kSmSpaceMoveHide:
+    case kSmSpaceMoveHide2:
+      messages.push_back(client_v1::ActorRemove{actor_id});
+      break;
     case kSmAlive: {
       client_v1::ActorUpsert upsert;
       client_v1::ActorVitals vitals;
