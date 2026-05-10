@@ -5,7 +5,8 @@
     "data": "Release\\Mir200\\Data.mdb derived active magic config"
   },
   "supported_magic_ids_added": [6, 13, 14, 15, 16, 18, 19, 36],
-  "still_deferred": [34, 37],
+  "still_deferred": [37],
+  "source_only_sword_supported": [34],
   "shared_rules": {
     "bujuk": {
       "source": "Source\\M2Server\\Magic.pas:CanUseBujuk",

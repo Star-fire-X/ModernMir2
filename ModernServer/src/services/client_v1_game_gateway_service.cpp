@@ -133,6 +133,7 @@ client_v1::ActorActionKind actor_action_kind_for_sm(std::uint16_t ident) {
     case kSmWalk:
       return client_v1::ActorActionKind::walk;
     case kSmRun:
+    case kSmRush:
       return client_v1::ActorActionKind::run;
     case kSmSpell:
       return client_v1::ActorActionKind::spell;
@@ -1765,7 +1766,8 @@ void ClientV1GameGatewayService::translate_legacy_packet(
     }
     case kSmTurn:
     case kSmWalk:
-    case kSmRun: {
+    case kSmRun:
+    case kSmRush: {
       auto desc = decode_char_desc_prefix(decoded->body);
       const auto name = name_from_turn_body(decoded->body);
       const auto dir = static_cast<std::uint8_t>(decoded->message.series & 0xFFU);
@@ -1773,7 +1775,8 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       const auto status = desc.has_value() ? desc->status : 0;
       messages.push_back(client_v1::ActorUpsert{
           make_actor(actor_id, name, decoded->message.param, decoded->message.tag, dir, feature, status)});
-      if (decoded->message.ident == kSmWalk || decoded->message.ident == kSmRun) {
+      if (decoded->message.ident == kSmWalk || decoded->message.ident == kSmRun ||
+          decoded->message.ident == kSmRush) {
         messages.push_back(client_v1::ActorStateDelta{
             actor_id, decoded->message.param, decoded->message.tag, dir});
       }
@@ -1797,10 +1800,14 @@ void ClientV1GameGatewayService::translate_legacy_packet(
     case legacy::kSmLongHit:
     case legacy::kSmWideHit:
     case legacy::kSmCrossHit:
+    case kSmRushKung:
       messages.push_back(client_v1::ActorAction{
           actor_id, client_v1::ActorActionKind::hit, decoded->message.param, decoded->message.tag,
           static_cast<std::uint8_t>(decoded->message.series), 0, 0,
-          legacy::normalize_attack_ident_to_sm(decoded->message.ident), 0, false});
+          decoded->message.ident == kSmRushKung
+              ? decoded->message.ident
+              : legacy::normalize_attack_ident_to_sm(decoded->message.ident),
+          0, false});
       break;
     case kSmSpell: {
       const auto magic_id = parse_i32(decoded->body).value_or(decoded->message.series);

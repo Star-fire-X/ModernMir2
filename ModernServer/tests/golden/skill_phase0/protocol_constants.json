@@ -8,6 +8,10 @@
                    "constants":  {
                                      "SM_SPELL":  17,
                                      "SM_STRUCK":  31,
+                                     "SM_RUSH":  6,
+                                     "SM_RUSHKUNG":  7,
+                                     "SM_FIREHIT":  8,
+                                     "SM_CROSSHIT":  35,
                                      "SM_ADDMAGIC":  210,
                                      "SM_SENDMYMAGIC":  211,
                                      "SM_DELMAGIC":  212,
@@ -28,6 +32,10 @@
                         "source":  "ModernServer\\src\\protocol\\legacy_types.hpp",
                         "constants_observed":  {
                                                    "kSmAddMagic":  210,
+                                                   "kSmRush":  6,
+                                                   "kSmRushKung":  7,
+                                                   "kSmFireHit":  8,
+                                                   "kSmCrossHit":  35,
                                                    "kSmSendMyMagic":  211,
                                                    "kSmDelMagic":  212,
                                                    "kSmMagicFire":  638,
@@ -37,7 +45,9 @@
                                                    "kSmSpaceMoveHide":  800,
                                                    "kSmSpaceMoveShow":  801,
                                                    "kSmSpaceMoveHide2":  806,
-                                                   "kSmSpaceMoveShow2":  807
+                                                   "kSmSpaceMoveShow2":  807,
+                                                   "kCmFireHit":  3025,
+                                                   "kCmCrossHit":  3035
                                                },
                         "missing_skill_constants":  []
                     },

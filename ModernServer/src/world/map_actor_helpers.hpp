@@ -501,6 +501,9 @@ bool legacy_p14_sword_skill(std::int32_t magic_id) {
     case 7:
     case 12:
     case 25:
+    case 26:
+    case 27:
+    case 34:
       return true;
     default:
       return false;
@@ -516,7 +519,10 @@ std::uint16_t legacy_attack_ident_for_sword_skill(std::int32_t magic_id) {
     case 12:
       return kCmWideHit;
     case 25:
+    case 26:
       return kCmFireHit;
+    case 34:
+      return kCmCrossHit;
     case 3:
     default:
       return kCmHit;
@@ -533,6 +539,8 @@ std::int32_t legacy_sword_skill_for_attack_ident(std::uint16_t ident) {
       return 12;
     case kCmFireHit:
       return 25;
+    case kCmCrossHit:
+      return 34;
     default:
       return 0;
   }

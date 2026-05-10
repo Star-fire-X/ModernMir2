@@ -492,6 +492,39 @@ std::vector<GameObject*> collect_wide_hit_targets(
   return targets;
 }
 
+std::vector<GameObject*> collect_cross_hit_targets(
+    std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
+    const Player& attacker, const MapConfig& map_config, std::uint64_t now_ms) {
+  static constexpr std::array<std::uint8_t, 7> kCrossDirs{{7, 1, 2, 3, 4, 5, 6}};
+  std::vector<GameObject*> targets;
+  targets.reserve(kCrossDirs.size());
+  const auto dir = actor_dir(attacker);
+  for (const auto offset : kCrossDirs) {
+    const auto [dx, dy] = direction_delta(static_cast<std::uint8_t>((dir + offset) % 8));
+    const auto tx = attacker.x() + dx;
+    const auto ty = attacker.y() + dy;
+    GameObject* target = nullptr;
+    for (auto& [actor_id, object] : objects) {
+      if (actor_id == attacker.id() || !is_attackable_target(*object)) {
+        continue;
+      }
+      if (object->x() == tx && object->y() == ty) {
+        target = object.get();
+        break;
+      }
+    }
+    if (target == nullptr) {
+      continue;
+    }
+    if (const auto* player_target = as_player(target); player_target != nullptr &&
+        !resolve_pk_block_reason(map_config, attacker, *player_target, now_ms).empty()) {
+      continue;
+    }
+    targets.push_back(target);
+  }
+  return targets;
+}
+
 bool magic_can_hit_target(const MagicConfig& magic, const GameObject& target) {
   if (as_player(&target) != nullptr) {
     return magic.affect_players;
@@ -2528,6 +2561,219 @@ std::int32_t MapActor::roll_legacy_player_attack_power(
   return std::max(0, static_cast<std::int32_t>(
                          std::lround(static_cast<double>(raw) *
                                      resolve_attack_multiplier(ident))));
+}
+
+bool MapActor::handle_legacy_rush_rush(Player& attacker, LegacyUseMagicInfo& user_magic,
+                                       const MagicConfig& magic, const ActorMail& mail,
+                                       RuntimeDispatch& dispatch, std::uint64_t current_tick,
+                                       std::uint64_t now_ms) {
+  const auto dir = static_cast<std::uint8_t>(std::clamp(mail.x, 0, 7));
+  const auto [dx, dy] = direction_delta(dir);
+  auto moved = false;
+  auto crash = false;
+  auto damage_level = static_cast<std::int32_t>(user_magic.level) + 1;
+
+  auto move_object = [&](GameObject& object, std::int32_t x, std::int32_t y,
+                         std::uint8_t object_dir, std::uint16_t ident) {
+    const auto old_x = object.x();
+    const auto old_y = object.y();
+    if (environment_.move_to_moving_object(old_x, old_y, object.id(), x, y, false,
+                                           now_ms, moving_state_for(object)) != 1) {
+      return false;
+    }
+    ActorMail move_mail;
+    move_mail.kind = ActorMailKind::move;
+    move_mail.map_id = config_.id;
+    move_mail.actor_id = object.id();
+    if (const auto* player = as_player(&object); player != nullptr) {
+      move_mail.session_id = player->session_id();
+    }
+    move_mail.x = x;
+    move_mail.y = y;
+    move_mail.dir = object_dir;
+    if (auto* monster = as_monster(&object); monster != nullptr) {
+      monster->set_dir(object_dir);
+    }
+    MapContext context;
+    context.tick = current_tick;
+    context.map_id = config_.id;
+    context.dispatch = &dispatch;
+    context.items = &item_configs_;
+    context.magics = &magic_configs_;
+    object.on_mail(move_mail, context);
+    sync_visibility_after_actor_move(object, old_x, old_y, x, y, dispatch);
+    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+      if (watcher.id() != object.id() && !is_legacy_visible_to(watcher, object)) {
+        return;
+      }
+      queue_packet(dispatch, watcher.session_id(),
+                   ident == kSmRush ? make_rush_packet(watcher.session_id(), object)
+                                     : make_turn_like_packet(watcher.session_id(), ident,
+                                                             object, false));
+    });
+    return true;
+  };
+
+  auto apply_rush_damage = [&](GameObject& target, std::int32_t raw_damage,
+                               std::uint64_t hitter_id, std::string command) {
+    const auto [ac_min, ac_max] = actor_physical_defense_range(target);
+    const auto armor_roll =
+        legacy_random_value(dispatch, "LegacyCombat", "armor_roll",
+                            std::max(1, ac_max - ac_min + 1), attacker.id(),
+                            target.id(), command, now_ms, current_tick);
+    const auto damage = legacy_physical_struck_damage(target, raw_damage, armor_roll);
+    std::int32_t applied_damage = 0;
+    bool target_died = false;
+    Monster* slain_monster = nullptr;
+    if (auto* player_target = as_player(&target); player_target != nullptr) {
+      const auto damage_result = player_target->apply_damage(damage, current_tick);
+      applied_damage = damage_result.hp_damage;
+      target_died = player_target->is_dead();
+      if (target_died && try_legacy_revival(*player_target, dispatch, current_tick, now_ms)) {
+        target_died = false;
+      }
+      if (target_died) {
+        const auto death_clear = player_target->mark_dead(now_ms);
+        dispatch_player_status_tick_result(*player_target, death_clear, dispatch, false);
+        if (hitter_id == attacker.id() && player_target->id() != attacker.id()) {
+          apply_bad_kill_penalty(attacker, *player_target, dispatch, current_tick,
+                                 now_ms, "LegacyCombat");
+        }
+        static_cast<void>(settle_player_death(*player_target, dispatch, current_tick,
+                                              now_ms));
+      }
+    } else if (auto* monster_target = as_monster(&target); monster_target != nullptr) {
+      applied_damage = apply_legacy_monster_damage(objects_, *monster_target, damage,
+                                                   hitter_id, now_ms);
+      if (applied_damage > 0 && hitter_id == attacker.id()) {
+        notify_owned_slaves_target(attacker, monster_target->id(), now_ms);
+      }
+      target_died = monster_target->is_dead();
+      slain_monster = target_died ? monster_target : nullptr;
+    }
+    if (applied_damage <= 0) {
+      return 0;
+    }
+    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+      if (watcher.id() != target.id() && !is_legacy_visible_to(watcher, target)) {
+        return;
+      }
+      queue_packet(dispatch, watcher.session_id(),
+                   target_died ? make_death_packet(watcher.session_id(), target,
+                                                   watcher.id() == target.id())
+                               : make_struck_packet(watcher.session_id(), target, hitter_id,
+                                                    applied_damage, false));
+    });
+    add_legacy_trace(dispatch, "LegacyCombat", target_died ? "death" : "struck", mail,
+                     current_tick, now_ms, true, magic.id, applied_damage,
+                     target_died ? "SM_DEATH" : "SM_STRUCK");
+    if (slain_monster != nullptr) {
+      finalize_monster_death(slain_monster->id(), attacker.id(), dispatch, current_tick);
+      add_legacy_trace(dispatch, "LegacyCombat", "exp", mail, current_tick, now_ms,
+                       true, magic.id, applied_damage, "WinExp");
+    }
+    return applied_damage;
+  };
+
+  ActorMail dir_mail = mail;
+  dir_mail.kind = ActorMailKind::spell;
+  dir_mail.dir = dir;
+  MapContext context;
+  context.tick = current_tick;
+  context.map_id = config_.id;
+  context.dispatch = &dispatch;
+  context.items = &item_configs_;
+  context.magics = &magic_configs_;
+  attacker.on_mail(dir_mail, context);
+
+  auto* front_target = find_attack_target_by_position(objects_, attacker, attacker.x() + dx,
+                                                       attacker.y() + dy, 1);
+  if (front_target != nullptr) {
+    auto can_push = actor_level(attacker) > actor_level(*front_target);
+    if (const auto* monster_target = as_monster(front_target);
+        monster_target != nullptr && monster_target->stick_mode()) {
+      can_push = false;
+    }
+    if (const auto* player_target = as_player(front_target);
+        player_target != nullptr &&
+        !resolve_pk_block_reason(config_, attacker, *player_target, now_ms).empty()) {
+      can_push = false;
+    }
+    const auto level_gap = actor_level(attacker) - actor_level(*front_target);
+    const auto gate_roll = legacy_random_value(dispatch, "LegacySkill", "rush_gate", 20,
+                                               attacker.id(), front_target->id(),
+                                               "Random(20)", now_ms, current_tick);
+    can_push = can_push && gate_roll < 6 + static_cast<std::int32_t>(user_magic.level) * 3 +
+                                level_gap;
+    add_legacy_trace(dispatch, "LegacySkill", "rush_gate", mail, current_tick, now_ms,
+                     can_push, gate_roll, 0, "CanPush");
+    if (can_push) {
+      const auto target_old_x = front_target->x();
+      const auto target_old_y = front_target->y();
+      const auto target_new_x = front_target->x() + dx;
+      const auto target_new_y = front_target->y() + dy;
+      if (environment_.can_walk(target_new_x, target_new_y, false) &&
+          move_object(*front_target, target_new_x, target_new_y,
+                      static_cast<std::uint8_t>((dir + 4) % 8), kSmWalk) &&
+          move_object(attacker, target_old_x, target_old_y, dir, kSmRush)) {
+        moved = true;
+        --damage_level;
+        add_legacy_trace(dispatch, "LegacySkill", "rush_push", mail, current_tick, now_ms,
+                         true, magic.id, 0, "RM_RUSH");
+        const auto damage_seed = std::max(1, (1 + damage_level) * 5);
+        const auto raw_damage =
+            (1 + damage_level) * 4 +
+            legacy_random_value(dispatch, "LegacyCombat", "rush_damage", damage_seed,
+                                attacker.id(), front_target->id(), "Random", now_ms,
+                                current_tick);
+        static_cast<void>(apply_rush_damage(*front_target, raw_damage, attacker.id(),
+                                            "rush_target"));
+      } else {
+        crash = true;
+      }
+    } else {
+      crash = true;
+    }
+  } else {
+    const auto step_limit = std::max<std::int32_t>(2, static_cast<std::int32_t>(user_magic.level) + 1);
+    for (std::int32_t step = 0; step < step_limit; ++step) {
+      const auto nx = attacker.x() + dx;
+      const auto ny = attacker.y() + dy;
+      if (!environment_.can_walk(nx, ny, false)) {
+        crash = true;
+        break;
+      }
+      if (!move_object(attacker, nx, ny, dir, kSmRush)) {
+        crash = true;
+        break;
+      }
+      moved = true;
+    }
+  }
+
+  if (crash) {
+    const auto crash_x = attacker.x() + dx;
+    const auto crash_y = attacker.y() + dy;
+    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+      if (watcher.id() != attacker.id() && !is_legacy_visible_to(watcher, attacker)) {
+        return;
+      }
+      queue_packet(dispatch, watcher.session_id(),
+                   make_rush_kung_packet(watcher.session_id(), attacker, crash_x, crash_y));
+    });
+    add_legacy_trace(dispatch, "LegacySkill", "rush_crash", mail, current_tick, now_ms,
+                     false, magic.id, 0, "RM_RUSHKUNG");
+    if (damage_level > 0) {
+      const auto damage_seed = std::max(1, (1 + damage_level) * 5);
+      const auto raw_damage =
+          (1 + damage_level) * 5 +
+          legacy_random_value(dispatch, "LegacyCombat", "rush_self_damage", damage_seed,
+                              attacker.id(), attacker.id(), "Random", now_ms, current_tick);
+      static_cast<void>(apply_rush_damage(attacker, raw_damage, 0, "rush_self"));
+    }
+  }
+
+  return moved;
 }
 
 bool MapActor::apply_legacy_physical_equipment_specials(Player& attacker,

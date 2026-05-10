@@ -481,6 +481,12 @@ class Player : public GameObject {
   [[nodiscard]] std::int32_t pending_legacy_sword_skill(std::uint64_t current_tick) const;
   [[nodiscard]] std::int32_t consume_legacy_sword_skill(std::uint64_t current_tick);
   void clear_legacy_sword_skill();
+  [[nodiscard]] bool legacy_fire_hit_ready(std::uint64_t now_ms) const;
+  void mark_legacy_fire_hit(std::uint64_t now_ms);
+  [[nodiscard]] bool legacy_rush_ready(std::uint64_t now_ms) const;
+  void mark_legacy_rush(std::uint64_t now_ms);
+  [[nodiscard]] bool legacy_cross_hit_enabled() const { return legacy_cross_hit_enabled_; }
+  void set_legacy_cross_hit_enabled(bool value) { legacy_cross_hit_enabled_ = value; }
   [[nodiscard]] bool legacy_open_health_active(std::uint64_t current_tick) const;
   [[nodiscard]] std::uint64_t legacy_open_health_expire_tick() const {
     return legacy_open_health_expire_tick_;
@@ -540,6 +546,9 @@ class Player : public GameObject {
   LegacyBuffContainer legacy_buffs_{};
   std::int32_t legacy_prepared_sword_magic_id_{0};
   std::uint64_t legacy_prepared_sword_expire_tick_{0};
+  std::uint64_t legacy_latest_fire_hit_time_ms_{0};
+  std::uint64_t legacy_latest_rush_time_ms_{0};
+  bool legacy_cross_hit_enabled_{false};
   std::uint64_t legacy_open_health_expire_tick_{0};
   std::int32_t legacy_inc_health_{0};
   std::int32_t legacy_inc_spell_{0};

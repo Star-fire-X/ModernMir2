@@ -348,6 +348,11 @@ class MapActor {
       const Player& attacker, const GameObject& target, std::uint16_t ident,
       RuntimeDispatch& dispatch, std::string stage, std::string command,
       std::uint64_t current_tick, std::uint64_t now_ms);
+  [[nodiscard]] bool handle_legacy_rush_rush(Player& attacker, LegacyUseMagicInfo& user_magic,
+                                             const MagicConfig& magic, const ActorMail& mail,
+                                             RuntimeDispatch& dispatch,
+                                             std::uint64_t current_tick,
+                                             std::uint64_t now_ms);
   bool apply_legacy_physical_equipment_specials(Player& attacker, GameObject& target,
                                                 std::int32_t hit_damage,
                                                 std::int32_t suck_damage,
