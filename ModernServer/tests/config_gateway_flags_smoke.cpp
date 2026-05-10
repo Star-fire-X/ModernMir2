@@ -42,6 +42,7 @@ int main() {
   write_text(root / "runtime" / "logic.toml",
              "tick_ms = 20\n"
              "player_budget_ms = 30\n"
+             "player_input_budget_per_tick = 2\n"
              "monster_budget_ms = 30\n"
              "spawn_budget_ms = 30\n"
              "npc_budget_ms = 5\n"
@@ -63,6 +64,7 @@ int main() {
   assert(!config.runtime.enable_legacy_gateways);
   assert(config.runtime.enable_client_v1_gateways);
   assert(config.runtime.io_threads == 2);
+  assert(config.budgets.player_input_budget_per_tick == 2);
 
   std::filesystem::remove_all(root, ignored);
   return 0;

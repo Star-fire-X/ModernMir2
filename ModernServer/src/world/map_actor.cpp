@@ -1576,7 +1576,8 @@ RuntimeDispatch MapActor::legacy_spawn_player(const ActorMail& mail,
 RuntimeDispatch MapActor::legacy_process_player(std::uint64_t actor_id,
                                                 std::uint64_t current_tick,
                                                 std::uint64_t now_ms,
-                                                bool persistence_overloaded) {
+                                                bool persistence_overloaded,
+                                                std::size_t player_input_budget_per_tick) {
   RuntimeDispatch dispatch;
   auto* player = find_player(actor_id);
   if (player == nullptr) {
@@ -1592,7 +1593,7 @@ RuntimeDispatch MapActor::legacy_process_player(std::uint64_t actor_id,
       break;
     case LegacyPlayerState::running: {
       legacy_operate_player_running(actor_id, *player, dispatch, current_tick, now_ms,
-                                    persistence_overloaded);
+                                    persistence_overloaded, player_input_budget_per_tick);
       break;
     }
     case LegacyPlayerState::ghost:

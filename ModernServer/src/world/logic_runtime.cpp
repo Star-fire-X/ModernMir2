@@ -1193,6 +1193,11 @@ void LogicRuntime::process_user_humans(std::uint64_t now_ms,
 
   const auto started = std::chrono::steady_clock::now();
   const auto budget_ms = static_cast<std::int64_t>(config_.budgets.player_budget_ms);
+  const auto player_input_budget_per_tick =
+      context.player_input_budget_per_tick != 0
+          ? context.player_input_budget_per_tick
+          : std::max<std::size_t>(
+                1, static_cast<std::size_t>(config_.budgets.player_input_budget_per_tick));
   std::size_t processed = 0;
   const auto initial_size = run_user_order_.size();
   while (!run_user_order_.empty() && processed < initial_size) {
@@ -1223,7 +1228,8 @@ void LogicRuntime::process_user_humans(std::uint64_t now_ms,
     append_dispatch(dispatch,
                     map_it->second->legacy_process_player(locator.actor_id, current_tick_,
                                                           now_ms,
-                                                          context.persistence_overloaded));
+                                                          context.persistence_overloaded,
+                                                          player_input_budget_per_tick));
     const auto state = map_it->second->legacy_player_state(locator.actor_id);
     if (!state.has_value() || *state == LegacyPlayerState::closed) {
       close_records_[util::lower_copy(locator.character_name)] =

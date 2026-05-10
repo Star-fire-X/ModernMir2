@@ -126,7 +126,8 @@ void MapActor::legacy_operate_player_running(std::uint64_t actor_id, Player& pla
                                              RuntimeDispatch& dispatch,
                                              std::uint64_t current_tick,
                                              std::uint64_t now_ms,
-                                             bool persistence_overloaded) {
+                                             bool persistence_overloaded,
+                                             std::size_t player_input_budget_per_tick) {
   if (!player.legacy_due(now_ms)) {
     return;
   }
@@ -146,7 +147,14 @@ void MapActor::legacy_operate_player_running(std::uint64_t actor_id, Player& pla
   trace_player_operate(dispatch, player, "messages", current_tick, now_ms,
                        player.legacy_has_commands(),
                        static_cast<std::int32_t>(player.legacy_inbox_size()));
-  while (auto command = player.pop_legacy_command()) {
+  std::size_t processed_messages = 0;
+  const auto input_budget = std::max<std::size_t>(player_input_budget_per_tick, 1);
+  while (processed_messages < input_budget) {
+    auto command = player.pop_legacy_command();
+    if (!command.has_value()) {
+      break;
+    }
+    ++processed_messages;
     handle_mail(command->mail, dispatch, current_tick, now_ms, true);
     auto* current_player = find_player(actor_id);
     if (current_player == nullptr) {
@@ -157,6 +165,11 @@ void MapActor::legacy_operate_player_running(std::uint64_t actor_id, Player& pla
   auto* current_player = find_player(actor_id);
   if (current_player == nullptr) {
     return;
+  }
+  if (current_player->legacy_has_commands()) {
+    trace_player_operate(dispatch, *current_player, "messages_budget_exhausted", current_tick,
+                         now_ms, false,
+                         static_cast<std::int32_t>(current_player->legacy_inbox_size()));
   }
   trace_player_operate(dispatch, *current_player, "post_operate", current_tick, now_ms);
   sync_player_visibility(*current_player, dispatch, false);

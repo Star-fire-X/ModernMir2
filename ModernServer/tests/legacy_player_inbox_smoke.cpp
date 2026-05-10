@@ -109,11 +109,15 @@ int main() {
           std::vector<std::uint64_t>{1, 2}));
   assert(runtime.legacy_session_run_time_ms(31) < before_move_run_time);
   const auto move_dispatch = runtime.tick(1502);
-  assert(runtime.legacy_session_inbox_size(31) == 0);
+  assert(runtime.legacy_session_inbox_size(31) == 1);
+  assert(runtime.legacy_session_inbox_sequences(31) == std::vector<std::uint64_t>{2});
   snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value());
   assert(snapshot->x == 11 && snapshot->y == 10);
   assert(!move_dispatch.session_events.empty());
+  const auto second_move_dispatch = runtime.tick(1753);
+  assert(runtime.legacy_session_inbox_size(31) == 0);
+  assert(!second_move_dispatch.session_events.empty());
 
   const auto before_say_run_time = runtime.legacy_session_run_time_ms(31);
   static_cast<void>(runtime.route_logic_command(make_say(31, "first", 3)));
@@ -123,14 +127,17 @@ int main() {
   assert(runtime.legacy_session_inbox_size(31) == 3);
   assert((runtime.legacy_session_inbox_sequences(31) ==
           std::vector<std::uint64_t>{3, 4, 5}));
-  const auto early_say_dispatch = runtime.tick(1600);
+  const auto early_say_dispatch = runtime.tick(1900);
   assert(runtime.legacy_session_inbox_size(31) == 3);
   assert(hear_lines(early_say_dispatch).empty());
-  const auto say_dispatch = runtime.tick(1753);
-  const auto lines = hear_lines(say_dispatch);
-  assert(lines.size() == 2);
-  assert(lines[0] == "Hero: first");
-  assert(lines[1] == "Hero: second");
+  auto say_dispatch = runtime.tick(2004);
+  assert((hear_lines(say_dispatch) == std::vector<std::string>{"Hero: first"}));
+  assert((runtime.legacy_session_inbox_sequences(31) == std::vector<std::uint64_t>{4, 5}));
+  say_dispatch = runtime.tick(2255);
+  assert((hear_lines(say_dispatch) == std::vector<std::string>{"Hero: second"}));
+  assert(runtime.legacy_session_inbox_sequences(31) == std::vector<std::uint64_t>{5});
+  static_cast<void>(runtime.tick(2506));
+  assert(runtime.legacy_session_inbox_size(31) == 0);
 
   return 0;
 }

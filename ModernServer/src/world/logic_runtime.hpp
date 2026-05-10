@@ -33,6 +33,7 @@ struct LegacyReadyUser {
 struct LegacyRuntimeContext {
   bool persistence_overloaded{false};
   std::size_t player_process_limit{0};
+  std::size_t player_input_budget_per_tick{0};
 };
 
 class LogicRuntime {
