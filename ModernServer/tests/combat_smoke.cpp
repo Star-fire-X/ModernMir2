@@ -233,7 +233,7 @@ int main() {
   }
 
   static_cast<void>(runtime.route_logic_command(make_attack_command(9, 2, 11, 10)));
-  const auto second_attack_dispatch = runtime.tick();
+  const auto second_attack_dispatch = runtime.tick(1000);
   const auto second_death = find_packet(second_attack_dispatch, mir2::kSmDeath);
   const auto second_win_exp = find_packet(second_attack_dispatch, mir2::kSmWinExp);
   const auto level_up = find_packet(second_attack_dispatch, mir2::kSmLevelUp);

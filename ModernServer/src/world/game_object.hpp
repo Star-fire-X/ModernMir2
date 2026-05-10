@@ -222,6 +222,12 @@ struct LegacySpellThrottleResult {
   std::int32_t over_count{0};
 };
 
+struct LegacyAttackThrottleResult {
+  bool allowed{true};
+  bool disconnect{false};
+  std::int32_t over_count{0};
+};
+
 enum class LegacyPlayerState {
   loading,
   ready,
@@ -388,6 +394,7 @@ class Player : public GameObject {
   [[nodiscard]] LegacySpellThrottleResult begin_spell_attempt(std::uint64_t now_ms,
                                                               std::int32_t delay_time_ms,
                                                               bool sword_skill);
+  [[nodiscard]] LegacyAttackThrottleResult begin_attack_attempt(std::uint64_t now_ms);
   void reset_move_throttle();
   [[nodiscard]] DamageResult apply_damage(std::int32_t amount, std::uint64_t current_tick);
   [[nodiscard]] std::int32_t apply_heal(std::int32_t amount);
@@ -535,6 +542,11 @@ class Player : public GameObject {
   std::int32_t latest_spell_delay_ms_{0};
   std::int32_t spell_time_over_count_{0};
   std::int32_t spell_speed_hack_timer_over_count_{0};
+  std::uint64_t latest_hit_time_ms_{0};
+  std::int32_t hit_time_over_count_{0};
+  std::int32_t hit_time_over_sum_{0};
+  std::int32_t hit_speed_hack_timer_over_count_{0};
+  std::int32_t legacy_hit_speed_{0};
   LegacyPlayerState legacy_state_{LegacyPlayerState::notice_pending};
   bool login_sign_{false};
   bool ready_run_{false};

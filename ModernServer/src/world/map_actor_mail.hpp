@@ -1289,6 +1289,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       session.id = next_trade_session_id_++;
       session.first_actor_id = requester->id();
       session.second_actor_id = target->id();
+      session.first.last_change_time_ms = now_ms;
+      session.second.last_change_time_ms = now_ms;
       trade_session_by_actor_[session.first_actor_id] = session.id;
       trade_session_by_actor_[session.second_actor_id] = session.id;
       trade_sessions_[session.id] = std::move(session);
@@ -1330,6 +1332,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       offer->items.push_back(*item);
       offer->accepted = false;
       peer_offer->accepted = false;
+      offer->last_change_time_ms = now_ms;
+      peer_offer->last_change_time_ms = now_ms;
       player->refresh_derived_state(item_configs_);
       queue_packet(dispatch, player->session_id(),
                    make_del_item_packet(player->session_id(), player->id(), *item, item_configs_));
@@ -1368,6 +1372,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       offer->accepted = false;
       peer_offer->accepted = false;
+      offer->last_change_time_ms = now_ms;
+      peer_offer->last_change_time_ms = now_ms;
       player->refresh_derived_state(item_configs_);
       queue_packet(dispatch, player->session_id(),
                    make_add_item_packet(player->session_id(), item, item_configs_));
@@ -1391,6 +1397,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       offer->gold = mail.amount;
       offer->accepted = false;
       peer_offer->accepted = false;
+      offer->last_change_time_ms = now_ms;
+      peer_offer->last_change_time_ms = now_ms;
       break;
     }
     case ActorMailKind::trade_accept: {
@@ -1400,7 +1408,17 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       auto* offer = trade_offer_for(*session, mail.actor_id);
-      if (offer == nullptr) {
+      auto* peer_offer = trade_peer_offer_for(*session, mail.actor_id);
+      if (offer == nullptr || peer_offer == nullptr) {
+        break;
+      }
+      constexpr std::uint64_t kLegacyTradeStableMs = 1000;
+      const auto offer_stable = offer->last_change_time_ms == 0 ||
+                                now_ms >= offer->last_change_time_ms + kLegacyTradeStableMs;
+      const auto peer_stable = peer_offer->last_change_time_ms == 0 ||
+                               now_ms >= peer_offer->last_change_time_ms + kLegacyTradeStableMs;
+      if (!offer_stable || !peer_stable) {
+        cancel_trade_for(mail.actor_id, dispatch, true);
         break;
       }
       offer->accepted = true;
@@ -2133,6 +2151,19 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                        make_ack_packet(attacker->session_id(), false));
           break;
         }
+      }
+
+      const auto attack_throttle = attacker->begin_attack_attempt(now_ms);
+      if (!attack_throttle.allowed) {
+        add_legacy_trace(dispatch, "LegacyCombat", "attack_cooldown_reject", effective_mail,
+                         current_tick, now_ms, false, attack_throttle.over_count, 0,
+                         "LatestHitTime");
+        queue_packet(dispatch, attacker->session_id(),
+                     make_ack_packet(attacker->session_id(), false));
+        if (attack_throttle.disconnect) {
+          queue_force_disconnect(dispatch, attacker->session_id(), "speed_hack_attack");
+        }
+        break;
       }
 
       attacker->on_mail(effective_mail, context);
