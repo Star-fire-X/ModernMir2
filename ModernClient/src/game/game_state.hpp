@@ -1325,6 +1325,27 @@ struct GameStateStore {
     maybe_clear_pending_after_equipment_sync();
   }
 
+  /// 应用耐久变化：旧端 SM_DURACHANGE 只表达槽位，client_v1 归一化为 make_index
+  void apply(const client_v1::DurabilityChange& message) {
+    if (message.item_make_index == 0) {
+      return;
+    }
+    const auto dura = static_cast<std::uint16_t>(std::clamp(message.dura, 0, 65535));
+    const auto dura_max = static_cast<std::uint16_t>(std::clamp(message.dura_max, 0, 65535));
+    auto update = [&](client_v1::ItemState& item) {
+      if (!item_empty(item) && item.make_index == message.item_make_index) {
+        item.dura = dura;
+        item.dura_max = dura_max;
+      }
+    };
+    for (auto& item : world.bag_items) {
+      update(item);
+    }
+    for (auto& item : world.equipment) {
+      update(item);
+    }
+  }
+
   /// 应用地面物品移除消息
   /// object_id 为 0 时按坐标移除（兼容旧版协议）
   void apply(const client_v1::GroundItemRemove& message) {

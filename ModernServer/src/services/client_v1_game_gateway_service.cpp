@@ -557,6 +557,8 @@ void ClientV1GameGatewayService::handle_message(std::uint64_t session_id,
           handle_unequip_item_request(session_id, value);
         } else if constexpr (std::is_same_v<T, client_v1::DropItemRequest>) {
           handle_drop_item_request(session_id, value);
+        } else if constexpr (std::is_same_v<T, client_v1::DropGoldRequest>) {
+          handle_drop_gold_request(session_id, value);
         } else if constexpr (std::is_same_v<T, client_v1::ReviveRequest>) {
           handle_revive_request(session_id, value);
         } else if constexpr (std::is_same_v<T, client_v1::MagicKeyChangeRequest>) {
@@ -864,6 +866,16 @@ void ClientV1GameGatewayService::handle_drop_item_request(
   }
 
   post_canonical_command(decode_client_v1_drop_item_command(session_id, request));
+}
+
+void ClientV1GameGatewayService::handle_drop_gold_request(
+    std::uint64_t session_id, const client_v1::DropGoldRequest& request) {
+  const auto state = session(session_id);
+  if (!state.has_value() || !state->in_game() || request.amount <= 0) {
+    return;
+  }
+
+  post_canonical_command(decode_client_v1_drop_gold_command(session_id, request));
 }
 
 void ClientV1GameGatewayService::handle_revive_request(
@@ -1887,6 +1899,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
             std::clamp<std::int32_t>(
                 decoded->message.tag | (decoded->message.series << 16), 0, 65535));
         std::optional<client_v1::EquipmentSnapshot> equipment_snapshot;
+        std::optional<client_v1::DurabilityChange> durability_change;
         {
           std::scoped_lock lock(mutex_);
           auto it = sessions_.find(session_id);
@@ -1896,10 +1909,16 @@ void ClientV1GameGatewayService::translate_legacy_packet(
             if (item.make_index != 0) {
               item.dura = dura;
               item.dura_max = dura_max;
+              durability_change = client_v1::DurabilityChange{
+                  item.make_index, static_cast<std::int32_t>(dura),
+                  static_cast<std::int32_t>(dura_max)};
               equipment_snapshot = client_v1::EquipmentSnapshot{
                   item_slot_snapshot(it->second.equipment_items)};
             }
           }
+        }
+        if (durability_change.has_value()) {
+          messages.push_back(*durability_change);
         }
         if (equipment_snapshot.has_value()) {
           messages.push_back(std::move(*equipment_snapshot));

@@ -280,6 +280,20 @@ void assert_p0_protocol_goldens() {
   assert_golden(Pong{123456789, 123456999}, 601, 20, payload);
 }
 
+void assert_p2_protocol_goldens() {
+  using namespace mir2::client_v1;
+
+  Bytes payload;
+  append_i32(payload, 12345);
+  assert_golden(DropGoldRequest{12345}, 419, 421, payload);
+
+  payload.clear();
+  append_i32(payload, 1001);
+  append_i32(payload, 550);
+  append_i32(payload, 1000);
+  assert_golden(DurabilityChange{1001, 550, 1000}, 420, 422, payload);
+}
+
 }  // namespace
 
 int main() {
@@ -306,12 +320,15 @@ int main() {
   assert_not_planned(find_entry(kDelphiSendMappings, "SendDropItem"));
   assert_not_planned(find_entry(kDelphiSendMappings, "SendBuyItem"));
   assert_not_planned(find_entry(kDelphiSendMappings, "SendStorageItem"));
+  assert_not_planned(find_entry(kDelphiSendMappings, "SendDropGold"));
   assert_not_planned(find_entry(kDelphiSendMappings, "SendDealTry"));
   assert_not_planned(find_entry(kDelphiClientGetMappings, "ClientGetBagItmes"));
   assert_not_planned(find_entry(kDelphiClientGetMappings, "ClientGetSenduseItems"));
+  assert_not_planned(find_entry(kDelphiClientGetMappings, "ClientGetDuraChange"));
   assert_not_planned(find_entry(kDelphiClientGetMappings, "ClientGetReadMiniMap"));
 
   assert_p0_protocol_goldens();
+  assert_p2_protocol_goldens();
 
   SelectServerRequest request;
   request.name = "ModernServer";
@@ -590,8 +607,28 @@ int main() {
   assert(decoded_drop.has_value());
   assert(decoded_drop->name == "Potion");
 
+  frame_bytes = encode_frame(make_frame(DropGoldRequest{250}, 32));
+  buffer = frame_bytes;
+  frames = drain_frames(buffer);
+  assert(frames.size() == 1);
+  assert(frames.front().message_id == MessageId::drop_gold_request);
+  const auto decoded_drop_gold = decode_message<DropGoldRequest>(frames.front());
+  assert(decoded_drop_gold.has_value());
+  assert(decoded_drop_gold->amount == 250);
+
+  frame_bytes = encode_frame(make_frame(DurabilityChange{1001, 550, 1000}, 33));
+  buffer = frame_bytes;
+  frames = drain_frames(buffer);
+  assert(frames.size() == 1);
+  assert(frames.front().message_id == MessageId::durability_change);
+  const auto decoded_dura = decode_message<DurabilityChange>(frames.front());
+  assert(decoded_dura.has_value());
+  assert(decoded_dura->item_make_index == 1001);
+  assert(decoded_dura->dura == 550);
+  assert(decoded_dura->dura_max == 1000);
+
   ChatLine chat_line{"Hero: hello", 0xFFFFFF00U, 0x00000000U};
-  frame_bytes = encode_frame(make_frame(chat_line, 32));
+  frame_bytes = encode_frame(make_frame(chat_line, 34));
   buffer = frame_bytes;
   frames = drain_frames(buffer);
   assert(frames.size() == 1);

@@ -176,9 +176,11 @@ int main() {
 
   ItemState weapon = potion;
   weapon.name = "Sword";
+  weapon.make_index = 3001;
   weapon.std_mode = 5;
   ItemState dress = potion;
   dress.name = "Armor";
+  dress.make_index = 3002;
   dress.std_mode = 10;
   EquipmentSnapshot equipment_snapshot;
   equipment_snapshot.items.push_back(ItemSlotState{1, weapon});
@@ -186,6 +188,9 @@ int main() {
   state.apply(equipment_snapshot);
   assert(state.world.equipment[1].name == "Sword");
   assert(state.world.equipment[0].name == "Armor");
+  state.apply(DurabilityChange{3001, 12, 34});
+  assert(state.world.equipment[1].dura == 12);
+  assert(state.world.equipment[1].dura_max == 34);
 
   state.world.eating_item_slot = 1;
   state.world.eat_time_ms = 100;

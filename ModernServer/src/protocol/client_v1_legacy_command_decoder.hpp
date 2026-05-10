@@ -23,6 +23,8 @@ namespace mir2 {
     std::uint64_t session_id, const client_v1::UnequipItemRequest& request);
 [[nodiscard]] CanonicalLegacyCommand decode_client_v1_drop_item_command(
     std::uint64_t session_id, const client_v1::DropItemRequest& request);
+[[nodiscard]] CanonicalLegacyCommand decode_client_v1_drop_gold_command(
+    std::uint64_t session_id, const client_v1::DropGoldRequest& request);
 [[nodiscard]] CanonicalLegacyCommand decode_client_v1_revive_command(std::uint64_t session_id);
 [[nodiscard]] CanonicalLegacyCommand decode_client_v1_npc_click_command(
     std::uint64_t session_id, const client_v1::NpcClickRequest& request);

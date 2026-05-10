@@ -133,6 +133,14 @@ CanonicalLegacyCommand decode_client_v1_drop_item_command(
   return command;
 }
 
+CanonicalLegacyCommand decode_client_v1_drop_gold_command(
+    std::uint64_t session_id, const client_v1::DropGoldRequest& request) {
+  auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::drop_gold);
+  command.amount = request.amount;
+  command.game_message = make_default_message(kCmDropGold, request.amount, 0, 0, 0);
+  return command;
+}
+
 CanonicalLegacyCommand decode_client_v1_revive_command(std::uint64_t session_id) {
   return make_client_v1_command(session_id, CanonicalLegacyCommandKind::revive);
 }

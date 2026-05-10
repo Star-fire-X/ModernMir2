@@ -1820,10 +1820,15 @@ class LegacyHud final {
         add_sprite_button(item_bag_, context, ArchiveId::prguse, kBagGoldButtonIndex, 274, 203,
                           30, 20);
     bind_audio_click(gold_button, context.audio, LegacyClickSound::normal,
-                     [app = context.app] {
-      if (app != nullptr) {
-        app->show_info_modal(L"Gold", L"Gold details are not available in this migration phase.");
+                     [this, app = context.app] {
+      if (app == nullptr || state_ == nullptr) {
+        return;
       }
+      if (state_->world.self_ability.gold <= 0) {
+        app->show_info_modal(L"Gold", L"No gold to drop.");
+        return;
+      }
+      app->request_drop_gold(client_v1::DropGoldRequest{1});
     });
 
     const auto state_frame = get_frame(context, ArchiveId::prguse, kStateDialogIndex);

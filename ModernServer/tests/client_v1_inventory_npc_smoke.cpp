@@ -191,6 +191,7 @@ int main() {
     hero.ability.max_weight = 30;
     hero.ability.max_wear_weight = 100;
     hero.ability.max_hand_weight = 100;
+    hero.gold = 500;
     hero.bag_items[0].index = 1;
     hero.bag_items[0].make_index = 1001;
     hero.bag_items[0].dura = 600;
@@ -300,6 +301,16 @@ int main() {
   if (!drop_remove.has_value() || !ground_add.has_value()) {
     stop_services();
     return fail("drop item");
+  }
+
+  send_message(*socket, mir2::client_v1::DropGoldRequest{25}, sequence);
+  const auto gold_add = reader.wait_for_matching<mir2::client_v1::GroundItemAdd>(
+      [](const mir2::client_v1::GroundItemAdd& add) { return add.item.name == "Gold"; });
+  const auto gold_ability = reader.wait_for_matching<mir2::client_v1::SelfAbility>(
+      [](const mir2::client_v1::SelfAbility& ability) { return ability.gold == 475; });
+  if (!gold_add.has_value() || !gold_ability.has_value()) {
+    stop_services();
+    return fail("drop gold");
   }
 
   send_message(*socket, mir2::client_v1::NpcClickRequest{1}, sequence);

@@ -87,6 +87,8 @@ enum class MessageId : std::uint16_t {
   unequip_item_request = 416,
   drop_item_request = 417,
   revive_request = 418,
+  drop_gold_request = 419,
+  durability_change = 420,
   magic_key_change_request = 430,
   chat_send = 500,
   sys_message = 501,
@@ -656,6 +658,18 @@ struct DropItemRequest {
 /// 复活请求：死亡后回安全/出生点复活
 struct ReviveRequest {};
 
+/// 丢弃金币请求：amount 对应旧端 CM_DROPGOLD 的 Recog
+struct DropGoldRequest {
+  std::int32_t amount{0};
+};
+
+/// 装备/背包耐久变化：按 make_index 更新本地镜像
+struct DurabilityChange {
+  std::int32_t item_make_index{0};
+  std::int32_t dura{0};
+  std::int32_t dura_max{0};
+};
+
 /// 魔法快捷键变更：key 为 0 或 '1'..'8'
 struct MagicKeyChangeRequest {
   std::uint16_t magic_id{0};
@@ -1016,6 +1030,8 @@ using Message = std::variant<ClientHello,
                              UnequipItemRequest,
                              DropItemRequest,
                              ReviveRequest,
+                             DropGoldRequest,
+                             DurabilityChange,
                              MagicKeyChangeRequest,
                              GroundItemAdd,
                              GroundItemRemove,
@@ -1270,6 +1286,8 @@ MIR2_CLIENT_V1_TRAIT(EquipItemRequest, equip_item_request);
 MIR2_CLIENT_V1_TRAIT(UnequipItemRequest, unequip_item_request);
 MIR2_CLIENT_V1_TRAIT(DropItemRequest, drop_item_request);
 MIR2_CLIENT_V1_TRAIT(ReviveRequest, revive_request);
+MIR2_CLIENT_V1_TRAIT(DropGoldRequest, drop_gold_request);
+MIR2_CLIENT_V1_TRAIT(DurabilityChange, durability_change);
 MIR2_CLIENT_V1_TRAIT(MagicKeyChangeRequest, magic_key_change_request);
 MIR2_CLIENT_V1_TRAIT(GroundItemAdd, ground_item_add);
 MIR2_CLIENT_V1_TRAIT(GroundItemRemove, ground_item_remove);
@@ -2152,6 +2170,25 @@ inline void encode(ByteWriter& /*writer*/, const ReviveRequest& /*value*/) {}
 
 inline bool decode(ByteReader& /*reader*/, ReviveRequest& /*value*/) { return true; }
 
+inline void encode(ByteWriter& writer, const DropGoldRequest& value) {
+  writer.write_i32(value.amount);
+}
+
+inline bool decode(ByteReader& reader, DropGoldRequest& value) {
+  return reader.read_i32(value.amount);
+}
+
+inline void encode(ByteWriter& writer, const DurabilityChange& value) {
+  writer.write_i32(value.item_make_index);
+  writer.write_i32(value.dura);
+  writer.write_i32(value.dura_max);
+}
+
+inline bool decode(ByteReader& reader, DurabilityChange& value) {
+  return reader.read_i32(value.item_make_index) && reader.read_i32(value.dura) &&
+         reader.read_i32(value.dura_max);
+}
+
 inline void encode(ByteWriter& writer, const MagicKeyChangeRequest& value) {
   writer.write_u16(value.magic_id);
   writer.write_u8(value.key);
@@ -2980,6 +3017,12 @@ inline std::optional<Message> decode_any(const Frame& frame) {
       break;
     case MessageId::revive_request:
       if (auto value = decode_message<ReviveRequest>(frame); value.has_value()) return Message{*value};
+      break;
+    case MessageId::drop_gold_request:
+      if (auto value = decode_message<DropGoldRequest>(frame); value.has_value()) return Message{*value};
+      break;
+    case MessageId::durability_change:
+      if (auto value = decode_message<DurabilityChange>(frame); value.has_value()) return Message{*value};
       break;
     case MessageId::magic_key_change_request:
       if (auto value = decode_message<MagicKeyChangeRequest>(frame); value.has_value()) return Message{*value};

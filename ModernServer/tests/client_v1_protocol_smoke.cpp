@@ -453,6 +453,14 @@ int main() {
   const auto drop_request = round_trip(DropItemRequest{1001, "Wooden Sword"}, 27);
   assert(drop_request.item_make_index == 1001);
 
+  const auto drop_gold = round_trip(DropGoldRequest{250}, 271);
+  assert(drop_gold.amount == 250);
+
+  const auto durability = round_trip(DurabilityChange{1001, 550, 1000}, 272);
+  assert(durability.item_make_index == 1001);
+  assert(durability.dura == 550);
+  assert(durability.dura_max == 1000);
+
   const auto npc_click = round_trip(NpcClickRequest{77}, 28);
   assert(npc_click.actor_id == 77);
 

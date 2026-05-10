@@ -15,6 +15,8 @@ ItemState make_item(const char* name, const std::int32_t make_index,
   item.make_index = make_index;
   item.std_mode = std_mode;
   item.looks = 1;
+  item.dura = 100;
+  item.dura_max = 1000;
   return item;
 }
 
@@ -114,6 +116,25 @@ void test_magic_key_rebinds_clear_previous_owner() {
   assert(state.world.magics[1].key == 0);
 }
 
+void test_durability_change_updates_matching_bag_and_equipment_items() {
+  GameStateStore state;
+  auto bag_sword = make_item("Wooden Sword", 1001, 5);
+  auto equipped_sword = bag_sword;
+  const auto potion = make_item("Potion", 2001, 0);
+  state.world.bag_items[6] = bag_sword;
+  state.world.equipment[1] = equipped_sword;
+  state.world.bag_items[7] = potion;
+
+  state.apply(DurabilityChange{1001, 550, 900});
+
+  assert(state.world.bag_items[6].dura == 550);
+  assert(state.world.bag_items[6].dura_max == 900);
+  assert(state.world.equipment[1].dura == 550);
+  assert(state.world.equipment[1].dura_max == 900);
+  assert(state.world.bag_items[7].dura == 100);
+  assert(state.world.bag_items[7].dura_max == 1000);
+}
+
 }  // namespace
 
 int main() {
@@ -122,5 +143,6 @@ int main() {
   test_use_failure_and_timeout_restore_source_slot();
   test_drop_pending_ignores_unrelated_updates();
   test_magic_key_rebinds_clear_previous_owner();
+  test_durability_change_updates_matching_bag_and_equipment_items();
   return 0;
 }

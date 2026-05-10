@@ -117,6 +117,15 @@ bool check_combat_and_items() {
     return false;
   }
 
+  command = mir2::decode_client_v1_drop_gold_command(
+      77, mir2::client_v1::DropGoldRequest{250});
+  if (!check_common(command, mir2::CanonicalLegacyCommandKind::drop_gold,
+                    mir2::LogicCommandKind::drop_gold) ||
+      command.amount != 250 || command.game_message.ident != mir2::kCmDropGold ||
+      command.game_message.recog != 250) {
+    return false;
+  }
+
   command = mir2::decode_client_v1_revive_command(77);
   return check_common(command, mir2::CanonicalLegacyCommandKind::revive,
                       mir2::LogicCommandKind::revive);

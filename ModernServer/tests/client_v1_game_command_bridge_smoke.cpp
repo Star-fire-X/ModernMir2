@@ -288,6 +288,15 @@ int main() {
     return fail("drop item command");
   }
 
+  mir2::tests::send_client_v1_message(
+      *socket, mir2::client_v1::DropGoldRequest{250}, sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::drop_gold);
+  if (!command.has_value() || command->session_id != session_id ||
+      command->amount != 250) {
+    stop_services();
+    return fail("drop gold command");
+  }
+
   mir2::tests::send_client_v1_message(*socket, mir2::client_v1::ReviveRequest{}, sequence);
   command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::revive);
   if (!command.has_value() || command->session_id != session_id) {
