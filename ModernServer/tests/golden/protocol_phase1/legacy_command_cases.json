@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "description": "Phase 1 golden cases for Delphi legacy framed protocol command payloads. body_hex is decoded byte text for legacy_string cases and raw body bytes for raw cases.",
+  "cases": [
+    {"name":"login_id_password","ident":2001,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"616c6963652f736563726574"},
+    {"name":"select_server","ident":104,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"447261676f6e"},
+    {"name":"query_character","ident":100,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"616c6963652f31323334"},
+    {"name":"select_character","ident":103,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"616c6963652f4865726f2f31323334"},
+    {"name":"turn_basic","ident":3010,"recog":655370,"param":0,"tag":2,"series":0,"body_encoding":"none","body_hex":""},
+    {"name":"walk_basic","ident":3011,"recog":655371,"param":0,"tag":3,"series":0,"body_encoding":"none","body_hex":""},
+    {"name":"run_basic","ident":3013,"recog":720908,"param":0,"tag":4,"series":0,"body_encoding":"none","body_hex":""},
+    {"name":"hit_basic","ident":3014,"recog":720909,"param":0,"tag":5,"series":0,"body_encoding":"none","body_hex":""},
+    {"name":"power_hit","ident":3018,"recog":720910,"param":0,"tag":6,"series":0,"body_encoding":"none","body_hex":""},
+    {"name":"fire_hit","ident":3025,"recog":720911,"param":0,"tag":7,"series":0,"body_encoding":"none","body_hex":""},
+    {"name":"spell_raw_magic_id","ident":3017,"recog":786448,"param":77,"tag":0,"series":0,"body_encoding":"raw","body_hex":"35"},
+    {"name":"say_space_text","ident":3030,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"68656c6c6f20776f726c64"},
+    {"name":"say_tab_text","ident":3030,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"73617909776974680974616273"},
+    {"name":"say_gbk_like_bytes","ident":3030,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"b0a1c4e3"},
+    {"name":"pickup_basic","ident":1001,"recog":0,"param":17,"tag":18,"series":0,"body_encoding":"none","body_hex":""},
+    {"name":"take_on_item","ident":1003,"recog":10001,"param":2,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},
+    {"name":"take_off_item","ident":1004,"recog":10001,"param":2,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},
+    {"name":"eat_item","ident":1006,"recog":10002,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"456c69786972"},
+    {"name":"click_npc","ident":1010,"recog":500,"param":0,"tag":0,"series":0,"body_encoding":"none","body_hex":""},
+    {"name":"merchant_select","ident":1011,"recog":501,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"40627579"},
+    {"name":"user_buy_item","ident":1014,"recog":501,"param":1234,"tag":2,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},
+    {"name":"user_sell_item","ident":1013,"recog":501,"param":1234,"tag":2,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},
+    {"name":"user_storage_item","ident":1031,"recog":501,"param":1234,"tag":2,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"}
+  ]
+}
