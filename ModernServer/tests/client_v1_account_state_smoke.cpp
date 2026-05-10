@@ -134,10 +134,21 @@ int main() {
     send_hello(*socket, sequence);
     mir2::tests::send_client_v1_message(
         *socket,
+        mir2::client_v1::CreateAccountRequest{"bad/name", "pw",
+                                              complete_profile("Invalid")},
+        sequence);
+    auto create = reader.wait_for_message<mir2::client_v1::CreateAccountResult>();
+    if (!create.has_value() || create->success ||
+        create->error_message != "create_account_failed") {
+      stop_services();
+      return fail("invalid account id rejected");
+    }
+    mir2::tests::send_client_v1_message(
+        *socket,
         mir2::client_v1::CreateAccountRequest{"alpha", "oldpw",
                                               incomplete_profile("Alpha")},
         sequence);
-    auto create = reader.wait_for_message<mir2::client_v1::CreateAccountResult>();
+    create = reader.wait_for_message<mir2::client_v1::CreateAccountResult>();
     if (!create.has_value() || !create->success) {
       stop_services();
       return fail("create incomplete alpha");

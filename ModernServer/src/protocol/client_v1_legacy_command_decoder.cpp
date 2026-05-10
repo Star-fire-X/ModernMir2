@@ -4,6 +4,7 @@
 #include <string>
 
 #include "protocol/legacy_game_codec.hpp"
+#include "protocol/legacy_string.hpp"
 #include "shared/legacy/action_ids.hpp"
 
 namespace mir2 {
@@ -71,7 +72,7 @@ CanonicalLegacyCommand decode_client_v1_spell_command(
   command.y = intent.y;
   command.dir = intent.dir;
   command.target_actor_id = intent.target_actor_id;
-  command.text = std::to_string(intent.magic_id);
+  command.text = copy_legacy_bytes(std::to_string(intent.magic_id));
   command.game_message =
       make_default_message(kCmSpell, make_long(intent.x, intent.y),
                            static_cast<std::uint16_t>(intent.target_actor_id & 0xFFFFU),
@@ -94,7 +95,7 @@ CanonicalLegacyCommand decode_client_v1_use_item_command(
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::eat_item);
   command.item_make_index = intent.item_make_index;
   command.item_slot = intent.item_slot;
-  command.text = intent.name;
+  command.text = copy_legacy_bytes(intent.name);
   command.game_message = make_default_message(kCmEat, intent.item_make_index, 0, 0, 0);
   return command;
 }
@@ -104,7 +105,7 @@ CanonicalLegacyCommand decode_client_v1_equip_item_command(
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::take_on_item);
   command.item_make_index = request.item_make_index;
   command.item_slot = request.equipment_slot;
-  command.text = request.name;
+  command.text = copy_legacy_bytes(request.name);
   command.game_message =
       make_default_message(kCmTakeOnItem, request.item_make_index,
                            static_cast<std::uint16_t>(std::max(request.equipment_slot, 0)), 0, 0);
@@ -116,7 +117,7 @@ CanonicalLegacyCommand decode_client_v1_unequip_item_command(
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::take_off_item);
   command.item_make_index = request.item_make_index;
   command.item_slot = request.equipment_slot;
-  command.text = request.name;
+  command.text = copy_legacy_bytes(request.name);
   command.game_message =
       make_default_message(kCmTakeOffItem, request.item_make_index,
                            static_cast<std::uint16_t>(std::max(request.equipment_slot, 0)), 0, 0);
@@ -127,7 +128,7 @@ CanonicalLegacyCommand decode_client_v1_drop_item_command(
     std::uint64_t session_id, const client_v1::DropItemRequest& request) {
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::drop_item);
   command.item_make_index = request.item_make_index;
-  command.text = request.name;
+  command.text = copy_legacy_bytes(request.name);
   command.game_message = make_default_message(kCmDropItem, request.item_make_index, 0, 0, 0);
   return command;
 }
@@ -149,7 +150,7 @@ CanonicalLegacyCommand decode_client_v1_npc_dialog_select_command(
     std::uint64_t session_id, std::uint64_t merchant_id, std::string_view selection) {
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::merchant_select);
   command.target_actor_id = merchant_id;
-  command.text = std::string(selection);
+  command.text = copy_legacy_bytes(selection);
   command.game_message =
       make_default_message(kCmMerchantDlgSelect, static_cast<std::int32_t>(merchant_id), 0, 0, 0);
   return command;
@@ -161,7 +162,7 @@ CanonicalLegacyCommand decode_client_v1_merchant_buy_command(
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::buy_item);
   command.target_actor_id = merchant_id;
   command.item_make_index = request.item_server_index;
-  command.text = request.name;
+  command.text = copy_legacy_bytes(request.name);
   command.game_message = make_default_message(
       kCmUserBuyItem, static_cast<std::int32_t>(merchant_id),
       low_word(request.item_server_index), high_word(request.item_server_index), 0);
@@ -174,7 +175,7 @@ CanonicalLegacyCommand decode_client_v1_merchant_sell_command(
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::sell_item);
   command.target_actor_id = merchant_id;
   command.item_make_index = request.item_make_index;
-  command.text = request.name;
+  command.text = copy_legacy_bytes(request.name);
   command.game_message =
       make_default_message(kCmUserSellItem, static_cast<std::int32_t>(merchant_id),
                            low_word(request.item_make_index), high_word(request.item_make_index),
@@ -188,7 +189,7 @@ CanonicalLegacyCommand decode_client_v1_merchant_sell_price_command(
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::query_sell_price);
   command.target_actor_id = merchant_id;
   command.item_make_index = request.item_make_index;
-  command.text = request.name;
+  command.text = copy_legacy_bytes(request.name);
   command.game_message =
       make_default_message(kCmMerchantQuerySellPrice, static_cast<std::int32_t>(merchant_id),
                            low_word(request.item_make_index), high_word(request.item_make_index),
@@ -202,7 +203,7 @@ CanonicalLegacyCommand decode_client_v1_merchant_repair_price_command(
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::query_repair_cost);
   command.target_actor_id = merchant_id;
   command.item_make_index = request.item_make_index;
-  command.text = request.name;
+  command.text = copy_legacy_bytes(request.name);
   command.game_message =
       make_default_message(kCmMerchantQueryRepairCost, static_cast<std::int32_t>(merchant_id),
                            low_word(request.item_make_index), high_word(request.item_make_index),
@@ -216,7 +217,7 @@ CanonicalLegacyCommand decode_client_v1_merchant_repair_command(
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::repair_item);
   command.target_actor_id = merchant_id;
   command.item_make_index = request.item_make_index;
-  command.text = request.name;
+  command.text = copy_legacy_bytes(request.name);
   command.game_message =
       make_default_message(kCmUserRepairItem, static_cast<std::int32_t>(merchant_id),
                            low_word(request.item_make_index), high_word(request.item_make_index),
@@ -230,7 +231,7 @@ CanonicalLegacyCommand decode_client_v1_storage_deposit_command(
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::storage_item);
   command.target_actor_id = merchant_id;
   command.item_make_index = request.item_make_index;
-  command.text = request.name;
+  command.text = copy_legacy_bytes(request.name);
   command.game_message =
       make_default_message(kCmUserStorageItem, static_cast<std::int32_t>(merchant_id),
                            low_word(request.item_make_index), high_word(request.item_make_index),
@@ -245,7 +246,7 @@ CanonicalLegacyCommand decode_client_v1_storage_withdraw_command(
       make_client_v1_command(session_id, CanonicalLegacyCommandKind::take_back_storage_item);
   command.target_actor_id = merchant_id;
   command.item_make_index = request.item_make_index;
-  command.text = request.name;
+  command.text = copy_legacy_bytes(request.name);
   command.game_message =
       make_default_message(kCmUserTakeBackStorageItem, static_cast<std::int32_t>(merchant_id),
                            low_word(request.item_make_index), high_word(request.item_make_index),
@@ -271,7 +272,7 @@ CanonicalLegacyCommand decode_client_v1_query_storage_items_command(
 CanonicalLegacyCommand decode_client_v1_trade_try_command(
     std::uint64_t session_id, const client_v1::TradeTryRequest& request) {
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::trade_try);
-  command.text = request.target_name;
+  command.text = copy_legacy_bytes(request.target_name);
   return command;
 }
 
@@ -283,7 +284,7 @@ CanonicalLegacyCommand decode_client_v1_trade_add_item_command(
     std::uint64_t session_id, const client_v1::TradeAddItemRequest& request) {
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::trade_add_item);
   command.item_make_index = request.item_make_index;
-  command.text = request.name;
+  command.text = copy_legacy_bytes(request.name);
   return command;
 }
 
@@ -292,7 +293,7 @@ CanonicalLegacyCommand decode_client_v1_trade_remove_item_command(
   auto command =
       make_client_v1_command(session_id, CanonicalLegacyCommandKind::trade_remove_item);
   command.item_make_index = request.item_make_index;
-  command.text = request.name;
+  command.text = copy_legacy_bytes(request.name);
   return command;
 }
 
@@ -310,7 +311,7 @@ CanonicalLegacyCommand decode_client_v1_trade_accept_command(std::uint64_t sessi
 CanonicalLegacyCommand decode_client_v1_chat_command(std::uint64_t session_id,
                                                      const client_v1::ChatSend& chat) {
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::say);
-  command.text = chat.text;
+  command.text = copy_legacy_bytes(chat.text);
   return command;
 }
 

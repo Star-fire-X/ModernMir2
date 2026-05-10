@@ -278,6 +278,20 @@ int main() {
       return fail("invalid character name");
     }
   }
+  std::string utf8_name;
+  utf8_name.push_back(static_cast<char>(0xE4));
+  utf8_name.push_back(static_cast<char>(0xB8));
+  utf8_name.push_back(static_cast<char>(0xAD));
+  mir2::tests::send_client_v1_message(
+      *alpha_lobby, mir2::client_v1::CreateCharacterRequest{utf8_name, 0, 0, 0},
+      alpha_sequence);
+  auto invalid_utf8_create =
+      alpha_reader.wait_for_message<mir2::client_v1::CreateCharacterResult>();
+  if (!invalid_utf8_create.has_value() || invalid_utf8_create->success ||
+      invalid_utf8_create->error_message != "invalid_character_name") {
+    stop_services();
+    return fail("utf8 character name uses legacy byte rules");
+  }
 
   mir2::tests::send_client_v1_message(
       *alpha_lobby, mir2::client_v1::CreateCharacterRequest{"Abc", 1, 0, 2},
@@ -339,19 +353,43 @@ int main() {
   }
   const auto stale_enter_world_token = select_character->enter_world_token;
 
+  const auto alpha_cleanup_token = login_and_select_server(io_context, "alpha", "pw");
+  if (!alpha_cleanup_token.has_value()) {
+    stop_services();
+    return fail("alpha cleanup token");
+  }
+  auto alpha_cleanup_lobby = connect_login(io_context);
+  if (!alpha_cleanup_lobby.has_value()) {
+    stop_services();
+    return fail("connect alpha cleanup lobby");
+  }
+  mir2::tests::ClientV1SocketReader alpha_cleanup_reader(*alpha_cleanup_lobby);
+  std::uint32_t alpha_cleanup_sequence = 1;
+  send_hello(*alpha_cleanup_lobby, alpha_cleanup_sequence);
   mir2::tests::send_client_v1_message(
-      *alpha_lobby, mir2::client_v1::DeleteCharacterRequest{"Abc"}, alpha_sequence);
+      *alpha_cleanup_lobby, mir2::client_v1::CharacterListRequest{*alpha_cleanup_token},
+      alpha_cleanup_sequence);
+  characters = alpha_cleanup_reader.wait_for_message<mir2::client_v1::CharacterList>();
+  if (!characters.has_value() || characters->characters.size() != 2) {
+    stop_services();
+    return fail("alpha cleanup character list");
+  }
+
+  mir2::tests::send_client_v1_message(
+      *alpha_cleanup_lobby, mir2::client_v1::DeleteCharacterRequest{"Abc"},
+      alpha_cleanup_sequence);
   auto delete_character =
-      alpha_reader.wait_for_message<mir2::client_v1::DeleteCharacterResult>();
+      alpha_cleanup_reader.wait_for_message<mir2::client_v1::DeleteCharacterResult>();
   if (!delete_character.has_value() || !delete_character->success ||
       delete_character->deleted_name != "Abc") {
     stop_services();
     return fail("delete Abc");
   }
   mir2::tests::send_client_v1_message(
-      *alpha_lobby, mir2::client_v1::SelectCharacterRequest{"Abc"}, alpha_sequence);
+      *alpha_cleanup_lobby, mir2::client_v1::SelectCharacterRequest{"Abc"},
+      alpha_cleanup_sequence);
   select_character =
-      alpha_reader.wait_for_message<mir2::client_v1::SelectCharacterResult>();
+      alpha_cleanup_reader.wait_for_message<mir2::client_v1::SelectCharacterResult>();
   if (!select_character.has_value() || select_character->success ||
       select_character->error_message != "character_not_found") {
     stop_services();
@@ -381,9 +419,10 @@ int main() {
   }
 
   mir2::tests::send_client_v1_message(
-      *alpha_lobby, mir2::client_v1::DeleteCharacterRequest{"Missing"}, alpha_sequence);
+      *alpha_cleanup_lobby, mir2::client_v1::DeleteCharacterRequest{"Missing"},
+      alpha_cleanup_sequence);
   delete_character =
-      alpha_reader.wait_for_message<mir2::client_v1::DeleteCharacterResult>();
+      alpha_cleanup_reader.wait_for_message<mir2::client_v1::DeleteCharacterResult>();
   if (!delete_character.has_value() || delete_character->success ||
       delete_character->error_message != "delete_character_failed") {
     stop_services();
@@ -422,10 +461,10 @@ int main() {
   }
 
   mir2::tests::send_client_v1_message(
-      *alpha_lobby, mir2::client_v1::DeleteCharacterRequest{"abcdefghijklmn"},
-      alpha_sequence);
+      *alpha_cleanup_lobby, mir2::client_v1::DeleteCharacterRequest{"abcdefghijklmn"},
+      alpha_cleanup_sequence);
   delete_character =
-      alpha_reader.wait_for_message<mir2::client_v1::DeleteCharacterResult>();
+      alpha_cleanup_reader.wait_for_message<mir2::client_v1::DeleteCharacterResult>();
   if (!delete_character.has_value() || !delete_character->success) {
     stop_services();
     return fail("alpha delete own same-name character");
@@ -439,8 +478,9 @@ int main() {
     return fail("beta same-name character isolated from alpha delete");
   }
   mir2::tests::send_client_v1_message(
-      *alpha_lobby, mir2::client_v1::CharacterListRequest{}, alpha_sequence);
-  characters = alpha_reader.wait_for_message<mir2::client_v1::CharacterList>();
+      *alpha_cleanup_lobby, mir2::client_v1::CharacterListRequest{},
+      alpha_cleanup_sequence);
+  characters = alpha_cleanup_reader.wait_for_message<mir2::client_v1::CharacterList>();
   if (!characters.has_value() || !characters->characters.empty()) {
     stop_services();
     return fail("alpha list empty after deleting own characters");

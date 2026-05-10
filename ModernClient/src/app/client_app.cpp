@@ -60,6 +60,7 @@ constexpr int kMessageNoButtonIndex = 367;      ///< 确认对话框"否"按钮
 std::wstring widen(const std::string& text) { return text::utf8_to_wide(text); }
 /// 宽字符串转窄字符串
 std::string narrow(const std::wstring& text) { return text::wide_to_utf8(text); }
+std::string legacy_byte_payload(std::string value) { return value; }
 
 std::vector<std::wstring> split_modal_lines(const std::wstring& text) {
   std::vector<std::wstring> lines;
@@ -385,8 +386,8 @@ void ClientApp::request_scene_change(SceneId id) {
 // 请求登录网关：清理旧状态 -> 重置角色/选服/世界数据 -> 发起 TCP 连接
 void ClientApp::request_login(const std::string& account_id, const std::string& password) {
   state_.login.status = L"Connecting login gateway...";
-  state_.login.account_id = account_id;
-  state_.login.password = password;
+  state_.login.account_id = legacy_byte_payload(account_id);
+  state_.login.password = legacy_byte_payload(password);
   state_.login.login_state = LoginState::lsLogin;
   state_.login_notice = LoginNoticeViewState{};
   // 清除可能残留的上次登录记录
@@ -419,11 +420,11 @@ void ClientApp::request_create_account(const std::string& account_id, const std:
                                        const client_v1::AccountProfile& profile) {
   state_.login.status = L"Connecting login gateway for registration...";
   state_.login.login_state = LoginState::lsNewid;
-  state_.login.account_id = account_id;
-  state_.login.password = password;
+  state_.login.account_id = legacy_byte_payload(account_id);
+  state_.login.password = legacy_byte_payload(password);
   state_.login.account_profile = normalize_account_profile(account_id, profile);
-  pending_create_account_ =
-      client_v1::CreateAccountRequest{account_id, password, state_.login.account_profile};
+  pending_create_account_ = client_v1::CreateAccountRequest{
+      state_.login.account_id, state_.login.password, state_.login.account_profile};
   pending_connect_ = PendingConnect::create_account;
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for registration..."); });
@@ -445,12 +446,13 @@ void ClientApp::request_update_account(const std::string& account_id, const std:
   }
   state_.login.status = L"Updating account details...";
   state_.login.login_state = LoginState::lsNewid;
-  state_.login.account_id = account_id;
-  state_.login.password = password;
+  state_.login.account_id = legacy_byte_payload(account_id);
+  state_.login.password = legacy_byte_payload(password);
   state_.login.account_profile = normalize_account_profile(account_id, profile);
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for account update..."); });
-  protocol_.send(client_v1::UpdateAccountRequest{account_id, password, state_.login.account_profile});
+  protocol_.send(client_v1::UpdateAccountRequest{state_.login.account_id, state_.login.password,
+                                                 state_.login.account_profile});
 }
 
 // 请求修改密码：发起独立的修改密码连接
@@ -458,10 +460,10 @@ void ClientApp::request_change_password(const std::string& account_id, const std
                                         const std::string& new_password) {
   state_.login.status = L"Connecting login gateway for password change...";
   state_.login.login_state = LoginState::lsChgpw;
-  state_.login.account_id = account_id;
-  state_.login.password = password;
-  pending_change_password_ =
-      client_v1::ChangePasswordRequest{account_id, password, new_password};
+  state_.login.account_id = legacy_byte_payload(account_id);
+  state_.login.password = legacy_byte_payload(password);
+  pending_change_password_ = client_v1::ChangePasswordRequest{
+      state_.login.account_id, state_.login.password, legacy_byte_payload(new_password)};
   pending_connect_ = PendingConnect::change_password;
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for password change..."); });
@@ -513,7 +515,7 @@ void ClientApp::request_create_character(const std::string& name, const std::uin
   }
   schedule_one_shot_timer(cmd_timer_, 3.0f,
                           [this] { cmd_timer_tick(L"Still waiting for character creation..."); });
-  protocol_.send(client_v1::CreateCharacterRequest{name, job, sex, hair});
+  protocol_.send(client_v1::CreateCharacterRequest{legacy_byte_payload(name), job, sex, hair});
 }
 
 // 请求删除当前选中的角色：弹出确认对话框，确认后发送删除请求
@@ -533,7 +535,7 @@ void ClientApp::request_delete_selected_character() {
         schedule_one_shot_timer(
             cmd_timer_, 3.0f,
             [this] { cmd_timer_tick(L"Still waiting for character deletion..."); });
-        protocol_.send(client_v1::DeleteCharacterRequest{name});
+        protocol_.send(client_v1::DeleteCharacterRequest{legacy_byte_payload(name)});
       });
 }
 
@@ -543,7 +545,8 @@ void ClientApp::request_selected_character_enter() {
       state_.lobby.selected_index >= static_cast<int>(state_.lobby.characters.size())) {
     return;
   }
-  state_.selected_character = state_.lobby.characters[static_cast<std::size_t>(state_.lobby.selected_index)].name;
+  state_.selected_character = legacy_byte_payload(
+      state_.lobby.characters[static_cast<std::size_t>(state_.lobby.selected_index)].name);
   schedule_one_shot_timer(sel_chr_wait_timer_, 5.0f,
                           [this] { sel_chr_wait_timer_tick(L"Still waiting for character entry..."); });
   protocol_.send(client_v1::SelectCharacterRequest{state_.selected_character});
@@ -696,7 +699,9 @@ void ClientApp::request_use_item(const client_v1::UseItemIntent& intent) {
         << " slot=" << intent.item_slot << " name=" << intent.name;
     legacy_trace(out.str());
   }
-  protocol_.send(intent);
+  auto legacy_intent = intent;
+  legacy_intent.name = legacy_byte_payload(std::move(legacy_intent.name));
+  protocol_.send(legacy_intent);
 }
 
 // 装备物品请求：步骤 3 只发送最小 Delphi 兼容字段，合法性由服务端最终裁决
@@ -708,7 +713,9 @@ void ClientApp::request_equip_item(const client_v1::EquipItemRequest& request) {
         << " make_index=" << request.item_make_index << " name=" << request.name;
     legacy_trace(out.str());
   }
-  protocol_.send(request);
+  auto legacy_request = request;
+  legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
+  protocol_.send(legacy_request);
 }
 
 // 卸下装备请求
@@ -720,7 +727,9 @@ void ClientApp::request_unequip_item(const client_v1::UnequipItemRequest& reques
         << " make_index=" << request.item_make_index << " name=" << request.name;
     legacy_trace(out.str());
   }
-  protocol_.send(request);
+  auto legacy_request = request;
+  legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
+  protocol_.send(legacy_request);
 }
 
 // 丢弃物品请求（步骤 3 仅保留协议入口，具体地面投放后续接入）
@@ -731,7 +740,9 @@ void ClientApp::request_drop_item(const client_v1::DropItemRequest& request) {
         << " make_index=" << request.item_make_index << " name=" << request.name;
     legacy_trace(out.str());
   }
-  protocol_.send(request);
+  auto legacy_request = request;
+  legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
+  protocol_.send(legacy_request);
 }
 
 // 魔法快捷键变更：服务端返回权威 MagicList 后更新客户端
@@ -752,7 +763,7 @@ void ClientApp::request_chat_send(std::string text) {
     out << "request_chat_send now=" << detail::monotonic_ms() << " text=" << text;
     legacy_trace(out.str());
   }
-  protocol_.send(client_v1::ChatSend{std::move(text)});
+  protocol_.send(client_v1::ChatSend{legacy_byte_payload(std::move(text))});
 }
 
 // 点击 NPC：对应 Delphi CM_CLICKNPC
@@ -780,7 +791,9 @@ void ClientApp::request_npc_dialog_select(
         << " merchant_id=" << request.merchant_id << " selection=" << request.selection;
     legacy_trace(out.str());
   }
-  protocol_.send(request);
+  auto legacy_request = request;
+  legacy_request.selection = legacy_byte_payload(std::move(legacy_request.selection));
+  protocol_.send(legacy_request);
 }
 
 // 商店购买：对应 Delphi CM_USERBUYITEM
@@ -788,7 +801,9 @@ void ClientApp::request_merchant_buy(const client_v1::MerchantBuyRequest& reques
   if (request.merchant_id == 0 || request.item_server_index == 0 || request.name.empty()) {
     return;
   }
-  protocol_.send(request);
+  auto legacy_request = request;
+  legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
+  protocol_.send(legacy_request);
 }
 
 // 商店出售：对应 Delphi CM_USERSELLITEM
@@ -796,7 +811,9 @@ void ClientApp::request_merchant_sell(const client_v1::MerchantSellRequest& requ
   if (request.merchant_id == 0 || request.item_make_index == 0 || request.name.empty()) {
     return;
   }
-  protocol_.send(request);
+  auto legacy_request = request;
+  legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
+  protocol_.send(legacy_request);
 }
 
 // 商店出售询价：对应 Delphi CM_MERCHANTQUERYSELLPRICE
@@ -805,35 +822,45 @@ void ClientApp::request_merchant_sell_price(
   if (request.merchant_id == 0 || request.item_make_index == 0 || request.name.empty()) {
     return;
   }
-  protocol_.send(request);
+  auto legacy_request = request;
+  legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
+  protocol_.send(legacy_request);
 }
 
 void ClientApp::request_repair_price(const client_v1::MerchantRepairPriceRequest& request) {
   if (request.merchant_id == 0 || request.item_make_index == 0 || request.name.empty()) {
     return;
   }
-  protocol_.send(request);
+  auto legacy_request = request;
+  legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
+  protocol_.send(legacy_request);
 }
 
 void ClientApp::request_repair_item(const client_v1::MerchantRepairRequest& request) {
   if (request.merchant_id == 0 || request.item_make_index == 0 || request.name.empty()) {
     return;
   }
-  protocol_.send(request);
+  auto legacy_request = request;
+  legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
+  protocol_.send(legacy_request);
 }
 
 void ClientApp::request_storage_deposit(const client_v1::StorageDepositRequest& request) {
   if (request.merchant_id == 0 || request.item_make_index == 0 || request.name.empty()) {
     return;
   }
-  protocol_.send(request);
+  auto legacy_request = request;
+  legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
+  protocol_.send(legacy_request);
 }
 
 void ClientApp::request_storage_withdraw(const client_v1::StorageWithdrawRequest& request) {
   if (request.merchant_id == 0 || request.item_make_index == 0 || request.name.empty()) {
     return;
   }
-  protocol_.send(request);
+  auto legacy_request = request;
+  legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
+  protocol_.send(legacy_request);
 }
 
 void ClientApp::request_group_mode(const client_v1::GroupModeRequest& request) {
@@ -862,7 +889,9 @@ void ClientApp::request_group_remove(const client_v1::GroupRemoveMemberRequest& 
 }
 
 void ClientApp::request_trade_try(const client_v1::TradeTryRequest& request) {
-  protocol_.send(request);
+  auto legacy_request = request;
+  legacy_request.target_name = legacy_byte_payload(std::move(legacy_request.target_name));
+  protocol_.send(legacy_request);
 }
 
 void ClientApp::request_trade_cancel(const client_v1::TradeCancelRequest& request) {
@@ -873,14 +902,18 @@ void ClientApp::request_trade_add_item(const client_v1::TradeAddItemRequest& req
   if (request.item_make_index == 0 || request.name.empty()) {
     return;
   }
-  protocol_.send(request);
+  auto legacy_request = request;
+  legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
+  protocol_.send(legacy_request);
 }
 
 void ClientApp::request_trade_remove_item(const client_v1::TradeRemoveItemRequest& request) {
   if (request.item_make_index == 0 || request.name.empty()) {
     return;
   }
-  protocol_.send(request);
+  auto legacy_request = request;
+  legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
+  protocol_.send(legacy_request);
 }
 
 void ClientApp::request_trade_gold(const client_v1::TradeSetGoldRequest& request) {
@@ -1024,7 +1057,7 @@ void ClientApp::handle_auto_character_list() {
     auto_character_create_requested_ = true;
     state_.login.status = L"Creating autoplay character...";
     protocol_.send(client_v1::CreateCharacterRequest{
-        config_.auto_play.character_name, config_.auto_play.job,
+        legacy_byte_payload(config_.auto_play.character_name), config_.auto_play.job,
         config_.auto_play.sex, config_.auto_play.hair});
     return;
   }
@@ -1125,7 +1158,8 @@ void ClientApp::handle_protocol_events() {
                 auto_account_create_requested_ = true;
                 state_.login.status = L"Account missing. Creating autoplay account...";
                 protocol_.send(client_v1::CreateAccountRequest{
-                    config_.auto_play.account_id, config_.auto_play.password,
+                    legacy_byte_payload(config_.auto_play.account_id),
+                    legacy_byte_payload(config_.auto_play.password),
                     make_autoplay_account_profile(config_.auto_play.account_id,
                                                   config_.auto_play.display_name)});
                 return;
@@ -1143,7 +1177,7 @@ void ClientApp::handle_protocol_events() {
             state_.login.status = L"Account details required.";
             if (config_.auto_play.enabled) {
               protocol_.send(client_v1::UpdateAccountRequest{
-                  value.account_id, state_.login.password,
+                  legacy_byte_payload(value.account_id), legacy_byte_payload(state_.login.password),
                   make_autoplay_account_profile(value.account_id, config_.auto_play.display_name)});
               state_.login.status = L"Completing autoplay account details...";
               return;
@@ -1441,8 +1475,9 @@ void ClientApp::handle_protocol_events() {
             }
             // 自动模式：创建成功后立即用刚注册的账号登录
             state_.login.status = L"Autoplay account ready. Logging in...";
-            protocol_.send(client_v1::LoginRequest{config_.auto_play.account_id,
-                                                   config_.auto_play.password});
+            protocol_.send(client_v1::LoginRequest{
+                legacy_byte_payload(config_.auto_play.account_id),
+                legacy_byte_payload(config_.auto_play.password)});
 
           } else if constexpr (std::is_same_v<T, client_v1::UpdateAccountResult>) {
             if (!value.success) {

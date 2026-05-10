@@ -85,6 +85,7 @@ set(MIR2_HOST_SOURCES
   src/protocol/legacy_edcode.cpp
   src/protocol/legacy_game_codec.cpp
   src/protocol/legacy_protocol.cpp
+  src/protocol/legacy_string.cpp
   src/protocol/session_router.cpp
   src/services/auth_service.cpp
   src/services/client_v1_gateway_service_base.cpp
@@ -166,6 +167,12 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_canonical_legacy_command_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_canonical_legacy_command_smoke
     COMMAND mir2_canonical_legacy_command_smoke)
+
+  add_executable(mir2_legacy_string_semantics_smoke
+    tests/legacy_string_semantics_smoke.cpp)
+  target_link_libraries(mir2_legacy_string_semantics_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_string_semantics_smoke
+    COMMAND mir2_legacy_string_semantics_smoke)
 
   add_executable(mir2_canonical_login_state_smoke
     tests/canonical_login_state_smoke.cpp)
@@ -827,6 +834,7 @@ if(BUILD_TESTING)
       mir2_legacy_frame_smoke
       mir2_legacy_protocol_command_golden_smoke
       mir2_canonical_legacy_command_smoke
+      mir2_legacy_string_semantics_smoke
       mir2_canonical_login_state_smoke
       mir2_client_v1_canonical_command_smoke
       mir2_client_v1_protocol_smoke

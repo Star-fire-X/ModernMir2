@@ -3,10 +3,10 @@
 #include <algorithm>
 #include <charconv>
 #include <chrono>
-#include <cctype>
 
 #include "protocol/legacy_edcode.hpp"
 #include "protocol/legacy_game_codec.hpp"
+#include "protocol/legacy_string.hpp"
 #include "util/string_utils.hpp"
 
 namespace mir2 {
@@ -37,15 +37,8 @@ void audit(HostContext& context, std::string category, std::string message, std:
 
 std::vector<std::string> split_fields(std::string_view text, char delimiter) {
   std::vector<std::string> fields;
-  std::size_t start = 0;
-  while (start <= text.size()) {
-    const auto end = text.find(delimiter, start);
-    if (end == std::string_view::npos) {
-      fields.emplace_back(text.substr(start));
-      break;
-    }
-    fields.emplace_back(text.substr(start, end - start));
-    start = end + 1;
+  for (const auto& field : split_legacy_fields(LegacyStringView{text}, delimiter)) {
+    fields.push_back(copy_legacy_bytes(field.bytes()));
   }
   return fields;
 }
@@ -65,38 +58,6 @@ std::int64_t now_ms() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
              std::chrono::system_clock::now().time_since_epoch())
       .count();
-}
-
-bool is_valid_character_name(const std::string& name) {
-  static constexpr std::string_view kInvalidChars = " /@?'\"\\.,:;`~!#$%^&*()-_+=|[]{}";
-  if (name.size() < 3 || name.size() > 14) {
-    return false;
-  }
-  return std::all_of(name.begin(), name.end(), [](unsigned char ch) {
-           return std::isalnum(ch) != 0;
-         }) && name.find_first_of(kInvalidChars) == std::string::npos;
-}
-
-bool is_valid_account_id(std::string_view account_id) {
-  if (account_id.empty()) {
-    return false;
-  }
-
-  for (std::size_t index = 0; index < account_id.size(); ++index) {
-    const auto ch = static_cast<unsigned char>(account_id[index]);
-    if (ch >= 48 && ch <= 122) {
-      continue;
-    }
-    if (ch >= 0xB0 && ch <= 0xC8 && index + 1 < account_id.size()) {
-      const auto next = static_cast<unsigned char>(account_id[index + 1]);
-      if (next >= 0xA1 && next <= 0xFE) {
-        ++index;
-        continue;
-      }
-    }
-    return false;
-  }
-  return true;
 }
 
 bool should_throttle(std::int64_t& last_command_at_ms, std::int64_t current_ms) {
@@ -351,7 +312,7 @@ void AuthService::handle_session_event(const SessionEvent& event) {
       }
 
       auto account = make_account_record(info, add_info);
-      if (!is_valid_account_id(account.account_id)) {
+      if (!is_valid_legacy_account_id(account.account_id)) {
         post_gateway_packet(*context_, event.session_id,
                             make_response_packet(event.session_id, kSmNewIdFail, 0));
         return;
@@ -392,7 +353,7 @@ void AuthService::handle_session_event(const SessionEvent& event) {
 
       auto account = make_account_record(info, add_info);
       if (session.account_id.empty() || session.account_id != account.account_id ||
-          !is_valid_account_id(account.account_id)) {
+          !is_valid_legacy_account_id(account.account_id)) {
         post_gateway_packet(*context_, event.session_id,
                             make_response_packet(event.session_id, kSmUpdateIdFail, -1));
         return;
@@ -526,7 +487,7 @@ void AuthService::handle_session_event(const SessionEvent& event) {
           !can_accept(session->second.stage, CanonicalLoginRequest::create_character) ||
           admissions_.find(session->second.certification) == admissions_.end() ||
           !hair.has_value() || !job.has_value() || !sex.has_value() ||
-          !is_valid_character_name(character_name)) {
+          !is_valid_legacy_character_name(character_name)) {
         post_gateway_packet(*context_, event.session_id,
                             make_response_packet(event.session_id, kSmNewChrFail, 0));
         return;

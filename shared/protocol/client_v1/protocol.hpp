@@ -1084,7 +1084,7 @@ class ByteWriter {
 
   void write_i32(std::int32_t value) { write_scalar(value); }
 
-  /// 写入字符串：2 字节长度前缀 + UTF-8 内容
+  /// 写入字符串：2 字节长度前缀 + byte payload。legacy-sensitive 字段不隐含 UTF-8 语义。
   void write_string(std::string_view value) {
     const auto size = static_cast<std::uint16_t>(std::min<std::size_t>(value.size(), 0xFFFFU));
     write_u16(size);
@@ -1146,7 +1146,7 @@ class ByteReader {
 
   [[nodiscard]] bool read_i32(std::int32_t& value) { return read_scalar(value); }
 
-  /// 读取字符串：2 字节长度前缀 + UTF-8 内容
+  /// 读取字符串：2 字节长度前缀 + byte payload。显示层自行决定是否按 UTF-8 展示。
   [[nodiscard]] bool read_string(std::string& value) {
     std::uint16_t size = 0;
     if (!read_u16(size) || offset_ + size > bytes_.size()) {
