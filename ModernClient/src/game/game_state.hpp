@@ -898,6 +898,33 @@ struct GameStateStore {
     actor.actor_type = message.actor.actor_type;
   }
 
+  /// 应用角色删除消息
+  /// 服务端通知角色离开九宫格视野或被清理时，移除本地对象并清掉悬挂目标。
+  void apply(const client_v1::ActorRemove& message) {
+    if (message.actor_id == 0 || message.actor_id == world.self_actor_id) {
+      return;
+    }
+    world.actors.erase(message.actor_id);
+    if (world.focus_actor_id == message.actor_id) {
+      world.focus_actor_id = 0;
+    }
+    if (world.target_actor_id == message.actor_id) {
+      world.target_actor_id = 0;
+    }
+    if (world.npc_dialog.merchant_id == message.actor_id) {
+      world.npc_dialog = NpcDialogState{};
+      world.merchant_shop = MerchantShopState{};
+      world.repair = RepairState{};
+      world.storage = StorageState{};
+    }
+    for (auto& entry : world.actors) {
+      auto& actor = entry.second;
+      if (actor.action_target_actor_id == message.actor_id) {
+        actor.action_target_actor_id = 0;
+      }
+    }
+  }
+
   /// 应用角色动作消息
   /// 服务端通知某个角色正在执行某种动作（攻击/施法/受击等）
   void apply(const client_v1::ActorAction& message) {

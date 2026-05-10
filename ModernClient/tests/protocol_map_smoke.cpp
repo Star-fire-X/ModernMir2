@@ -234,6 +234,10 @@ void assert_p0_protocol_goldens() {
   assert_golden(ActorUpsert{hen}, 306, 14, payload);
 
   payload.clear();
+  append_u64(payload, 2000);
+  assert_golden(ActorRemove{2000}, 316, 141, payload);
+
+  payload.clear();
   append_u64(payload, 1000);
   append_i32(payload, 331);
   append_i32(payload, 270);
@@ -464,6 +468,15 @@ int main() {
   const auto decoded_ground_remove = decode_message<GroundItemRemove>(frames.front());
   assert(decoded_ground_remove.has_value());
   assert(decoded_ground_remove->object_id == 77);
+
+  frame_bytes = encode_frame(make_frame(ActorRemove{2000}, 211));
+  buffer = frame_bytes;
+  frames = drain_frames(buffer);
+  assert(frames.size() == 1);
+  assert(frames.front().message_id == MessageId::actor_remove);
+  const auto decoded_actor_remove = decode_message<ActorRemove>(frames.front());
+  assert(decoded_actor_remove.has_value());
+  assert(decoded_actor_remove->actor_id == 2000);
 
   frame_bytes = encode_frame(make_frame(UseItemResult{true}, 22));
   buffer = frame_bytes;

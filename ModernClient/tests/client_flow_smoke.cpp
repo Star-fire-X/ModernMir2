@@ -77,6 +77,15 @@ int main() {
       WorldActor{2000, "Hen", 332, 271, 4, 0, 0, ActorType::monster}});
   assert(state.world.actors.size() == 2);
   assert(state.world.actors[2000].name == "Hen");
+  state.world.focus_actor_id = 2000;
+  state.world.target_actor_id = 2000;
+  state.world.actors[1000].action_target_actor_id = 2000;
+  state.apply(ActorRemove{2000});
+  assert(state.world.actors.size() == 1);
+  assert(state.world.actors.find(2000) == state.world.actors.end());
+  assert(state.world.focus_actor_id == 0);
+  assert(state.world.target_actor_id == 0);
+  assert(state.world.actors[1000].action_target_actor_id == 0);
 
   state.apply(ActorStateDelta{1000, 331, 270, 2});
   assert(state.world.actors[1000].x == 331);

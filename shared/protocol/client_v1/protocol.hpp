@@ -67,6 +67,7 @@ enum class MessageId : std::uint16_t {
   mini_map_request = 313,
   mini_map_data = 314,
   actor_magic_fire = 315,
+  actor_remove = 316,
   move_intent = 400,
   action_intent = 401,
   spell_intent = 402,
@@ -460,6 +461,11 @@ struct ActorStateDelta {
 /// 新增/更新角色：服务端通知有新角色进入或角色信息更新
 struct ActorUpsert {
   WorldActor actor{};
+};
+
+/// 删除角色：服务端通知角色离开九宫格视野或被清理
+struct ActorRemove {
+  std::uint64_t actor_id{0};
 };
 
 /// 角色动作：服务端同步角色的动作事件（攻击、施法等）
@@ -984,6 +990,7 @@ using Message = std::variant<ClientHello,
                              LoginNotice,
                              LoginNoticeOk,
                              ActorUpsert,
+                             ActorRemove,
                              ActorAction,
                              ActorMagicFire,
                              ActorVitals,
@@ -1237,6 +1244,7 @@ MIR2_CLIENT_V1_TRAIT(ActorStateDelta, actor_state_delta);
 MIR2_CLIENT_V1_TRAIT(LoginNotice, login_notice);
 MIR2_CLIENT_V1_TRAIT(LoginNoticeOk, login_notice_ok);
 MIR2_CLIENT_V1_TRAIT(ActorUpsert, actor_upsert);
+MIR2_CLIENT_V1_TRAIT(ActorRemove, actor_remove);
 MIR2_CLIENT_V1_TRAIT(ActorAction, actor_action);
 MIR2_CLIENT_V1_TRAIT(ActorMagicFire, actor_magic_fire);
 MIR2_CLIENT_V1_TRAIT(ActorVitals, actor_vitals);
@@ -1846,6 +1854,14 @@ inline bool decode(ByteReader& /*reader*/, LoginNoticeOk& /*value*/) { return tr
 inline void encode(ByteWriter& writer, const ActorUpsert& value) { encode(writer, value.actor); }
 
 inline bool decode(ByteReader& reader, ActorUpsert& value) { return decode(reader, value.actor); }
+
+inline void encode(ByteWriter& writer, const ActorRemove& value) {
+  writer.write_u64(value.actor_id);
+}
+
+inline bool decode(ByteReader& reader, ActorRemove& value) {
+  return reader.read_u64(value.actor_id);
+}
 
 inline void encode(ByteWriter& writer, const ActorAction& value) {
   writer.write_u64(value.actor_id);
@@ -2886,6 +2902,9 @@ inline std::optional<Message> decode_any(const Frame& frame) {
       break;
     case MessageId::actor_upsert:
       if (auto value = decode_message<ActorUpsert>(frame); value.has_value()) return Message{*value};
+      break;
+    case MessageId::actor_remove:
+      if (auto value = decode_message<ActorRemove>(frame); value.has_value()) return Message{*value};
       break;
     case MessageId::actor_action:
       if (auto value = decode_message<ActorAction>(frame); value.has_value()) return Message{*value};

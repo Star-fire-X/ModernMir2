@@ -300,6 +300,14 @@ int main() {
   assert(decoded_ground_remove.has_value());
   assert(decoded_ground_remove->object_id == 77);
 
+  const auto actor_remove_frame = encode_frame(make_frame(ActorRemove{42}, 1841));
+  buffer = actor_remove_frame;
+  frames = drain_frames(buffer);
+  assert(frames.front().message_id == MessageId::actor_remove);
+  const auto decoded_actor_remove = decode_message<ActorRemove>(frames.front());
+  assert(decoded_actor_remove.has_value());
+  assert(decoded_actor_remove->actor_id == 42);
+
   const auto use_result_frame = encode_frame(make_frame(UseItemResult{true}, 185));
   buffer = use_result_frame;
   frames = drain_frames(buffer);
