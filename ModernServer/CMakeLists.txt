@@ -225,6 +225,12 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_legacy_player_inbox_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_player_inbox_smoke COMMAND mir2_legacy_player_inbox_smoke)
 
+  add_executable(mir2_legacy_player_input_budget_smoke
+    tests/legacy_player_input_budget_smoke.cpp)
+  target_link_libraries(mir2_legacy_player_input_budget_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_player_input_budget_smoke
+    COMMAND mir2_legacy_player_input_budget_smoke)
+
   add_executable(mir2_legacy_player_operate_order_smoke
     tests/legacy_player_operate_order_smoke.cpp)
   target_link_libraries(mir2_legacy_player_operate_order_smoke PRIVATE mir2_hostlib)
@@ -822,6 +828,7 @@ if(BUILD_TESTING)
       mir2_combat_smoke
       mir2_items_smoke
       mir2_world_tick_cadence_smoke
+      mir2_legacy_player_input_budget_smoke
       mir2_player_movement_smoke
       mir2_visibility_delta_smoke
       mir2_monster_legacy_combat_damage_smoke

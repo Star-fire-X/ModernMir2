@@ -69,7 +69,8 @@ class MapActor {
   [[nodiscard]] RuntimeDispatch legacy_process_player(std::uint64_t actor_id,
                                                       std::uint64_t current_tick,
                                                       std::uint64_t now_ms,
-                                                      bool persistence_overloaded);
+                                                      bool persistence_overloaded,
+                                                      std::size_t player_input_budget_per_tick = 1);
   [[nodiscard]] RuntimeDispatch legacy_process_monster(std::uint64_t actor_id,
                                                        std::uint64_t current_tick,
                                                        std::uint64_t now_ms,
@@ -157,7 +158,8 @@ class MapActor {
                                      RuntimeDispatch& dispatch,
                                      std::uint64_t current_tick,
                                      std::uint64_t now_ms,
-                                     bool persistence_overloaded);
+                                     bool persistence_overloaded,
+                                     std::size_t player_input_budget_per_tick);
   void trace_player_operate(RuntimeDispatch& dispatch, const Player& player,
                             std::string action, std::uint64_t current_tick,
                             std::uint64_t now_ms, bool success = true,
