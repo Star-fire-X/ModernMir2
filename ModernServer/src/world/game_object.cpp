@@ -850,6 +850,27 @@ LegacySpellThrottleResult Player::begin_spell_attempt(std::uint64_t now_ms,
                                    spell_time_over_count_};
 }
 
+LegacyAttackThrottleResult Player::begin_attack_attempt(std::uint64_t now_ms) {
+  const auto interval_ms =
+      static_cast<std::uint64_t>(std::max(200, 900 - legacy_hit_speed_ * 60));
+  if (latest_hit_time_ms_ != 0 && now_ms - latest_hit_time_ms_ < interval_ms) {
+    ++hit_time_over_count_;
+    ++hit_time_over_sum_;
+    latest_hit_time_ms_ = now_ms;
+    ++hit_speed_hack_timer_over_count_;
+    return LegacyAttackThrottleResult{false, hit_speed_hack_timer_over_count_ > 8,
+                                      hit_time_over_count_};
+  }
+
+  hit_time_over_count_ = 0;
+  if (hit_time_over_sum_ > 0) {
+    --hit_time_over_sum_;
+  }
+
+  latest_hit_time_ms_ = now_ms;
+  return {};
+}
+
 void Player::reset_move_throttle() {
   walk_time_over_count_ = 0;
   walk_time_over_sum_ = 0;
@@ -1505,6 +1526,10 @@ void Player::refresh_derived_state(
       case 5:
       case 6:
         accuracy_point_ += packed_max(upgraded.ac);
+        if (slot == kEquipWeapon) {
+          const auto mac_high = packed_max(upgraded.mac);
+          legacy_hit_speed_ += mac_high > 10 ? mac_high - 10 : -mac_high;
+        }
         specials.luck += packed_min(upgraded.ac);
         specials.unluck += packed_min(upgraded.mac);
         break;
@@ -1536,10 +1561,15 @@ void Player::refresh_derived_state(
         derived.mac = add_packed_range(derived.mac, upgraded.mac);
         break;
       case 21:
+        legacy_hit_speed_ += packed_min(upgraded.ac);
+        legacy_hit_speed_ -= packed_min(upgraded.mac);
+        break;
       case 53:
         break;
       case 23:
         specials.anti_poison += packed_max(upgraded.ac);
+        legacy_hit_speed_ += packed_min(upgraded.ac);
+        legacy_hit_speed_ -= packed_min(upgraded.mac);
         break;
       default:
         derived.ac = add_packed_range(derived.ac, upgraded.ac);
@@ -1596,6 +1626,7 @@ void Player::refresh_derived_state(
 
   accuracy_point_ = base_ability_.reserved1 > 0 ? base_ability_.reserved1 : 10;
   speed_point_ = base_ability_.exp_count > 0 ? base_ability_.exp_count : 10;
+  legacy_hit_speed_ = 0;
   for (std::size_t slot = 0; slot < character_.equipped_items.size(); ++slot) {
     add_equipment_stats(slot, character_.equipped_items[slot]);
   }

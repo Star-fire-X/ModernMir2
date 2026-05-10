@@ -68,6 +68,7 @@ function Get-CiBuildTargets {
     "mir2_special_consumables_legacy_smoke",
     "mir2_monster_legacy_drop_scatter_smoke",
     "mir2_legacy_player_input_budget_smoke",
+    "mir2_legacy_action_cadence_smoke",
     "mir2_canonical_login_state_smoke",
     "mir2_client_v1_canonical_command_smoke",
     "mir2_client_v1_auth_boundary_smoke",

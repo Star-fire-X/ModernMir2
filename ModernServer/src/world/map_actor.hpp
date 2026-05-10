@@ -137,6 +137,7 @@ class MapActor {
     std::vector<LegacyUserItem> items{};
     std::int32_t gold{0};
     bool accepted{false};
+    std::uint64_t last_change_time_ms{0};
   };
 
   struct TradeSession {

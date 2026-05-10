@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdint>
 #include <iterator>
 #include <optional>
@@ -8,6 +9,8 @@
 #include "protocol/legacy_edcode.hpp"
 #include "protocol/legacy_game_codec.hpp"
 #include "protocol/legacy_types.hpp"
+#include "protocol/canonical_legacy_command.hpp"
+#include "protocol/client_v1_legacy_command_decoder.hpp"
 #include "util/string_utils.hpp"
 #include "world/logic_runtime.hpp"
 
@@ -51,6 +54,26 @@ bool has_save_character(const mir2::RuntimeDispatch& dispatch, std::string_view 
   return false;
 }
 
+bool has_raw_text_for(const mir2::RuntimeDispatch& dispatch, std::uint64_t session_id,
+                      std::string_view text) {
+  for (const auto& event : dispatch.session_events) {
+    if (event.session_id != session_id) {
+      continue;
+    }
+    const auto decoded = mir2::decode_legacy_game_packet(event.packet);
+    if (decoded.has_value() && decoded->message.ident == mir2::kSmHear &&
+        mir2::legacy_decode_string(decoded->body).find(text) != std::string::npos) {
+      return true;
+    }
+    const auto found =
+        std::search(event.packet.body.begin(), event.packet.body.end(), text.begin(), text.end());
+    if (found != event.packet.body.end()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void append_dispatch(mir2::RuntimeDispatch& target, mir2::RuntimeDispatch source) {
   target.session_events.insert(target.session_events.end(),
                                std::make_move_iterator(source.session_events.begin()),
@@ -60,9 +83,9 @@ void append_dispatch(mir2::RuntimeDispatch& target, mir2::RuntimeDispatch source
                                  std::make_move_iterator(source.persist_requests.end()));
 }
 
-mir2::RuntimeDispatch tick_players(mir2::LogicRuntime& runtime) {
+mir2::RuntimeDispatch tick_players(mir2::LogicRuntime& runtime, int count = 30) {
   mir2::RuntimeDispatch dispatch;
-  for (int i = 0; i < 30; ++i) {
+  for (int i = 0; i < count; ++i) {
     append_dispatch(dispatch, runtime.tick());
   }
   return dispatch;
@@ -121,6 +144,10 @@ mir2::LogicCommand trade_command(mir2::LogicCommandKind kind, std::uint64_t sess
   command.text = std::move(text);
   command.amount = amount;
   return command;
+}
+
+mir2::LogicCommand client_v1_trade_accept(std::uint64_t session_id) {
+  return mir2::to_logic_command(mir2::decode_client_v1_trade_accept_command(session_id));
 }
 
 std::vector<mir2::LegacyClientItem> query_bag(mir2::LogicRuntime& runtime,
@@ -192,6 +219,7 @@ int main() {
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_set_gold, 8, 0, {}, 7)));
   static_cast<void>(tick_players(runtime));
+  static_cast<void>(tick_players(runtime, 60));
 
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_accept, 7)));
@@ -230,16 +258,76 @@ int main() {
       trade_command(mir2::LogicCommandKind::trade_add_item, 7, 2001, "Sapphire")));
   static_cast<void>(tick_players(runtime));
   static_cast<void>(runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_remove_item, 7, 2001, "Sapphire")));
+  static_cast<void>(tick_players(runtime));
+  static_cast<void>(runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_accept, 7)));
+  const auto remove_window_cancel = tick_players(runtime);
+  if (!has_raw_text_for(remove_window_cancel, 7, "Trade cancelled.") ||
+      !has_raw_text_for(remove_window_cancel, 8, "Trade cancelled.")) {
+    return fail(7);
+  }
+
+  auto bag_after_remove_window = query_bag(runtime, 7);
+  if (bag_after_remove_window.size() != 1 || bag_after_remove_window.front().make_index != 2001) {
+    return fail(8);
+  }
+
+  static_cast<void>(runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_try, 7, 0, "HeroB")));
+  static_cast<void>(tick_players(runtime));
+  static_cast<void>(runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_add_item, 7, 2001, "Sapphire")));
+  static_cast<void>(tick_players(runtime));
+  static_cast<void>(runtime.route_logic_command(client_v1_trade_accept(7)));
+  const auto early_accept = tick_players(runtime);
+  if (!find_packet(early_accept, 7, mir2::kSmAddItem).has_value() ||
+      !has_save_character(early_accept, "HeroA") ||
+      !has_raw_text_for(early_accept, 7, "Trade cancelled.") ||
+      !has_raw_text_for(early_accept, 8, "Trade cancelled.")) {
+    return fail(9);
+  }
+
+  const auto bag_after_early_accept = query_bag(runtime, 7);
+  if (bag_after_early_accept.size() != 1 || bag_after_early_accept.front().make_index != 2001) {
+    return fail(10);
+  }
+
+  static_cast<void>(runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_try, 7, 0, "HeroB")));
+  static_cast<void>(tick_players(runtime));
+  static_cast<void>(runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_set_gold, 7, 0, {}, 5)));
+  static_cast<void>(tick_players(runtime));
+  static_cast<void>(runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_accept, 7)));
+  const auto gold_window_cancel = tick_players(runtime);
+  const auto hero_a_after_gold_cancel = runtime.snapshot_character_actor("HeroA");
+  const auto hero_b_after_gold_cancel = runtime.snapshot_character_actor("HeroB");
+  if (!hero_a_after_gold_cancel.has_value() || !hero_b_after_gold_cancel.has_value() ||
+      hero_a_after_gold_cancel->gold != 92 || hero_b_after_gold_cancel->gold != 58 ||
+      !has_raw_text_for(gold_window_cancel, 7, "Trade cancelled.") ||
+      !has_raw_text_for(gold_window_cancel, 8, "Trade cancelled.")) {
+    return fail(11);
+  }
+
+  static_cast<void>(runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_try, 7, 0, "HeroB")));
+  static_cast<void>(tick_players(runtime));
+  static_cast<void>(runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_add_item, 7, 2001, "Sapphire")));
+  static_cast<void>(tick_players(runtime));
+  static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_cancel, 7)));
   const auto cancel = tick_players(runtime);
   if (!find_packet(cancel, 7, mir2::kSmAddItem).has_value() ||
       !has_save_character(cancel, "HeroA")) {
-    return fail(7);
+    return fail(12);
   }
 
   const auto bag_after_cancel = query_bag(runtime, 7);
   if (bag_after_cancel.size() != 1 || bag_after_cancel.front().make_index != 2001) {
-    return fail(8);
+    return fail(13);
   }
 
   return 0;
