@@ -36,6 +36,7 @@ mir2::CharacterRecord make_character() {
   character.ability.mp = 15;
   character.ability.max_mp = 15;
   character.ability.max_exp = 100;
+  character.gold = 500;
   return character;
 }
 
@@ -279,6 +280,22 @@ int main() {
   }
 
   mir2::tests::send_client_v1_message(
+      *socket, mir2::client_v1::DropItemRequest{1003, "Ore"}, sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::drop_item);
+  if (!command.has_value() || command->session_id != session_id ||
+      command->item_make_index != 1003 || command->text != "Ore") {
+    stop_services();
+    return fail("drop item command");
+  }
+
+  mir2::tests::send_client_v1_message(*socket, mir2::client_v1::ReviveRequest{}, sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::revive);
+  if (!command.has_value() || command->session_id != session_id) {
+    stop_services();
+    return fail("revive command");
+  }
+
+  mir2::tests::send_client_v1_message(
       *socket, mir2::client_v1::NpcClickRequest{42}, sequence);
   command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::click_npc);
   if (!command.has_value() || command->session_id != session_id ||
@@ -294,6 +311,129 @@ int main() {
       command->target_actor_id != 42 || command->text != "@buy") {
     stop_services();
     return fail("npc select command");
+  }
+
+  mir2::tests::send_client_v1_message(
+      *socket, mir2::client_v1::MerchantBuyRequest{0, 555, "Drug"}, sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::buy_item);
+  if (!command.has_value() || command->session_id != session_id ||
+      command->target_actor_id != 42 || command->item_make_index != 555 ||
+      command->text != "Drug") {
+    stop_services();
+    return fail("merchant buy command");
+  }
+
+  mir2::tests::send_client_v1_message(
+      *socket, mir2::client_v1::MerchantSellRequest{0, 1004, "Ruby"}, sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::sell_item);
+  if (!command.has_value() || command->session_id != session_id ||
+      command->target_actor_id != 42 || command->item_make_index != 1004 ||
+      command->text != "Ruby") {
+    stop_services();
+    return fail("merchant sell command");
+  }
+
+  mir2::tests::send_client_v1_message(
+      *socket, mir2::client_v1::MerchantSellPriceRequest{0, 1004, "Ruby"}, sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::query_sell_price);
+  if (!command.has_value() || command->session_id != session_id ||
+      command->target_actor_id != 42 || command->item_make_index != 1004 ||
+      command->text != "Ruby") {
+    stop_services();
+    return fail("merchant sell price command");
+  }
+
+  mir2::tests::send_client_v1_message(
+      *socket, mir2::client_v1::MerchantRepairPriceRequest{0, 1005, "Sword"}, sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::query_repair_cost);
+  if (!command.has_value() || command->session_id != session_id ||
+      command->target_actor_id != 42 || command->item_make_index != 1005 ||
+      command->text != "Sword") {
+    stop_services();
+    return fail("merchant repair price command");
+  }
+
+  mir2::tests::send_client_v1_message(
+      *socket, mir2::client_v1::MerchantRepairRequest{0, 1005, "Sword"}, sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::repair_item);
+  if (!command.has_value() || command->session_id != session_id ||
+      command->target_actor_id != 42 || command->item_make_index != 1005 ||
+      command->text != "Sword") {
+    stop_services();
+    return fail("merchant repair command");
+  }
+
+  mir2::tests::send_client_v1_message(
+      *socket, mir2::client_v1::StorageDepositRequest{0, 1006, "Ring"}, sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::storage_item);
+  if (!command.has_value() || command->session_id != session_id ||
+      command->target_actor_id != 42 || command->item_make_index != 1006 ||
+      command->text != "Ring") {
+    stop_services();
+    return fail("storage deposit command");
+  }
+
+  mir2::tests::send_client_v1_message(
+      *socket, mir2::client_v1::StorageWithdrawRequest{0, 1007, "Ring"}, sequence);
+  command =
+      wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::take_back_storage_item);
+  if (!command.has_value() || command->session_id != session_id ||
+      command->target_actor_id != 42 || command->item_make_index != 1007 ||
+      command->text != "Ring") {
+    stop_services();
+    return fail("storage withdraw command");
+  }
+
+  mir2::tests::send_client_v1_message(
+      *socket, mir2::client_v1::TradeTryRequest{"Other"}, sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::trade_try);
+  if (!command.has_value() || command->session_id != session_id ||
+      command->text != "Other") {
+    stop_services();
+    return fail("trade try command");
+  }
+
+  mir2::tests::send_client_v1_message(
+      *socket, mir2::client_v1::TradeAddItemRequest{1008, "Gem"}, sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::trade_add_item);
+  if (!command.has_value() || command->session_id != session_id ||
+      command->item_make_index != 1008 || command->text != "Gem") {
+    stop_services();
+    return fail("trade add item command");
+  }
+
+  mir2::tests::send_client_v1_message(
+      *socket, mir2::client_v1::TradeRemoveItemRequest{1008, "Gem"}, sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::trade_remove_item);
+  if (!command.has_value() || command->session_id != session_id ||
+      command->item_make_index != 1008 || command->text != "Gem") {
+    stop_services();
+    return fail("trade remove item command");
+  }
+
+  mir2::tests::send_client_v1_message(
+      *socket, mir2::client_v1::TradeSetGoldRequest{123}, sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::trade_set_gold);
+  if (!command.has_value() || command->session_id != session_id ||
+      command->amount != 123) {
+    stop_services();
+    return fail("trade set gold command");
+  }
+
+  mir2::tests::send_client_v1_message(*socket, mir2::client_v1::TradeAcceptRequest{},
+                                      sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::trade_accept);
+  if (!command.has_value() || command->session_id != session_id) {
+    stop_services();
+    return fail("trade accept command");
+  }
+
+  mir2::tests::send_client_v1_message(*socket, mir2::client_v1::TradeCancelRequest{},
+                                      sequence);
+  command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::trade_cancel);
+  if (!command.has_value() || command->session_id != session_id) {
+    stop_services();
+    return fail("trade cancel command");
   }
 
   mir2::tests::send_client_v1_message(*socket, mir2::client_v1::ChatSend{"hello"}, sequence);

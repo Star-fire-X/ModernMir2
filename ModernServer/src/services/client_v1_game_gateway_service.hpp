@@ -20,6 +20,8 @@
 
 namespace mir2 {
 
+struct CanonicalLegacyCommand;
+
 class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
  public:
   explicit ClientV1GameGatewayService(std::shared_ptr<ClientV1AdmissionRegistry> admissions);
@@ -148,6 +150,7 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
   void handle_chat_send(std::uint64_t session_id, const client_v1::ChatSend& chat);
   void handle_ping(std::uint64_t session_id, const client_v1::Ping& ping);
   void post_enter_world(std::uint64_t session_id, const SessionState& state);
+  void post_canonical_command(CanonicalLegacyCommand command);
   void post_logic_command(LogicCommand command);
   void bus_loop();
   void handle_session_event(const SessionEvent& event);
