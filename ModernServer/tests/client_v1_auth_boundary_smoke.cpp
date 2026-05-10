@@ -182,6 +182,7 @@ int main() {
       sequence);
   create = reader.wait_for_message<mir2::client_v1::CreateAccountResult>();
   if (!create.has_value() || create->success ||
+      create->code != 0 ||
       create->error_message != "create_account_failed") {
     stop_services();
     return fail("duplicate account");
@@ -190,7 +191,8 @@ int main() {
   mir2::tests::send_client_v1_message(
       *socket, mir2::client_v1::LoginRequest{"alpha", "badpw"}, sequence);
   auto login = reader.wait_for_message<mir2::client_v1::LoginResult>();
-  if (!login.has_value() || login->success || login->error_message != "login_failed") {
+  if (!login.has_value() || login->success || login->code != -1 ||
+      login->error_message != "login_failed") {
     stop_services();
     return fail("bad password");
   }
@@ -199,7 +201,8 @@ int main() {
       *socket, mir2::client_v1::ChangePasswordRequest{"alpha", "badpw", "newpw"},
       sequence);
   auto change = reader.wait_for_message<mir2::client_v1::ChangePasswordResult>();
-  if (!change.has_value() || change->success) {
+  if (!change.has_value() || change->success || change->code != -1 ||
+      change->error_message != "change_password_failed") {
     stop_services();
     return fail("bad password change");
   }
@@ -216,7 +219,8 @@ int main() {
   mir2::tests::send_client_v1_message(
       *socket, mir2::client_v1::LoginRequest{"alpha", "oldpw"}, sequence);
   login = reader.wait_for_message<mir2::client_v1::LoginResult>();
-  if (!login.has_value() || login->success) {
+  if (!login.has_value() || login->success || login->code != -1 ||
+      login->error_message != "login_failed") {
     stop_services();
     return fail("old password rejected");
   }
@@ -324,6 +328,7 @@ int main() {
   auto create_character =
       char_reader.wait_for_message<mir2::client_v1::CreateCharacterResult>();
   if (!create_character.has_value() || create_character->success ||
+      create_character->code != 0 ||
       create_character->error_message != "invalid_character_name") {
     stop_services();
     return fail("invalid character");
@@ -345,7 +350,9 @@ int main() {
       char_sequence);
   create_character =
       char_reader.wait_for_message<mir2::client_v1::CreateCharacterResult>();
-  if (!create_character.has_value() || create_character->success) {
+  if (!create_character.has_value() || create_character->success ||
+      create_character->code != 2 ||
+      create_character->error_message != "create_character_failed") {
     stop_services();
     return fail("duplicate character");
   }
@@ -366,6 +373,7 @@ int main() {
   create_character =
       char_reader.wait_for_message<mir2::client_v1::CreateCharacterResult>();
   if (!create_character.has_value() || create_character->success ||
+      create_character->code != 3 ||
       create_character->error_message != "character_slots_full") {
     stop_services();
     return fail("character slots full");
@@ -376,7 +384,9 @@ int main() {
       char_sequence);
   auto delete_character =
       char_reader.wait_for_message<mir2::client_v1::DeleteCharacterResult>();
-  if (!delete_character.has_value() || delete_character->success) {
+  if (!delete_character.has_value() || delete_character->success ||
+      delete_character->code != 0 ||
+      delete_character->error_message != "delete_character_failed") {
     stop_services();
     return fail("delete missing");
   }

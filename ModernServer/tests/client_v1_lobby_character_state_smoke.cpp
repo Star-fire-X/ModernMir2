@@ -273,6 +273,7 @@ int main() {
     const auto create =
         alpha_reader.wait_for_message<mir2::client_v1::CreateCharacterResult>();
     if (!create.has_value() || create->success ||
+        create->code != 0 ||
         create->error_message != "invalid_character_name") {
       stop_services();
       return fail("invalid character name");
@@ -288,6 +289,7 @@ int main() {
   auto invalid_utf8_create =
       alpha_reader.wait_for_message<mir2::client_v1::CreateCharacterResult>();
   if (!invalid_utf8_create.has_value() || invalid_utf8_create->success ||
+      invalid_utf8_create->code != 0 ||
       invalid_utf8_create->error_message != "invalid_character_name") {
     stop_services();
     return fail("utf8 character name uses legacy byte rules");
@@ -309,6 +311,7 @@ int main() {
       alpha_sequence);
   create = alpha_reader.wait_for_message<mir2::client_v1::CreateCharacterResult>();
   if (!create.has_value() || create->success ||
+      create->code != 2 ||
       create->error_message != "create_character_failed") {
     stop_services();
     return fail("duplicate alpha character");
@@ -328,6 +331,7 @@ int main() {
       alpha_sequence);
   create = alpha_reader.wait_for_message<mir2::client_v1::CreateCharacterResult>();
   if (!create.has_value() || create->success ||
+      create->code != 3 ||
       create->error_message != "character_slots_full") {
     stop_services();
     return fail("alpha slot full");
@@ -424,6 +428,7 @@ int main() {
   delete_character =
       alpha_cleanup_reader.wait_for_message<mir2::client_v1::DeleteCharacterResult>();
   if (!delete_character.has_value() || delete_character->success ||
+      delete_character->code != 0 ||
       delete_character->error_message != "delete_character_failed") {
     stop_services();
     return fail("delete missing alpha character");
