@@ -745,6 +745,19 @@ void ClientApp::request_drop_item(const client_v1::DropItemRequest& request) {
   protocol_.send(legacy_request);
 }
 
+void ClientApp::request_drop_gold(const client_v1::DropGoldRequest& request) {
+  if (request.amount <= 0) {
+    return;
+  }
+  if (legacy_trace_enabled()) {
+    std::ostringstream out;
+    out << "request_drop_gold now=" << detail::monotonic_ms()
+        << " amount=" << request.amount;
+    legacy_trace(out.str());
+  }
+  protocol_.send(request);
+}
+
 // 魔法快捷键变更：服务端返回权威 MagicList 后更新客户端
 void ClientApp::request_magic_key_change(const client_v1::MagicKeyChangeRequest& request) {
   if (request.magic_id == 0) {
@@ -1392,6 +1405,8 @@ void ClientApp::handle_protocol_events() {
             state_.apply(value);                    // 背包范围清理
           } else if constexpr (std::is_same_v<T, client_v1::EquipmentSnapshot>) {
             state_.apply(value);                    // 装备栏镜像
+          } else if constexpr (std::is_same_v<T, client_v1::DurabilityChange>) {
+            state_.apply(value);                    // 耐久变化
           } else if constexpr (std::is_same_v<T, client_v1::ActionAck>) {
             if (legacy_trace_enabled()) {
               std::ostringstream out;
@@ -1614,6 +1629,9 @@ void ClientApp::handle_protocol_events() {
         break;
       case client_v1::MessageId::equipment_snapshot:
         decoded = decode_and_dispatch.operator()<client_v1::EquipmentSnapshot>();
+        break;
+      case client_v1::MessageId::durability_change:
+        decoded = decode_and_dispatch.operator()<client_v1::DurabilityChange>();
         break;
       case client_v1::MessageId::action_ack:
         decoded = decode_and_dispatch.operator()<client_v1::ActionAck>();

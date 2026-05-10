@@ -151,6 +151,17 @@ int main() {
     std::cerr << "missing_magicon_frame=0\n";
     return 1;
   }
+  const std::vector<std::pair<mir2::client::ArchiveId, const char*>> item_archives{
+      {mir2::client::ArchiveId::items, "items"},
+      {mir2::client::ArchiveId::state_item, "state_item"},
+      {mir2::client::ArchiveId::dn_items, "dn_items"}};
+  for (const auto& [archive, name] : item_archives) {
+    const auto frame = assets.get_frame(archive, 1);
+    if (frame == nullptr || frame->empty() || !has_visible_pixel(*frame)) {
+      std::cerr << "missing_item_ui_frame=" << name << ":1\n";
+      return 1;
+    }
+  }
 
   std::cout << "map=" << map->width << "x" << map->height
             << " tile=" << tile->width << "x" << tile->height

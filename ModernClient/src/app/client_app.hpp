@@ -76,6 +76,7 @@ class ClientApp {
   void request_equip_item(const client_v1::EquipItemRequest& request);
   void request_unequip_item(const client_v1::UnequipItemRequest& request);
   void request_drop_item(const client_v1::DropItemRequest& request);
+  void request_drop_gold(const client_v1::DropGoldRequest& request);
   void request_magic_key_change(const client_v1::MagicKeyChangeRequest& request);
   void request_chat_send(std::string text);
   void request_npc_click(std::uint64_t actor_id);

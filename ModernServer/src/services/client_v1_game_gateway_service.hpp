@@ -96,6 +96,8 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
                                    const client_v1::UnequipItemRequest& request);
   void handle_drop_item_request(std::uint64_t session_id,
                                 const client_v1::DropItemRequest& request);
+  void handle_drop_gold_request(std::uint64_t session_id,
+                                const client_v1::DropGoldRequest& request);
   void handle_revive_request(std::uint64_t session_id, const client_v1::ReviveRequest& request);
   void handle_magic_key_change_request(
       std::uint64_t session_id, const client_v1::MagicKeyChangeRequest& request);
