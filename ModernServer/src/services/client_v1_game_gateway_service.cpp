@@ -6,6 +6,7 @@
 #include <cstring>
 #include <utility>
 
+#include "protocol/client_v1_legacy_command_decoder.hpp"
 #include "protocol/legacy_edcode.hpp"
 #include "protocol/legacy_game_codec.hpp"
 #include "protocol/legacy_types.hpp"
@@ -110,20 +111,6 @@ std::uint16_t client_action_legacy_ident(client_v1::WorldActionKind kind,
     return legacy::normalize_attack_ident_to_sm(requested_ident);
   }
   return action_legacy_ident(kind, requested_ident);
-}
-
-LogicCommandKind command_kind_for_action(client_v1::WorldActionKind kind) {
-  switch (kind) {
-    case client_v1::WorldActionKind::turn:
-      return LogicCommandKind::turn;
-    case client_v1::WorldActionKind::walk:
-      return LogicCommandKind::walk;
-    case client_v1::WorldActionKind::run:
-      return LogicCommandKind::run;
-    case client_v1::WorldActionKind::attack:
-      return LogicCommandKind::attack;
-  }
-  return LogicCommandKind::walk;
 }
 
 client_v1::ActorActionKind actor_action_kind_for_sm(std::uint16_t ident) {
@@ -785,7 +772,6 @@ void ClientV1GameGatewayService::handle_action_intent(
                                       effective.y, state->character.dir);
   }
 
-  const auto runtime_ident = action_legacy_ident(effective.kind, effective.legacy_ident);
   const auto client_ident = client_action_legacy_ident(effective.kind, effective.legacy_ident);
   effective.legacy_ident = client_ident;
   {
@@ -795,17 +781,7 @@ void ClientV1GameGatewayService::handle_action_intent(
       it->second.pending_action = effective;
     }
   }
-  LogicCommand command;
-  command.kind = command_kind_for_action(effective.kind);
-  command.gateway = name();
-  command.session_id = session_id;
-  command.x = effective.x;
-  command.y = effective.y;
-  command.dir = effective.dir;
-  command.target_actor_id = effective.target_actor_id;
-  command.game_message = make_default_message(runtime_ident, make_long(effective.x, effective.y), 0,
-                                              effective.dir, 0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_action_command(session_id, effective));
 }
 
 void ClientV1GameGatewayService::handle_spell_intent(
@@ -815,21 +791,7 @@ void ClientV1GameGatewayService::handle_spell_intent(
     return;
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::spell;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.x = intent.x;
-  command.y = intent.y;
-  command.dir = intent.dir;
-  command.target_actor_id = intent.target_actor_id;
-  command.text = std::to_string(intent.magic_id);
-  command.game_message =
-      make_default_message(kCmSpell, make_long(intent.x, intent.y),
-                           static_cast<std::uint16_t>(intent.target_actor_id & 0xFFFFU),
-                           intent.magic_id,
-                           static_cast<std::uint16_t>((intent.target_actor_id >> 16U) & 0xFFFFU));
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_spell_command(session_id, intent));
 }
 
 void ClientV1GameGatewayService::handle_pickup_intent(
@@ -839,14 +801,7 @@ void ClientV1GameGatewayService::handle_pickup_intent(
     return;
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::pickup_item;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.x = intent.x;
-  command.y = intent.y;
-  command.game_message = make_default_message(kCmPickup, 0, intent.x, intent.y, 0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_pickup_command(session_id, intent));
 }
 
 void ClientV1GameGatewayService::handle_use_item_intent(
@@ -856,15 +811,7 @@ void ClientV1GameGatewayService::handle_use_item_intent(
     return;
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::eat_item;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.item_make_index = intent.item_make_index;
-  command.item_slot = intent.item_slot;
-  command.text = intent.name;
-  command.game_message = make_default_message(kCmEat, intent.item_make_index, 0, 0, 0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_use_item_command(session_id, intent));
 }
 
 void ClientV1GameGatewayService::handle_equip_item_request(
@@ -874,17 +821,7 @@ void ClientV1GameGatewayService::handle_equip_item_request(
     return;
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::take_on_item;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.item_make_index = request.item_make_index;
-  command.item_slot = request.equipment_slot;
-  command.text = request.name;
-  command.game_message =
-      make_default_message(kCmTakeOnItem, request.item_make_index,
-                           static_cast<std::uint16_t>(std::max(request.equipment_slot, 0)), 0, 0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_equip_item_command(session_id, request));
 }
 
 void ClientV1GameGatewayService::handle_unequip_item_request(
@@ -894,17 +831,7 @@ void ClientV1GameGatewayService::handle_unequip_item_request(
     return;
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::take_off_item;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.item_make_index = request.item_make_index;
-  command.item_slot = request.equipment_slot;
-  command.text = request.name;
-  command.game_message =
-      make_default_message(kCmTakeOffItem, request.item_make_index,
-                           static_cast<std::uint16_t>(std::max(request.equipment_slot, 0)), 0, 0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_unequip_item_command(session_id, request));
 }
 
 void ClientV1GameGatewayService::handle_drop_item_request(
@@ -914,14 +841,7 @@ void ClientV1GameGatewayService::handle_drop_item_request(
     return;
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::drop_item;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.item_make_index = request.item_make_index;
-  command.text = request.name;
-  command.game_message = make_default_message(kCmDropItem, request.item_make_index, 0, 0, 0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_drop_item_command(session_id, request));
 }
 
 void ClientV1GameGatewayService::handle_revive_request(
@@ -931,11 +851,7 @@ void ClientV1GameGatewayService::handle_revive_request(
     return;
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::revive;
-  command.gateway = name();
-  command.session_id = session_id;
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_revive_command(session_id));
 }
 
 void ClientV1GameGatewayService::handle_magic_key_change_request(
@@ -995,17 +911,8 @@ void ClientV1GameGatewayService::handle_merchant_buy_request(
     }
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::buy_item;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.target_actor_id = merchant_id;
-  command.item_make_index = request.item_server_index;
-  command.text = request.name;
-  command.game_message = make_default_message(
-      kCmUserBuyItem, static_cast<std::int32_t>(merchant_id),
-      low_word(request.item_server_index), high_word(request.item_server_index), 0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_merchant_buy_command(session_id, merchant_id,
+                                                               request));
 }
 
 void ClientV1GameGatewayService::handle_merchant_sell_request(
@@ -1030,18 +937,8 @@ void ClientV1GameGatewayService::handle_merchant_sell_request(
     }
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::sell_item;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.target_actor_id = merchant_id;
-  command.item_make_index = request.item_make_index;
-  command.text = request.name;
-  command.game_message =
-      make_default_message(kCmUserSellItem, static_cast<std::int32_t>(merchant_id),
-                           low_word(request.item_make_index), high_word(request.item_make_index),
-                           0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_merchant_sell_command(session_id, merchant_id,
+                                                                request));
 }
 
 void ClientV1GameGatewayService::handle_merchant_sell_price_request(
@@ -1057,18 +954,8 @@ void ClientV1GameGatewayService::handle_merchant_sell_price_request(
     return;
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::query_sell_price;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.target_actor_id = merchant_id;
-  command.item_make_index = request.item_make_index;
-  command.text = request.name;
-  command.game_message =
-      make_default_message(kCmMerchantQuerySellPrice, static_cast<std::int32_t>(merchant_id),
-                           low_word(request.item_make_index), high_word(request.item_make_index),
-                           0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_merchant_sell_price_command(session_id, merchant_id,
+                                                                      request));
 }
 
 void ClientV1GameGatewayService::handle_merchant_repair_price_request(
@@ -1093,18 +980,8 @@ void ClientV1GameGatewayService::handle_merchant_repair_price_request(
     }
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::query_repair_cost;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.target_actor_id = merchant_id;
-  command.item_make_index = request.item_make_index;
-  command.text = request.name;
-  command.game_message =
-      make_default_message(kCmMerchantQueryRepairCost, static_cast<std::int32_t>(merchant_id),
-                           low_word(request.item_make_index), high_word(request.item_make_index),
-                           0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_merchant_repair_price_command(
+      session_id, merchant_id, request));
 }
 
 void ClientV1GameGatewayService::handle_merchant_repair_request(
@@ -1129,18 +1006,8 @@ void ClientV1GameGatewayService::handle_merchant_repair_request(
     }
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::repair_item;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.target_actor_id = merchant_id;
-  command.item_make_index = request.item_make_index;
-  command.text = request.name;
-  command.game_message =
-      make_default_message(kCmUserRepairItem, static_cast<std::int32_t>(merchant_id),
-                           low_word(request.item_make_index), high_word(request.item_make_index),
-                           0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_merchant_repair_command(session_id, merchant_id,
+                                                                  request));
 }
 
 void ClientV1GameGatewayService::handle_storage_deposit_request(
@@ -1163,18 +1030,8 @@ void ClientV1GameGatewayService::handle_storage_deposit_request(
     }
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::storage_item;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.target_actor_id = merchant_id;
-  command.item_make_index = request.item_make_index;
-  command.text = request.name;
-  command.game_message =
-      make_default_message(kCmUserStorageItem, static_cast<std::int32_t>(merchant_id),
-                           low_word(request.item_make_index), high_word(request.item_make_index),
-                           0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_storage_deposit_command(session_id, merchant_id,
+                                                                  request));
 }
 
 void ClientV1GameGatewayService::handle_storage_withdraw_request(
@@ -1197,18 +1054,8 @@ void ClientV1GameGatewayService::handle_storage_withdraw_request(
     }
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::take_back_storage_item;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.target_actor_id = merchant_id;
-  command.item_make_index = request.item_make_index;
-  command.text = request.name;
-  command.game_message =
-      make_default_message(kCmUserTakeBackStorageItem, static_cast<std::int32_t>(merchant_id),
-                           low_word(request.item_make_index), high_word(request.item_make_index),
-                           0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_storage_withdraw_command(session_id, merchant_id,
+                                                                   request));
 }
 
 void ClientV1GameGatewayService::handle_group_mode_request(
@@ -1288,12 +1135,7 @@ void ClientV1GameGatewayService::handle_trade_try_request(
   }
   send_message(session_id, client_v1::TradeState{true, request.target_name, {}, {}, 0, 0,
                                                  false, false});
-  LogicCommand command;
-  command.kind = LogicCommandKind::trade_try;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.text = request.target_name;
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_trade_try_command(session_id, request));
 }
 
 void ClientV1GameGatewayService::handle_trade_cancel_request(
@@ -1313,11 +1155,7 @@ void ClientV1GameGatewayService::handle_trade_cancel_request(
     }
   }
   send_message(session_id, client_v1::TradeState{});
-  LogicCommand command;
-  command.kind = LogicCommandKind::trade_cancel;
-  command.gateway = name();
-  command.session_id = session_id;
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_trade_cancel_command(session_id));
 }
 
 void ClientV1GameGatewayService::handle_trade_add_item_request(
@@ -1330,13 +1168,7 @@ void ClientV1GameGatewayService::handle_trade_add_item_request(
   send_message(session_id, client_v1::TradeState{state->trade_visible, state->trade_remote_name,
                                                  {}, {}, state->trade_local_gold, 0,
                                                  false, false});
-  LogicCommand command;
-  command.kind = LogicCommandKind::trade_add_item;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.item_make_index = request.item_make_index;
-  command.text = request.name;
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_trade_add_item_command(session_id, request));
 }
 
 void ClientV1GameGatewayService::handle_trade_remove_item_request(
@@ -1349,13 +1181,7 @@ void ClientV1GameGatewayService::handle_trade_remove_item_request(
   send_message(session_id, client_v1::TradeState{state->trade_visible, state->trade_remote_name,
                                                  {}, {}, state->trade_local_gold, 0,
                                                  false, false});
-  LogicCommand command;
-  command.kind = LogicCommandKind::trade_remove_item;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.item_make_index = request.item_make_index;
-  command.text = request.name;
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_trade_remove_item_command(session_id, request));
 }
 
 void ClientV1GameGatewayService::handle_trade_set_gold_request(
@@ -1377,12 +1203,8 @@ void ClientV1GameGatewayService::handle_trade_set_gold_request(
   send_message(session_id, client_v1::TradeState{state->trade_visible, state->trade_remote_name,
                                                  {}, {}, state->trade_local_gold, 0,
                                                  false, false});
-  LogicCommand command;
-  command.kind = LogicCommandKind::trade_set_gold;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.amount = state->trade_local_gold;
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_trade_set_gold_command(session_id,
+                                                                 state->trade_local_gold));
 }
 
 void ClientV1GameGatewayService::handle_trade_accept_request(
@@ -1401,11 +1223,7 @@ void ClientV1GameGatewayService::handle_trade_accept_request(
   }
   send_message(session_id, client_v1::TradeState{state->trade_visible, state->trade_remote_name,
                                                  {}, {}, state->trade_local_gold, 0, true, false});
-  LogicCommand command;
-  command.kind = LogicCommandKind::trade_accept;
-  command.gateway = name();
-  command.session_id = session_id;
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_trade_accept_command(session_id));
 }
 
 void ClientV1GameGatewayService::handle_guild_open_request(
@@ -1522,14 +1340,7 @@ void ClientV1GameGatewayService::handle_npc_click_request(
     }
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::click_npc;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.target_actor_id = request.actor_id;
-  command.game_message =
-      make_default_message(kCmClickNpc, static_cast<std::int32_t>(request.actor_id), 0, 0, 0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_npc_click_command(session_id, request));
 }
 
 void ClientV1GameGatewayService::handle_npc_dialog_select_request(
@@ -1545,15 +1356,8 @@ void ClientV1GameGatewayService::handle_npc_dialog_select_request(
     return;
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::merchant_select;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.target_actor_id = merchant_id;
-  command.text = request.selection;
-  command.game_message =
-      make_default_message(kCmMerchantDlgSelect, static_cast<std::int32_t>(merchant_id), 0, 0, 0);
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_npc_dialog_select_command(
+      session_id, merchant_id, request.selection));
 }
 
 void ClientV1GameGatewayService::handle_chat_send(std::uint64_t session_id,
@@ -1563,12 +1367,7 @@ void ClientV1GameGatewayService::handle_chat_send(std::uint64_t session_id,
     return;
   }
 
-  LogicCommand command;
-  command.kind = LogicCommandKind::say;
-  command.gateway = name();
-  command.session_id = session_id;
-  command.text = chat.text;
-  post_logic_command(std::move(command));
+  post_canonical_command(decode_client_v1_chat_command(session_id, chat));
 }
 
 void ClientV1GameGatewayService::handle_ping(std::uint64_t session_id,
@@ -1578,6 +1377,12 @@ void ClientV1GameGatewayService::handle_ping(std::uint64_t session_id,
           std::chrono::system_clock::now().time_since_epoch())
           .count();
   send_message(session_id, client_v1::Pong{ping.client_time_ms, static_cast<std::uint64_t>(now)});
+}
+
+void ClientV1GameGatewayService::post_canonical_command(CanonicalLegacyCommand command) {
+  auto logic = to_logic_command(command);
+  logic.gateway = name();
+  post_logic_command(std::move(logic));
 }
 
 void ClientV1GameGatewayService::post_logic_command(LogicCommand command) {
@@ -2496,24 +2301,13 @@ void ClientV1GameGatewayService::translate_legacy_packet(
   }
 
   if (request_bag_items) {
-    LogicCommand command;
-    command.kind = LogicCommandKind::query_bag_items;
-    command.gateway = name();
-    command.session_id = session_id;
-    post_logic_command(std::move(command));
+    post_canonical_command(decode_client_v1_query_bag_items_command(session_id));
   }
   if (request_storage_items) {
     const auto current = session(session_id);
     if (current.has_value() && current->current_merchant_id != 0) {
-      LogicCommand command;
-      command.kind = LogicCommandKind::query_storage_items;
-      command.gateway = name();
-      command.session_id = session_id;
-      command.target_actor_id = current->current_merchant_id;
-      command.game_message =
-          make_default_message(kCmUserTakeBackStorageItem,
-                               static_cast<std::int32_t>(current->current_merchant_id), 0, 0, 0);
-      post_logic_command(std::move(command));
+      post_canonical_command(decode_client_v1_query_storage_items_command(
+          session_id, current->current_merchant_id));
     }
   }
 }

@@ -78,6 +78,7 @@ set(MIR2_HOST_SOURCES
   src/importer/legacy_character_importer.cpp
   src/importer/legacy_importer.cpp
   src/protocol/canonical_legacy_command.cpp
+  src/protocol/client_v1_legacy_command_decoder.cpp
   src/protocol/client_v1_session.cpp
   src/protocol/game_session.cpp
   src/protocol/legacy_edcode.cpp
@@ -164,6 +165,12 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_canonical_legacy_command_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_canonical_legacy_command_smoke
     COMMAND mir2_canonical_legacy_command_smoke)
+
+  add_executable(mir2_client_v1_canonical_command_smoke
+    tests/client_v1_canonical_command_smoke.cpp)
+  target_link_libraries(mir2_client_v1_canonical_command_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_client_v1_canonical_command_smoke
+    COMMAND mir2_client_v1_canonical_command_smoke)
 
   add_executable(mir2_legacy_environment_smoke tests/legacy_environment_smoke.cpp)
   target_link_libraries(mir2_legacy_environment_smoke PRIVATE mir2_hostlib)
@@ -801,6 +808,7 @@ if(BUILD_TESTING)
       mir2_legacy_frame_smoke
       mir2_legacy_protocol_command_golden_smoke
       mir2_canonical_legacy_command_smoke
+      mir2_client_v1_canonical_command_smoke
       mir2_client_v1_protocol_smoke
       mir2_movement_blocking_legacy_smoke
       mir2_combat_smoke

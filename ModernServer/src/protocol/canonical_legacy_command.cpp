@@ -31,6 +31,8 @@ LogicCommandKind to_logic_kind(CanonicalLegacyCommandKind kind) {
       return LogicCommandKind::query_username;
     case CanonicalLegacyCommandKind::query_bag_items:
       return LogicCommandKind::query_bag_items;
+    case CanonicalLegacyCommandKind::query_storage_items:
+      return LogicCommandKind::query_storage_items;
     case CanonicalLegacyCommandKind::query_detail_goods:
       return LogicCommandKind::query_detail_goods;
     case CanonicalLegacyCommandKind::query_sell_price:
@@ -49,6 +51,8 @@ LogicCommandKind to_logic_kind(CanonicalLegacyCommandKind kind) {
       return LogicCommandKind::eat_item;
     case CanonicalLegacyCommandKind::drop_gold:
       return LogicCommandKind::drop_gold;
+    case CanonicalLegacyCommandKind::revive:
+      return LogicCommandKind::revive;
     case CanonicalLegacyCommandKind::buy_item:
       return LogicCommandKind::buy_item;
     case CanonicalLegacyCommandKind::sell_item:
@@ -59,6 +63,18 @@ LogicCommandKind to_logic_kind(CanonicalLegacyCommandKind kind) {
       return LogicCommandKind::storage_item;
     case CanonicalLegacyCommandKind::take_back_storage_item:
       return LogicCommandKind::take_back_storage_item;
+    case CanonicalLegacyCommandKind::trade_try:
+      return LogicCommandKind::trade_try;
+    case CanonicalLegacyCommandKind::trade_cancel:
+      return LogicCommandKind::trade_cancel;
+    case CanonicalLegacyCommandKind::trade_add_item:
+      return LogicCommandKind::trade_add_item;
+    case CanonicalLegacyCommandKind::trade_remove_item:
+      return LogicCommandKind::trade_remove_item;
+    case CanonicalLegacyCommandKind::trade_set_gold:
+      return LogicCommandKind::trade_set_gold;
+    case CanonicalLegacyCommandKind::trade_accept:
+      return LogicCommandKind::trade_accept;
   }
   return LogicCommandKind::raw_packet;
 }

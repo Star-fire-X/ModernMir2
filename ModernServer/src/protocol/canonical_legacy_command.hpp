@@ -25,6 +25,7 @@ enum class CanonicalLegacyCommandKind {
   merchant_select,
   query_username,
   query_bag_items,
+  query_storage_items,
   query_detail_goods,
   query_sell_price,
   query_repair_cost,
@@ -34,11 +35,18 @@ enum class CanonicalLegacyCommandKind {
   take_off_item,
   eat_item,
   drop_gold,
+  revive,
   buy_item,
   sell_item,
   repair_item,
   storage_item,
-  take_back_storage_item
+  take_back_storage_item,
+  trade_try,
+  trade_cancel,
+  trade_add_item,
+  trade_remove_item,
+  trade_set_gold,
+  trade_accept
 };
 
 enum class CanonicalParseStatus {
