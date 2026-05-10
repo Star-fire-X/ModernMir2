@@ -13,6 +13,10 @@ int main() {
   state.login.password = "pass";
   state.connection_phase = GameStateStore::ConnectionPhase::login;
 
+  LoginResult login_result{true, 0, "guest", "Guest", ""};
+  assert(login_result.success);
+  assert(login_result.account_id == "guest");
+
   state.apply(ServerList{{ServerEntry{"ModernServer", "127.0.0.1", 5600}}});
   assert(state.lobby.selected_server_name == "ModernServer");
 
@@ -27,9 +31,17 @@ int main() {
   assert(state.lobby.selected_index == 0);
 
   state.selected_character = "Hero";
-  state.enter_world_token = "world-token";
   state.login_notice = LoginNoticeViewState{"Welcome", "Notice text"};
   assert(state.login_notice.title == "Welcome");
+
+  SelectCharacterResult select_character{true, "Hero", "world-token", "127.0.0.1", 5602, ""};
+  state.enter_world_token = select_character.enter_world_token;
+  state.pending_game_host = select_character.address;
+  state.pending_game_port = select_character.port;
+  state.connection_phase = GameStateStore::ConnectionPhase::play;
+  assert(state.enter_world_token == "world-token");
+  assert(state.pending_game_host == "127.0.0.1");
+  assert(state.pending_game_port == 5602);
 
   EnterWorldResult enter;
   enter.success = true;
@@ -38,6 +50,13 @@ int main() {
   enter.map_id = "0";
   enter.x = 330;
   enter.y = 270;
+  state.pending_self_actor_id = enter.self_actor_id;
+  state.selected_character = enter.character_name;
+  state.pending_spawn_x = enter.x;
+  state.pending_spawn_y = enter.y;
+  assert(state.pending_self_actor_id == 1000);
+  assert(state.pending_spawn_x == 330);
+  assert(state.pending_spawn_y == 270);
 
   WorldSnapshot snapshot;
   snapshot.map_id = enter.map_id;
@@ -53,6 +72,28 @@ int main() {
   assert(state.world.self_actor_id == 1000);
   assert(state.world.actors.size() == 1);
   assert(state.connection_phase == GameStateStore::ConnectionPhase::play);
+
+  state.apply(ActorUpsert{
+      WorldActor{2000, "Hen", 332, 271, 4, 0, 0, ActorType::monster}});
+  assert(state.world.actors.size() == 2);
+  assert(state.world.actors[2000].name == "Hen");
+
+  state.apply(ActorStateDelta{1000, 331, 270, 2});
+  assert(state.world.actors[1000].x == 331);
+  assert(state.world.actors[1000].y == 270);
+  assert(state.world.actors[1000].dir == 2);
+
+  auto& flow_self = state.world.actors[1000];
+  flow_self.from_x = 330;
+  flow_self.from_y = 270;
+  flow_self.x = 331;
+  flow_self.y = 270;
+  flow_self.current_action = ActorActionKind::walk;
+  state.world.action_locked = true;
+  state.apply(ActionAck{false, 1235});
+  assert(!state.world.action_locked);
+  assert(flow_self.x == 330 && flow_self.y == 270);
+  assert(flow_self.current_action == ActorActionKind::turn);
 
   state.apply(ActorVitals{1000, 42, 55, 18, 24, 0, 0, false});
   assert(state.world.actors[1000].hp == 42);

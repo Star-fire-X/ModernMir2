@@ -18,10 +18,13 @@
 #include "assets/asset_manager.hpp"
 
 #include <array>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cctype>
 #include <fstream>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace mir2::client {
@@ -34,6 +37,7 @@ constexpr std::size_t kWilHeaderSize = 60;     ///< WIL 文件头大小
 constexpr std::size_t kWilTitleBytes = 40;     ///< WIL 标题字符串长度
 constexpr std::size_t kWixHeaderSize = 48;     ///< WIX 索引文件头大小
 constexpr std::size_t kMapHeaderSize = 52;     ///< 地图文件头大小
+constexpr std::size_t kAntiHackMapHeaderSize = 64; ///< AntiHack 地图文件头大小
 constexpr int kMapCellSize = 12;               ///< 每个地图单元格 12 字节
 
 // ---- 小端字节序读取工具函数 ----
@@ -54,6 +58,16 @@ std::uint32_t read_u32(const std::vector<std::uint8_t>& buffer, std::size_t offs
          (static_cast<std::uint32_t>(buffer[offset + 1]) << 8U) |
          (static_cast<std::uint32_t>(buffer[offset + 2]) << 16U) |
          (static_cast<std::uint32_t>(buffer[offset + 3]) << 24U);
+}
+
+bool is_antihack_map_id(const std::string& map_id) {
+  std::string upper;
+  upper.reserve(map_id.size());
+  for (const auto ch : map_id) {
+    upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(ch))));
+  }
+  return upper == "LABY01" || upper == "LABY02" || upper == "LABY03" ||
+         upper == "LABY04" || upper == "SNAKE";
 }
 
 // 将调色板颜色（BGR 各 8 位）转换为 32 位 BGRA 像素
@@ -424,18 +438,27 @@ std::shared_ptr<MapDocument> AssetManager::decode_map(const std::string& map_id)
   }
 
   const auto bytes = read_file_bytes(map_path);
-  if (bytes.size() < kMapHeaderSize) {
+  const auto anti_hack = is_antihack_map_id(map_id);
+  const auto header_size = anti_hack ? kAntiHackMapHeaderSize : kMapHeaderSize;
+  if (bytes.size() < header_size) {
     return nullptr;
   }
 
   auto map = std::make_shared<MapDocument>();
-  map->width = static_cast<int>(read_u16(bytes, 0));
-  map->height = static_cast<int>(read_u16(bytes, 2));
+  std::uint16_t check_key = 0;
+  if (anti_hack) {
+    check_key = read_u16(bytes, 33U);
+    map->width = static_cast<int>(read_u16(bytes, 31U) ^ check_key);
+    map->height = static_cast<int>(read_u16(bytes, 35U) ^ check_key);
+  } else {
+    map->width = static_cast<int>(read_u16(bytes, 0));
+    map->height = static_cast<int>(read_u16(bytes, 2));
+  }
   if (map->width <= 0 || map->height <= 0) {
     return nullptr;
   }
 
-  const auto expected_size = kMapHeaderSize +
+  const auto expected_size = header_size +
       static_cast<std::size_t>(map->width) * static_cast<std::size_t>(map->height) * kMapCellSize;
   if (bytes.size() < expected_size) {
     return nullptr;
@@ -446,14 +469,14 @@ std::shared_ptr<MapDocument> AssetManager::decode_map(const std::string& map_id)
   map->cells.resize(static_cast<std::size_t>(map->width) * static_cast<std::size_t>(map->height));
   for (int x = 0; x < map->width; ++x) {
     for (int y = 0; y < map->height; ++y) {
-      const auto source = kMapHeaderSize +
+      const auto source = header_size +
           (static_cast<std::size_t>(x) * static_cast<std::size_t>(map->height) +
            static_cast<std::size_t>(y)) * kMapCellSize;
       auto& cell = map->cells[static_cast<std::size_t>(y) * static_cast<std::size_t>(map->width) +
                               static_cast<std::size_t>(x)];
-      cell.bk_img = read_u16(bytes, source);
-      cell.mid_img = read_u16(bytes, source + 2U);
-      cell.fr_img = read_u16(bytes, source + 4U);
+      cell.bk_img = read_u16(bytes, source) ^ check_key;
+      cell.mid_img = read_u16(bytes, source + 2U) ^ check_key;
+      cell.fr_img = read_u16(bytes, source + 4U) ^ check_key;
       cell.door_index = bytes[source + 6U];
       cell.door_offset = bytes[source + 7U];
       cell.ani_frame = bytes[source + 8U];
