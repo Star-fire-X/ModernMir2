@@ -1374,9 +1374,6 @@ class LegacyStateContentNode final : public ui::UiNode {
       const auto& magic = magics[static_cast<std::size_t>(index)];
       const auto y = 59 + row * 37;
       auto icon = assets->get_frame(ArchiveId::mag_icon, magic.effect * 2);
-      if (icon == nullptr || icon->empty()) {
-        icon = assets->get_frame(ArchiveId::mag_icon, magic.magic_id * 2);
-      }
       draw_sprite(renderer, icon, rect.x + 46, rect.y + y);
       draw_legacy_text(renderer, rect.x + 84, rect.y + y, widen(magic.name), 0xFFFFFF66U);
       draw_sprite(renderer,

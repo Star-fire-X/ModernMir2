@@ -217,8 +217,8 @@ struct LegacyMagicEffectBase {
 /// 传奇的魔法飞行弹道使用 16 方向（而角色使用 8 方向），
 /// 以获得更精细的弹道路径
 [[nodiscard]] int legacy_fly_direction16(int sx, int sy, int tx, int ty);
-/// 获取魔法的效果基址和归档（根据魔法 ID 和效果类型）
-[[nodiscard]] LegacyMagicEffectBase legacy_magic_effect_base(int magic_id, int effect_type);
+/// 获取魔法的效果基址和归档（effect_index = MagicDB.Effect - 1）
+[[nodiscard]] LegacyMagicEffectBase legacy_magic_effect_base(int effect_index, int effect_kind);
 /// 获取地图物件的动画帧索引（根据单元格的 ani_frame/ani_tick）
 [[nodiscard]] int legacy_map_object_frame(const MapCell& cell, int main_ani_count);
 /// 判断地图物件是否使用混合模式渲染（如水面/火焰等半透明物件）
@@ -391,6 +391,8 @@ class LegacyEffectManager {
   struct MagicCreate {
     int magic_id{0};           ///< 魔法 ID
     int server_magic_id{0};    ///< 服务端魔法 ID
+    int effect_type{-1};       ///< Delphi TMagicType ordinal（-1 表示使用旧 magic_id 兜底）
+    int effect{0};             ///< MagicDB Effect，1-based
     ArchiveId archive{ArchiveId::magic};  ///< 精灵归档
     int effect_base{-1};       ///< 效果帧基址（-1 表示自动计算）
     int source_x{0};           ///< 源 X

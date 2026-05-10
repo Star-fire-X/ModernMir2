@@ -1,4 +1,5 @@
 #include <cassert>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 
@@ -63,6 +64,27 @@ int main() {
   assert(mon_magic.archive == ArchiveId::mon21);
   const auto hit_magic = legacy_magic_effect_base(5, 1);
   assert(hit_magic.archive == ArchiveId::magic2 && hit_magic.frame_base == 40);
+  constexpr std::array<int, 36> expected_effect_base{
+      0,    200, 400, 600, 0,    900, 920, 940, 20,   940, 940, 940,
+      0,    1380, 1500, 1520, 940, 1560, 1590, 1620, 1650, 1680, 0, 0,
+      0,    3960, 1790, 0,    3880, 3920, 3840, 0,    40,   130, 160, 190};
+  for (std::size_t index = 0; index < expected_effect_base.size(); ++index) {
+    const auto base = legacy_magic_effect_base(static_cast<int>(index), 0);
+    assert(base.frame_base == expected_effect_base[index]);
+    if (index == 8 || index == 27 || index == 33 || index == 34 || index == 35) {
+      assert(base.archive == ArchiveId::magic2);
+    } else if (index == 31) {
+      assert(base.archive == ArchiveId::mon21);
+    } else {
+      assert(base.archive == ArchiveId::magic);
+    }
+  }
+  constexpr std::array<int, 6> expected_hit_effect_base{800, 1410, 1700, 3480, 3390, 40};
+  for (std::size_t index = 0; index < expected_hit_effect_base.size(); ++index) {
+    const auto base = legacy_magic_effect_base(static_cast<int>(index), 1);
+    assert(base.frame_base == expected_hit_effect_base[index]);
+    assert(base.archive == (index == 5 ? ArchiveId::magic2 : ArchiveId::magic));
+  }
 
   MapCell cell;
   cell.fr_img = 100;
@@ -254,6 +276,19 @@ int main() {
   animations.update(world, 4000);
   assert(animations.effects().overlay_count() == 1);
 
+  animations.reset(4500);
+  world.actors[1].magic_id = 5;
+  world.actors[1].action_started_ms = 4500;
+  world.actors[1].action_magic_effect_type = 1;
+  world.actors[1].action_magic_effect = 3;
+  world.actors[1].action_target_actor_id = 2;
+  world.actors[1].action_target_x = 11;
+  world.actors[1].action_target_y = 10;
+  animations.update(world, 4500);
+  assert(animations.effects().fly_count() == 1);
+  assert(animations.effects().fly_effects().front().effect_base == 400);
+  assert(animations.effects().overlay_count() == 0);
+
   AssetManager assets;
   const auto root = std::filesystem::temp_directory_path() / "mir2_missing_legacy_archives";
   std::filesystem::create_directories(root / "Data");
@@ -298,6 +333,8 @@ int main() {
   LegacyEffectManager::MagicCreate magic;
   magic.magic_id = 1;
   magic.server_magic_id = 99;
+  magic.effect_type = 1;
+  magic.effect = 1;
   magic.source_x = 10;
   magic.source_y = 10;
   magic.target_x = 13;
@@ -307,7 +344,7 @@ int main() {
   assert(effects.fly_count() == 1);
   assert(!fly.fixed_effect);
   assert(fly.dir16 == 4);
-  assert(fly.draw_frame_index() == 250);
+  assert(fly.draw_frame_index() == 50);
   effects.update(4051);
   assert(effects.fly_count() == 1);
   effects.del_magic(99);

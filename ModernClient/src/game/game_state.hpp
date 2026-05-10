@@ -104,6 +104,8 @@ struct ActorState {
   int action_target_x{-1};
   int action_target_y{-1};
   bool action_magic{false};             ///< 当前动作是否为魔法
+  int action_magic_effect{0};
+  int action_magic_effect_type{-1};
   std::uint64_t action_started_ms{0};
   std::uint64_t action_duration_ms{0};
   bool dead{false};
@@ -132,6 +134,7 @@ struct MagicShortcutState {
   std::string name{};
   int effect{0};            ///< 魔法图标索引基数（Delphi WMagIcon[effect*2]）
   int max_train{0};         ///< 当前等级熟练度上限
+  int effect_type{0};
 };
 
 /// 模态对话框状态
@@ -911,6 +914,8 @@ struct GameStateStore {
     actor.action_target_x = message.x;
     actor.action_target_y = message.y;
     actor.action_magic = message.magic;
+    actor.action_magic_effect = message.magic_effect;
+    actor.action_magic_effect_type = -1;
     actor.action_started_ms = detail::monotonic_ms();
     actor.action_duration_ms = action_duration_ms(message.kind, legacy_ident);
     // 非施法动作且有坐标时更新角色位置
@@ -927,6 +932,17 @@ struct GameStateStore {
       actor.last_hitter_id = message.target_actor_id;
       actor.last_damage_magic = message.magic;
     }
+  }
+
+  void apply(const client_v1::ActorMagicFire& message) {
+    auto& actor = world.actors[message.actor_id];
+    actor.actor_id = message.actor_id;
+    actor.action_target_actor_id = message.target_actor_id;
+    actor.action_target_x = message.x;
+    actor.action_target_y = message.y;
+    actor.action_magic = true;
+    actor.action_magic_effect = message.effect;
+    actor.action_magic_effect_type = message.effect_type;
   }
 
   /// 应用角色属性（血量/蓝量）更新消息
@@ -998,7 +1014,8 @@ struct GameStateStore {
     for (const auto& entry : message.magics) {
       world.magics.push_back(MagicShortcutState{entry.magic_id, entry.key, entry.level,
                                                 entry.train, entry.delay_ms, entry.name,
-                                                entry.effect, entry.max_train});
+                                                entry.effect, entry.max_train,
+                                                entry.effect_type});
     }
   }
 

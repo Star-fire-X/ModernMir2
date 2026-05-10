@@ -317,6 +317,7 @@ int main() {
   actor_action.target_actor_id = 99;
   actor_action.value = 7;
   actor_action.legacy_ident = 14;
+  actor_action.magic_effect = 31;
   const auto actor_action_frame = encode_frame(make_frame(actor_action, 19));
   buffer = actor_action_frame;
   frames = drain_frames(buffer);
@@ -324,6 +325,19 @@ int main() {
   assert(decoded_actor_action.has_value());
   assert(decoded_actor_action->kind == ActorActionKind::hit);
   assert(decoded_actor_action->target_actor_id == 99);
+  assert(decoded_actor_action->magic_effect == 31);
+
+  const auto magic_fire_frame =
+      encode_frame(make_frame(ActorMagicFire{42, 99, 330, 270, 7, 32}, 191));
+  buffer = magic_fire_frame;
+  frames = drain_frames(buffer);
+  assert(frames.front().message_id == MessageId::actor_magic_fire);
+  const auto decoded_magic_fire = decode_message<ActorMagicFire>(frames.front());
+  assert(decoded_magic_fire.has_value());
+  assert(decoded_magic_fire->actor_id == 42);
+  assert(decoded_magic_fire->target_actor_id == 99);
+  assert(decoded_magic_fire->effect_type == 7);
+  assert(decoded_magic_fire->effect == 32);
 
   const auto vitals_frame =
       encode_frame(make_frame(ActorVitals{42, 18, 30, 9, 12, 5, 99, true}, 20));
@@ -342,7 +356,7 @@ int main() {
   assert(decoded_death->dir == 4);
 
   MagicList magic_list;
-  magic_list.magics.push_back(MagicEntry{1, 1, 0, 0, 1000, "Fire", 15, 900});
+  magic_list.magics.push_back(MagicEntry{1, 1, 0, 0, 1000, "Fire", 15, 900, 1});
   const auto magic_frame = encode_frame(make_frame(magic_list, 22));
   buffer = magic_frame;
   frames = drain_frames(buffer);
@@ -352,6 +366,7 @@ int main() {
   assert(decoded_magic->magics.front().name == "Fire");
   assert(decoded_magic->magics.front().effect == 15);
   assert(decoded_magic->magics.front().max_train == 900);
+  assert(decoded_magic->magics.front().effect_type == 1);
 
   const auto self_ability =
       round_trip(SelfAbility{35, 1, 123456, 200000, 37, 60, 8888, 3}, 221);

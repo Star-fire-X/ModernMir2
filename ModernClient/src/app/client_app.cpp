@@ -658,6 +658,15 @@ void ClientApp::request_spell(const client_v1::SpellIntent& intent) {
     actor.action_target_x = intent.x;
     actor.action_target_y = intent.y;
     actor.action_magic = true;
+    actor.action_magic_effect = 0;
+    actor.action_magic_effect_type = -1;
+    for (const auto& magic : state_.world.magics) {
+      if (magic.magic_id == intent.magic_id) {
+        actor.action_magic_effect = magic.effect;
+        actor.action_magic_effect_type = magic.effect_type;
+        break;
+      }
+    }
     actor.action_started_ms = now_ms;
     actor.action_duration_ms = GameStateStore::action_duration_ms(actor.current_action, 0);
   }
@@ -1285,6 +1294,17 @@ void ClientApp::handle_protocol_events() {
               legacy_trace(out.str());
             }
             state_.apply(value);                    // 其他角色动作同步
+          } else if constexpr (std::is_same_v<T, client_v1::ActorMagicFire>) {
+            if (legacy_trace_enabled()) {
+              std::ostringstream out;
+              out << "recv_actor_magic_fire now=" << detail::monotonic_ms()
+                  << " actor=" << value.actor_id << " target=" << value.target_actor_id
+                  << " x=" << value.x << " y=" << value.y
+                  << " effect_type=" << static_cast<int>(value.effect_type)
+                  << " effect=" << static_cast<int>(value.effect);
+              legacy_trace(out.str());
+            }
+            state_.apply(value);
           } else if constexpr (std::is_same_v<T, client_v1::ActorVitals>) {
             if (legacy_trace_enabled()) {
               std::ostringstream out;
@@ -1509,6 +1529,9 @@ void ClientApp::handle_protocol_events() {
         break;
       case client_v1::MessageId::actor_action:
         decoded = decode_and_dispatch.operator()<client_v1::ActorAction>();
+        break;
+      case client_v1::MessageId::actor_magic_fire:
+        decoded = decode_and_dispatch.operator()<client_v1::ActorMagicFire>();
         break;
       case client_v1::MessageId::actor_vitals:
         decoded = decode_and_dispatch.operator()<client_v1::ActorVitals>();
