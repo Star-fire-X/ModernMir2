@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <string_view>
 #include <vector>
 
@@ -7,6 +8,8 @@
 #include "shared/protocol/client_v1/protocol.hpp"
 
 namespace {
+
+using Bytes = std::vector<std::uint8_t>;
 
 template <std::size_t Size>
 bool has_entry(const std::array<mir2::client::protocol_migration::MappingEntry, Size>& entries,
@@ -24,6 +27,253 @@ const mir2::client::protocol_migration::MappingEntry* find_entry(
     return entry.delphi_entry == name;
   });
   return it == entries.end() ? nullptr : &*it;
+}
+
+void append_u8(Bytes& bytes, std::uint8_t value) {
+  bytes.push_back(value);
+}
+
+void append_bool(Bytes& bytes, bool value) {
+  append_u8(bytes, value ? 1U : 0U);
+}
+
+void append_u16(Bytes& bytes, std::uint16_t value) {
+  bytes.push_back(static_cast<std::uint8_t>(value & 0xFFU));
+  bytes.push_back(static_cast<std::uint8_t>((value >> 8U) & 0xFFU));
+}
+
+void append_u32(Bytes& bytes, std::uint32_t value) {
+  for (std::size_t index = 0; index < sizeof(value); ++index) {
+    bytes.push_back(static_cast<std::uint8_t>((value >> (index * 8U)) & 0xFFU));
+  }
+}
+
+void append_u64(Bytes& bytes, std::uint64_t value) {
+  for (std::size_t index = 0; index < sizeof(value); ++index) {
+    bytes.push_back(static_cast<std::uint8_t>((value >> (index * 8U)) & 0xFFU));
+  }
+}
+
+void append_i32(Bytes& bytes, std::int32_t value) {
+  append_u32(bytes, static_cast<std::uint32_t>(value));
+}
+
+void append_string(Bytes& bytes, std::string_view value) {
+  append_u16(bytes, static_cast<std::uint16_t>(value.size()));
+  bytes.insert(bytes.end(), value.begin(), value.end());
+}
+
+Bytes expected_frame(std::uint16_t message_id, std::uint32_t sequence, Bytes payload) {
+  Bytes bytes;
+  append_u32(bytes, static_cast<std::uint32_t>(8U + payload.size()));
+  append_u16(bytes, message_id);
+  append_u16(bytes, 0);
+  append_u32(bytes, sequence);
+  bytes.insert(bytes.end(), payload.begin(), payload.end());
+  return bytes;
+}
+
+void assert_bytes(const Bytes& actual, const Bytes& expected) {
+  assert(actual.size() == expected.size());
+  assert(std::equal(actual.begin(), actual.end(), expected.begin(), expected.end()));
+}
+
+template <typename T>
+void assert_golden(const T& message, std::uint16_t message_id, std::uint32_t sequence,
+                   Bytes payload) {
+  using namespace mir2::client_v1;
+  const auto actual = encode_frame(make_frame(message, sequence));
+  assert_bytes(actual, expected_frame(message_id, sequence, std::move(payload)));
+  auto buffer = actual;
+  const auto frames = drain_frames(buffer);
+  assert(frames.size() == 1);
+  assert(buffer.empty());
+  assert(frames.front().message_id == static_cast<MessageId>(message_id));
+  const auto decoded = decode_message<T>(frames.front());
+  assert(decoded.has_value());
+}
+
+void append_server_entry(Bytes& bytes, std::string_view name, std::string_view address,
+                         std::uint16_t port) {
+  append_string(bytes, name);
+  append_string(bytes, address);
+  append_u16(bytes, port);
+}
+
+void append_character_summary(Bytes& bytes, std::string_view name, std::uint16_t level,
+                              std::uint8_t job, std::uint8_t sex, std::uint8_t hair,
+                              std::string_view map_id) {
+  append_string(bytes, name);
+  append_u16(bytes, level);
+  append_u8(bytes, job);
+  append_u8(bytes, sex);
+  append_u8(bytes, hair);
+  append_string(bytes, map_id);
+}
+
+void append_world_actor(Bytes& bytes, std::uint64_t actor_id, std::string_view name,
+                        std::int32_t x, std::int32_t y, std::uint8_t dir,
+                        std::int32_t feature, std::int32_t status, std::uint8_t actor_type) {
+  append_u64(bytes, actor_id);
+  append_string(bytes, name);
+  append_i32(bytes, x);
+  append_i32(bytes, y);
+  append_u8(bytes, dir);
+  append_i32(bytes, feature);
+  append_i32(bytes, status);
+  append_u8(bytes, actor_type);
+}
+
+void assert_p0_protocol_goldens() {
+  using namespace mir2::client_v1;
+
+  Bytes payload;
+  append_u32(payload, 1);
+  append_u32(payload, 0x01020304U);
+  append_u32(payload, 0xA0B0C0D0U);
+  append_u32(payload, 0x0F0E0D0CU);
+  assert_golden(ClientHello{1, 0x01020304U, 0xA0B0C0D0U, 0x0F0E0D0CU}, 1, 1, payload);
+
+  payload.clear();
+  append_string(payload, "id");
+  append_string(payload, "pw");
+  assert_golden(LoginRequest{"id", "pw"}, 100, 2, payload);
+
+  payload.clear();
+  append_bool(payload, true);
+  append_i32(payload, 7);
+  append_string(payload, "id");
+  append_string(payload, "Hero");
+  append_string(payload, "");
+  assert_golden(LoginResult{true, 7, "id", "Hero", ""}, 101, 3, payload);
+
+  payload.clear();
+  append_u16(payload, 1);
+  append_server_entry(payload, "S1", "127.0.0.1", 5600);
+  assert_golden(ServerList{{ServerEntry{"S1", "127.0.0.1", 5600}}}, 110, 4, payload);
+
+  payload.clear();
+  append_string(payload, "S1");
+  assert_golden(SelectServerRequest{"S1"}, 111, 5, payload);
+
+  payload.clear();
+  append_bool(payload, true);
+  append_string(payload, "S1");
+  append_string(payload, "127.0.0.1");
+  append_u16(payload, 5601);
+  append_string(payload, "lobby");
+  append_string(payload, "");
+  assert_golden(SelectServerResult{true, "S1", "127.0.0.1", 5601, "lobby", ""}, 112, 6,
+                payload);
+
+  payload.clear();
+  append_string(payload, "lobby");
+  assert_golden(CharacterListRequest{"lobby"}, 200, 7, payload);
+
+  payload.clear();
+  append_u16(payload, 1);
+  append_character_summary(payload, "Hero", 1, 0, 1, 2, "0");
+  append_string(payload, "Hero");
+  CharacterList characters;
+  characters.characters.push_back(CharacterSummary{"Hero", 1, 0, 1, 2, "0"});
+  characters.selected_name = "Hero";
+  assert_golden(characters, 201, 8, payload);
+
+  payload.clear();
+  append_string(payload, "Hero");
+  assert_golden(SelectCharacterRequest{"Hero"}, 206, 9, payload);
+
+  payload.clear();
+  append_bool(payload, true);
+  append_string(payload, "Hero");
+  append_string(payload, "world");
+  append_string(payload, "127.0.0.1");
+  append_u16(payload, 5602);
+  append_string(payload, "");
+  assert_golden(SelectCharacterResult{true, "Hero", "world", "127.0.0.1", 5602, ""}, 207,
+                10, payload);
+
+  payload.clear();
+  append_string(payload, "world");
+  append_u32(payload, 0x01020304U);
+  append_u32(payload, 0x05060708U);
+  assert_golden(EnterWorldRequest{"world", 0x01020304U, 0x05060708U}, 300, 11, payload);
+
+  payload.clear();
+  append_bool(payload, true);
+  append_u64(payload, 1000);
+  append_string(payload, "Hero");
+  append_string(payload, "0");
+  append_i32(payload, 330);
+  append_i32(payload, 270);
+  append_string(payload, "");
+  assert_golden(EnterWorldResult{true, 1000, "Hero", "0", 330, 270, ""}, 301, 12,
+                payload);
+
+  const WorldActor hero{1000, "Hero", 330, 270, 2, 0x01020304, 8, ActorType::player};
+  const WorldActor hen{2000, "Hen", 332, 271, 4, 0, 0, ActorType::monster};
+
+  payload.clear();
+  append_string(payload, "0");
+  append_i32(payload, 700);
+  append_i32(payload, 700);
+  append_u64(payload, 1000);
+  append_u16(payload, 2);
+  append_world_actor(payload, 1000, "Hero", 330, 270, 2, 0x01020304, 8, 1);
+  append_world_actor(payload, 2000, "Hen", 332, 271, 4, 0, 0, 2);
+  WorldSnapshot snapshot;
+  snapshot.map_id = "0";
+  snapshot.width = 700;
+  snapshot.height = 700;
+  snapshot.self_actor_id = 1000;
+  snapshot.actors = {hero, hen};
+  assert_golden(snapshot, 302, 13, payload);
+
+  payload.clear();
+  append_world_actor(payload, 2000, "Hen", 332, 271, 4, 0, 0, 2);
+  assert_golden(ActorUpsert{hen}, 306, 14, payload);
+
+  payload.clear();
+  append_u64(payload, 1000);
+  append_i32(payload, 331);
+  append_i32(payload, 270);
+  append_u8(payload, 2);
+  assert_golden(ActorStateDelta{1000, 331, 270, 2}, 303, 15, payload);
+
+  payload.clear();
+  append_u64(payload, 1000);
+  append_u8(payload, 1);
+  append_i32(payload, 331);
+  append_i32(payload, 270);
+  append_u8(payload, 2);
+  append_u64(payload, 0);
+  append_i32(payload, 0);
+  append_u16(payload, 0);
+  append_u16(payload, 0);
+  append_bool(payload, false);
+  append_u16(payload, 0);
+  assert_golden(ActorAction{1000, ActorActionKind::walk, 331, 270, 2, 0, 0, 0, 0, false, 0},
+                307, 16, payload);
+
+  payload.clear();
+  append_i32(payload, 331);
+  append_i32(payload, 270);
+  append_u8(payload, 0);
+  assert_golden(MoveIntent{331, 270, MoveMode::walk}, 400, 17, payload);
+
+  payload.clear();
+  append_bool(payload, true);
+  append_u32(payload, 1234);
+  assert_golden(ActionAck{true, 1234}, 403, 18, payload);
+
+  payload.clear();
+  append_u64(payload, 123456789);
+  assert_golden(Ping{123456789}, 600, 19, payload);
+
+  payload.clear();
+  append_u64(payload, 123456789);
+  append_u64(payload, 123456999);
+  assert_golden(Pong{123456789, 123456999}, 601, 20, payload);
 }
 
 }  // namespace
@@ -56,6 +306,8 @@ int main() {
   assert_not_planned(find_entry(kDelphiClientGetMappings, "ClientGetBagItmes"));
   assert_not_planned(find_entry(kDelphiClientGetMappings, "ClientGetSenduseItems"));
   assert_not_planned(find_entry(kDelphiClientGetMappings, "ClientGetReadMiniMap"));
+
+  assert_p0_protocol_goldens();
 
   SelectServerRequest request;
   request.name = "ModernServer";

@@ -50,7 +50,10 @@ struct MapDocument {
     if (target == nullptr) {
       return false;
     }
-    return ((target->bk_img & 0x8000U) == 0U) && ((target->fr_img & 0x8000U) == 0U);
+    if ((target->bk_img & 0x8000U) != 0U || (target->fr_img & 0x8000U) != 0U) {
+      return false;
+    }
+    return ((target->door_index & 0x80U) == 0U) || ((target->door_offset & 0x80U) != 0U);
   }
 };
 

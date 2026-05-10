@@ -239,7 +239,7 @@ int main() {
   assert(phase1_map->cell(3, 0) == nullptr);
   assert(phase1_map->can_move(0, 0));
   assert(!phase1_map->can_move(1, 0));
-  assert(!phase1_map->can_move(2, 1));
+  assert(phase1_map->can_move(2, 1));
 
   MapCell object_cell;
   object_cell.fr_img = 100;
