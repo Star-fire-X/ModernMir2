@@ -196,6 +196,8 @@ void ClientV1LoginGatewayService::handle_login_request(std::uint64_t session_id,
     session_state.authenticated = true;
     session_state.account_id = response.account_id;
     session_state.display_name = response.display_name;
+    session_state.stage =
+        advance(session_state.stage, CanonicalLoginTransition::authenticate);
   }
 
   if (needs_account_update(*result.account)) {
@@ -296,7 +298,8 @@ void ClientV1LoginGatewayService::handle_change_password_request(
 void ClientV1LoginGatewayService::handle_select_server_request(
     std::uint64_t session_id, const client_v1::SelectServerRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->authenticated) {
+  if (!state.has_value() || !state->authenticated ||
+      !can_accept(state->stage, CanonicalLoginRequest::select_server)) {
     disconnect(session_id, 401, "not_authenticated");
     return;
   }
@@ -307,11 +310,17 @@ void ClientV1LoginGatewayService::handle_select_server_request(
       "ModernServer", context().config.ports.client_v1_login_gateway.address,
       context().config.ports.client_v1_login_gateway.port};
   if (request.name.empty() || request.name == entry.name) {
+    auto selected_state = *state;
+    selected_state.stage = advance(selected_state.stage, CanonicalLoginTransition::select_server);
+    {
+      std::scoped_lock lock(mutex_);
+      sessions_[session_id].stage = selected_state.stage;
+    }
     result.success = true;
     result.name = entry.name;
     result.address = entry.address;
     result.port = entry.port;
-    result.lobby_token = issue_lobby_token(*state, entry.name);
+    result.lobby_token = issue_lobby_token(selected_state, entry.name);
   } else {
     result.error_message = "server_not_found";
   }
@@ -324,7 +333,8 @@ void ClientV1LoginGatewayService::handle_character_list_request(
   if ((!state.has_value() || !state->authenticated) && !request.lobby_token.empty()) {
     state = authenticate_lobby_session(session_id, request.lobby_token);
   }
-  if (!state.has_value() || !state->authenticated) {
+  if (!state.has_value() || !state->authenticated ||
+      !can_accept(state->stage, CanonicalLoginRequest::query_characters)) {
     disconnect(session_id, 401, "not_authenticated");
     return;
   }
@@ -343,7 +353,8 @@ void ClientV1LoginGatewayService::handle_character_list_request(
 void ClientV1LoginGatewayService::handle_create_character_request(
     std::uint64_t session_id, const client_v1::CreateCharacterRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->authenticated) {
+  if (!state.has_value() || !state->authenticated ||
+      !can_accept(state->stage, CanonicalLoginRequest::create_character)) {
     disconnect(session_id, 401, "not_authenticated");
     return;
   }
@@ -373,7 +384,8 @@ void ClientV1LoginGatewayService::handle_create_character_request(
 void ClientV1LoginGatewayService::handle_delete_character_request(
     std::uint64_t session_id, const client_v1::DeleteCharacterRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->authenticated) {
+  if (!state.has_value() || !state->authenticated ||
+      !can_accept(state->stage, CanonicalLoginRequest::delete_character)) {
     disconnect(session_id, 401, "not_authenticated");
     return;
   }
@@ -391,7 +403,8 @@ void ClientV1LoginGatewayService::handle_delete_character_request(
 void ClientV1LoginGatewayService::handle_select_character_request(
     std::uint64_t session_id, const client_v1::SelectCharacterRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->authenticated) {
+  if (!state.has_value() || !state->authenticated ||
+      !can_accept(state->stage, CanonicalLoginRequest::select_character)) {
     disconnect(session_id, 401, "not_authenticated");
     return;
   }
@@ -409,6 +422,11 @@ void ClientV1LoginGatewayService::handle_select_character_request(
   result.enter_world_token = admissions_->issue(state->account_id, request.name);
   result.address = context().config.ports.client_v1_game_gateway.address;
   result.port = context().config.ports.client_v1_game_gateway.port;
+  {
+    std::scoped_lock lock(mutex_);
+    sessions_[session_id].stage =
+        advance(sessions_[session_id].stage, CanonicalLoginTransition::select_character);
+  }
   send_message(session_id, result);
 }
 
@@ -443,7 +461,8 @@ std::string ClientV1LoginGatewayService::issue_lobby_token(const SessionState& s
                                                            const std::string& server_name) {
   std::scoped_lock lock(mutex_);
   auto token = std::to_string(next_lobby_token_++) + ":" + state.account_id + ":" + server_name;
-  lobby_admissions_[token] = LobbyAdmission{state.account_id, state.display_name, server_name};
+  lobby_admissions_[token] =
+      LobbyAdmission{state.account_id, state.display_name, server_name, state.stage};
   return token;
 }
 
@@ -466,6 +485,7 @@ ClientV1LoginGatewayService::authenticate_lobby_session(std::uint64_t session_id
   state.authenticated = true;
   state.account_id = admission.account_id;
   state.display_name = admission.display_name;
+  state.stage = admission.stage;
   return state;
 }
 

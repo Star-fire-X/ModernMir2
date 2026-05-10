@@ -235,6 +235,33 @@ int main() {
     return fail("server list");
   }
 
+  {
+    auto early_socket = connect_login(io_context);
+    if (!early_socket.has_value()) {
+      stop_services();
+      return fail("connect early character");
+    }
+    mir2::tests::ClientV1SocketReader early_reader(*early_socket);
+    std::uint32_t early_sequence = 1;
+    send_hello(*early_socket, early_sequence);
+    mir2::tests::send_client_v1_message(
+        *early_socket, mir2::client_v1::LoginRequest{"alpha", "newpw"}, early_sequence);
+    auto early_login = early_reader.wait_for_message<mir2::client_v1::LoginResult>();
+    auto early_servers = early_reader.wait_for_message<mir2::client_v1::ServerList>();
+    if (!early_login.has_value() || !early_login->success || !early_servers.has_value()) {
+      stop_services();
+      return fail("early character login");
+    }
+    mir2::tests::send_client_v1_message(
+        *early_socket, mir2::client_v1::CharacterListRequest{}, early_sequence);
+    auto early_disconnect = early_reader.wait_for_message<mir2::client_v1::DisconnectReason>();
+    if (!early_disconnect.has_value() || early_disconnect->code != 401 ||
+        early_disconnect->text != "not_authenticated") {
+      stop_services();
+      return fail("character list before select server");
+    }
+  }
+
   mir2::tests::send_client_v1_message(
       *socket, mir2::client_v1::SelectServerRequest{"OtherServer"}, sequence);
   auto select_server = reader.wait_for_message<mir2::client_v1::SelectServerResult>();

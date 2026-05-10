@@ -732,7 +732,8 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
     if (const auto run_login = decode_run_login(event.packet); run_login.has_value()) {
       const auto admission = admissions_.find(run_login->certification);
       if (admission == admissions_.end() || admission->second.account_id != run_login->account_id ||
-          admission->second.character_name != run_login->character_name) {
+          admission->second.character_name != run_login->character_name ||
+          !can_accept(admission->second.stage, CanonicalLoginRequest::enter_world)) {
         context_->bus->post(
             "log_service",
             AuditEvent{"world.admission_fail",
@@ -740,12 +741,14 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
                         std::to_string(event.session_id)});
         return {};
       }
+      admission->second.stage =
+          advance(admission->second.stage, CanonicalLoginTransition::enter_game);
 
       session_gateways_[event.session_id] = event.gateway.empty() ? "game_gateway" : event.gateway;
       pending_loads_[make_key(run_login->account_id, run_login->character_name)] =
           PendingLoad{event.session_id, event.gateway.empty() ? "game_gateway" : event.gateway,
                       run_login->account_id, run_login->character_name,
-                      run_login->certification};
+                      run_login->certification, admission->second.stage};
       PersistRequest request;
       request.kind = PersistRequestKind::load_character;
       request.reply_to = name();
@@ -852,7 +855,8 @@ RuntimeDispatch WorldService::handle_logic_command(const LogicCommand& command) 
       return {};
     }
     admissions_[command.certification] =
-        Admission{command.account_id, command.character_name, command.certification};
+        Admission{command.account_id, command.character_name, command.certification,
+                  CanonicalLoginStage::character_selected};
     return {};
   }
 
@@ -1003,8 +1007,14 @@ RuntimeDispatch WorldService::handle_persist_result(const PersistResult& result)
                 event.kind == SessionEventKind::send_packet_and_close);
       });
   if (!rejected && pending->second.certification > 0) {
+    if (auto admission = admissions_.find(pending->second.certification);
+        admission != admissions_.end()) {
+      admission->second.stage =
+          advance(pending->second.stage, CanonicalLoginTransition::enter_game_complete);
+    }
     active_sessions_[pending->second.session_id] =
-        Admission{result.account_id, result.character_name, pending->second.certification};
+        Admission{result.account_id, result.character_name, pending->second.certification,
+                  CanonicalLoginStage::in_game};
     active_accounts_[result.account_id] = pending->second.session_id;
   }
   pending_loads_.erase(pending);

@@ -689,6 +689,8 @@ void ClientV1GameGatewayService::handle_enter_world_request(
   updated.greeted = true;
   updated.entered_world = true;
   updated.pending_login_notice = !context().config.runtime.login_notice_text.empty();
+  updated.stage = advance(CanonicalLoginStage::character_selected,
+                          CanonicalLoginTransition::enter_game);
   updated.account_id = admission->account_id;
   updated.character_name = admission->character_name;
   updated.character = *character;
@@ -706,6 +708,12 @@ void ClientV1GameGatewayService::handle_enter_world_request(
     return;
   }
 
+  {
+    std::scoped_lock lock(mutex_);
+    sessions_[session_id].stage =
+        advance(sessions_[session_id].stage, CanonicalLoginTransition::enter_game_complete);
+    updated = sessions_[session_id];
+  }
   post_enter_world(session_id, updated);
 }
 
@@ -714,10 +722,13 @@ void ClientV1GameGatewayService::handle_login_notice_ok(std::uint64_t session_id
   {
     std::scoped_lock lock(mutex_);
     auto it = sessions_.find(session_id);
-    if (it == sessions_.end() || !it->second.entered_world || !it->second.pending_login_notice) {
+    if (it == sessions_.end() || !it->second.entered_world || !it->second.pending_login_notice ||
+        !can_accept(it->second.stage, CanonicalLoginRequest::finish_enter_game)) {
       return;
     }
     it->second.pending_login_notice = false;
+    it->second.stage =
+        advance(it->second.stage, CanonicalLoginTransition::enter_game_complete);
     state = it->second;
   }
 
@@ -744,7 +755,7 @@ void ClientV1GameGatewayService::post_enter_world(std::uint64_t session_id,
 void ClientV1GameGatewayService::handle_move_intent(std::uint64_t session_id,
                                                     const client_v1::MoveIntent& intent) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
 
@@ -761,7 +772,7 @@ void ClientV1GameGatewayService::handle_move_intent(std::uint64_t session_id,
 void ClientV1GameGatewayService::handle_action_intent(
     std::uint64_t session_id, const client_v1::ActionIntent& intent) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
 
@@ -787,7 +798,7 @@ void ClientV1GameGatewayService::handle_action_intent(
 void ClientV1GameGatewayService::handle_spell_intent(
     std::uint64_t session_id, const client_v1::SpellIntent& intent) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
 
@@ -797,7 +808,7 @@ void ClientV1GameGatewayService::handle_spell_intent(
 void ClientV1GameGatewayService::handle_pickup_intent(
     std::uint64_t session_id, const client_v1::PickupIntent& intent) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
 
@@ -807,7 +818,7 @@ void ClientV1GameGatewayService::handle_pickup_intent(
 void ClientV1GameGatewayService::handle_use_item_intent(
     std::uint64_t session_id, const client_v1::UseItemIntent& intent) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
 
@@ -817,7 +828,7 @@ void ClientV1GameGatewayService::handle_use_item_intent(
 void ClientV1GameGatewayService::handle_equip_item_request(
     std::uint64_t session_id, const client_v1::EquipItemRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
 
@@ -827,7 +838,7 @@ void ClientV1GameGatewayService::handle_equip_item_request(
 void ClientV1GameGatewayService::handle_unequip_item_request(
     std::uint64_t session_id, const client_v1::UnequipItemRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
 
@@ -837,7 +848,7 @@ void ClientV1GameGatewayService::handle_unequip_item_request(
 void ClientV1GameGatewayService::handle_drop_item_request(
     std::uint64_t session_id, const client_v1::DropItemRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
 
@@ -847,7 +858,7 @@ void ClientV1GameGatewayService::handle_drop_item_request(
 void ClientV1GameGatewayService::handle_revive_request(
     std::uint64_t session_id, const client_v1::ReviveRequest& /*request*/) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
 
@@ -857,7 +868,7 @@ void ClientV1GameGatewayService::handle_revive_request(
 void ClientV1GameGatewayService::handle_magic_key_change_request(
     std::uint64_t session_id, const client_v1::MagicKeyChangeRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.magic_id == 0 || request.key > 8) {
     return;
   }
@@ -894,7 +905,7 @@ void ClientV1GameGatewayService::handle_magic_key_change_request(
 void ClientV1GameGatewayService::handle_merchant_buy_request(
     std::uint64_t session_id, const client_v1::MerchantBuyRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.name.empty()) {
     return;
   }
@@ -918,7 +929,7 @@ void ClientV1GameGatewayService::handle_merchant_buy_request(
 void ClientV1GameGatewayService::handle_merchant_sell_request(
     std::uint64_t session_id, const client_v1::MerchantSellRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.item_make_index == 0 || request.name.empty()) {
     return;
   }
@@ -944,7 +955,7 @@ void ClientV1GameGatewayService::handle_merchant_sell_request(
 void ClientV1GameGatewayService::handle_merchant_sell_price_request(
     std::uint64_t session_id, const client_v1::MerchantSellPriceRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.item_make_index == 0 || request.name.empty()) {
     return;
   }
@@ -961,7 +972,7 @@ void ClientV1GameGatewayService::handle_merchant_sell_price_request(
 void ClientV1GameGatewayService::handle_merchant_repair_price_request(
     std::uint64_t session_id, const client_v1::MerchantRepairPriceRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.item_make_index == 0 || request.name.empty()) {
     return;
   }
@@ -987,7 +998,7 @@ void ClientV1GameGatewayService::handle_merchant_repair_price_request(
 void ClientV1GameGatewayService::handle_merchant_repair_request(
     std::uint64_t session_id, const client_v1::MerchantRepairRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.item_make_index == 0 || request.name.empty()) {
     return;
   }
@@ -1013,7 +1024,7 @@ void ClientV1GameGatewayService::handle_merchant_repair_request(
 void ClientV1GameGatewayService::handle_storage_deposit_request(
     std::uint64_t session_id, const client_v1::StorageDepositRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.item_make_index == 0 || request.name.empty()) {
     return;
   }
@@ -1037,7 +1048,7 @@ void ClientV1GameGatewayService::handle_storage_deposit_request(
 void ClientV1GameGatewayService::handle_storage_withdraw_request(
     std::uint64_t session_id, const client_v1::StorageWithdrawRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.item_make_index == 0 || request.name.empty()) {
     return;
   }
@@ -1061,7 +1072,7 @@ void ClientV1GameGatewayService::handle_storage_withdraw_request(
 void ClientV1GameGatewayService::handle_group_mode_request(
     std::uint64_t session_id, const client_v1::GroupModeRequest& request) {
   auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
   {
@@ -1083,7 +1094,7 @@ void ClientV1GameGatewayService::handle_group_mode_request(
 void ClientV1GameGatewayService::handle_group_create_request(
     std::uint64_t session_id, const client_v1::GroupCreateRequest& request) {
   auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.target_name.empty()) {
     return;
   }
@@ -1095,7 +1106,7 @@ void ClientV1GameGatewayService::handle_group_create_request(
 void ClientV1GameGatewayService::handle_group_add_member_request(
     std::uint64_t session_id, const client_v1::GroupAddMemberRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.target_name.empty()) {
     return;
   }
@@ -1107,7 +1118,7 @@ void ClientV1GameGatewayService::handle_group_add_member_request(
 void ClientV1GameGatewayService::handle_group_remove_member_request(
     std::uint64_t session_id, const client_v1::GroupRemoveMemberRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.target_name.empty()) {
     return;
   }
@@ -1119,7 +1130,7 @@ void ClientV1GameGatewayService::handle_group_remove_member_request(
 void ClientV1GameGatewayService::handle_trade_try_request(
     std::uint64_t session_id, const client_v1::TradeTryRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.target_name.empty()) {
     return;
   }
@@ -1141,7 +1152,7 @@ void ClientV1GameGatewayService::handle_trade_try_request(
 void ClientV1GameGatewayService::handle_trade_cancel_request(
     std::uint64_t session_id, const client_v1::TradeCancelRequest& /*request*/) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
   {
@@ -1161,7 +1172,7 @@ void ClientV1GameGatewayService::handle_trade_cancel_request(
 void ClientV1GameGatewayService::handle_trade_add_item_request(
     std::uint64_t session_id, const client_v1::TradeAddItemRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.item_make_index == 0 || request.name.empty()) {
     return;
   }
@@ -1174,7 +1185,7 @@ void ClientV1GameGatewayService::handle_trade_add_item_request(
 void ClientV1GameGatewayService::handle_trade_remove_item_request(
     std::uint64_t session_id, const client_v1::TradeRemoveItemRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.item_make_index == 0 || request.name.empty()) {
     return;
   }
@@ -1187,7 +1198,7 @@ void ClientV1GameGatewayService::handle_trade_remove_item_request(
 void ClientV1GameGatewayService::handle_trade_set_gold_request(
     std::uint64_t session_id, const client_v1::TradeSetGoldRequest& request) {
   auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice ||
+  if (!state.has_value() || !state->in_game() ||
       request.gold < 0) {
     return;
   }
@@ -1210,7 +1221,7 @@ void ClientV1GameGatewayService::handle_trade_set_gold_request(
 void ClientV1GameGatewayService::handle_trade_accept_request(
     std::uint64_t session_id, const client_v1::TradeAcceptRequest& /*request*/) {
   auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
   {
@@ -1229,7 +1240,7 @@ void ClientV1GameGatewayService::handle_trade_accept_request(
 void ClientV1GameGatewayService::handle_guild_open_request(
     std::uint64_t session_id, const client_v1::GuildOpenRequest& /*request*/) {
   auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
   {
@@ -1309,7 +1320,7 @@ void ClientV1GameGatewayService::handle_guild_update_grade_request(
 void ClientV1GameGatewayService::handle_minimap_request(
     std::uint64_t session_id, const client_v1::MiniMapRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
   const auto map_id = request.map_id.empty() ? state->character.map_id : request.map_id;
@@ -1328,7 +1339,7 @@ void ClientV1GameGatewayService::handle_minimap_request(
 void ClientV1GameGatewayService::handle_npc_click_request(
     std::uint64_t session_id, const client_v1::NpcClickRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
 
@@ -1346,7 +1357,7 @@ void ClientV1GameGatewayService::handle_npc_click_request(
 void ClientV1GameGatewayService::handle_npc_dialog_select_request(
     std::uint64_t session_id, const client_v1::NpcDialogSelectRequest& request) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
 
@@ -1363,7 +1374,7 @@ void ClientV1GameGatewayService::handle_npc_dialog_select_request(
 void ClientV1GameGatewayService::handle_chat_send(std::uint64_t session_id,
                                                   const client_v1::ChatSend& chat) {
   const auto state = session(session_id);
-  if (!state.has_value() || !state->entered_world || state->pending_login_notice) {
+  if (!state.has_value() || !state->in_game()) {
     return;
   }
 
