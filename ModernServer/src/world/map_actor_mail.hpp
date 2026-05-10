@@ -2090,16 +2090,26 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       auto effective_ident = mail.game_message.ident;
       auto sword_magic_id = legacy_sword_skill_for_attack_ident(effective_ident);
       auto prepared_sword_magic_id = 0;
-      if (effective_ident == kCmHit) {
-        const auto prepared_magic_id = attacker->pending_legacy_sword_skill(current_tick);
-        if (prepared_magic_id != 0) {
-          prepared_sword_magic_id = prepared_magic_id;
-          sword_magic_id = prepared_magic_id;
-          effective_ident = legacy_attack_ident_for_sword_skill(prepared_magic_id);
-        } else if (attacker->learned_magic(3) != nullptr) {
-          attacker->clear_legacy_sword_skill();
-          sword_magic_id = 3;
+      const auto pending_magic_id = attacker->pending_legacy_sword_skill(current_tick);
+      const auto pending_ident = legacy_attack_ident_for_sword_skill(pending_magic_id);
+      if (pending_magic_id != 0 &&
+          (effective_ident == kCmHit || effective_ident == pending_ident)) {
+        prepared_sword_magic_id = pending_magic_id;
+        sword_magic_id = pending_magic_id;
+        effective_ident = pending_ident;
+      } else if (effective_ident == kCmHit && attacker->learned_magic(3) != nullptr) {
+        attacker->clear_legacy_sword_skill();
+        sword_magic_id = 3;
+      } else if (effective_ident == kCmFireHit) {
+        if (attacker->learned_magic(26) != nullptr) {
+          sword_magic_id = 26;
+        } else if (attacker->learned_magic(25) != nullptr) {
+          sword_magic_id = 25;
+        } else {
+          sword_magic_id = 26;
         }
+      } else if (effective_ident == kCmCrossHit) {
+        sword_magic_id = 34;
       }
       effective_mail.game_message.ident = effective_ident;
 
@@ -2112,6 +2122,13 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             !legacy_p14_sword_skill(sword_magic_id)) {
           add_legacy_trace(dispatch, "LegacySkill", "sword_reject", effective_mail,
                            current_tick, now_ms, false, sword_magic_id, 0, "GetMagic");
+          queue_packet(dispatch, attacker->session_id(),
+                       make_ack_packet(attacker->session_id(), false));
+          break;
+        }
+        if (effective_ident == kCmCrossHit && !attacker->legacy_cross_hit_enabled()) {
+          add_legacy_trace(dispatch, "LegacySkill", "sword_reject", effective_mail,
+                           current_tick, now_ms, false, sword_magic_id, 0, "CrossDisabled");
           queue_packet(dispatch, attacker->session_id(),
                        make_ack_packet(attacker->session_id(), false));
           break;
@@ -2144,8 +2161,18 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           effective_ident == kCmWideHit
               ? collect_wide_hit_targets(objects_, *attacker, config_, now_ms)
               : std::vector<GameObject*>{};
+      auto cross_targets =
+          effective_ident == kCmCrossHit
+              ? collect_cross_hit_targets(objects_, *attacker, config_, now_ms)
+              : std::vector<GameObject*>{};
       if (effective_ident == kCmWideHit) {
         target = wide_targets.empty() ? nullptr : wide_targets.front();
+      }
+      if (effective_ident == kCmCrossHit) {
+        target = find_attack_target_in_front(objects_, *attacker, 1);
+        if (cross_targets.empty()) {
+          target = nullptr;
+        }
       }
       if (target == nullptr && prepared_sword_magic_id != 0) {
         effective_ident = kCmHit;
@@ -2200,9 +2227,22 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       static_cast<void>(apply_pending_weapon_upgrade_result(*attacker, dispatch,
                                                             current_tick, now_ms));
 
-      const auto attack_power =
-          roll_legacy_player_attack_power(*attacker, *target, effective_ident, dispatch,
+      const auto attack_roll_ident =
+          sword_magic_id == 26 || sword_magic_id == 34 ? kCmHit : effective_ident;
+      auto attack_power =
+          roll_legacy_player_attack_power(*attacker, *target, attack_roll_ident, dispatch,
                                           "LegacyCombat", "attack", current_tick, now_ms);
+      if (sword_magic_id == 26) {
+        const auto* fire_magic = attacker->learned_magic(26);
+        const auto fire_level = fire_magic != nullptr ? static_cast<std::int32_t>(fire_magic->level) : 0;
+        const auto hit_double = 4 + fire_level * 4;
+        const auto fire_bonus =
+            delphi_round(static_cast<double>(attack_power) / 100.0 *
+                         static_cast<double>(hit_double * 10));
+        attack_power += fire_bonus;
+        add_legacy_trace(dispatch, "LegacyCombat", "fire_hit_bonus", effective_mail,
+                         current_tick, now_ms, true, fire_bonus, attack_power, "HitDouble");
+      }
       const auto undead_power = legacy_player_undead_power(*attacker, item_configs_);
       const auto hit_roll =
           legacy_random_value(dispatch, "LegacyCombat", "hit_check",
@@ -2414,6 +2454,109 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           }
         }
       }
+      if (effective_ident == kCmCrossHit) {
+        const auto* cross_magic = attacker->learned_magic(34);
+        const auto cross_level =
+            cross_magic != nullptr ? static_cast<std::int32_t>(cross_magic->level) : 0;
+        auto cross_max_train_level = 3;
+        if (const auto cross_it = magic_configs_.find(34); cross_it != magic_configs_.end()) {
+          cross_max_train_level = std::max(0, cross_it->second.legacy.max_train_level);
+        }
+        const auto cross_attack_power =
+            delphi_round(static_cast<double>(attack_power) /
+                         static_cast<double>(cross_max_train_level + 11) *
+                         static_cast<double>(cross_level + 3));
+        for (auto* extra_target : cross_targets) {
+          if (extra_target == nullptr || extra_target == target ||
+              objects_.find(extra_target->id()) == objects_.end() ||
+              !is_attackable_target(*extra_target)) {
+            continue;
+          }
+          const auto extra_hit_roll =
+              legacy_random_value(dispatch, "LegacyCombat", "hit_check",
+                                  std::max(legacy_speed_point(*extra_target), 1), attacker->id(),
+                                  extra_target->id(), "cross_hit", now_ms, current_tick);
+          if (legacy_accuracy_point(*attacker) <= extra_hit_roll) {
+            add_legacy_trace(dispatch, "LegacyCombat", "miss", effective_mail, current_tick,
+                             now_ms, false, extra_hit_roll, 0,
+                             "CrossHit AccuracyPoint<=Random(SpeedPoint)");
+            continue;
+          }
+          auto extra_attack_power = cross_attack_power;
+          if (as_player(extra_target) != nullptr) {
+            extra_attack_power =
+                delphi_round(static_cast<double>(extra_attack_power) * 0.8);
+          }
+          const auto [extra_ac_min, extra_ac_max] = actor_physical_defense_range(*extra_target);
+          const auto extra_armor_roll =
+              legacy_random_value(dispatch, "LegacyCombat", "armor_roll",
+                                  std::max(1, extra_ac_max - extra_ac_min + 1),
+                                  attacker->id(), extra_target->id(), "cross_hit", now_ms,
+                                  current_tick);
+          const auto extra_damage =
+              legacy_physical_struck_damage(*extra_target, extra_attack_power, extra_armor_roll,
+                                            undead_power);
+          std::int32_t extra_applied_damage = 0;
+          bool extra_target_died = false;
+          Monster* extra_slain_monster = nullptr;
+          if (auto* player_target = as_player(extra_target); player_target != nullptr) {
+            if (!config_.fight_zone && !config_.fight3_zone && player_target->pk_level() < 2) {
+              player_target->record_pk_hiter(attacker->id(), now_ms);
+            }
+            const auto damage_result = player_target->apply_damage(extra_damage, current_tick);
+            extra_applied_damage = damage_result.hp_damage;
+            extra_target_died = player_target->is_dead();
+            if (extra_target_died &&
+                try_legacy_revival(*player_target, dispatch, current_tick, now_ms)) {
+              extra_target_died = false;
+            }
+            if (extra_target_died) {
+              const auto death_clear = player_target->mark_dead(now_ms);
+              dispatch_player_status_tick_result(*player_target, death_clear, dispatch, false);
+              apply_bad_kill_penalty(*attacker, *player_target, dispatch,
+                                     current_tick, now_ms, "LegacyCombat");
+              static_cast<void>(settle_player_death(*player_target, dispatch,
+                                                    current_tick, now_ms));
+            }
+          } else if (auto* monster_target = as_monster(extra_target); monster_target != nullptr) {
+            extra_applied_damage = apply_legacy_monster_damage(
+                objects_, *monster_target, extra_damage, attacker->id(), now_ms);
+            if (extra_applied_damage > 0) {
+              notify_owned_slaves_target(*attacker, monster_target->id(), now_ms);
+            }
+            extra_target_died = monster_target->is_dead();
+            extra_slain_monster = extra_target_died ? monster_target : nullptr;
+          }
+          static_cast<void>(apply_legacy_physical_equipment_specials(
+              *attacker, *extra_target, extra_damage, extra_applied_damage, dispatch,
+              "LegacyCombat", current_tick, now_ms));
+          if (extra_applied_damage <= 0) {
+            continue;
+          }
+          for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+            if (watcher.id() != extra_target->id() &&
+                !is_legacy_visible_to(watcher, *extra_target)) {
+              return;
+            }
+            queue_packet(dispatch, watcher.session_id(),
+                         extra_target_died
+                             ? make_death_packet(watcher.session_id(), *extra_target,
+                                                 watcher.id() == extra_target->id())
+                             : make_struck_packet(watcher.session_id(), *extra_target,
+                                                  attacker->id(), extra_applied_damage, false));
+          });
+          add_legacy_trace(dispatch, "LegacyCombat",
+                           extra_target_died ? "death" : "struck", effective_mail,
+                           current_tick, now_ms, true, sword_magic_id, extra_applied_damage,
+                           extra_target_died ? "SM_DEATH" : "SM_STRUCK");
+          if (extra_slain_monster != nullptr) {
+            finalize_monster_death(extra_slain_monster->id(), attacker->id(), dispatch,
+                                   current_tick);
+            add_legacy_trace(dispatch, "LegacyCombat", "exp", effective_mail, current_tick,
+                             now_ms, true, sword_magic_id, extra_applied_damage, "WinExp");
+          }
+        }
+      }
       if (sword_magic_id != 0) {
         if (auto* user_magic = attacker->learned_magic_mutable(sword_magic_id);
             user_magic != nullptr) {
@@ -2473,12 +2616,68 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           break;
         }
 
+        if (magic_id == 27) {
+          if (!attacker->legacy_rush_ready(now_ms)) {
+            add_legacy_trace(dispatch, "LegacySkill", "sword_cooldown_reject", mail,
+                             current_tick, now_ms, false, magic_id, 0,
+                             "LatestRushRushTime");
+            queue_packet(dispatch, attacker->session_id(),
+                         make_ack_packet(attacker->session_id(), false));
+            break;
+          }
+          const auto spell_point =
+              legacy_spell_point(magic_it->second.legacy, static_cast<std::int32_t>(user_magic->level));
+          if (spell_point > 0 && !attacker->spend_mp(spell_point)) {
+            add_legacy_trace(dispatch, "LegacySkill", "sword_mp_reject", mail, current_tick,
+                             now_ms, false, spell_point, 0, "GetSpellPoint");
+            queue_packet(dispatch, attacker->session_id(),
+                         make_ack_packet(attacker->session_id(), false));
+            break;
+          }
+          const auto cleared_transparent = attacker->clear_legacy_transparent(current_tick);
+          if (spell_point > 0 || cleared_transparent) {
+            queue_packet(dispatch, attacker->session_id(),
+                         make_health_spell_changed_packet(attacker->session_id(), *attacker));
+          }
+          if (cleared_transparent) {
+            broadcast_legacy_char_status_changed(dispatch, *attacker);
+          }
+          attacker->mark_legacy_rush(now_ms);
+          queue_packet(dispatch, attacker->session_id(),
+                       make_ack_packet(attacker->session_id(), true));
+          const auto rushed = handle_legacy_rush_rush(*attacker, *user_magic, magic_it->second,
+                                                      mail, dispatch, current_tick, now_ms);
+          if (rushed) {
+            LegacyRandom fallback_random;
+            auto& random = legacy_random_ != nullptr ? *legacy_random_ : fallback_random;
+            const auto training =
+                legacy_train_magic(*attacker, *user_magic, magic_it->second, random);
+            if (training.trained) {
+              add_legacy_trace(dispatch, "LegacySkill", "train_skill", mail,
+                               current_tick, now_ms, true, training.train_amount,
+                               training.cur_train,
+                               training.leveled_up ? "sword_level_up" : "sword_train");
+              schedule_legacy_magic_lvexp(*attacker, training, dispatch, mail,
+                                           current_tick, now_ms);
+            }
+          }
+          break;
+        }
+
         const auto throttle =
             attacker->begin_spell_attempt(now_ms, magic_it->second.legacy.delay_time, true);
         if (!throttle.allowed) {
           add_legacy_trace(dispatch, "LegacySkill", "sword_cooldown_reject", mail,
                            current_tick, now_ms, false, throttle.over_count, 0,
                            "LatestSpellDelay");
+          queue_packet(dispatch, attacker->session_id(),
+                       make_ack_packet(attacker->session_id(), false));
+          break;
+        }
+
+        if (magic_id == 26 && !attacker->legacy_fire_hit_ready(now_ms)) {
+          add_legacy_trace(dispatch, "LegacySkill", "sword_cooldown_reject", mail,
+                           current_tick, now_ms, false, magic_id, 0, "SetAllowFireHit");
           queue_packet(dispatch, attacker->session_id(),
                        make_ack_packet(attacker->session_id(), false));
           break;
@@ -2504,11 +2703,32 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           broadcast_legacy_char_status_changed(dispatch, *attacker);
         }
 
+        if (magic_id == 34) {
+          const auto enabled = !attacker->legacy_cross_hit_enabled();
+          attacker->set_legacy_cross_hit_enabled(enabled);
+          attacker->clear_legacy_sword_skill();
+          queue_packet(dispatch, attacker->session_id(),
+                       make_ack_packet(attacker->session_id(), true));
+          queue_packet(dispatch, attacker->session_id(),
+                       make_sword_state_packet(attacker->session_id(),
+                                               enabled ? "+CRS" : "+UCRS"));
+          add_legacy_trace(dispatch, "LegacySkill", "sword_toggle", mail, current_tick,
+                           now_ms, true, magic_id, enabled ? 1 : 0, "CM_SPELL");
+          break;
+        }
+
         const auto expire_tick =
             current_tick + legacy_delay_ms_to_ticks(5000, budgets_.tick_ms);
         attacker->prepare_legacy_sword_skill(magic_id, expire_tick);
+        if (magic_id == 26) {
+          attacker->mark_legacy_fire_hit(now_ms);
+        }
         queue_packet(dispatch, attacker->session_id(),
                      make_ack_packet(attacker->session_id(), true));
+        if (magic_id == 26) {
+          queue_packet(dispatch, attacker->session_id(),
+                       make_sword_state_packet(attacker->session_id(), "+FIR"));
+        }
         add_legacy_trace(dispatch, "LegacySkill", "sword_prepare", mail, current_tick,
                          now_ms, true, magic_id,
                          static_cast<std::int32_t>(legacy_attack_ident_for_sword_skill(magic_id)),

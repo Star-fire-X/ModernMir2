@@ -8,7 +8,8 @@
     "data": "Source\\Mir200\\Release\\Mir200\\Data.mdb Magic table via magic_db.json"
   },
   "enabled_magic_ids_phase4": [1, 2, 5, 8, 9, 10, 11, 21, 22, 23, 24, 28, 29, 31, 32, 33, 35],
-  "source_only_not_enabled": [34, 37],
+  "source_only_not_enabled": [37],
+  "source_only_sword_supported": [34],
   "shared_sequence": [
     "cooldown check before MP deduction",
     "DoSpell deducts GetSpellPoint and sends SM_HEALTHSPELLCHANGED when MP changes",

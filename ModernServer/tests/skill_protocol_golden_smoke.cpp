@@ -12,6 +12,7 @@
 #include "protocol/legacy_edcode.hpp"
 #include "protocol/legacy_game_codec.hpp"
 #include "protocol/legacy_types.hpp"
+#include "shared/legacy/action_ids.hpp"
 #include "world/logic_runtime.hpp"
 
 #ifndef MIR2_CONFIG_DIR
@@ -132,6 +133,8 @@ const mir2::LegacyRuntimeTrace* find_trace(const mir2::RuntimeDispatch& dispatch
 }  // namespace
 
 int main() {
+  assert(mir2::kSmRush == 6);
+  assert(mir2::kSmRushKung == 7);
   assert(mir2::kSmAddMagic == 210);
   assert(mir2::kSmSendMyMagic == 211);
   assert(mir2::kSmDelMagic == 212);
@@ -144,6 +147,10 @@ int main() {
   assert(mir2::kSmSpaceMoveShow == 801);
   assert(mir2::kSmSpaceMoveHide2 == 806);
   assert(mir2::kSmSpaceMoveShow2 == 807);
+  assert(mir2::legacy::kSmFireHit == 8);
+  assert(mir2::legacy::kSmCrossHit == 35);
+  assert(mir2::kCmFireHit == 3025);
+  assert(mir2::kCmCrossHit == 3035);
   assert(mir2::kSmDelMagic != mir2::kSmAreaState);
 
   const auto loaded = mir2::ConfigLoader{}.load(std::filesystem::path(MIR2_CONFIG_DIR));

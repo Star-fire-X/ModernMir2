@@ -401,6 +401,12 @@ if(BUILD_TESTING)
   add_test(NAME mir2_skill_weapon_sword_common_smoke
     COMMAND mir2_skill_weapon_sword_common_smoke)
 
+  add_executable(mir2_skill_weapon_sword_phase5_smoke
+    tests/skill_weapon_sword_phase5_smoke.cpp)
+  target_link_libraries(mir2_skill_weapon_sword_phase5_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_skill_weapon_sword_phase5_smoke
+    COMMAND mir2_skill_weapon_sword_phase5_smoke)
+
   add_executable(mir2_skill_status_poison_buff_hide_shield_smoke
     tests/skill_status_poison_buff_hide_shield_smoke.cpp)
   target_link_libraries(mir2_skill_status_poison_buff_hide_shield_smoke PRIVATE mir2_hostlib)

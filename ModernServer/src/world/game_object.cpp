@@ -1661,6 +1661,8 @@ StatusTickResult Player::mark_dead(std::uint64_t now_ms) {
     character_.death_time_ms = now_ms;
   }
   auto result = clear_legacy_buffs_on_death(0);
+  clear_legacy_sword_skill();
+  legacy_cross_hit_enabled_ = false;
   next_move_tick_ = std::numeric_limits<std::uint64_t>::max();
   return result;
 }
@@ -1790,6 +1792,24 @@ std::int32_t Player::consume_legacy_sword_skill(std::uint64_t current_tick) {
 void Player::clear_legacy_sword_skill() {
   legacy_prepared_sword_magic_id_ = 0;
   legacy_prepared_sword_expire_tick_ = 0;
+}
+
+bool Player::legacy_fire_hit_ready(std::uint64_t now_ms) const {
+  return legacy_latest_fire_hit_time_ms_ == 0 ||
+         now_ms - legacy_latest_fire_hit_time_ms_ > 10000;
+}
+
+void Player::mark_legacy_fire_hit(std::uint64_t now_ms) {
+  legacy_latest_fire_hit_time_ms_ = now_ms;
+}
+
+bool Player::legacy_rush_ready(std::uint64_t now_ms) const {
+  return legacy_latest_rush_time_ms_ == 0 ||
+         now_ms - legacy_latest_rush_time_ms_ > 3000;
+}
+
+void Player::mark_legacy_rush(std::uint64_t now_ms) {
+  legacy_latest_rush_time_ms_ = now_ms;
 }
 
 bool Player::legacy_open_health_active(std::uint64_t current_tick) const {

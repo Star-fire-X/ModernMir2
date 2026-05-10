@@ -88,6 +88,18 @@ int main() {
   assert(id5.legacy.def_min_power == 10);
   assert(id5.legacy.def_max_power == 10);
 
+  const auto& id26 = find_magic(config, 26);
+  assert(id26.legacy.is_sword_skill);
+  assert(id26.legacy.effect == 24);
+  assert(id26.legacy.spell == 0);
+  assert(id26.legacy.def_spell == 7);
+
+  const auto& id27 = find_magic(config, 27);
+  assert(id27.legacy.is_sword_skill);
+  assert(id27.legacy.effect == 25);
+  assert(id27.legacy.spell == 15);
+  assert(id27.legacy.def_spell == 0);
+
   const auto& id31 = find_magic(config, 31);
   assert(id31.legacy.effect_type == 4);
   assert(id31.legacy.effect == 29);

@@ -38,6 +38,28 @@ LegacyPacket make_hit_packet(std::uint64_t session_id, const GameObject& object,
                            static_cast<std::uint16_t>(object.y()), actor_dir(object)));
 }
 
+LegacyPacket make_rush_packet(std::uint64_t session_id, const GameObject& object) {
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmRush, static_cast<std::int32_t>(object.id()),
+                           static_cast<std::uint16_t>(object.x()),
+                           static_cast<std::uint16_t>(object.y()), actor_dir(object)));
+}
+
+LegacyPacket make_rush_kung_packet(std::uint64_t session_id, const GameObject& object,
+                                   std::int32_t x, std::int32_t y) {
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmRushKung, static_cast<std::int32_t>(object.id()),
+                           static_cast<std::uint16_t>(x),
+                           static_cast<std::uint16_t>(y), actor_dir(object)));
+}
+
+LegacyPacket make_sword_state_packet(std::uint64_t session_id, std::string state) {
+  return make_legacy_raw_packet(session_id, std::move(state) + "/" +
+                                                std::to_string(tick_count_ms()));
+}
+
 LegacyStdItem make_std_item(const LegacyUserItem& item,
                             const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
   LegacyStdItem std_item;
