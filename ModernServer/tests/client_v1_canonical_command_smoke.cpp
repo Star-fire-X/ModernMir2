@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <iostream>
+#include <string>
 #include <string_view>
 
 #include "protocol/client_v1_legacy_command_decoder.hpp"
@@ -210,11 +211,16 @@ bool check_npc_merchant_storage() {
 }
 
 bool check_trade_chat() {
+  std::string legacy_bytes;
+  legacy_bytes.push_back(static_cast<char>(0xB0));
+  legacy_bytes.push_back(static_cast<char>(0xA1));
+  legacy_bytes += "Other";
+
   auto command = mir2::decode_client_v1_trade_try_command(
-      77, mir2::client_v1::TradeTryRequest{"Other"});
+      77, mir2::client_v1::TradeTryRequest{legacy_bytes});
   if (!check_common(command, mir2::CanonicalLegacyCommandKind::trade_try,
                     mir2::LogicCommandKind::trade_try) ||
-      command.text != "Other") {
+      command.text != legacy_bytes) {
     return false;
   }
 
@@ -253,10 +259,10 @@ bool check_trade_chat() {
     return false;
   }
 
-  command = mir2::decode_client_v1_chat_command(77, mir2::client_v1::ChatSend{"hello"});
+  command = mir2::decode_client_v1_chat_command(77, mir2::client_v1::ChatSend{legacy_bytes});
   return check_common(command, mir2::CanonicalLegacyCommandKind::say,
                       mir2::LogicCommandKind::say) &&
-         command.text == "hello";
+         command.text == legacy_bytes;
 }
 
 }  // namespace

@@ -1,8 +1,9 @@
 #include "services/client_v1_login_gateway_service.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
+
+#include "protocol/legacy_string.hpp"
 
 namespace mir2 {
 
@@ -10,18 +11,11 @@ namespace {
 
 constexpr std::size_t kMaxCharacterSlots = 2;
 
-bool is_valid_character_name(std::string_view name) {
-  if (name.size() < 3 || name.size() > 14) {
-    return false;
-  }
-  return std::all_of(name.begin(), name.end(), [](unsigned char ch) { return std::isalnum(ch) != 0; });
-}
-
 CharacterRecord make_character(const std::string& account_id,
                                const client_v1::CreateCharacterRequest& request) {
   CharacterRecord character;
   character.account_id = account_id;
-  character.character_name = request.name;
+  character.character_name = copy_legacy_bytes(request.name);
   character.map_id = "0";
   character.x = 330;
   character.y = 270;
@@ -167,8 +161,10 @@ void ClientV1LoginGatewayService::handle_login_request(std::uint64_t session_id,
     return;
   }
 
+  const auto account_id = copy_legacy_bytes(request.account_id);
+  const auto password = copy_legacy_bytes(request.password);
   const auto result = repository_->authenticate_account(
-      request.account_id, request.password,
+      account_id, password,
       std::chrono::duration_cast<std::chrono::milliseconds>(
           std::chrono::system_clock::now().time_since_epoch())
           .count());
@@ -218,11 +214,16 @@ void ClientV1LoginGatewayService::handle_create_account_request(
   }
 
   AccountRecord account;
-  account.account_id = request.account_id;
-  account.password = request.password;
+  account.account_id = copy_legacy_bytes(request.account_id);
+  account.password = copy_legacy_bytes(request.password);
   apply_profile(account, request.profile);
 
   client_v1::CreateAccountResult result;
+  if (!is_valid_legacy_account_id(account.account_id)) {
+    result.error_message = "create_account_failed";
+    send_message(session_id, result);
+    return;
+  }
   result.success = repository_->create_account(account);
   result.code = result.success ? 1 : 0;
   if (!result.success) {
@@ -238,13 +239,14 @@ void ClientV1LoginGatewayService::handle_update_account_request(
     disconnect(session_id, 401, "not_authenticated");
     return;
   }
-  if (request.account_id != state->account_id) {
+  const auto account_id = copy_legacy_bytes(request.account_id);
+  if (account_id != state->account_id) {
     disconnect(session_id, 403, "account_mismatch");
     return;
   }
 
   client_v1::UpdateAccountResult result;
-  auto account = repository_->load_account(request.account_id);
+  auto account = repository_->load_account(account_id);
   if (!account.has_value()) {
     result.code = -4;
     result.error_message = "account_not_found";
@@ -253,7 +255,7 @@ void ClientV1LoginGatewayService::handle_update_account_request(
   }
 
   if (!request.password.empty()) {
-    account->password = request.password;
+    account->password = copy_legacy_bytes(request.password);
   }
   apply_profile(*account, request.profile);
 
@@ -284,7 +286,8 @@ void ClientV1LoginGatewayService::handle_change_password_request(
 
   client_v1::ChangePasswordResult result;
   result.code = repository_->change_password(
-      request.account_id, request.password, request.new_password,
+      copy_legacy_bytes(request.account_id), copy_legacy_bytes(request.password),
+      copy_legacy_bytes(request.new_password),
       std::chrono::duration_cast<std::chrono::milliseconds>(
           std::chrono::system_clock::now().time_since_epoch())
           .count());
@@ -360,7 +363,7 @@ void ClientV1LoginGatewayService::handle_create_character_request(
   }
 
   client_v1::CreateCharacterResult result;
-  if (!is_valid_character_name(request.name)) {
+  if (!is_valid_legacy_character_name(request.name)) {
     result.error_message = "invalid_character_name";
     send_message(session_id, result);
     return;
@@ -391,9 +394,10 @@ void ClientV1LoginGatewayService::handle_delete_character_request(
   }
 
   client_v1::DeleteCharacterResult result;
-  result.success = repository_->delete_character(state->account_id, request.name);
+  const auto character_name = copy_legacy_bytes(request.name);
+  result.success = repository_->delete_character(state->account_id, character_name);
   result.code = result.success ? 1 : 0;
-  result.deleted_name = request.name;
+  result.deleted_name = character_name;
   if (!result.success) {
     result.error_message = "delete_character_failed";
   }
@@ -409,9 +413,10 @@ void ClientV1LoginGatewayService::handle_select_character_request(
     return;
   }
 
-  const auto character = repository_->load_character(state->account_id, request.name);
+  const auto character_name = copy_legacy_bytes(request.name);
+  const auto character = repository_->load_character(state->account_id, character_name);
   client_v1::SelectCharacterResult result;
-  result.character_name = request.name;
+  result.character_name = character_name;
   if (!character.has_value()) {
     result.error_message = "character_not_found";
     send_message(session_id, result);
@@ -419,7 +424,7 @@ void ClientV1LoginGatewayService::handle_select_character_request(
   }
 
   result.success = true;
-  result.enter_world_token = admissions_->issue(state->account_id, request.name);
+  result.enter_world_token = admissions_->issue(state->account_id, character_name);
   result.address = context().config.ports.client_v1_game_gateway.address;
   result.port = context().config.ports.client_v1_game_gateway.port;
   {
