@@ -9,6 +9,7 @@
 #include <thread>
 #include <vector>
 
+#include "protocol/canonical_legacy_command.hpp"
 #include "protocol/legacy_edcode.hpp"
 #include "protocol/legacy_game_codec.hpp"
 #include "util/string_utils.hpp"
@@ -356,174 +357,6 @@ std::string display_castle_lord(const CastleDialogContext& castle_dialog_context
                  util::trim(castle_dialog_context.lord).empty()
              ? castle_dialog_context.unclaimed_lord_label
              : castle_dialog_context.lord;
-}
-
-std::optional<LogicCommand> decode_game_command(std::uint64_t session_id, const LegacyPacket& packet) {
-  const auto decoded = decode_legacy_game_packet(packet);
-  if (!decoded.has_value()) {
-    return std::nullopt;
-  }
-
-  LogicCommand command;
-  command.session_id = session_id;
-  command.game_message = decoded->message;
-
-  switch (decoded->message.ident) {
-    case kCmTurn:
-      command.kind = LogicCommandKind::turn;
-      command.x = low_word(decoded->message.recog);
-      command.y = high_word(decoded->message.recog);
-      command.dir = static_cast<std::uint8_t>(decoded->message.tag);
-      return command;
-    case kCmWalk:
-      command.kind = LogicCommandKind::walk;
-      command.x = low_word(decoded->message.recog);
-      command.y = high_word(decoded->message.recog);
-      command.dir = static_cast<std::uint8_t>(decoded->message.tag);
-      return command;
-    case kCmRun:
-      command.kind = LogicCommandKind::run;
-      command.x = low_word(decoded->message.recog);
-      command.y = high_word(decoded->message.recog);
-      command.dir = static_cast<std::uint8_t>(decoded->message.tag);
-      return command;
-    case kCmHit:
-    case kCmHeavyHit:
-    case kCmBigHit:
-    case kCmPowerHit:
-    case kCmLongHit:
-    case kCmWideHit:
-    case kCmFireHit:
-    case kCmCrossHit:
-      command.kind = LogicCommandKind::attack;
-      command.x = low_word(decoded->message.recog);
-      command.y = high_word(decoded->message.recog);
-      command.dir = static_cast<std::uint8_t>(decoded->message.tag);
-      return command;
-    case kCmSpell:
-      command.kind = LogicCommandKind::spell;
-      command.x = low_word(decoded->message.recog);
-      command.y = high_word(decoded->message.recog);
-      command.target_actor_id =
-          static_cast<std::uint64_t>(static_cast<std::uint32_t>(
-              make_long(decoded->message.param, decoded->message.series)));
-      command.text = decoded->body;
-      return command;
-    case kCmSay:
-      command.kind = LogicCommandKind::say;
-      command.text = legacy_decode_string(decoded->body);
-      return command;
-    case kCmClickNpc:
-      command.kind = LogicCommandKind::click_npc;
-      command.target_actor_id =
-          static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
-      return command;
-    case kCmMerchantDlgSelect:
-      command.kind = LogicCommandKind::merchant_select;
-      command.target_actor_id =
-          static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
-      command.text = legacy_decode_string(decoded->body);
-      return command;
-    case kCmQueryUsername:
-      command.kind = LogicCommandKind::query_username;
-      command.target_actor_id =
-          static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
-      command.x = decoded->message.param;
-      command.y = decoded->message.tag;
-      return command;
-    case kCmQueryBagItems:
-      command.kind = LogicCommandKind::query_bag_items;
-      return command;
-    case kCmUserStorageItem:
-      command.kind = LogicCommandKind::storage_item;
-      command.target_actor_id =
-          static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
-      command.item_make_index = make_long(decoded->message.param, decoded->message.tag);
-      command.text = legacy_decode_string(decoded->body);
-      return command;
-    case kCmUserTakeBackStorageItem:
-      command.kind = LogicCommandKind::take_back_storage_item;
-      command.target_actor_id =
-          static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
-      command.item_make_index = make_long(decoded->message.param, decoded->message.tag);
-      command.text = legacy_decode_string(decoded->body);
-      return command;
-    case kCmUserGetDetailItem:
-      command.kind = LogicCommandKind::query_detail_goods;
-      command.target_actor_id =
-          static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
-      command.item_make_index = decoded->message.param;
-      command.text = legacy_decode_string(decoded->body);
-      return command;
-    case kCmMerchantQuerySellPrice:
-      command.kind = LogicCommandKind::query_sell_price;
-      command.target_actor_id =
-          static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
-      command.item_make_index = make_long(decoded->message.param, decoded->message.tag);
-      command.text = legacy_decode_string(decoded->body);
-      return command;
-    case kCmMerchantQueryRepairCost:
-      command.kind = LogicCommandKind::query_repair_cost;
-      command.target_actor_id =
-          static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
-      command.item_make_index = make_long(decoded->message.param, decoded->message.tag);
-      command.text = legacy_decode_string(decoded->body);
-      return command;
-    case kCmDropItem:
-      command.kind = LogicCommandKind::drop_item;
-      command.item_make_index = decoded->message.recog;
-      command.text = legacy_decode_string(decoded->body);
-      return command;
-    case kCmPickup:
-      command.kind = LogicCommandKind::pickup_item;
-      command.x = decoded->message.param;
-      command.y = decoded->message.tag;
-      return command;
-    case kCmTakeOnItem:
-      command.kind = LogicCommandKind::take_on_item;
-      command.item_make_index = decoded->message.recog;
-      command.item_slot = decoded->message.param;
-      command.text = legacy_decode_string(decoded->body);
-      return command;
-    case kCmTakeOffItem:
-      command.kind = LogicCommandKind::take_off_item;
-      command.item_make_index = decoded->message.recog;
-      command.item_slot = decoded->message.param;
-      command.text = legacy_decode_string(decoded->body);
-      return command;
-    case kCmEat:
-      command.kind = LogicCommandKind::eat_item;
-      command.item_make_index = decoded->message.recog;
-      command.text = legacy_decode_string(decoded->body);
-      return command;
-    case kCmDropGold:
-      command.kind = LogicCommandKind::drop_gold;
-      command.amount = decoded->message.recog;
-      return command;
-    case kCmUserSellItem:
-      command.kind = LogicCommandKind::sell_item;
-      command.target_actor_id =
-          static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
-      command.item_make_index = make_long(decoded->message.param, decoded->message.tag);
-      command.text = legacy_decode_string(decoded->body);
-      return command;
-    case kCmUserBuyItem:
-      command.kind = LogicCommandKind::buy_item;
-      command.target_actor_id =
-          static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
-      command.item_make_index = make_long(decoded->message.param, decoded->message.tag);
-      command.text = legacy_decode_string(decoded->body);
-      return command;
-    case kCmUserRepairItem:
-      command.kind = LogicCommandKind::repair_item;
-      command.target_actor_id =
-          static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
-      command.item_make_index = make_long(decoded->message.param, decoded->message.tag);
-      command.text = legacy_decode_string(decoded->body);
-      return command;
-    default:
-      return std::nullopt;
-  }
 }
 
 LegacyPacket make_out_of_connection_packet(std::uint64_t session_id) {
@@ -922,11 +755,13 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
       return {};
     }
 
-    if (auto command = decode_game_command(event.session_id, event.packet); command.has_value()) {
-      command->gateway = event.gateway.empty() ? "game_gateway" : event.gateway;
-      command->session_seq = event.session_seq;
-      session_gateways_[event.session_id] = command->gateway;
-      return runtime_->route_logic_command(*command);
+    const auto canonical = decode_legacy_game_command(event.session_id, event.packet);
+    if (canonical.status == CanonicalParseStatus::ok && canonical.command.has_value()) {
+      auto command = to_logic_command(*canonical.command);
+      command.gateway = event.gateway.empty() ? "game_gateway" : event.gateway;
+      command.session_seq = event.session_seq;
+      session_gateways_[event.session_id] = command.gateway;
+      return runtime_->route_logic_command(command);
     }
 
     const auto body = body_to_string(event.packet);

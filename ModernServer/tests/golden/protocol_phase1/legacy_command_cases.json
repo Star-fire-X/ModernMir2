@@ -6,6 +6,8 @@
     {"name":"select_server","ident":104,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"447261676f6e"},
     {"name":"query_character","ident":100,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"616c6963652f31323334"},
     {"name":"select_character","ident":103,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"616c6963652f4865726f2f31323334"},
+    {"name":"query_username","ident":80,"recog":600,"param":21,"tag":22,"series":0,"body_encoding":"none","body_hex":""},
+    {"name":"query_bag_items","ident":81,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"none","body_hex":""},
     {"name":"turn_basic","ident":3010,"recog":655370,"param":0,"tag":2,"series":0,"body_encoding":"none","body_hex":""},
     {"name":"walk_basic","ident":3011,"recog":655371,"param":0,"tag":3,"series":0,"body_encoding":"none","body_hex":""},
     {"name":"run_basic","ident":3013,"recog":720908,"param":0,"tag":4,"series":0,"body_encoding":"none","body_hex":""},
@@ -17,13 +19,20 @@
     {"name":"say_tab_text","ident":3030,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"73617909776974680974616273"},
     {"name":"say_gbk_like_bytes","ident":3030,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"b0a1c4e3"},
     {"name":"pickup_basic","ident":1001,"recog":0,"param":17,"tag":18,"series":0,"body_encoding":"none","body_hex":""},
+    {"name":"drop_item","ident":1000,"recog":10003,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"44726f702053776f7264"},
     {"name":"take_on_item","ident":1003,"recog":10001,"param":2,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},
     {"name":"take_off_item","ident":1004,"recog":10001,"param":2,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},
     {"name":"eat_item","ident":1006,"recog":10002,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"456c69786972"},
+    {"name":"drop_gold","ident":1016,"recog":250,"param":0,"tag":0,"series":0,"body_encoding":"none","body_hex":""},
     {"name":"click_npc","ident":1010,"recog":500,"param":0,"tag":0,"series":0,"body_encoding":"none","body_hex":""},
     {"name":"merchant_select","ident":1011,"recog":501,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"40627579"},
+    {"name":"merchant_query_sell_price","ident":1012,"recog":501,"param":1234,"tag":2,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},
     {"name":"user_buy_item","ident":1014,"recog":501,"param":1234,"tag":2,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},
     {"name":"user_sell_item","ident":1013,"recog":501,"param":1234,"tag":2,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},
-    {"name":"user_storage_item","ident":1031,"recog":501,"param":1234,"tag":2,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"}
+    {"name":"user_detail_item","ident":1015,"recog":501,"param":1234,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},
+    {"name":"user_repair_item","ident":1023,"recog":501,"param":1234,"tag":2,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},
+    {"name":"merchant_query_repair_cost","ident":1024,"recog":501,"param":1234,"tag":2,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},
+    {"name":"user_storage_item","ident":1031,"recog":501,"param":1234,"tag":2,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},
+    {"name":"user_take_back_storage_item","ident":1032,"recog":501,"param":1234,"tag":2,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"}
   ]
 }
