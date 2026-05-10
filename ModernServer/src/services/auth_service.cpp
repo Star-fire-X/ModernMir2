@@ -451,12 +451,20 @@ void AuthService::handle_session_event(const SessionEvent& event) {
     }
 
     case kCmSelectServer: {
-      const auto session = session_states_.find(event.session_id);
+      auto session = session_states_.find(event.session_id);
       if (session == session_states_.end() || session->second.account_id.empty() ||
+          !can_accept(session->second.stage, CanonicalLoginRequest::select_server) ||
           admissions_.find(session->second.certification) == admissions_.end()) {
         post_gateway_packet(*context_, event.session_id,
                             make_response_packet(event.session_id, kSmPasswdFail, -4));
         return;
+      }
+
+      session->second.stage =
+          advance(session->second.stage, CanonicalLoginTransition::select_server);
+      if (auto admission = admissions_.find(session->second.certification);
+          admission != admissions_.end()) {
+        admission->second.stage = session->second.stage;
       }
 
       post_gateway_packet(
@@ -474,7 +482,10 @@ void AuthService::handle_session_event(const SessionEvent& event) {
 
       const auto admission =
           certification.has_value() ? admissions_.find(*certification) : admissions_.end();
-      if (account_id.empty() || !certification.has_value() || admission == admissions_.end() ||
+      const auto session = session_states_.find(event.session_id);
+      if (account_id.empty() || !certification.has_value() || session == session_states_.end() ||
+          !can_accept(session->second.stage, CanonicalLoginRequest::query_characters) ||
+          admission == admissions_.end() ||
           admission->second.account_id != account_id) {
         post_gateway_packet(*context_, event.session_id,
                             make_response_packet(event.session_id, kSmQueryChrFail, 0, 0, 0, 1));
@@ -482,9 +493,9 @@ void AuthService::handle_session_event(const SessionEvent& event) {
         return;
       }
 
-      auto& session = session_states_[event.session_id];
-      session.account_id = account_id;
-      session.certification = *certification;
+      auto& session_state = session->second;
+      session_state.account_id = account_id;
+      session_state.certification = *certification;
       const auto request_id = make_request_id();
       PendingAuthRequest pending;
       pending.kind = PendingAuthRequestKind::query_characters;
@@ -512,6 +523,7 @@ void AuthService::handle_session_event(const SessionEvent& event) {
       const auto sex = fields.size() > 4 ? parse_i32(fields[4]) : std::nullopt;
 
       if (session == session_states_.end() || session->second.account_id != account_id ||
+          !can_accept(session->second.stage, CanonicalLoginRequest::create_character) ||
           admissions_.find(session->second.certification) == admissions_.end() ||
           !hair.has_value() || !job.has_value() || !sex.has_value() ||
           !is_valid_character_name(character_name)) {
@@ -545,6 +557,7 @@ void AuthService::handle_session_event(const SessionEvent& event) {
       const auto session = session_states_.find(event.session_id);
       const auto character_name = legacy_decode_string(decoded->body);
       if (session == session_states_.end() || character_name.empty() ||
+          !can_accept(session->second.stage, CanonicalLoginRequest::delete_character) ||
           admissions_.find(session->second.certification) == admissions_.end()) {
         post_gateway_packet(*context_, event.session_id,
                             make_response_packet(event.session_id, kSmDelChrFail, 0));
@@ -578,6 +591,7 @@ void AuthService::handle_session_event(const SessionEvent& event) {
 
       if (session == session_states_.end() || session->second.account_id != account_id ||
           character_name.empty() ||
+          !can_accept(session->second.stage, CanonicalLoginRequest::select_character) ||
           admissions_.find(session->second.certification) == admissions_.end()) {
         post_gateway_packet(*context_, event.session_id,
                             make_response_packet(event.session_id, kSmStartFail, 0));
@@ -670,7 +684,8 @@ void AuthService::handle_persist_result(const PersistResult& result) {
                   revoked_admissions[it->second.certification] = admission->second;
                 } else {
                   revoked_admissions[it->second.certification] =
-                      LoginAdmission{pending.account_id, {}, it->second.certification};
+                      LoginAdmission{pending.account_id, {}, it->second.certification,
+                                     CanonicalLoginStage::authenticated};
                 }
               }
               it = session_states_.erase(it);
@@ -724,7 +739,9 @@ void AuthService::handle_persist_result(const PersistResult& result) {
         session.account_id = pending.account_id;
         session.certification = certification;
         session.client_version = pending.client_version;
-        admissions_[certification] = LoginAdmission{pending.account_id, {}, certification};
+        session.stage = advance(session.stage, CanonicalLoginTransition::authenticate);
+        admissions_[certification] =
+            LoginAdmission{pending.account_id, {}, certification, session.stage};
 
         post_gateway_packet(
             *context_, pending.session_id,
@@ -827,7 +844,13 @@ void AuthService::handle_persist_result(const PersistResult& result) {
           }
 
           admissions_[pending.certification] =
-              LoginAdmission{pending.account_id, pending.character_name, pending.certification};
+              LoginAdmission{pending.account_id, pending.character_name, pending.certification,
+                             CanonicalLoginStage::character_selected};
+          if (auto session = session_states_.find(pending.session_id);
+              session != session_states_.end()) {
+            session->second.stage =
+                advance(session->second.stage, CanonicalLoginTransition::select_character);
+          }
           last_selected_character_[pending.account_id] = pending.character_name;
 
           LogicCommand admission;

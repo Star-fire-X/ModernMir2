@@ -10,6 +10,7 @@
 #include <unordered_map>
 
 #include "core/module.hpp"
+#include "protocol/canonical_login_state.hpp"
 #include "world/legacy_frame_driver.hpp"
 #include "world/logic_runtime.hpp"
 
@@ -44,12 +45,14 @@ class WorldService : public Module {
     std::string account_id{};
     std::string character_name{};
     std::int32_t certification{0};
+    CanonicalLoginStage stage{CanonicalLoginStage::entering_game};
   };
 
   struct Admission {
     std::string account_id{};
     std::string character_name{};
     std::int32_t certification{0};
+    CanonicalLoginStage stage{CanonicalLoginStage::character_selected};
   };
 
   void run();

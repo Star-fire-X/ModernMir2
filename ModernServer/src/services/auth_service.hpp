@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include "core/module.hpp"
+#include "protocol/canonical_login_state.hpp"
 
 namespace mir2 {
 
@@ -30,6 +31,7 @@ class AuthService : public Module {
     std::int32_t certification{0};
     std::int32_t client_version{0};
     std::int64_t last_command_at_ms{0};
+    CanonicalLoginStage stage{CanonicalLoginStage::connected};
   };
 
   enum class PendingAuthRequestKind {
@@ -59,6 +61,7 @@ class AuthService : public Module {
     std::string account_id{};
     std::string selected_character{};
     std::int32_t certification{0};
+    CanonicalLoginStage stage{CanonicalLoginStage::authenticated};
   };
 
   void run();

@@ -7,6 +7,7 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "protocol/canonical_login_state.hpp"
 #include "services/client_v1_admission_registry.hpp"
 #include "services/client_v1_gateway_service_base.hpp"
 #include "storage/repository.hpp"
@@ -33,12 +34,14 @@ class ClientV1LoginGatewayService : public ClientV1GatewayServiceBase {
     bool authenticated{false};
     std::string account_id{};
     std::string display_name{};
+    CanonicalLoginStage stage{CanonicalLoginStage::connected};
   };
 
   struct LobbyAdmission {
     std::string account_id{};
     std::string display_name{};
     std::string server_name{};
+    CanonicalLoginStage stage{CanonicalLoginStage::server_selected};
   };
 
   void handle_client_hello(std::uint64_t session_id, const client_v1::ClientHello& hello);

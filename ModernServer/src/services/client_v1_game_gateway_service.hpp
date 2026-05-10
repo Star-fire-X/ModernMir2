@@ -13,6 +13,7 @@
 
 #include "config/models.hpp"
 #include "core/local_bus.hpp"
+#include "protocol/canonical_login_state.hpp"
 #include "protocol/legacy_types.hpp"
 #include "services/client_v1_admission_registry.hpp"
 #include "services/client_v1_gateway_service_base.hpp"
@@ -73,6 +74,11 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
     bool trade_local_accept{false};
     bool guild_visible{false};
     std::uint64_t next_session_seq{0};
+    CanonicalLoginStage stage{CanonicalLoginStage::connected};
+
+    [[nodiscard]] bool in_game() const {
+      return can_accept(stage, CanonicalLoginRequest::gameplay);
+    }
   };
 
   void handle_client_hello(std::uint64_t session_id, const client_v1::ClientHello& hello);

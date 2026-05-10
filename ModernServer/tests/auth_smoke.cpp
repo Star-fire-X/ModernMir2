@@ -131,6 +131,30 @@ int main() {
                                    "login_gateway",
                                    1,
                                    "127.0.0.1:10001",
+                                   make_login_packet(1, mir2::kCmNewChr, "guest/Early/2/1/1"),
+                                   {}})) {
+    stop_services();
+    return 1;
+  }
+
+  const auto early_create_response = wait_for_session_event(login_gateway);
+  if (!early_create_response.has_value()) {
+    stop_services();
+    return 1;
+  }
+  const auto decoded_early_create =
+      mir2::decode_legacy_game_packet(early_create_response->packet);
+  if (!decoded_early_create.has_value() ||
+      decoded_early_create->message.ident != mir2::kSmNewChrFail) {
+    stop_services();
+    return 1;
+  }
+
+  if (!bus.post("auth_service",
+                mir2::SessionEvent{mir2::SessionEventKind::packet_received,
+                                   "login_gateway",
+                                   1,
+                                   "127.0.0.1:10001",
                                    make_login_packet(1, mir2::kCmSelectServer, "Alpha"),
                                    {}})) {
     stop_services();
