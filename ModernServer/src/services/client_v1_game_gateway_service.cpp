@@ -2246,6 +2246,10 @@ void ClientV1GameGatewayService::translate_legacy_packet(
           static_cast<std::uint8_t>((decoded->message.series >> 8U) & 0xFFU)});
       break;
     }
+    case kSmMagicFireFail: {
+      messages.push_back(client_v1::ActorMagicFireFail{actor_id});
+      break;
+    }
     case kSmStruck: {
       const auto body = decode_body_wl_prefix(decoded->body);
       const auto source = body.has_value() ? static_cast<std::uint64_t>(static_cast<std::uint32_t>(body->ltag1)) : 0;

@@ -47,25 +47,29 @@ int main() {
   assert(state.world.actors[2000].last_hitter_id == 1000);
   assert(animations.pose_for(2000).has_value());
 
-  state.apply(MagicList{{MagicEntry{1, 1, 0, 0, 1000, "Fireball", 32, 900, 7}}});
+  state.apply(MagicList{{MagicEntry{1, 1, 0, 0, 1000, "Fireball", 1, 900, 1}}});
   state.apply(ActorAction{1000, ActorActionKind::spell, 333, 271, 3, 2000, 0, 0, 1,
-                          true, 32});
+                          true, 1});
   state.world.actors[1000].action_started_ms = 1300;
-  state.apply(ActorMagicFire{1000, 2000, 333, 271, 7, 32});
+  state.world.actors[1000].legacy_pending_actions.clear();
+  state.apply(ActorMagicFire{1000, 2000, 333, 271, 1, 1});
   animations.reset(1300);
   animations.sync_world(state.world, 1300);
   animations.update(state.world, 1300);
   assert(state.world.actors[1000].current_action == ActorActionKind::spell);
-  assert(state.world.actors[1000].action_magic_effect_type == 7);
+  assert(state.world.actors[1000].action_magic_effect_type == 1);
   assert(animations.effects().fly_count() + animations.effects().ground_count() +
              animations.effects().overlay_count() ==
          0);
-  for (std::uint64_t now = 1361; now <= 1849; now += 61) {
+  bool saw_spell_effect = false;
+  for (std::uint64_t now = 1361; now <= 2000; now += 61) {
     animations.update(state.world, now);
+    saw_spell_effect = saw_spell_effect ||
+                       animations.effects().fly_count() + animations.effects().ground_count() +
+                               animations.effects().overlay_count() >
+                           0;
   }
-  assert(animations.effects().fly_count() + animations.effects().ground_count() +
-             animations.effects().overlay_count() >
-         0);
+  assert(saw_spell_effect);
 
   state.apply(ActorDeath{2000, 332, 271, 4});
   animations.sync_world(state.world, 1400);

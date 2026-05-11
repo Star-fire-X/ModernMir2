@@ -254,6 +254,8 @@ int main() {
   auto& caster = world.actors[1];
   caster.current_action = mir2::client_v1::ActorActionKind::spell;
   caster.magic_id = 1;
+  caster.action_magic_effect = 1;
+  caster.action_magic_effect_type = 1;
   caster.action_started_ms = 5100;
   caster.action_duration_ms = 500;
   caster.action_target_x = 12;
