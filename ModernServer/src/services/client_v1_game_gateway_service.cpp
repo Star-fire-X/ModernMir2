@@ -643,13 +643,66 @@ void ClientV1GameGatewayService::handle_disconnected(std::uint64_t session_id,
                                                      const std::string& peer_address,
                                                      const std::string& reason) {
   std::optional<SessionState> state;
+  std::vector<std::pair<std::uint64_t, client_v1::GroupState>> group_states;
+  std::vector<std::pair<std::uint64_t, client_v1::TradeState>> trade_states;
+  std::vector<std::pair<std::uint64_t, client_v1::GuildState>> guild_states;
   {
     std::scoped_lock lock(mutex_);
     const auto it = sessions_.find(session_id);
     if (it != sessions_.end()) {
       state = it->second;
+      if (it->second.group_id != 0) {
+        const auto group_id = it->second.group_id;
+        if (auto group_it = groups_.find(group_id); group_it != groups_.end()) {
+          group_it->second.members.erase(
+              std::remove(group_it->second.members.begin(), group_it->second.members.end(),
+                          session_id),
+              group_it->second.members.end());
+          if (group_it->second.members.size() < 2) {
+            const auto remaining = group_it->second.members;
+            for (const auto member_session_id : remaining) {
+              if (auto member_it = sessions_.find(member_session_id);
+                  member_it != sessions_.end()) {
+                member_it->second.group_id = 0;
+                member_it->second.group_visible = false;
+                group_states.emplace_back(member_session_id, group_state_locked(member_session_id));
+              }
+            }
+            groups_.erase(group_it);
+          } else {
+            group_states = group_broadcast_locked(group_id);
+          }
+        }
+      }
+      if (it->second.trade_peer_session_id != 0) {
+        const auto peer_id = it->second.trade_peer_session_id;
+        if (auto peer_it = sessions_.find(peer_id); peer_it != sessions_.end()) {
+          clear_trade_locked(peer_it->second);
+          trade_states.emplace_back(peer_id, client_v1::TradeState{});
+        }
+      }
+      const auto guild_name = it->second.character.guild_name;
       sessions_.erase(it);
+      if (!guild_name.empty()) {
+        if (auto guild_it = guilds_.find(guild_name); guild_it != guilds_.end()) {
+          for (auto& member : guild_it->second.members) {
+            if (state.has_value() && member.name == state->character_name) {
+              member.online = false;
+            }
+          }
+        }
+        guild_states = guild_broadcast_locked(guild_name);
+      }
     }
+  }
+  for (const auto& [target_session_id, group_state] : group_states) {
+    send_message(target_session_id, group_state);
+  }
+  for (const auto& [target_session_id, trade_state] : trade_states) {
+    send_message(target_session_id, trade_state);
+  }
+  for (const auto& [target_session_id, guild_state] : guild_states) {
+    send_message(target_session_id, guild_state);
   }
   if (state.has_value() && state->entered_world) {
     context().bus->post(
@@ -1092,22 +1145,223 @@ void ClientV1GameGatewayService::handle_storage_withdraw_request(
                                                                    request));
 }
 
-void ClientV1GameGatewayService::handle_group_mode_request(
-    std::uint64_t session_id, const client_v1::GroupModeRequest& request) {
-  auto state = session(session_id);
-  if (!state.has_value() || !state->in_game()) {
+std::optional<std::uint64_t> ClientV1GameGatewayService::find_session_by_character_locked(
+    const std::string_view name) const {
+  for (const auto& [id, state] : sessions_) {
+    if (state.in_game() && state.character_name == name) {
+      return id;
+    }
+  }
+  return std::nullopt;
+}
+
+client_v1::GroupState ClientV1GameGatewayService::group_state_locked(
+    const std::uint64_t session_id) const {
+  client_v1::GroupState result;
+  const auto it = sessions_.find(session_id);
+  if (it == sessions_.end()) {
+    return result;
+  }
+  result.visible = it->second.group_visible || it->second.group_id != 0;
+  result.allow_group = it->second.allow_group;
+  if (it->second.group_id == 0) {
+    if (result.visible && !it->second.character_name.empty()) {
+      result.members.push_back(it->second.character_name);
+    }
+    return result;
+  }
+  const auto group_it = groups_.find(it->second.group_id);
+  if (group_it == groups_.end()) {
+    return result;
+  }
+  for (const auto member_session_id : group_it->second.members) {
+    const auto member_it = sessions_.find(member_session_id);
+    if (member_it != sessions_.end() && member_it->second.in_game()) {
+      result.members.push_back(member_it->second.character_name);
+    }
+  }
+  return result;
+}
+
+std::vector<std::pair<std::uint64_t, client_v1::GroupState>>
+ClientV1GameGatewayService::group_broadcast_locked(const std::uint64_t group_id) const {
+  std::vector<std::pair<std::uint64_t, client_v1::GroupState>> states;
+  const auto group_it = groups_.find(group_id);
+  if (group_it == groups_.end()) {
+    return states;
+  }
+  for (const auto member_session_id : group_it->second.members) {
+    if (sessions_.contains(member_session_id)) {
+      states.emplace_back(member_session_id, group_state_locked(member_session_id));
+    }
+  }
+  return states;
+}
+
+client_v1::TradeState ClientV1GameGatewayService::trade_state_locked(
+    const std::uint64_t session_id) const {
+  client_v1::TradeState result;
+  const auto it = sessions_.find(session_id);
+  if (it == sessions_.end()) {
+    return result;
+  }
+  const auto& state = it->second;
+  result.visible = state.trade_visible;
+  result.remote_name = state.trade_remote_name;
+  result.local_items = state.trade_local_items;
+  result.local_gold = state.trade_local_gold;
+  result.local_accept = state.trade_local_accept;
+  const auto peer_it = sessions_.find(state.trade_peer_session_id);
+  if (peer_it != sessions_.end() && peer_it->second.trade_peer_session_id == session_id) {
+    result.remote_items = peer_it->second.trade_local_items;
+    result.remote_gold = peer_it->second.trade_local_gold;
+    result.remote_accept = peer_it->second.trade_local_accept;
+    if (result.remote_name.empty()) {
+      result.remote_name = peer_it->second.character_name;
+    }
+  }
+  return result;
+}
+
+std::vector<std::pair<std::uint64_t, client_v1::TradeState>>
+ClientV1GameGatewayService::trade_pair_states_locked(const std::uint64_t session_id) const {
+  std::vector<std::pair<std::uint64_t, client_v1::TradeState>> states;
+  const auto it = sessions_.find(session_id);
+  if (it == sessions_.end()) {
+    return states;
+  }
+  states.emplace_back(session_id, trade_state_locked(session_id));
+  const auto peer_id = it->second.trade_peer_session_id;
+  if (peer_id != 0 && sessions_.contains(peer_id)) {
+    states.emplace_back(peer_id, trade_state_locked(peer_id));
+  }
+  return states;
+}
+
+void ClientV1GameGatewayService::clear_trade_locked(SessionState& state) {
+  state.trade_visible = false;
+  state.trade_peer_session_id = 0;
+  state.trade_remote_name.clear();
+  state.trade_local_items.clear();
+  state.trade_local_gold = 0;
+  state.trade_local_accept = false;
+}
+
+std::optional<client_v1::ItemSlotState> ClientV1GameGatewayService::trade_item_from_bag_locked(
+    const SessionState& state, const std::int32_t make_index, const std::string_view name) const {
+  if (std::any_of(state.trade_local_items.begin(), state.trade_local_items.end(),
+                  [&](const client_v1::ItemSlotState& entry) {
+                    return entry.item.make_index == make_index;
+                  })) {
+    return std::nullopt;
+  }
+  for (const auto& item : state.bag_items) {
+    if (!item.empty() && item.make_index == make_index &&
+        (name.empty() || item.name == name)) {
+      return client_v1::ItemSlotState{
+          static_cast<std::int32_t>(state.trade_local_items.size()), item};
+    }
+  }
+  return std::nullopt;
+}
+
+void ClientV1GameGatewayService::ensure_guild_member_locked(SessionState& state) {
+  if (state.character.guild_name.empty()) {
     return;
   }
+  auto& guild = guilds_[state.character.guild_name];
+  if (guild.name.empty()) {
+    guild.name = state.character.guild_name;
+    guild.notice = "Guild notice";
+  }
+  const auto rank = state.character.guild_title.empty() ? std::string{"Member"}
+                                                        : state.character.guild_title;
+  if (std::find(guild.ranks.begin(), guild.ranks.end(), rank) == guild.ranks.end()) {
+    guild.ranks.push_back(rank);
+  }
+  auto member_it = std::find_if(guild.members.begin(), guild.members.end(),
+                                [&](const client_v1::GuildMemberState& member) {
+                                  return member.name == state.character_name;
+                                });
+  if (member_it == guild.members.end()) {
+    guild.members.push_back(client_v1::GuildMemberState{state.character_name, rank, true});
+  } else {
+    member_it->rank = rank;
+    member_it->online = true;
+  }
+  for (auto& member : guild.members) {
+    member.online = false;
+    for (const auto& [session_id, session_state] : sessions_) {
+      (void)session_id;
+      if (session_state.in_game() &&
+          session_state.character.guild_name == guild.name &&
+          session_state.character_name == member.name) {
+        member.online = true;
+        if (!session_state.character.guild_title.empty()) {
+          member.rank = session_state.character.guild_title;
+        }
+      }
+    }
+  }
+}
+
+client_v1::GuildState ClientV1GameGatewayService::guild_state_locked(
+    const std::uint64_t session_id) {
+  client_v1::GuildState result;
+  auto it = sessions_.find(session_id);
+  if (it == sessions_.end()) {
+    return result;
+  }
+  result.visible = it->second.guild_visible;
+  if (it->second.character.guild_name.empty()) {
+    return result;
+  }
+  ensure_guild_member_locked(it->second);
+  const auto guild_it = guilds_.find(it->second.character.guild_name);
+  if (guild_it == guilds_.end()) {
+    return result;
+  }
+  result.visible = true;
+  result.guild_name = guild_it->second.name;
+  result.rank_name = it->second.character.guild_title.empty() ? "Member"
+                                                              : it->second.character.guild_title;
+  result.notice = guild_it->second.notice;
+  result.members = guild_it->second.members;
+  result.ranks = guild_it->second.ranks;
+  result.can_admin = !result.guild_name.empty();
+  return result;
+}
+
+std::vector<std::pair<std::uint64_t, client_v1::GuildState>>
+ClientV1GameGatewayService::guild_broadcast_locked(const std::string_view guild_name) {
+  std::vector<std::pair<std::uint64_t, client_v1::GuildState>> states;
+  for (auto& [session_id, session_state] : sessions_) {
+    if (session_state.in_game() && session_state.guild_visible &&
+        session_state.character.guild_name == guild_name) {
+      states.emplace_back(session_id, guild_state_locked(session_id));
+    }
+  }
+  return states;
+}
+
+void ClientV1GameGatewayService::handle_group_mode_request(
+    std::uint64_t session_id, const client_v1::GroupModeRequest& request) {
+  std::vector<std::pair<std::uint64_t, client_v1::GroupState>> states;
   {
     std::scoped_lock lock(mutex_);
     auto it = sessions_.find(session_id);
-    if (it != sessions_.end()) {
-      it->second.allow_group = request.allow;
-      it->second.group_visible = true;
-      state = it->second;
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
     }
+    it->second.allow_group = request.allow;
+    it->second.group_visible = true;
+    states = it->second.group_id != 0 ? group_broadcast_locked(it->second.group_id)
+                                      : std::vector<std::pair<std::uint64_t, client_v1::GroupState>>{
+                                            {session_id, group_state_locked(session_id)}};
   }
-  send_message(session_id, client_v1::GroupState{true, state->allow_group, {state->character_name}});
+  for (const auto& [target_session_id, state] : states) {
+    send_message(target_session_id, state);
+  }
   send_message(session_id, client_v1::SysMessage{
                                request.allow ? "Group invitations enabled."
                                              : "Group invitations disabled.",
@@ -1116,174 +1370,353 @@ void ClientV1GameGatewayService::handle_group_mode_request(
 
 void ClientV1GameGatewayService::handle_group_create_request(
     std::uint64_t session_id, const client_v1::GroupCreateRequest& request) {
-  auto state = session(session_id);
-  if (!state.has_value() || !state->in_game() ||
-      request.target_name.empty()) {
+  if (request.target_name.empty()) {
     return;
   }
-  send_message(session_id, client_v1::GroupState{true, state->allow_group, {state->character_name}});
-  send_message(session_id, client_v1::SysMessage{
-                               "Group backend is not available in client_v1 yet.", 1});
+  std::vector<std::pair<std::uint64_t, client_v1::GroupState>> states;
+  std::optional<client_v1::SysMessage> failure;
+  {
+    std::scoped_lock lock(mutex_);
+    auto it = sessions_.find(session_id);
+    const auto target_id = find_session_by_character_locked(request.target_name);
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
+    }
+    if (!target_id.has_value() || *target_id == session_id ||
+        !sessions_[*target_id].allow_group || it->second.group_id != 0 ||
+        sessions_[*target_id].group_id != 0) {
+      failure = client_v1::SysMessage{"Group create failed.", 1};
+    } else {
+      const auto group_id = next_group_id_++;
+      groups_[group_id].members = {session_id, *target_id};
+      it->second.group_id = group_id;
+      it->second.group_visible = true;
+      sessions_[*target_id].group_id = group_id;
+      sessions_[*target_id].group_visible = true;
+      states = group_broadcast_locked(group_id);
+    }
+  }
+  for (const auto& [target_session_id, state] : states) {
+    send_message(target_session_id, state);
+  }
+  if (failure.has_value()) {
+    send_message(session_id, *failure);
+  }
 }
 
 void ClientV1GameGatewayService::handle_group_add_member_request(
     std::uint64_t session_id, const client_v1::GroupAddMemberRequest& request) {
-  const auto state = session(session_id);
-  if (!state.has_value() || !state->in_game() ||
-      request.target_name.empty()) {
+  if (request.target_name.empty()) {
     return;
   }
-  send_message(session_id, client_v1::GroupState{true, state->allow_group, {state->character_name}});
-  send_message(session_id, client_v1::SysMessage{
-                               "Group member changes are not available in client_v1 yet.", 1});
+  std::vector<std::pair<std::uint64_t, client_v1::GroupState>> states;
+  std::optional<client_v1::SysMessage> failure;
+  {
+    std::scoped_lock lock(mutex_);
+    auto it = sessions_.find(session_id);
+    const auto target_id = find_session_by_character_locked(request.target_name);
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
+    }
+    if (it->second.group_id == 0 || !target_id.has_value() || *target_id == session_id ||
+        !sessions_[*target_id].allow_group || sessions_[*target_id].group_id != 0) {
+      failure = client_v1::SysMessage{"Group add failed.", 1};
+    } else {
+      auto& group = groups_[it->second.group_id];
+      group.members.push_back(*target_id);
+      sessions_[*target_id].group_id = it->second.group_id;
+      sessions_[*target_id].group_visible = true;
+      states = group_broadcast_locked(it->second.group_id);
+    }
+  }
+  for (const auto& [target_session_id, state] : states) {
+    send_message(target_session_id, state);
+  }
+  if (failure.has_value()) {
+    send_message(session_id, *failure);
+  }
 }
 
 void ClientV1GameGatewayService::handle_group_remove_member_request(
     std::uint64_t session_id, const client_v1::GroupRemoveMemberRequest& request) {
-  const auto state = session(session_id);
-  if (!state.has_value() || !state->in_game() ||
-      request.target_name.empty()) {
+  if (request.target_name.empty()) {
     return;
   }
-  send_message(session_id, client_v1::GroupState{true, state->allow_group, {state->character_name}});
-  send_message(session_id, client_v1::SysMessage{
-                               "Group member changes are not available in client_v1 yet.", 1});
+  std::vector<std::pair<std::uint64_t, client_v1::GroupState>> states;
+  std::optional<client_v1::SysMessage> failure;
+  {
+    std::scoped_lock lock(mutex_);
+    auto it = sessions_.find(session_id);
+    const auto target_id = find_session_by_character_locked(request.target_name);
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
+    }
+    if (it->second.group_id == 0 || !target_id.has_value() ||
+        sessions_[*target_id].group_id != it->second.group_id) {
+      failure = client_v1::SysMessage{"Group remove failed.", 1};
+    } else {
+      const auto group_id = it->second.group_id;
+      auto group_it = groups_.find(group_id);
+      if (group_it == groups_.end()) {
+        failure = client_v1::SysMessage{"Group remove failed.", 1};
+      } else {
+        auto members = group_it->second.members;
+        group_it->second.members.erase(
+            std::remove(group_it->second.members.begin(), group_it->second.members.end(),
+                        *target_id),
+            group_it->second.members.end());
+        sessions_[*target_id].group_id = 0;
+        sessions_[*target_id].group_visible = false;
+        if (group_it->second.members.size() < 2) {
+          for (const auto member_session_id : members) {
+            if (auto member_it = sessions_.find(member_session_id);
+                member_it != sessions_.end()) {
+              member_it->second.group_id = 0;
+              member_it->second.group_visible = false;
+            }
+          }
+          groups_.erase(group_it);
+          for (const auto member_session_id : members) {
+            if (sessions_.contains(member_session_id)) {
+              states.emplace_back(member_session_id, group_state_locked(member_session_id));
+            }
+          }
+        } else {
+          states = group_broadcast_locked(group_id);
+          states.emplace_back(*target_id, group_state_locked(*target_id));
+        }
+      }
+    }
+  }
+  for (const auto& [target_session_id, state] : states) {
+    send_message(target_session_id, state);
+  }
+  if (failure.has_value()) {
+    send_message(session_id, *failure);
+  }
 }
 
 void ClientV1GameGatewayService::handle_trade_try_request(
     std::uint64_t session_id, const client_v1::TradeTryRequest& request) {
-  const auto state = session(session_id);
-  if (!state.has_value() || !state->in_game() ||
-      request.target_name.empty()) {
+  if (request.target_name.empty()) {
     return;
   }
+  std::vector<std::pair<std::uint64_t, client_v1::TradeState>> states;
+  std::optional<client_v1::SysMessage> failure;
   {
     std::scoped_lock lock(mutex_);
     auto it = sessions_.find(session_id);
-    if (it != sessions_.end()) {
+    const auto target_id = find_session_by_character_locked(request.target_name);
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
+    }
+    if (!target_id.has_value() || *target_id == session_id || it->second.trade_visible ||
+        sessions_[*target_id].trade_visible) {
+      failure = client_v1::SysMessage{"Trade request failed.", 1};
+    } else {
       it->second.trade_visible = true;
-      it->second.trade_remote_name = request.target_name;
+      it->second.trade_peer_session_id = *target_id;
+      it->second.trade_remote_name = sessions_[*target_id].character_name;
+      it->second.trade_local_items.clear();
       it->second.trade_local_gold = 0;
       it->second.trade_local_accept = false;
+      auto& peer = sessions_[*target_id];
+      peer.trade_visible = true;
+      peer.trade_peer_session_id = session_id;
+      peer.trade_remote_name = it->second.character_name;
+      peer.trade_local_items.clear();
+      peer.trade_local_gold = 0;
+      peer.trade_local_accept = false;
+      states = trade_pair_states_locked(session_id);
     }
   }
-  send_message(session_id, client_v1::TradeState{true, request.target_name, {}, {}, 0, 0,
-                                                 false, false});
+  for (const auto& [target_session_id, state] : states) {
+    send_message(target_session_id, state);
+  }
+  if (failure.has_value()) {
+    send_message(session_id, *failure);
+  }
   post_canonical_command(decode_client_v1_trade_try_command(session_id, request));
 }
 
 void ClientV1GameGatewayService::handle_trade_cancel_request(
     std::uint64_t session_id, const client_v1::TradeCancelRequest& /*request*/) {
-  const auto state = session(session_id);
-  if (!state.has_value() || !state->in_game()) {
-    return;
-  }
+  std::vector<std::pair<std::uint64_t, client_v1::TradeState>> states;
   {
     std::scoped_lock lock(mutex_);
     auto it = sessions_.find(session_id);
-    if (it != sessions_.end()) {
-      it->second.trade_visible = false;
-      it->second.trade_remote_name.clear();
-      it->second.trade_local_gold = 0;
-      it->second.trade_local_accept = false;
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
+    }
+    const auto peer_id = it->second.trade_peer_session_id;
+    clear_trade_locked(it->second);
+    states.emplace_back(session_id, client_v1::TradeState{});
+    if (auto peer_it = sessions_.find(peer_id); peer_it != sessions_.end()) {
+      clear_trade_locked(peer_it->second);
+      states.emplace_back(peer_id, client_v1::TradeState{});
     }
   }
-  send_message(session_id, client_v1::TradeState{});
+  for (const auto& [target_session_id, state] : states) {
+    send_message(target_session_id, state);
+  }
   post_canonical_command(decode_client_v1_trade_cancel_command(session_id));
 }
 
 void ClientV1GameGatewayService::handle_trade_add_item_request(
     std::uint64_t session_id, const client_v1::TradeAddItemRequest& request) {
-  const auto state = session(session_id);
-  if (!state.has_value() || !state->in_game() ||
-      request.item_make_index == 0 || request.name.empty()) {
+  if (request.item_make_index == 0 || request.name.empty()) {
     return;
   }
-  send_message(session_id, client_v1::TradeState{state->trade_visible, state->trade_remote_name,
-                                                 {}, {}, state->trade_local_gold, 0,
-                                                 false, false});
-  post_canonical_command(decode_client_v1_trade_add_item_command(session_id, request));
+  std::vector<std::pair<std::uint64_t, client_v1::TradeState>> states;
+  std::optional<client_v1::SysMessage> failure;
+  bool should_post = false;
+  {
+    std::scoped_lock lock(mutex_);
+    auto it = sessions_.find(session_id);
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
+    }
+    should_post = true;
+    if (!it->second.trade_visible) {
+      states.clear();
+    } else {
+      auto item = trade_item_from_bag_locked(it->second, request.item_make_index, request.name);
+      if (!item.has_value()) {
+        failure = client_v1::SysMessage{"Trade item failed.", 1};
+      } else {
+        it->second.trade_local_items.push_back(*item);
+        it->second.trade_local_accept = false;
+        if (auto peer_it = sessions_.find(it->second.trade_peer_session_id);
+            peer_it != sessions_.end()) {
+          peer_it->second.trade_local_accept = false;
+        }
+        states = trade_pair_states_locked(session_id);
+      }
+    }
+  }
+  for (const auto& [target_session_id, state] : states) {
+    send_message(target_session_id, state);
+  }
+  if (failure.has_value()) {
+    send_message(session_id, *failure);
+  }
+  if (should_post) {
+    post_canonical_command(decode_client_v1_trade_add_item_command(session_id, request));
+  }
 }
 
 void ClientV1GameGatewayService::handle_trade_remove_item_request(
     std::uint64_t session_id, const client_v1::TradeRemoveItemRequest& request) {
-  const auto state = session(session_id);
-  if (!state.has_value() || !state->in_game() ||
-      request.item_make_index == 0 || request.name.empty()) {
+  if (request.item_make_index == 0 || request.name.empty()) {
     return;
   }
-  send_message(session_id, client_v1::TradeState{state->trade_visible, state->trade_remote_name,
-                                                 {}, {}, state->trade_local_gold, 0,
-                                                 false, false});
-  post_canonical_command(decode_client_v1_trade_remove_item_command(session_id, request));
+  std::vector<std::pair<std::uint64_t, client_v1::TradeState>> states;
+  std::optional<client_v1::SysMessage> failure;
+  bool should_post = false;
+  {
+    std::scoped_lock lock(mutex_);
+    auto it = sessions_.find(session_id);
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
+    }
+    should_post = true;
+    if (!it->second.trade_visible) {
+      states.clear();
+    } else {
+      auto& items = it->second.trade_local_items;
+      const auto item_it = std::find_if(items.begin(), items.end(),
+                                        [&](const client_v1::ItemSlotState& entry) {
+                                          return entry.item.make_index == request.item_make_index &&
+                                                 entry.item.name == request.name;
+                                        });
+      if (item_it == items.end()) {
+        failure = client_v1::SysMessage{"Trade remove failed.", 1};
+      } else {
+        items.erase(item_it);
+        for (std::size_t index = 0; index < items.size(); ++index) {
+          items[index].slot = static_cast<std::int32_t>(index);
+        }
+        it->second.trade_local_accept = false;
+        if (auto peer_it = sessions_.find(it->second.trade_peer_session_id);
+            peer_it != sessions_.end()) {
+          peer_it->second.trade_local_accept = false;
+        }
+        states = trade_pair_states_locked(session_id);
+      }
+    }
+  }
+  for (const auto& [target_session_id, state] : states) {
+    send_message(target_session_id, state);
+  }
+  if (failure.has_value()) {
+    send_message(session_id, *failure);
+  }
+  if (should_post) {
+    post_canonical_command(decode_client_v1_trade_remove_item_command(session_id, request));
+  }
 }
 
 void ClientV1GameGatewayService::handle_trade_set_gold_request(
     std::uint64_t session_id, const client_v1::TradeSetGoldRequest& request) {
-  auto state = session(session_id);
-  if (!state.has_value() || !state->in_game() ||
-      request.gold < 0) {
+  if (request.gold < 0) {
     return;
   }
+  std::vector<std::pair<std::uint64_t, client_v1::TradeState>> states;
+  std::int32_t gold = request.gold;
   {
     std::scoped_lock lock(mutex_);
     auto it = sessions_.find(session_id);
-    if (it != sessions_.end()) {
-      it->second.trade_local_gold = std::min<std::int32_t>(request.gold, it->second.character.gold);
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
+    }
+    if (it->second.trade_visible) {
+      gold = std::min<std::int32_t>(request.gold, it->second.character.gold);
+      it->second.trade_local_gold = gold;
       it->second.trade_local_accept = false;
-      state = it->second;
+      if (auto peer_it = sessions_.find(it->second.trade_peer_session_id);
+          peer_it != sessions_.end()) {
+        peer_it->second.trade_local_accept = false;
+      }
+      states = trade_pair_states_locked(session_id);
     }
   }
-  send_message(session_id, client_v1::TradeState{state->trade_visible, state->trade_remote_name,
-                                                 {}, {}, state->trade_local_gold, 0,
-                                                 false, false});
-  post_canonical_command(decode_client_v1_trade_set_gold_command(session_id,
-                                                                 state->trade_local_gold));
+  for (const auto& [target_session_id, state] : states) {
+    send_message(target_session_id, state);
+  }
+  post_canonical_command(decode_client_v1_trade_set_gold_command(session_id, gold));
 }
 
 void ClientV1GameGatewayService::handle_trade_accept_request(
     std::uint64_t session_id, const client_v1::TradeAcceptRequest& /*request*/) {
-  auto state = session(session_id);
-  if (!state.has_value() || !state->in_game()) {
-    return;
-  }
+  std::vector<std::pair<std::uint64_t, client_v1::TradeState>> states;
   {
     std::scoped_lock lock(mutex_);
     auto it = sessions_.find(session_id);
-    if (it != sessions_.end()) {
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
+    }
+    if (it->second.trade_visible) {
       it->second.trade_local_accept = true;
-      state = it->second;
+      states = trade_pair_states_locked(session_id);
     }
   }
-  send_message(session_id, client_v1::TradeState{state->trade_visible, state->trade_remote_name,
-                                                 {}, {}, state->trade_local_gold, 0, true, false});
+  for (const auto& [target_session_id, state] : states) {
+    send_message(target_session_id, state);
+  }
   post_canonical_command(decode_client_v1_trade_accept_command(session_id));
 }
 
 void ClientV1GameGatewayService::handle_guild_open_request(
     std::uint64_t session_id, const client_v1::GuildOpenRequest& /*request*/) {
-  auto state = session(session_id);
-  if (!state.has_value() || !state->in_game()) {
-    return;
-  }
+  client_v1::GuildState guild;
   {
     std::scoped_lock lock(mutex_);
     auto it = sessions_.find(session_id);
-    if (it != sessions_.end()) {
-      it->second.guild_visible = true;
-      state = it->second;
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
     }
-  }
-  client_v1::GuildState guild;
-  guild.visible = true;
-  guild.guild_name = state->character.guild_name;
-  guild.rank_name = state->character.guild_title;
-  guild.notice = state->character.guild_name.empty() ? "" : "Guild notice is not synced yet.";
-  guild.can_admin = !state->character.guild_name.empty();
-  if (!state->character.guild_name.empty()) {
-    guild.members.push_back(
-        client_v1::GuildMemberState{state->character_name, state->character.guild_title, true});
-    guild.ranks.push_back(state->character.guild_title);
+    it->second.guild_visible = true;
+    guild = guild_state_locked(session_id);
   }
   send_message(session_id, std::move(guild));
 }
@@ -1305,9 +1738,50 @@ void ClientV1GameGatewayService::handle_guild_add_member_request(
   if (request.name.empty()) {
     return;
   }
-  handle_guild_open_request(session_id, client_v1::GuildOpenRequest{});
-  send_message(session_id, client_v1::SysMessage{
-                               "Guild member changes are not available in client_v1 yet.", 1});
+  std::vector<std::pair<std::uint64_t, client_v1::GuildState>> states;
+  std::optional<client_v1::SysMessage> failure;
+  {
+    std::scoped_lock lock(mutex_);
+    auto it = sessions_.find(session_id);
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
+    }
+    it->second.guild_visible = true;
+    auto current = guild_state_locked(session_id);
+    if (!current.can_admin) {
+      failure = client_v1::SysMessage{"Guild add failed.", 1};
+    } else {
+      auto& guild = guilds_[current.guild_name];
+      const auto target_id = find_session_by_character_locked(request.name);
+      const auto rank = std::string{"Member"};
+      auto member_it = std::find_if(guild.members.begin(), guild.members.end(),
+                                    [&](const client_v1::GuildMemberState& member) {
+                                      return member.name == request.name;
+                                    });
+      if (member_it == guild.members.end()) {
+        guild.members.push_back(client_v1::GuildMemberState{
+            request.name, rank, target_id.has_value()});
+      } else {
+        member_it->rank = rank;
+        member_it->online = target_id.has_value();
+      }
+      if (target_id.has_value()) {
+        auto& target = sessions_[*target_id];
+        target.character.guild_name = current.guild_name;
+        target.character.guild_title = rank;
+        if (target.guild_visible) {
+          states.emplace_back(*target_id, guild_state_locked(*target_id));
+        }
+      }
+      states = guild_broadcast_locked(current.guild_name);
+    }
+  }
+  for (const auto& [target_session_id, state] : states) {
+    send_message(target_session_id, state);
+  }
+  if (failure.has_value()) {
+    send_message(session_id, *failure);
+  }
 }
 
 void ClientV1GameGatewayService::handle_guild_remove_member_request(
@@ -1315,9 +1789,45 @@ void ClientV1GameGatewayService::handle_guild_remove_member_request(
   if (request.name.empty()) {
     return;
   }
-  handle_guild_open_request(session_id, client_v1::GuildOpenRequest{});
-  send_message(session_id, client_v1::SysMessage{
-                               "Guild member changes are not available in client_v1 yet.", 1});
+  std::vector<std::pair<std::uint64_t, client_v1::GuildState>> states;
+  std::optional<client_v1::SysMessage> failure;
+  {
+    std::scoped_lock lock(mutex_);
+    auto it = sessions_.find(session_id);
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
+    }
+    it->second.guild_visible = true;
+    auto current = guild_state_locked(session_id);
+    if (!current.can_admin) {
+      failure = client_v1::SysMessage{"Guild remove failed.", 1};
+    } else {
+      auto& guild = guilds_[current.guild_name];
+      guild.members.erase(std::remove_if(guild.members.begin(), guild.members.end(),
+                                         [&](const client_v1::GuildMemberState& member) {
+                                           return member.name == request.name;
+                                         }),
+                          guild.members.end());
+      const auto target_id = find_session_by_character_locked(request.name);
+      if (target_id.has_value()) {
+        auto& target = sessions_[*target_id];
+        target.character.guild_name.clear();
+        target.character.guild_title.clear();
+        if (target.guild_visible) {
+          target.guild_visible = false;
+          states.emplace_back(*target_id, client_v1::GuildState{});
+        }
+      }
+      auto broadcast = guild_broadcast_locked(current.guild_name);
+      states.insert(states.end(), broadcast.begin(), broadcast.end());
+    }
+  }
+  for (const auto& [target_session_id, state] : states) {
+    send_message(target_session_id, state);
+  }
+  if (failure.has_value()) {
+    send_message(session_id, *failure);
+  }
 }
 
 void ClientV1GameGatewayService::handle_guild_update_notice_request(
@@ -1325,9 +1835,29 @@ void ClientV1GameGatewayService::handle_guild_update_notice_request(
   if (request.text.empty()) {
     return;
   }
-  handle_guild_open_request(session_id, client_v1::GuildOpenRequest{});
-  send_message(session_id, client_v1::SysMessage{
-                               "Guild notice update is not available in client_v1 yet.", 1});
+  std::vector<std::pair<std::uint64_t, client_v1::GuildState>> states;
+  std::optional<client_v1::SysMessage> failure;
+  {
+    std::scoped_lock lock(mutex_);
+    auto it = sessions_.find(session_id);
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
+    }
+    it->second.guild_visible = true;
+    auto current = guild_state_locked(session_id);
+    if (!current.can_admin) {
+      failure = client_v1::SysMessage{"Guild notice update failed.", 1};
+    } else {
+      guilds_[current.guild_name].notice = request.text;
+      states = guild_broadcast_locked(current.guild_name);
+    }
+  }
+  for (const auto& [target_session_id, state] : states) {
+    send_message(target_session_id, state);
+  }
+  if (failure.has_value()) {
+    send_message(session_id, *failure);
+  }
 }
 
 void ClientV1GameGatewayService::handle_guild_update_grade_request(
@@ -1335,9 +1865,48 @@ void ClientV1GameGatewayService::handle_guild_update_grade_request(
   if (request.text.empty()) {
     return;
   }
-  handle_guild_open_request(session_id, client_v1::GuildOpenRequest{});
-  send_message(session_id, client_v1::SysMessage{
-                               "Guild rank update is not available in client_v1 yet.", 1});
+  std::vector<std::pair<std::uint64_t, client_v1::GuildState>> states;
+  std::optional<client_v1::SysMessage> failure;
+  {
+    std::scoped_lock lock(mutex_);
+    auto it = sessions_.find(session_id);
+    if (it == sessions_.end() || !it->second.in_game()) {
+      return;
+    }
+    it->second.guild_visible = true;
+    auto current = guild_state_locked(session_id);
+    if (!current.can_admin) {
+      failure = client_v1::SysMessage{"Guild rank update failed.", 1};
+    } else {
+      auto& ranks = guilds_[current.guild_name].ranks;
+      ranks.clear();
+      std::string rank;
+      auto flush_rank = [&] {
+        if (!rank.empty()) {
+          ranks.push_back(rank);
+          rank.clear();
+        }
+      };
+      for (const auto ch : request.text) {
+        if (ch == '/' || ch == '\n' || ch == '\r') {
+          flush_rank();
+        } else {
+          rank.push_back(ch);
+        }
+      }
+      flush_rank();
+      if (ranks.empty()) {
+        ranks.push_back("Member");
+      }
+      states = guild_broadcast_locked(current.guild_name);
+    }
+  }
+  for (const auto& [target_session_id, state] : states) {
+    send_message(target_session_id, state);
+  }
+  if (failure.has_value()) {
+    send_message(session_id, *failure);
+  }
 }
 
 void ClientV1GameGatewayService::handle_minimap_request(
@@ -2024,9 +2593,35 @@ void ClientV1GameGatewayService::translate_legacy_packet(
           "Gold: " + std::to_string(decoded->message.recog), 0});
       break;
     }
-    case kSmHear:
-      messages.push_back(client_v1::SysMessage{legacy_decode_string(decoded->body), 0});
+    case kSmHear: {
+      const auto text = legacy_decode_string(decoded->body);
+      messages.push_back(client_v1::SysMessage{text, 0});
+      if (text.find("Trade cancelled.") != std::string::npos ||
+          text.find("Trade completed.") != std::string::npos) {
+        std::scoped_lock lock(mutex_);
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end()) {
+          const auto peer_id = it->second.trade_peer_session_id;
+          clear_trade_locked(it->second);
+          if (auto peer_it = sessions_.find(peer_id); peer_it != sessions_.end()) {
+            clear_trade_locked(peer_it->second);
+          }
+        }
+        messages.push_back(client_v1::TradeState{});
+      } else if (text.find("Trade failed.") != std::string::npos) {
+        std::scoped_lock lock(mutex_);
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end() && it->second.trade_visible) {
+          it->second.trade_local_accept = false;
+          if (auto peer_it = sessions_.find(it->second.trade_peer_session_id);
+              peer_it != sessions_.end()) {
+            peer_it->second.trade_local_accept = false;
+          }
+          messages.push_back(trade_state_locked(session_id));
+        }
+      }
       break;
+    }
     case kSmMerchantSay: {
       const auto merchant_id =
           static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));

@@ -124,6 +124,31 @@ void append_world_actor(Bytes& bytes, std::uint64_t actor_id, std::string_view n
   append_u8(bytes, actor_type);
 }
 
+void append_item_state(Bytes& bytes, std::string_view name, std::int32_t make_index,
+                       std::int32_t looks, std::uint8_t std_mode, std::uint16_t dura,
+                       std::uint16_t dura_max) {
+  append_string(bytes, name);
+  append_i32(bytes, make_index);
+  append_i32(bytes, looks);
+  append_u8(bytes, std_mode);
+  append_u16(bytes, dura);
+  append_u16(bytes, dura_max);
+}
+
+void append_item_slot(Bytes& bytes, std::int32_t slot, std::string_view name,
+                      std::int32_t make_index, std::int32_t looks, std::uint8_t std_mode,
+                      std::uint16_t dura, std::uint16_t dura_max) {
+  append_i32(bytes, slot);
+  append_item_state(bytes, name, make_index, looks, std_mode, dura, dura_max);
+}
+
+void append_guild_member(Bytes& bytes, std::string_view name, std::string_view rank,
+                         bool online) {
+  append_string(bytes, name);
+  append_string(bytes, rank);
+  append_bool(bytes, online);
+}
+
 void assert_p0_protocol_goldens() {
   using namespace mir2::client_v1;
 
@@ -294,6 +319,136 @@ void assert_p2_protocol_goldens() {
   assert_golden(DurabilityChange{1001, 550, 1000}, 420, 422, payload);
 }
 
+void assert_p3_protocol_goldens() {
+  using namespace mir2::client_v1;
+
+  ItemState ruby;
+  ruby.name = "Ruby";
+  ruby.make_index = 1001;
+  ruby.looks = 7;
+  ruby.std_mode = 0;
+  ruby.dura = 10;
+  ruby.dura_max = 20;
+
+  ItemState sapphire;
+  sapphire.name = "Sapphire";
+  sapphire.make_index = 2001;
+  sapphire.looks = 8;
+  sapphire.std_mode = 0;
+  sapphire.dura = 30;
+  sapphire.dura_max = 40;
+
+  Bytes payload;
+  append_bool(payload, true);
+  assert_golden(GroupModeRequest{true}, 535, 501, payload);
+
+  payload.clear();
+  append_string(payload, "Ally");
+  assert_golden(GroupCreateRequest{"Ally"}, 536, 502, payload);
+
+  payload.clear();
+  append_string(payload, "Ally");
+  assert_golden(GroupAddMemberRequest{"Ally"}, 537, 503, payload);
+
+  payload.clear();
+  append_string(payload, "Ally");
+  assert_golden(GroupRemoveMemberRequest{"Ally"}, 538, 504, payload);
+
+  payload.clear();
+  append_bool(payload, true);
+  append_bool(payload, true);
+  append_u16(payload, 2);
+  append_string(payload, "Hero");
+  append_string(payload, "Ally");
+  assert_golden(GroupState{true, true, {"Hero", "Ally"}}, 539, 505, payload);
+
+  payload.clear();
+  append_string(payload, "Ally");
+  assert_golden(TradeTryRequest{"Ally"}, 540, 506, payload);
+
+  payload.clear();
+  assert_golden(TradeCancelRequest{}, 541, 507, payload);
+
+  payload.clear();
+  append_i32(payload, 1001);
+  append_string(payload, "Ruby");
+  assert_golden(TradeAddItemRequest{1001, "Ruby"}, 542, 508, payload);
+
+  payload.clear();
+  append_i32(payload, 1001);
+  append_string(payload, "Ruby");
+  assert_golden(TradeRemoveItemRequest{1001, "Ruby"}, 543, 509, payload);
+
+  payload.clear();
+  append_i32(payload, 25);
+  assert_golden(TradeSetGoldRequest{25}, 544, 510, payload);
+
+  payload.clear();
+  assert_golden(TradeAcceptRequest{}, 545, 511, payload);
+
+  payload.clear();
+  append_bool(payload, true);
+  append_string(payload, "Ally");
+  append_u16(payload, 1);
+  append_item_slot(payload, 0, "Ruby", 1001, 7, 0, 10, 20);
+  append_u16(payload, 1);
+  append_item_slot(payload, 1, "Sapphire", 2001, 8, 0, 30, 40);
+  append_i32(payload, 25);
+  append_i32(payload, 9);
+  append_bool(payload, true);
+  append_bool(payload, false);
+  assert_golden(TradeState{true, "Ally", {ItemSlotState{0, ruby}},
+                           {ItemSlotState{1, sapphire}}, 25, 9, true, false},
+                546, 512, payload);
+
+  payload.clear();
+  assert_golden(GuildOpenRequest{}, 547, 513, payload);
+
+  payload.clear();
+  assert_golden(GuildHomeRequest{}, 548, 514, payload);
+
+  payload.clear();
+  assert_golden(GuildMemberListRequest{}, 549, 515, payload);
+
+  payload.clear();
+  append_string(payload, "Ally");
+  assert_golden(GuildAddMemberRequest{"Ally"}, 550, 516, payload);
+
+  payload.clear();
+  append_string(payload, "Ally");
+  assert_golden(GuildRemoveMemberRequest{"Ally"}, 551, 517, payload);
+
+  payload.clear();
+  append_string(payload, "Notice");
+  assert_golden(GuildUpdateNoticeRequest{"Notice"}, 552, 518, payload);
+
+  payload.clear();
+  append_string(payload, "Leader/Member");
+  assert_golden(GuildUpdateGradeRequest{"Leader/Member"}, 553, 519, payload);
+
+  payload.clear();
+  append_bool(payload, true);
+  append_string(payload, "Guild");
+  append_string(payload, "Leader");
+  append_string(payload, "Notice");
+  append_u16(payload, 2);
+  append_guild_member(payload, "Hero", "Leader", true);
+  append_guild_member(payload, "Ally", "Member", false);
+  append_u16(payload, 2);
+  append_string(payload, "Leader");
+  append_string(payload, "Member");
+  append_bool(payload, true);
+  assert_golden(GuildState{true,
+                           "Guild",
+                           "Leader",
+                           "Notice",
+                           {GuildMemberState{"Hero", "Leader", true},
+                            GuildMemberState{"Ally", "Member", false}},
+                           {"Leader", "Member"},
+                           true},
+                554, 520, payload);
+}
+
 }  // namespace
 
 int main() {
@@ -329,6 +484,7 @@ int main() {
 
   assert_p0_protocol_goldens();
   assert_p2_protocol_goldens();
+  assert_p3_protocol_goldens();
 
   SelectServerRequest request;
   request.name = "ModernServer";
