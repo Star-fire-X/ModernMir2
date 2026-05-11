@@ -163,7 +163,11 @@ enum class ActorActionKind : std::uint8_t {
   run = 2,
   hit = 3,
   spell = 4,
-  struck = 5
+  struck = 5,
+  rush = 6,
+  rush_kung = 7,
+  backstep = 8,
+  knockback = 9
 };
 
 // ====================================================================

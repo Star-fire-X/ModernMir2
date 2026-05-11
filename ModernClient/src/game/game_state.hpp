@@ -108,6 +108,8 @@ struct ActorState {
   int action_magic_effect_type{-1};
   std::uint64_t action_started_ms{0};
   std::uint64_t action_duration_ms{0};
+  std::uint64_t legacy_event_sequence{0};
+  std::vector<ActorState> legacy_pending_actions{};
   bool dead{false};
   bool skeleton{false};                ///< 死亡后是否已变为骨架
   int hp{-1};
@@ -469,6 +471,19 @@ struct GameStateStore {
     play                ///< 游戏中阶段（连接到 RunGate）
   };
   ConnectionPhase connection_phase{ConnectionPhase::login};
+  std::uint64_t legacy_actor_event_sequence{0};
+
+  void record_legacy_actor_event(ActorState& actor) {
+    auto event = actor;
+    event.legacy_pending_actions.clear();
+    event.legacy_event_sequence = ++legacy_actor_event_sequence;
+    actor.legacy_pending_actions.push_back(event);
+    if (actor.legacy_pending_actions.size() > 32U) {
+      actor.legacy_pending_actions.erase(actor.legacy_pending_actions.begin(),
+                                         actor.legacy_pending_actions.end() - 32);
+    }
+    actor.legacy_event_sequence = event.legacy_event_sequence;
+  }
 
   /// 根据动作类型返回动画持续时间（毫秒）
   /// 这些时间值基于对经典传奇客户端的逆向分析，
@@ -479,7 +494,12 @@ struct GameStateStore {
       case client_v1::ActorActionKind::walk:
         return 540;    // 行走动画总时长
       case client_v1::ActorActionKind::run:
+      case client_v1::ActorActionKind::rush:
+      case client_v1::ActorActionKind::rush_kung:
         return 720;    // 跑步动画总时长
+      case client_v1::ActorActionKind::backstep:
+      case client_v1::ActorActionKind::knockback:
+        return 540;
       case client_v1::ActorActionKind::hit:
         if (legacy_ident == legacy::kSmHeavyHit) {
           return 540;
@@ -958,14 +978,44 @@ struct GameStateStore {
     actor.action_magic_effect_type = -1;
     actor.action_started_ms = detail::monotonic_ms();
     actor.action_duration_ms = action_duration_ms(message.kind, legacy_ident);
-    // 非施法动作且有坐标时更新角色位置
-    if (message.kind != client_v1::ActorActionKind::spell && (message.x != 0 || message.y != 0)) {
+    const auto forced_move = message.kind == client_v1::ActorActionKind::rush ||
+                             message.kind == client_v1::ActorActionKind::rush_kung ||
+                             message.kind == client_v1::ActorActionKind::backstep ||
+                             message.kind == client_v1::ActorActionKind::knockback;
+    if (forced_move) {
+      if (actor.x != message.x || actor.y != message.y ||
+          message.kind == client_v1::ActorActionKind::rush_kung) {
+        actor.from_x = actor.x;
+        actor.from_y = actor.y;
+      }
+      actor.running = message.kind == client_v1::ActorActionKind::rush ||
+                      message.kind == client_v1::ActorActionKind::rush_kung;
+      actor.move_started_ms = actor.action_started_ms;
+      actor.move_duration_ms = 0;
+      if (message.kind == client_v1::ActorActionKind::rush_kung) {
+        actor.action_target_x = message.x;
+        actor.action_target_y = message.y;
+      } else if (message.x != 0 || message.y != 0) {
+        actor.x = message.x;
+        actor.y = message.y;
+      }
+    } else if (message.kind != client_v1::ActorActionKind::spell && (message.x != 0 || message.y != 0)) {
+      if (message.kind == client_v1::ActorActionKind::walk ||
+          message.kind == client_v1::ActorActionKind::run) {
+        if (actor.x != message.x || actor.y != message.y || actor.move_started_ms == 0) {
+          actor.from_x = actor.x;
+          actor.from_y = actor.y;
+        }
+        actor.running = message.kind == client_v1::ActorActionKind::run;
+        actor.move_started_ms = actor.action_started_ms;
+      }
       actor.x = message.x;
       actor.y = message.y;
     }
     if (message.dir < 8) {
       actor.dir = message.dir;
     }
+    record_legacy_actor_event(actor);
     // 受击动作时记录伤害信息
     if (message.kind == client_v1::ActorActionKind::struck) {
       actor.last_damage = message.value;
@@ -1253,7 +1303,11 @@ struct GameStateStore {
       if (auto it = world.actors.find(world.self_actor_id); it != world.actors.end()) {
         auto& actor = it->second;
         if (actor.current_action == client_v1::ActorActionKind::walk ||
-            actor.current_action == client_v1::ActorActionKind::run) {
+            actor.current_action == client_v1::ActorActionKind::run ||
+            actor.current_action == client_v1::ActorActionKind::rush ||
+            actor.current_action == client_v1::ActorActionKind::rush_kung ||
+            actor.current_action == client_v1::ActorActionKind::backstep ||
+            actor.current_action == client_v1::ActorActionKind::knockback) {
           // 移动被拒绝：回到移动前的位置
           actor.x = actor.from_x;
           actor.y = actor.from_y;

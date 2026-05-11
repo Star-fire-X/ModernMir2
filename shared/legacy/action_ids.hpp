@@ -11,6 +11,9 @@ namespace mir2::legacy {
 constexpr std::uint16_t kSmFireHit = 8;
 constexpr std::uint16_t kSmRush = 6;
 constexpr std::uint16_t kSmRushKung = 7;
+constexpr std::uint16_t kSmBackStep = 9;
+constexpr std::uint16_t kSmWalk = 11;
+constexpr std::uint16_t kSmRun = 13;
 constexpr std::uint16_t kSmHit = 14;
 constexpr std::uint16_t kSmHeavyHit = 15;
 constexpr std::uint16_t kSmBigHit = 16;

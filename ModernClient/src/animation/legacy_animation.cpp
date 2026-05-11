@@ -524,6 +524,15 @@ std::pair<int, int> dir_tile_delta(const std::uint8_t dir) {
   }
 }
 
+bool legacy_move_action(const client_v1::ActorActionKind kind) {
+  return kind == client_v1::ActorActionKind::walk ||
+         kind == client_v1::ActorActionKind::run ||
+         kind == client_v1::ActorActionKind::rush ||
+         kind == client_v1::ActorActionKind::rush_kung ||
+         kind == client_v1::ActorActionKind::backstep ||
+         kind == client_v1::ActorActionKind::knockback;
+}
+
 /// 判断魔法是否使用"角色附着"特效（char_attached）
 /// 这类魔法的爆炸效果直接出现在目标角色身上，而非地图格上：
 ///   - magic_id=2（火球术）：火球命中目标后爆炸
@@ -1461,6 +1470,7 @@ void LegacyActorAnimation::initialize(const ActorState& actor, const std::uint64
   smooth_move_time_ms_ = now_ms;
   last_move_started_ms_ = actor.move_started_ms;
   last_action_started_ms_ = actor.action_started_ms;
+  last_legacy_event_sequence_ = 0;
   last_action_kind_ = actor.current_action;
   last_legacy_ident_ = actor.legacy_action_ident;
   last_magic_id_ = actor.magic_id;
@@ -1497,15 +1507,27 @@ void LegacyActorAnimation::sync_actor(const ActorState& actor, const std::uint64
        actor.legacy_action_ident != last_legacy_ident_ || actor.magic_id != last_magic_id_);
   // 检测是否刚死亡
   const auto newly_dead = actor.dead && !last_dead_;
+  auto queued_legacy_event = false;
+
+  for (const auto& event : actor.legacy_pending_actions) {
+    if (event.legacy_event_sequence <= last_legacy_event_sequence_) {
+      continue;
+    }
+    queue_or_begin(event, legacy_move_action(event.current_action), now_ms);
+    last_legacy_event_sequence_ = event.legacy_event_sequence;
+    queued_legacy_event = true;
+  }
 
   if (newly_dead) {
     pending_actions_.clear();
     begin_motion(actor, die_action_for(actor), MotionKind::action, 0, now_ms);
+  } else if (queued_legacy_event) {
+    // Queued legacy action snapshots preserve intermediate move segments that
+    // arrived in the same network poll before the renderer observed them.
   } else if (new_move) {
     queue_or_begin(actor, true, now_ms);
   } else if (new_action) {
-    if (actor.current_action == client_v1::ActorActionKind::walk ||
-        actor.current_action == client_v1::ActorActionKind::run) {
+    if (legacy_move_action(actor.current_action)) {
       queue_or_begin(actor, true, now_ms);
     } else {
       queue_or_begin(actor, false, now_ms);
@@ -1520,6 +1542,7 @@ void LegacyActorAnimation::sync_actor(const ActorState& actor, const std::uint64
 
   last_move_started_ms_ = actor.move_started_ms;
   last_action_started_ms_ = actor.action_started_ms;
+  last_legacy_event_sequence_ = std::max(last_legacy_event_sequence_, actor.legacy_event_sequence);
   last_action_kind_ = actor.current_action;
   last_legacy_ident_ = actor.legacy_action_ident;
   last_magic_id_ = actor.magic_id;
@@ -1544,8 +1567,7 @@ void LegacyActorAnimation::begin_queued_or_idle(const ActorState& fallback_actor
   if (!pending_actions_.empty()) {
     const auto next = pending_actions_.front();
     pending_actions_.erase(pending_actions_.begin());
-    if (next.current_action == client_v1::ActorActionKind::walk ||
-        next.current_action == client_v1::ActorActionKind::run) {
+    if (legacy_move_action(next.current_action)) {
       begin_move(next, now_ms);
     } else {
       begin_action(next, now_ms);
@@ -1569,13 +1591,28 @@ void LegacyActorAnimation::finish_motion(const ActorState& actor, const std::uin
 
 /// 开始移动动画：选择 walk 或 run 的动作信息
 void LegacyActorAnimation::begin_move(const ActorState& actor, const std::uint64_t now_ms) {
-  const auto action = actor.current_action == client_v1::ActorActionKind::run || actor.running
-                          ? action_info_for(actor, client_v1::ActorActionKind::run)
-                          : action_info_for(actor, client_v1::ActorActionKind::walk);
-  const auto distance = std::max(std::abs(actor.x - actor.from_x), std::abs(actor.y - actor.from_y));
+  const auto action = action_info_for(actor, actor.current_action);
+  auto target_x = actor.x;
+  auto target_y = actor.y;
+  const auto move_backwards = actor.current_action == client_v1::ActorActionKind::backstep ||
+                              actor.current_action == client_v1::ActorActionKind::knockback;
+  const auto rush_kung_move = actor.current_action == client_v1::ActorActionKind::rush_kung;
+  if (rush_kung_move && actor.action_target_x >= 0 && actor.action_target_y >= 0) {
+    target_x = actor.action_target_x;
+    target_y = actor.action_target_y;
+  }
+  const auto distance =
+      std::max(std::abs(target_x - actor.from_x), std::abs(target_y - actor.from_y));
   begin_motion(actor, action, MotionKind::move, std::max(1, distance), now_ms);
-  current_frame_ = start_frame_ - 1;
-  shift_ = legacy_shift(xx_, yy_, frame_dir_for(actor), move_step_, 0,
+  move_backwards_ = move_backwards;
+  rush_kung_move_ = rush_kung_move;
+  xx_ = target_x;
+  yy_ = target_y;
+  move_return_x_ = actor.from_x;
+  move_return_y_ = actor.from_y;
+  move_shift_dir_ = move_backwards_ ? opposite_dir(frame_dir_for(actor)) : frame_dir_for(actor);
+  current_frame_ = move_backwards_ ? end_frame_ + 1 : start_frame_ - 1;
+  shift_ = legacy_shift(xx_, yy_, move_shift_dir_, move_step_, 0,
                         std::max(1, end_frame_ - start_frame_ + 1));
   lock_end_frame_ = false;
 }
@@ -1603,6 +1640,11 @@ void LegacyActorAnimation::begin_motion(const ActorState& actor, const LegacyAct
   action_ = normalized_action(action);
   motion_kind_ = kind;
   move_step_ = move_step;
+  move_backwards_ = false;
+  rush_kung_move_ = false;
+  move_shift_dir_ = frame_dir_for(actor);
+  move_return_x_ = actor.from_x;
+  move_return_y_ = actor.from_y;
   xx_ = actor.x;
   yy_ = actor.y;
   dir_ = actor.dir % 8U;
@@ -1656,8 +1698,27 @@ void LegacyActorAnimation::update(const ActorState& actor, const LegacyAnimation
   if (motion_kind_ == MotionKind::move) {
     // 移动动画：由 move_tick 驱动帧推进
     if (clock.move_tick()) {
-      if (current_frame_ < start_frame_ || current_frame_ > end_frame_) {
+      if (!move_backwards_ && (current_frame_ < start_frame_ || current_frame_ > end_frame_)) {
         current_frame_ = start_frame_ - 1;
+      }
+      if (move_backwards_ && (current_frame_ < start_frame_ || current_frame_ > end_frame_)) {
+        current_frame_ = end_frame_ + 1;
+      }
+      if (move_backwards_) {
+        if (current_frame_ > start_frame_) {
+          --current_frame_;
+          if (pending_actions_.size() >= 2 && current_frame_ > start_frame_) {
+            --current_frame_;
+          }
+          const auto cur_step = end_frame_ - current_frame_ + 1;
+          const auto max_step = end_frame_ - start_frame_ + 1;
+          shift_ = legacy_shift(xx_, yy_, move_shift_dir_, move_step_, cur_step, max_step);
+        }
+        if (current_frame_ <= start_frame_) {
+          lock_end_frame_ = true;
+          begin_queued_or_idle(actor, now_ms);
+        }
+        return;
       }
       if (current_frame_ < end_frame_) {
         ++current_frame_;
@@ -1666,7 +1727,13 @@ void LegacyActorAnimation::update(const ActorState& actor, const LegacyAnimation
         }
         const auto cur_step = current_frame_ - start_frame_ + 1;
         const auto max_step = end_frame_ - start_frame_ + 1;
-        shift_ = legacy_shift(xx_, yy_, frame_dir_for(actor), move_step_, cur_step, max_step);
+        shift_ = legacy_shift(xx_, yy_, move_shift_dir_, move_step_, cur_step, max_step);
+      }
+      if (rush_kung_move_ && current_frame_ >= end_frame_ - 3) {
+        shift_ = LegacyShiftResult{move_return_x_, move_return_y_, 0, 0};
+        lock_end_frame_ = true;
+        begin_queued_or_idle(actor, now_ms);
+        return;
       }
       if (current_frame_ >= end_frame_) {
         lock_end_frame_ = true;
@@ -1797,7 +1864,13 @@ LegacyActionInfo LegacyActorAnimation::action_info_for(const ActorState& actor,
       case client_v1::ActorActionKind::walk:
         return legacy_human_action_info(LegacyHumanAction::walk);
       case client_v1::ActorActionKind::run:
+      case client_v1::ActorActionKind::rush_kung:
         return legacy_human_action_info(LegacyHumanAction::run);
+      case client_v1::ActorActionKind::rush:
+        return legacy_human_action_info(LegacyHumanAction::rush_left);
+      case client_v1::ActorActionKind::backstep:
+      case client_v1::ActorActionKind::knockback:
+        return legacy_human_action_info(LegacyHumanAction::walk);
       case client_v1::ActorActionKind::hit:
         if (actor.legacy_action_ident == legacy::kSmHeavyHit) {
           return legacy_human_action_info(LegacyHumanAction::heavy_hit);
@@ -1823,6 +1896,10 @@ LegacyActionInfo LegacyActorAnimation::action_info_for(const ActorState& actor,
   switch (kind) {
     case client_v1::ActorActionKind::walk:
     case client_v1::ActorActionKind::run:
+    case client_v1::ActorActionKind::rush:
+    case client_v1::ActorActionKind::rush_kung:
+    case client_v1::ActorActionKind::backstep:
+    case client_v1::ActorActionKind::knockback:
       return monster_action(*table, LegacyMonsterAction::walk);
     case client_v1::ActorActionKind::hit:
     case client_v1::ActorActionKind::spell:

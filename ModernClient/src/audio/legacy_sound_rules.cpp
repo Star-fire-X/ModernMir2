@@ -98,7 +98,13 @@ LegacyActionInfo audio_action_info_for(const ActorState& actor) {
       case client_v1::ActorActionKind::walk:
         return legacy_human_action_info(LegacyHumanAction::walk);
       case client_v1::ActorActionKind::run:
+      case client_v1::ActorActionKind::rush_kung:
         return legacy_human_action_info(LegacyHumanAction::run);
+      case client_v1::ActorActionKind::rush:
+        return legacy_human_action_info(LegacyHumanAction::rush_left);
+      case client_v1::ActorActionKind::backstep:
+      case client_v1::ActorActionKind::knockback:
+        return legacy_human_action_info(LegacyHumanAction::walk);
       case client_v1::ActorActionKind::hit:
         if (actor.legacy_action_ident == legacy::kSmHeavyHit) {
           return legacy_human_action_info(LegacyHumanAction::heavy_hit);
@@ -125,6 +131,10 @@ LegacyActionInfo audio_action_info_for(const ActorState& actor) {
   switch (actor.current_action) {
     case client_v1::ActorActionKind::walk:
     case client_v1::ActorActionKind::run:
+    case client_v1::ActorActionKind::rush:
+    case client_v1::ActorActionKind::rush_kung:
+    case client_v1::ActorActionKind::backstep:
+    case client_v1::ActorActionKind::knockback:
       return (*table)[static_cast<std::size_t>(LegacyMonsterAction::walk)];
     case client_v1::ActorActionKind::hit:
     case client_v1::ActorActionKind::spell:
