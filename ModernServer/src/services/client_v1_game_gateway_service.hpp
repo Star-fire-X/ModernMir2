@@ -9,6 +9,7 @@
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "config/models.hpp"
@@ -68,8 +69,11 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
     std::string pending_repair_item_name{};
     bool allow_group{false};
     bool group_visible{false};
+    std::uint64_t group_id{0};
     bool trade_visible{false};
+    std::uint64_t trade_peer_session_id{0};
     std::string trade_remote_name{};
+    std::vector<client_v1::ItemSlotState> trade_local_items{};
     std::int32_t trade_local_gold{0};
     bool trade_local_accept{false};
     bool guild_visible{false};
@@ -165,6 +169,33 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
   void translate_legacy_packet(std::uint64_t session_id, const LegacyPacket& packet,
                                std::vector<client_v1::Message>& messages);
 
+  struct GroupRuntimeState {
+    std::vector<std::uint64_t> members{};
+  };
+
+  struct GuildRuntimeState {
+    std::string name{};
+    std::string notice{};
+    std::vector<client_v1::GuildMemberState> members{};
+    std::vector<std::string> ranks{};
+  };
+
+  [[nodiscard]] std::optional<std::uint64_t> find_session_by_character_locked(
+      std::string_view name) const;
+  [[nodiscard]] client_v1::GroupState group_state_locked(std::uint64_t session_id) const;
+  [[nodiscard]] std::vector<std::pair<std::uint64_t, client_v1::GroupState>>
+  group_broadcast_locked(std::uint64_t group_id) const;
+  [[nodiscard]] client_v1::TradeState trade_state_locked(std::uint64_t session_id) const;
+  [[nodiscard]] std::vector<std::pair<std::uint64_t, client_v1::TradeState>>
+  trade_pair_states_locked(std::uint64_t session_id) const;
+  void clear_trade_locked(SessionState& state);
+  [[nodiscard]] std::optional<client_v1::ItemSlotState> trade_item_from_bag_locked(
+      const SessionState& state, std::int32_t make_index, std::string_view name) const;
+  void ensure_guild_member_locked(SessionState& state);
+  [[nodiscard]] client_v1::GuildState guild_state_locked(std::uint64_t session_id);
+  [[nodiscard]] std::vector<std::pair<std::uint64_t, client_v1::GuildState>>
+  guild_broadcast_locked(std::string_view guild_name);
+
   [[nodiscard]] std::optional<MapConfig> find_map(std::string_view map_id) const;
   [[nodiscard]] std::optional<SessionState> session(std::uint64_t session_id) const;
 
@@ -175,6 +206,9 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
   std::atomic_bool bus_running_{false};
   mutable std::mutex mutex_{};
   std::unordered_map<std::uint64_t, SessionState> sessions_{};
+  std::uint64_t next_group_id_{1};
+  std::unordered_map<std::uint64_t, GroupRuntimeState> groups_{};
+  std::unordered_map<std::string, GuildRuntimeState> guilds_{};
 };
 
 }  // namespace mir2

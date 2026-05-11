@@ -161,6 +161,7 @@ function Get-CiBuildTargets {
     "mir2_client_v1_enter_world_boundary_smoke",
     "mir2_client_v1_session_boundary_smoke",
     "mir2_client_v1_gateway_lifecycle_smoke",
+    "mir2_client_v1_trade_group_guild_smoke",
     "mir2_client_v1_world_entry_smoke",
     "mir2_client_v1_game_gateway_notice_smoke",
     "mir2_client_v1_imported_character_flow_smoke",
@@ -186,6 +187,7 @@ function Get-CiBuildTargets {
   $clientPhase3 = Join-Unique -Values ($clientPhase2 + @(
     "modern_client_map_render_alignment_smoke",
     "modern_client_ui_smoke",
+    "modern_client_trade_group_guild_ui_smoke",
     "modern_client_audio_mapping_smoke",
     "modern_client_wav_reader_smoke",
     "modern_client_direct_sound_backend_smoke",

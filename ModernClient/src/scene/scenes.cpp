@@ -2209,17 +2209,19 @@ class LegacyHud final {
     trade_content_->assets = assets_;
     make_text_button(trade_window_, RectI{238, 8, 54, 22}, L"Close",
                      [this, app = context.app] { close_trade_window(app); });
-    make_text_button(trade_window_, RectI{20, 202, 52, 24}, L"Add",
+    make_text_button(trade_window_, RectI{20, 202, 42, 24}, L"Add",
                      [this, app = context.app] { add_selected_bag_item_to_trade(app); });
-    make_text_button(trade_window_, RectI{78, 202, 52, 24}, L"Gold",
+    make_text_button(trade_window_, RectI{66, 202, 42, 24}, L"Del",
+                     [this, app = context.app] { remove_first_trade_item(app); });
+    make_text_button(trade_window_, RectI{112, 202, 52, 24}, L"Gold",
                      [this, app = context.app] { set_trade_gold(app); });
-    make_text_button(trade_window_, RectI{136, 202, 72, 24}, L"Accept",
+    make_text_button(trade_window_, RectI{170, 202, 60, 24}, L"Accept",
                      [app = context.app] {
-      if (app != nullptr) {
-        app->request_trade_accept(client_v1::TradeAcceptRequest{});
-      }
-    });
-    make_text_button(trade_window_, RectI{214, 202, 72, 24}, L"Cancel",
+                       if (app != nullptr) {
+                         app->request_trade_accept(client_v1::TradeAcceptRequest{});
+                       }
+                     });
+    make_text_button(trade_window_, RectI{236, 202, 60, 24}, L"Cancel",
                      [this, app = context.app] { close_trade_window(app); });
 
     guild_window_ = root->emplace_child<ui::Window>(RectI{18, 60, 330, 300});
@@ -3394,6 +3396,17 @@ class LegacyHud final {
       return;
     }
     app->request_trade_add_item(client_v1::TradeAddItemRequest{item.make_index, item.name});
+  }
+
+  void remove_first_trade_item(ClientApp* app) {
+    if (app == nullptr || state_ == nullptr || state_->world.trade.local_items.empty()) {
+      return;
+    }
+    const auto& item = state_->world.trade.local_items.front().item;
+    if (item.make_index == 0 || item.name.empty()) {
+      return;
+    }
+    app->request_trade_remove_item(client_v1::TradeRemoveItemRequest{item.make_index, item.name});
   }
 
   void set_trade_gold(ClientApp* app) {
