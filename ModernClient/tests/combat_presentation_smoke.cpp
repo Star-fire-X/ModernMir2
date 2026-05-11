@@ -52,10 +52,17 @@ int main() {
                           true, 32});
   state.world.actors[1000].action_started_ms = 1300;
   state.apply(ActorMagicFire{1000, 2000, 333, 271, 7, 32});
+  animations.reset(1300);
   animations.sync_world(state.world, 1300);
   animations.update(state.world, 1300);
   assert(state.world.actors[1000].current_action == ActorActionKind::spell);
   assert(state.world.actors[1000].action_magic_effect_type == 7);
+  assert(animations.effects().fly_count() + animations.effects().ground_count() +
+             animations.effects().overlay_count() ==
+         0);
+  for (std::uint64_t now = 1361; now <= 1849; now += 61) {
+    animations.update(state.world, now);
+  }
   assert(animations.effects().fly_count() + animations.effects().ground_count() +
              animations.effects().overlay_count() >
          0);

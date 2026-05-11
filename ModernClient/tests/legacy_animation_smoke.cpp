@@ -2,6 +2,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <unordered_map>
 
 #include "animation/legacy_animation.hpp"
 #include "assets/asset_manager.hpp"
@@ -271,6 +272,12 @@ int main() {
   assert(pose->body_index == 600 + 80);
   assert(pose->rx == 10 && pose->shift_x == 8);
 
+  animations.reset(2000);
+  world.actors[1].x = 10;
+  world.actors[1].y = 10;
+  world.actors[1].from_x = 10;
+  world.actors[1].from_y = 10;
+  world.actors[1].move_started_ms = 0;
   world.actors[1].current_action = mir2::client_v1::ActorActionKind::spell;
   world.actors[1].magic_id = 1;
   world.actors[1].action_started_ms = 2000;
@@ -279,13 +286,64 @@ int main() {
   world.actors[1].action_target_actor_id = 0;
   world.actors[1].action_magic = true;
   animations.update(world, 2000);
+  assert(animations.effects().fly_count() == 0);
+  for (std::uint64_t now = 2061; now <= 2488; now += 61) {
+    animations.update(world, now);
+    assert(animations.effects().fly_count() == 0);
+  }
+  animations.update(world, 2549);
   assert(animations.effects().fly_count() == 1);
   assert(animations.effects().fly_effects().front().owner_actor_id == 1);
   assert(animations.effects().fly_effects().front().target_x == 14);
-  animations.update(world, 2050);
+  animations.update(world, 2599);
   assert(animations.effects().fly_count() == 1);
 
+  animations.reset(2600);
+  world.actors[1].action_started_ms = 2600;
+  world.actors[1].action_magic_effect = 3;
+  world.actors[1].action_magic_effect_type = -1;
+  animations.update(world, 2600);
+  for (std::uint64_t now = 2661; now <= 3149; now += 61) {
+    animations.update(world, now);
+    assert(animations.effects().fly_count() == 0);
+  }
+  world.actors[1].action_magic_effect_type = 1;
+  animations.update(world, 3210);
+  assert(animations.effects().fly_count() == 1);
+  world.actors[1].action_magic_effect = 0;
+  world.actors[1].action_magic_effect_type = -1;
+
+  animations.reset(6000);
+  auto queued_actor = actor;
+  queued_actor.current_action = mir2::client_v1::ActorActionKind::hit;
+  queued_actor.action_started_ms = 6000;
+  world.actors[1] = queued_actor;
+  animations.update(world, 6000);
+  queued_actor.current_action = mir2::client_v1::ActorActionKind::spell;
+  queued_actor.magic_id = 1;
+  queued_actor.action_started_ms = 6061;
+  queued_actor.action_target_x = 14;
+  queued_actor.action_target_y = 10;
+  world.actors[1] = queued_actor;
+  animations.update(world, 6061);
+  pose = animations.pose_for(1);
+  assert(pose.has_value());
+  assert(pose->body_index ==
+         appearance.body_offset +
+             legacy_frame_index(legacy_human_action_info(LegacyHumanAction::hit), 2, 0));
+  for (std::uint64_t now = 6147; now <= 6600; now += 86) {
+    animations.update(world, now);
+  }
+  animations.update(world, 6664);
+  pose = animations.pose_for(1);
+  assert(pose.has_value());
+  assert(pose->body_index ==
+         appearance.body_offset +
+             legacy_frame_index(legacy_human_action_info(LegacyHumanAction::spell), 2, 1));
+
   animations.reset(3000);
+  world.actors[1] = actor;
+  world.actors[1].current_action = mir2::client_v1::ActorActionKind::spell;
   world.actors[1].x = 10;
   world.actors[1].y = 10;
   world.actors[1].from_x = 10;
@@ -295,6 +353,10 @@ int main() {
   world.actors[1].action_target_x = 12;
   world.actors[1].action_target_y = 12;
   animations.update(world, 3000);
+  assert(animations.effects().ground_count() == 0);
+  for (std::uint64_t now = 3061; now <= 3549; now += 61) {
+    animations.update(world, now);
+  }
   assert(animations.effects().ground_count() == 1);
   assert(animations.effects().ground_effects().front().effect_base == 600);
 
@@ -314,6 +376,10 @@ int main() {
   world.actors[1].action_target_x = 11;
   world.actors[1].action_target_y = 10;
   animations.update(world, 4000);
+  assert(animations.effects().overlay_count() == 0);
+  for (std::uint64_t now = 4061; now <= 4549; now += 61) {
+    animations.update(world, now);
+  }
   assert(animations.effects().overlay_count() == 1);
 
   animations.reset(4500);
@@ -325,6 +391,10 @@ int main() {
   world.actors[1].action_target_x = 11;
   world.actors[1].action_target_y = 10;
   animations.update(world, 4500);
+  assert(animations.effects().fly_count() == 0);
+  for (std::uint64_t now = 4561; now <= 5049; now += 61) {
+    animations.update(world, now);
+  }
   assert(animations.effects().fly_count() == 1);
   assert(animations.effects().fly_effects().front().effect_base == 400);
   assert(animations.effects().overlay_count() == 0);
@@ -395,6 +465,26 @@ int main() {
   effects.spawn_magic_effect(magic);
   effects.update(15001);
   assert(effects.fly_count() == 0);
+
+  LegacyEffectManager tracking_effects;
+  magic.server_magic_id = 101;
+  magic.now_ms = 6000;
+  magic.target_actor_id = 42;
+  auto& tracking = tracking_effects.spawn_magic_effect(magic);
+  assert(tracking_effects.fly_count() == 1);
+  std::unordered_map<std::uint64_t, ActorRenderPose> target_poses;
+  ActorRenderPose target_pose;
+  target_pose.rx = 13;
+  target_pose.ry = 10;
+  target_pose.shift_x = 0;
+  target_pose.shift_y = 0;
+  target_poses.emplace(42, target_pose);
+  tracking_effects.update(6051, target_poses);
+  const auto first_track_x = tracking.fly_x;
+  target_poses[42].rx = 15;
+  tracking_effects.update(6102, target_poses);
+  assert(tracking_effects.fly_count() == 1);
+  assert(tracking.fly_x > first_track_x);
 
   return 0;
 }

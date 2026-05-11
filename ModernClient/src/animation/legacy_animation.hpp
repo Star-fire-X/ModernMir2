@@ -269,7 +269,7 @@ class LegacyAnimationClock {
 class LegacyActorAnimation {
  public:
   /// 与服务端角色状态同步（检测新动作/新移动）
-  void sync_actor(const ActorState& actor, std::uint64_t now_ms);
+  void sync_actor(const ActorState& actor, std::uint64_t now_ms, bool self_actor = false);
   /// 更新动画帧（根据时钟 tick 推进帧序号）
   void update(const ActorState& actor, const LegacyAnimationClock& clock,
               std::uint64_t now_ms);
@@ -277,6 +277,8 @@ class LegacyActorAnimation {
   /// 获取当前角色的渲染姿态（精灵帧索引、坐标偏移等）
   [[nodiscard]] std::optional<ActorRenderPose> pose_for(const ActorState& actor) const;
   [[nodiscard]] std::uint64_t actor_id() const { return actor_id_; }
+  [[nodiscard]] std::optional<std::uint64_t> spell_effect_ready_started_ms() const;
+  void mark_spell_effect_spawned(std::uint64_t action_started_ms);
 
  private:
   /// 动画运动类型（状态机的三种状态）
@@ -287,10 +289,15 @@ class LegacyActorAnimation {
   };
 
   void initialize(const ActorState& actor, std::uint64_t now_ms);
+  void begin_queued_or_idle(const ActorState& fallback_actor, std::uint64_t now_ms);
   void begin_move(const ActorState& actor, std::uint64_t now_ms);
   void begin_action(const ActorState& actor, std::uint64_t now_ms);
   void begin_motion(const ActorState& actor, const LegacyActionInfo& action,
                     MotionKind kind, int move_step, std::uint64_t now_ms);
+  void queue_or_begin(const ActorState& actor, bool is_move, std::uint64_t now_ms);
+  void finish_motion(const ActorState& actor, std::uint64_t now_ms);
+  void setup_spell_runtime(const ActorState& actor, std::uint64_t now_ms);
+  [[nodiscard]] bool spell_magic_ready(const ActorState& actor, std::uint64_t now_ms) const;
   void refresh_default_frame(const ActorState& actor, std::uint64_t now_ms);
   void reset_default_frame(const ActorState& actor, std::uint64_t now_ms);
   [[nodiscard]] const LegacyActionInfo& stand_action_for(const ActorState& actor) const;
@@ -324,6 +331,17 @@ class LegacyActorAnimation {
   std::uint64_t war_mode_time_ms_{0};     ///< 战斗模式开始时间
   bool war_mode_{false};  ///< 是否处于战斗模式（攻击/施法后保持持武器姿态一段时间）
   bool dead_{false};      ///< 是否死亡
+  bool lock_end_frame_{false};
+  bool self_actor_{false};
+
+  std::vector<ActorState> pending_actions_{};
+  std::uint64_t active_action_started_ms_{0};
+  bool spell_active_{false};
+  int cur_eff_frame_{0};
+  int spell_frame_{10};
+  std::uint64_t wait_magic_request_ms_{0};
+  std::optional<std::uint64_t> spell_effect_ready_started_ms_{};
+  std::uint64_t spell_effect_spawned_started_ms_{0};
 
   int xx_{0};             ///< 当前 X 坐标（内部副本，用于检测坐标变化）
   int yy_{0};             ///< 当前 Y 坐标
@@ -365,6 +383,8 @@ class LegacyEffectManager {
     int fly_y{0};           ///< 飞行中世界 Y
     int firedis_x{0};       ///< X 方向飞行位移增量（每帧移动量）
     int firedis_y{0};       ///< Y 方向飞行位移增量
+    double fly_xf{0.0};      ///< Delphi Real 飞行 X，用于追踪目标时累积小数
+    double fly_yf{0.0};      ///< Delphi Real 飞行 Y
     int prev_distance_x{99999};  ///< 上次距目标的 X 距离（用于越过目标的判定）
     int prev_distance_y{99999};  ///< 上次距目标的 Y 距离
     int explosion_frame_count{10};  ///< 爆炸效果帧数
@@ -375,12 +395,14 @@ class LegacyEffectManager {
     std::uint64_t target_actor_id{0}; ///< 目标角色 ID
     std::uint64_t spawned_ms{0};      ///< 生成时间戳
     std::uint64_t frame_step_ms{0};   ///< 帧更新时间戳
+    std::uint64_t move_step_ms{0};    ///< 飞行位置更新时间戳
     std::uint64_t next_frame_ms{30};  ///< 帧间隔（毫秒，两帧之间的等待时间）
     bool fixed_effect{true};  ///< 是否固定位置（false 表示飞行弹道，位置会变化）
     bool repetition{false};   ///< 是否循环播放（如火墙持续燃烧）
     bool blend{true};         ///< 是否使用混合模式（半透明，如火焰/光效）
     bool active{true};        ///< 是否激活（false 表示播放完毕可移除）
     std::uint8_t dir16{0};    ///< 16 方向编号（飞行弹道的方向）
+    std::uint8_t old_dir16{0};
     int light{0};             ///< 光照值（影响周围环境的亮度）
 
     /// 计算当前帧在精灵表中的实际绝对索引
@@ -423,6 +445,8 @@ class LegacyEffectManager {
                                    std::uint64_t next_frame_ms, bool blend);
   void del_magic(int server_magic_id);
   void update(std::uint64_t now_ms);
+  void update(std::uint64_t now_ms,
+              const std::unordered_map<std::uint64_t, ActorRenderPose>& actor_poses);
   [[nodiscard]] std::vector<LegacyMagicAudioCue> drain_magic_audio_cues();
   void render_ground(AssetManager& assets, SoftwareRenderer& renderer,
                      const legacy::LegacyMapViewport& viewport) const;
@@ -481,6 +505,8 @@ class AnimationManager {
  private:
   /// 检查并生成法术特效：当角色开始施法时创建对应的魔法效果
   void spawn_spell_effects(const WorldViewState& world, std::uint64_t now_ms);
+  void spawn_spell_effect_for_actor(const WorldViewState& world, const ActorState& actor,
+                                    std::uint64_t actor_id, std::uint64_t now_ms);
 
   LegacyAnimationClock clock_{};  ///< 动画时钟（驱动所有帧推进）
   LegacyEffectManager effects_{}; ///< 特效管理器
