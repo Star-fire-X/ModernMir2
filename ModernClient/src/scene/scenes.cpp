@@ -2408,7 +2408,8 @@ class LegacyHud final {
       context_menu_pointer_consumed_ = true;
       suppress_item_click_until_left_release_ = true;
     }
-    if (context.input->right_pressed && !world.moving_item.active) {
+    if (legacy_right_click_menu_enabled_ && context.input->right_pressed &&
+        !world.moving_item.active) {
       const auto opened_menu = handle_right_click(*context.input, *tree_);
       if (!opened_menu && context_menu_.visible &&
           !context_menu_contains(context.input->mouse_x, context.input->mouse_y)) {
@@ -2428,9 +2429,9 @@ class LegacyHud final {
     if (tree_ == nullptr) {
       return;
     }
-    bring_if_visible(drag_overlay_);
-    bring_if_visible(tooltip_);
     bring_if_visible(key_select_dialog_);
+    bring_if_visible(tooltip_);
+    bring_if_visible(drag_overlay_);
     if (tree_->modal() != nullptr) {
       tree_->bring_to_front(tree_->modal());
     }
@@ -2497,18 +2498,8 @@ class LegacyHud final {
       consumed = true;
     }
     if (!context_menu_pointer_consumed && context.input->left_pressed &&
-        world.moving_item.active && !context.ui_input.consumed && context.app != nullptr) {
-      const auto item = world.moving_item.item;
-      if (!item_empty(item) && world.moving_item.source == MovingItemSource::bag) {
-        context.state->begin_pending_item_action(PendingItemActionKind::drop,
-                                                 world.moving_item.source,
-                                                 world.moving_item.source_slot, -1, item,
-                                                 detail::monotonic_ms());
-        context.app->request_drop_item(client_v1::DropItemRequest{item.make_index, item.name});
-        world.moving_item = MovingItemState{};
-      } else {
-        restore_moving_item(world);
-      }
+        world.moving_item.active && !context.ui_input.consumed) {
+      restore_moving_item(world);
       consumed = true;
     }
     return consumed;
@@ -2546,20 +2537,8 @@ class LegacyHud final {
     if (context.ui_input.text_focus || tree.modal() != nullptr) {
       return false;
     }
-    if (context_menu_.visible && context.input->key_pressed[VK_ESCAPE]) {
-      hide_context_menu(tree);
-      return true;
-    }
-    if (key_select_dialog_ != nullptr && key_select_dialog_->visible) {
-      if (context.input->key_pressed[VK_ESCAPE]) {
-        key_select_dialog_->hide(tree);
-      }
-      return true;
-    }
-    if (state_ != nullptr && state_->world.moving_item.active &&
-        context.input->key_pressed[VK_ESCAPE]) {
-      cancel_moving_item(context);
-      return true;
+    if (context.input->key_pressed[VK_ESCAPE]) {
+      return handle_escape(context, tree);
     }
     if (tree.captured() != nullptr) {
       return false;
@@ -2590,71 +2569,8 @@ class LegacyHud final {
         return true;
       }
     }
-    if (trade_window_ != nullptr && trade_window_->visible) {
-      if (context.input->key_pressed[VK_ESCAPE]) {
-        close_trade_window(context.app);
-      }
-      return true;
-    }
-    if (guild_window_ != nullptr && guild_window_->visible) {
-      if (context.input->key_pressed[VK_ESCAPE]) {
-        close_guild_window();
-      }
-      return true;
-    }
-    if (group_window_ != nullptr && group_window_->visible) {
-      if (context.input->key_pressed[VK_ESCAPE]) {
-        close_group_window();
-      }
-      return true;
-    }
-    if (storage_window_ != nullptr && storage_window_->visible) {
-      if (context.input->key_pressed[VK_ESCAPE]) {
-        close_storage_window();
-      }
-      return true;
-    }
-    if (repair_dialog_ != nullptr && repair_dialog_->visible) {
-      if (context.input->key_pressed[VK_ESCAPE]) {
-        clear_repair_dialog();
-      }
-      return true;
-    }
-    if (merchant_sell_dialog_ != nullptr && merchant_sell_dialog_->visible) {
-      if (context.input->key_pressed[VK_ESCAPE]) {
-        clear_sell_dialog();
-      }
-      return true;
-    }
-    if (merchant_menu_ != nullptr && merchant_menu_->visible) {
-      if (context.input->key_pressed[VK_ESCAPE]) {
-        close_merchant_menu();
-      }
-      return true;
-    }
     if (npc_dialog_visible()) {
-      if (context.input->key_pressed[VK_ESCAPE]) {
-        close_npc_dialog_local();
-        return true;
-      }
       return false;
-    }
-    if (context.input->key_pressed[VK_ESCAPE]) {
-      if (minimap_ != nullptr && minimap_->visible) {
-        if (state_ != nullptr) {
-          state_->world.minimap.visible = false;
-        }
-        minimap_->set_visible(tree, false);
-        return true;
-      }
-      if (state_window_ != nullptr && state_window_->visible) {
-        state_window_->hide(tree);
-        return true;
-      }
-      if (item_bag_ != nullptr && item_bag_->visible) {
-        item_bag_->hide(tree);
-        return true;
-      }
     }
     if (context.input->key_pressed[VK_F9] || context.input->key_pressed['I']) {
       toggle_bag(tree);
@@ -2672,7 +2588,90 @@ class LegacyHud final {
       request_minimap(context.app);
       return true;
     }
+    if (context.input->key_pressed['P']) {
+      open_group(context.app);
+      return true;
+    }
+    if (context.input->key_pressed['T']) {
+      open_trade(context.app);
+      return true;
+    }
+    if (context.input->key_pressed['G']) {
+      open_guild(context.app);
+      return true;
+    }
+    if ((context.input->key_down[VK_MENU] && context.input->key_pressed['X']) ||
+        (context.input->key_down[VK_MENU] && context.input->key_pressed['Q'])) {
+      if (context.app != nullptr) {
+        context.app->request_close();
+      }
+      return true;
+    }
     return false;
+  }
+
+  bool handle_escape(ClientContext& context, ui::UiTree& tree) {
+    auto handled = false;
+    if (context_menu_.visible) {
+      hide_context_menu(tree);
+      handled = true;
+    }
+    if (key_select_dialog_ != nullptr && key_select_dialog_->visible) {
+      key_select_dialog_->hide(tree);
+      handled = true;
+    }
+    if (state_ != nullptr && state_->world.moving_item.active) {
+      cancel_moving_item(context);
+      handled = true;
+    }
+    if (state_window_ != nullptr && state_window_->visible) {
+      state_window_->hide(tree);
+      handled = true;
+    }
+    if (item_bag_ != nullptr && item_bag_->visible) {
+      item_bag_->hide(tree);
+      handled = true;
+    }
+    if (npc_dialog_visible()) {
+      close_npc_dialog_local();
+      handled = true;
+    }
+    if (merchant_menu_ != nullptr && merchant_menu_->visible) {
+      close_merchant_menu();
+      handled = true;
+    }
+    if (merchant_sell_dialog_ != nullptr && merchant_sell_dialog_->visible) {
+      clear_sell_dialog();
+      handled = true;
+    }
+    if (storage_window_ != nullptr && storage_window_->visible) {
+      close_storage_window();
+      handled = true;
+    }
+    if (repair_dialog_ != nullptr && repair_dialog_->visible) {
+      clear_repair_dialog();
+      handled = true;
+    }
+    if (group_window_ != nullptr && group_window_->visible) {
+      close_group_window();
+      handled = true;
+    }
+    if (guild_window_ != nullptr && guild_window_->visible) {
+      close_guild_window();
+      handled = true;
+    }
+    if (trade_window_ != nullptr && trade_window_->visible) {
+      close_trade_window(context.app);
+      handled = true;
+    }
+    if (minimap_ != nullptr && minimap_->visible) {
+      if (state_ != nullptr) {
+        state_->world.minimap.visible = false;
+      }
+      minimap_->set_visible(tree, false);
+      handled = true;
+    }
+    return handled;
   }
 
   [[nodiscard]] bool initialized() const { return initialized_; }
@@ -2684,15 +2683,8 @@ class LegacyHud final {
     return npc_dialog_ != nullptr && npc_dialog_->visible;
   }
   [[nodiscard]] bool blocks_world_input() const {
-    return npc_dialog_visible() ||
-           (merchant_menu_ != nullptr && merchant_menu_->visible) ||
-           (merchant_sell_dialog_ != nullptr && merchant_sell_dialog_->visible) ||
-           (storage_window_ != nullptr && storage_window_->visible) ||
-           (repair_dialog_ != nullptr && repair_dialog_->visible) ||
-           (group_window_ != nullptr && group_window_->visible) ||
-           (trade_window_ != nullptr && trade_window_->visible) ||
-           (guild_window_ != nullptr && guild_window_->visible) ||
-           (key_select_dialog_ != nullptr && key_select_dialog_->visible);
+    return (tree_ != nullptr && tree_->modal() != nullptr) ||
+           (state_ != nullptr && state_->world.moving_item.active);
   }
   [[nodiscard]] int equipment_slot_at(const int screen_x, const int screen_y) const {
     for (int slot = 0; slot < kEquipmentSlotCount; ++slot) {
@@ -4304,6 +4296,7 @@ class LegacyHud final {
   ui::Window* context_menu_window_{nullptr};
   bool context_menu_pointer_consumed_{false};
   bool suppress_item_click_until_left_release_{false};
+  bool legacy_right_click_menu_enabled_{false};
 
   std::string pending_chat_send_{};
   std::string pending_npc_select_{};
