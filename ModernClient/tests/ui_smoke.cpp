@@ -255,6 +255,26 @@ void test_window_drag_clamps_and_brings_to_front() {
   assert(tree.captured() == nullptr);
 }
 
+void test_non_floating_window_click_does_not_bring_to_front() {
+  ui::UiTree tree;
+  auto* root = tree.set_root<ui::UiNode>(RectI{0, 0, 800, 600});
+  auto* first = root->emplace_child<ui::Window>(RectI{0, 0, 50, 50});
+  auto* second = root->emplace_child<ui::Window>(RectI{30, 0, 50, 50});
+
+  assert(root->hit_test(35, 5) == second);
+
+  InputState press{};
+  press.mouse_x = 10;
+  press.mouse_y = 10;
+  press.left_pressed = true;
+  press.left_down = true;
+  const auto result = tree.update(press);
+  assert(result.consumed);
+  assert(root->hit_test(35, 5) == second);
+  assert(tree.focused() == first);
+  assert(tree.captured() == nullptr);
+}
+
 void test_grid_cell_select_and_double_click() {
   ui::UiTree tree;
   auto* root = tree.set_root<ui::UiNode>(RectI{0, 0, 100, 100});
@@ -332,14 +352,14 @@ void test_overlay_layer_order_keeps_modal_on_top() {
   tooltip->visible = true;
 
   tree.bring_to_front(window);
-  tree.bring_to_front(drag);
   tree.bring_to_front(tooltip);
+  tree.bring_to_front(drag);
   tree.bring_to_front(modal);
 
   const auto& children = root->children();
   assert(children[children.size() - 4].get() == window);
-  assert(children[children.size() - 3].get() == drag);
-  assert(children[children.size() - 2].get() == tooltip);
+  assert(children[children.size() - 3].get() == tooltip);
+  assert(children[children.size() - 2].get() == drag);
   assert(children.back().get() == modal);
 }
 
@@ -354,6 +374,7 @@ int main() {
   test_modal_root_consumes_clicks();
   test_three_button_confirm_yes_only();
   test_window_drag_clamps_and_brings_to_front();
+  test_non_floating_window_click_does_not_bring_to_front();
   test_grid_cell_select_and_double_click();
   test_tooltip_clamps_to_screen();
   test_tooltip_multiline_sizes_height();

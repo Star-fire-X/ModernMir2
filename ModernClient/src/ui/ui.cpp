@@ -641,14 +641,14 @@ void Window::paint(SoftwareRenderer& renderer) {
   UiNode::paint(renderer);
 }
 
-/// 鼠标按下：获得焦点、置于顶层、开始浮动拖拽
+/// 鼠标按下：获得焦点，浮动窗口按旧端规则置顶并开始拖拽
 bool Window::on_mouse_down(UiTree& tree, const InputState& input, const UiMouseButton button) {
   if (button != UiMouseButton::left) {
     return true;
   }
   tree.focus(this);
-  tree.bring_to_front(this);
   if (floating) {
+    tree.bring_to_front(this);
     dragging = true;
     drag_origin_x = input.mouse_x;
     drag_origin_y = input.mouse_y;
