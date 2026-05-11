@@ -533,31 +533,15 @@ bool legacy_move_action(const client_v1::ActorActionKind kind) {
          kind == client_v1::ActorActionKind::knockback;
 }
 
-/// 判断魔法是否使用"角色附着"特效（char_attached）
-/// 这类魔法的爆炸效果直接出现在目标角色身上，而非地图格上：
-///   - magic_id=2（火球术）：火球命中目标后爆炸
-///   - magic_id=5（雷电术）：雷从目标头顶劈下
-///   - magic_id=8（冰咆哮）：冰风暴包围目标
-bool spell_prefers_char_effect(const int magic_id) {
-  return magic_id == 2 || magic_id == 5 || magic_id == 8;
-}
-
-/// 判断魔法是否使用"地图地面"特效（map）
-/// magic_id=3（火墙术）：在地面创建持续燃烧的火墙，
-/// 只在地图格上显示，不跟随角色
-bool spell_prefers_map_effect(const int magic_id) {
-  return magic_id == 3;
-}
-
 /// 根据魔法 ID 和施法者/目标位置判断弹道类型
 ///   - 同格施法（施法者=目标）：直接爆炸（无飞行弹道）
 ///   - 不同格施法：飞行弹道（从施法者飞向目标）
 ///   - 特殊魔法：冰咆哮（fire_thunder）、火墙（ground_effect）
 LegacyMagicType spell_magic_type(const int magic_id, const bool same_tile) {
-  if (magic_id == 8) {
+  if (magic_id == 33) {
     return LegacyMagicType::fire_thunder;  // 冰咆哮：固定位置爆发
   }
-  if (magic_id == 3) {
+  if (magic_id == 22) {
     return LegacyMagicType::ground_effect; // 火墙：地面持续效果
   }
   return same_tile ? LegacyMagicType::explosion : LegacyMagicType::fly;
@@ -782,6 +766,32 @@ void begin_magic_explosion(LegacyEffectManager::Effect& effect,
   effect.fly_y = map_to_world_y(effect.target_y);
 }
 
+void lock_effect_to_target_pose(
+    LegacyEffectManager::Effect& effect,
+    const std::unordered_map<std::uint64_t, ActorRenderPose>& actor_poses) {
+  if (effect.target_actor_id == 0) {
+    effect.rx = effect.target_x;
+    effect.ry = effect.target_y;
+    effect.fly_x = map_to_world_x(effect.target_x);
+    effect.fly_y = map_to_world_y(effect.target_y);
+    return;
+  }
+  const auto target = actor_poses.find(effect.target_actor_id);
+  if (target == actor_poses.end()) {
+    effect.rx = effect.target_x;
+    effect.ry = effect.target_y;
+    effect.fly_x = map_to_world_x(effect.target_x);
+    effect.fly_y = map_to_world_y(effect.target_y);
+    return;
+  }
+  effect.rx = target->second.rx;
+  effect.ry = target->second.ry;
+  effect.target_x = target->second.rx;
+  effect.target_y = target->second.ry;
+  effect.fly_x = map_to_world_x(target->second.rx) + target->second.shift_x;
+  effect.fly_y = map_to_world_y(target->second.ry) + target->second.shift_y;
+}
+
 /// 运行魔法飞行特效：更新飞行位置，到达目标时触发爆炸
 ///
 /// 飞行弹道的工作原理：
@@ -804,11 +814,8 @@ bool run_magic_effect(LegacyEffectManager::Effect& effect, const std::uint64_t n
   }
 
   if (effect.fixed_effect) {
-    // 固定特效（已爆炸）：位置锁定在目标点不动
-    effect.rx = effect.target_x;
-    effect.ry = effect.target_y;
-    effect.fly_x = map_to_world_x(effect.target_x);
-    effect.fly_y = map_to_world_y(effect.target_y);
+    // 固定特效（已爆炸）：有目标角色时继续贴 Actor pose。
+    lock_effect_to_target_pose(effect, actor_poses);
     return true;
   }
 
@@ -870,6 +877,7 @@ bool run_magic_effect(LegacyEffectManager::Effect& effect, const std::uint64_t n
   // 到达目标附近或已越过目标 → 触发爆炸
   if ((distance_x < 15 && distance_y < 15) || passed_target || crash) {
     begin_magic_explosion(effect, audio_cues);
+    lock_effect_to_target_pose(effect, actor_poses);
   }
   return true;
 }
@@ -1678,7 +1686,7 @@ bool LegacyActorAnimation::spell_magic_ready(const ActorState& actor,
                                              const std::uint64_t now_ms) const {
   const auto timeout_ms = self_actor_ ? 3000U : 2000U;
   return actor.action_magic_effect_type >= 0 ||
-         actor.action_magic_effect <= 0 ||
+         actor.action_magic_failed ||
          elapsed_ms(now_ms, wait_magic_request_ms_) > timeout_ms;
 }
 
@@ -2171,6 +2179,7 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
       break;
     case LegacyMagicType::ground_effect:
       effect.archive = ArchiveId::mon21;
+      effect.explosion_base = 3580;
       effect.frame_count = 20;
       effect.fixed_effect = true;
       effect.repetition = false;
@@ -2250,6 +2259,10 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
         delphi_round(static_cast<double>(target_world_y - effect.fire_y) * (500.0 / tay));
   }
 
+  if (magic_type == LegacyMagicType::ground_effect) {
+    ground_effects_.push_back(effect);
+    return ground_effects_.back();
+  }
   fly_effects_.push_back(effect);
   return fly_effects_.back();
 }
@@ -2486,6 +2499,10 @@ void AnimationManager::spawn_spell_effect_for_actor(const WorldViewState& world,
       actor.action_started_ms == 0) {
     return;
   }
+  if (actor.action_magic_failed || actor.action_magic_effect_type <= 0 ||
+      actor.action_magic_effect <= 0) {
+    return;
+  }
 
   auto target_actor_id = actor.action_target_actor_id;
   auto target_x = actor.action_target_x;
@@ -2507,27 +2524,11 @@ void AnimationManager::spawn_spell_effect_for_actor(const WorldViewState& world,
   const auto magic_id = static_cast<int>(actor.magic_id);
   const auto has_effect = actor.action_magic_effect > 0;
   const auto effect = has_effect ? actor.action_magic_effect : magic_id;
-  const auto effect_index = has_effect ? std::max(0, effect - 1) : magic_id;
-  const auto has_server_effect_type = actor.action_magic_effect_type >= 0;
   magic_audio_cues_.push_back(LegacyMagicAudioCue{
       actor_id,
       magic_id,
       LegacyMagicAudioCuePhase::fire,
   });
-  if (!has_server_effect_type && spell_prefers_char_effect(magic_id)) {
-    if (target_actor_id == 0) {
-      target_actor_id = actor_id;
-    }
-    const auto base = legacy_magic_effect_base(effect_index, 1);
-    effects_.spawn_char_effect(target_actor_id, base.archive, base.frame_base, 10, now_ms);
-    return;
-  }
-
-  if (!has_server_effect_type && spell_prefers_map_effect(magic_id)) {
-    const auto base = legacy_magic_effect_base(effect_index, 0);
-    effects_.spawn_map_effect(base.archive, base.frame_base, 10, target_x, target_y, now_ms);
-    return;
-  }
 
   LegacyEffectManager::MagicCreate create;
   create.magic_id = magic_id;

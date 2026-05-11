@@ -106,6 +106,7 @@ struct ActorState {
   bool action_magic{false};             ///< 当前动作是否为魔法
   int action_magic_effect{0};
   int action_magic_effect_type{-1};
+  bool action_magic_failed{false};
   std::uint64_t action_started_ms{0};
   std::uint64_t action_duration_ms{0};
   std::uint64_t legacy_event_sequence{0};
@@ -441,6 +442,29 @@ struct LoginNoticeViewState {
   std::string text{};
 };
 
+inline int legacy_visual_effect_type(const std::uint16_t magic_id, const int effect_type) {
+  switch (magic_id) {
+    case 9:
+      return 5;   // mtFireGun
+    case 10:
+      return 6;   // mtLightingThunder
+    case 11:
+      return 7;   // mtThunder
+    case 13:
+    case 19:
+      return 8;   // mtExploBujauk
+    case 14:
+    case 15:
+      return 9;   // mtBujaukGroundEffect
+    case 22:
+      return 13;  // mtGroundEffect
+    case 33:
+      return 2;   // mtExplosion with magic-specific frame params
+    default:
+      return effect_type;
+  }
+}
+
 /// 游戏状态主存储：包含所有子状态和协议消息的 apply 方法
 /// 这是客户端数据层的中心点，所有状态变更都通过此结构
 struct GameStateStore {
@@ -460,6 +484,23 @@ struct GameStateStore {
   std::uint64_t pending_self_actor_id{0};  ///< 进入世界后自己的 actor_id
   int pending_spawn_x{0};                  ///< 角色出生 X 坐标
   int pending_spawn_y{0};                  ///< 角色出生 Y 坐标
+
+  [[nodiscard]] const MagicShortcutState* magic_for_id(const std::uint16_t magic_id) const {
+    const auto it = std::find_if(world.magics.begin(), world.magics.end(),
+                                 [magic_id](const MagicShortcutState& magic) {
+                                   return magic.magic_id == magic_id;
+                                 });
+    return it == world.magics.end() ? nullptr : &*it;
+  }
+
+  void apply_magic_metadata(ActorState& actor, const std::uint16_t magic_id) const {
+    if (const auto* magic = magic_for_id(magic_id); magic != nullptr) {
+      if (actor.action_magic_effect <= 0) {
+        actor.action_magic_effect = magic->effect;
+      }
+      actor.action_magic_effect_type = legacy_visual_effect_type(magic_id, magic->effect_type);
+    }
+  }
 
   /// 连接阶段：标识当前所处的网络连接流程
   /// 传奇客户端的网络连接分为几个独立的阶段，
@@ -976,6 +1017,10 @@ struct GameStateStore {
     actor.action_magic = message.magic;
     actor.action_magic_effect = message.magic_effect;
     actor.action_magic_effect_type = -1;
+    actor.action_magic_failed = false;
+    if (message.kind == client_v1::ActorActionKind::spell && message.magic_id != 0) {
+      apply_magic_metadata(actor, message.magic_id);
+    }
     actor.action_started_ms = detail::monotonic_ms();
     actor.action_duration_ms = action_duration_ms(message.kind, legacy_ident);
     const auto forced_move = message.kind == client_v1::ActorActionKind::rush ||
@@ -1032,7 +1077,18 @@ struct GameStateStore {
     actor.action_target_y = message.y;
     actor.action_magic = true;
     actor.action_magic_effect = message.effect;
-    actor.action_magic_effect_type = message.effect_type;
+    actor.action_magic_effect_type =
+        legacy_visual_effect_type(actor.magic_id, message.effect_type);
+    actor.action_magic_failed = false;
+  }
+
+  void apply(const client_v1::ActorMagicFireFail& message) {
+    auto& actor = world.actors[message.actor_id];
+    actor.actor_id = message.actor_id;
+    actor.action_magic = false;
+    actor.action_magic_effect = 0;
+    actor.action_magic_effect_type = -1;
+    actor.action_magic_failed = true;
   }
 
   /// 应用角色属性（血量/蓝量）更新消息

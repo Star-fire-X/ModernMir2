@@ -60,6 +60,11 @@ mir2::LegacyPacket make_magic_fire_packet(std::uint64_t session_id) {
       mir2::legacy_encode_buffer(&target, sizeof(target)));
 }
 
+mir2::LegacyPacket make_magic_fire_fail_packet(std::uint64_t session_id) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmMagicFireFail, 42, 0, 0, 0));
+}
+
 mir2::LegacyPacket make_actor_hide_packet(std::uint64_t session_id, std::uint16_t ident) {
   return mir2::make_legacy_game_packet(
       session_id, 0, 0, mir2::make_default_message(ident, 77, 12, 13, 0));
@@ -133,6 +138,14 @@ int main() {
   assert(magic_fire->y == 13);
   assert(magic_fire->effect_type == 7);
   assert(magic_fire->effect == 32);
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_magic_fire_fail_packet(kSessionId),
+                                           messages);
+  assert(messages.size() == 1);
+  const auto* magic_fail = std::get_if<mir2::client_v1::ActorMagicFireFail>(&messages.front());
+  assert(magic_fail != nullptr);
+  assert(magic_fail->actor_id == 42);
 
   messages.clear();
   service.translate_legacy_packet_for_test(
