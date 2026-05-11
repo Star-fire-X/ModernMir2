@@ -6261,10 +6261,12 @@ class WorldScene final : public Scene {
       animation_.effects().render_ground(*context.assets, *context.renderer, viewport);
     }
     render_world_rows(context, viewport);
+    render_actor_selection_blend_pass(context, viewport);
     render_map_debug_overlay(context, viewport);
     if (context.assets != nullptr) {
       animation_.effects().render_overlay(*context.assets, *context.renderer, viewport);
     }
+    render_actor_overlays_after_scene(context, viewport);
 
   }
 
@@ -7039,35 +7041,39 @@ class WorldScene final : public Scene {
     int draw_row{0};
   };
 
-  struct RowGroundItemDraw {
-    std::uint64_t item_id{0};
-    const client_v1::GroundItemState* item{nullptr};
-  };
-
   std::vector<RowActorDraw> collect_row_actor_draws(
       ClientContext& context, const legacy::LegacyMapViewport& viewport) const {
     std::vector<RowActorDraw> actors;
     actors.reserve(context.state->world.actors.size());
-    for (const auto& [actor_id, actor] : context.state->world.actors) {
+    const auto& world = context.state->world;
+    auto add_actor = [&](const std::uint64_t actor_id) {
+      const auto actor_it = world.actors.find(actor_id);
+      if (actor_it == world.actors.end()) {
+        return;
+      }
       const auto pose = animation_.pose_for(actor_id);
       if (!pose.has_value()) {
-        continue;
+        return;
       }
       const auto draw_row = legacy::legacy_actor_draw_row(pose->ry, pose->down_draw_level);
       if (draw_row < viewport.top || draw_row > viewport.bottom) {
-        continue;
+        return;
       }
-      actors.push_back(RowActorDraw{actor_id, &actor, *pose, draw_row});
+      actors.push_back(RowActorDraw{actor_id, &actor_it->second, *pose, draw_row});
+    };
+    if (!world.actor_draw_order.empty()) {
+      for (const auto actor_id : world.actor_draw_order) {
+        add_actor(actor_id);
+      }
+    } else {
+      for (const auto& [actor_id, actor] : world.actors) {
+        (void)actor;
+        add_actor(actor_id);
+      }
     }
     std::stable_sort(actors.begin(), actors.end(), [](const RowActorDraw& left,
-                                                      const RowActorDraw& right) {
-      if (left.draw_row != right.draw_row) {
-        return left.draw_row < right.draw_row;
-      }
-      if (left.pose.ry != right.pose.ry) {
-        return left.pose.ry < right.pose.ry;
-      }
-      return left.actor_id < right.actor_id;
+                                                       const RowActorDraw& right) {
+      return left.draw_row < right.draw_row;
     });
     return actors;
   }
@@ -7087,8 +7093,7 @@ class WorldScene final : public Scene {
           if (it->actor == nullptr) {
             continue;
           }
-          render_actor(context, *it->actor, it->pose, viewport,
-                       it->actor_id == context.state->world.self_actor_id);
+          render_actor(context, it->pose, viewport, it->actor_id == context.state->world.self_actor_id);
           if (context.assets != nullptr) {
             animation_.effects().render_overlay_for_actor(it->actor_id, it->pose, *context.assets,
                                                           *context.renderer, viewport);
@@ -7186,27 +7191,23 @@ class WorldScene final : public Scene {
   }
 
   void render_ground_items_for_row(ClientContext& context,
-                                   const legacy::LegacyMapViewport& viewport, const int row) {
-    std::vector<RowGroundItemDraw> items;
-    items.reserve(context.state->world.ground_items.size());
-    for (const auto& [item_id, item] : context.state->world.ground_items) {
-      if (item.y == row) {
-        items.push_back(RowGroundItemDraw{item_id, &item});
+                                    const legacy::LegacyMapViewport& viewport, const int row) {
+    const auto& world = context.state->world;
+    auto render_item = [&](const std::uint64_t item_id) {
+      const auto item_it = world.ground_items.find(item_id);
+      if (item_it != world.ground_items.end() && item_it->second.y == row) {
+        render_ground_item(context, viewport, item_id, item_it->second);
       }
-    }
-    std::stable_sort(items.begin(), items.end(), [](const RowGroundItemDraw& left,
-                                                    const RowGroundItemDraw& right) {
-      if (left.item == nullptr || right.item == nullptr) {
-        return left.item != nullptr;
+    };
+    if (!world.ground_item_draw_order.empty()) {
+      for (const auto item_id : world.ground_item_draw_order) {
+        render_item(item_id);
       }
-      if (left.item->x != right.item->x) {
-        return left.item->x < right.item->x;
-      }
-      return left.item_id < right.item_id;
-    });
-    for (const auto& draw : items) {
-      if (draw.item != nullptr) {
-        render_ground_item(context, viewport, draw.item_id, *draw.item);
+    } else {
+      for (const auto& [item_id, item] : world.ground_items) {
+        if (item.y == row) {
+          render_ground_item(context, viewport, item_id, item);
+        }
       }
     }
   }
@@ -7235,13 +7236,18 @@ class WorldScene final : public Scene {
     }
   }
 
-  void render_actor(ClientContext& context, const ActorState& actor, const ActorRenderPose& pose,
-                    const legacy::LegacyMapViewport& viewport, bool is_self) {
+  void render_actor(ClientContext& context, const ActorRenderPose& pose,
+                    const legacy::LegacyMapViewport& viewport, bool is_self,
+                    const std::uint8_t alpha_override = 0) {
     if (!pose.visible) {
+      return;
+    }
+    if (context.assets == nullptr) {
       return;
     }
     const auto base_x = legacy::legacy_actor_base_x(viewport, pose.rx, pose.shift_x);
     const auto base_y = legacy::legacy_actor_base_y(viewport, pose.ry, pose.shift_y);
+    const auto alpha = alpha_override > 0 ? alpha_override : pose.alpha;
 
     const auto body = context.assets->get_frame(pose.body_archive, pose.body_index);
     const auto hair = pose.hair_index >= 0
@@ -7255,35 +7261,149 @@ class WorldScene final : public Scene {
       context.renderer->fill_rect(
           RectI{base_x + 18, base_y - 36, 12, 28},
           is_self ? 0xFF22C55EU : 0xFFF97316U);
-      render_actor_saying(context, actor, base_x, base_y);
       return;
     }
 
     if (pose.weapon_before_body && weapon != nullptr) {
       draw_sprite(*context.renderer, weapon, base_x + weapon->hotspot_x,
-                  base_y + weapon->hotspot_y, pose.alpha);
+                  base_y + weapon->hotspot_y, alpha);
     }
     draw_sprite(*context.renderer, body, base_x + body->hotspot_x, base_y + body->hotspot_y,
-                pose.alpha);
+                alpha);
     if (hair != nullptr) {
       draw_sprite(*context.renderer, hair, base_x + hair->hotspot_x, base_y + hair->hotspot_y,
-                  pose.alpha);
+                  alpha);
     }
     if (!pose.weapon_before_body && weapon != nullptr) {
       draw_sprite(*context.renderer, weapon, base_x + weapon->hotspot_x,
-                  base_y + weapon->hotspot_y, pose.alpha);
+                  base_y + weapon->hotspot_y, alpha);
     }
+  }
+
+  void render_actor_selection_blend_pass(ClientContext& context,
+                                         const legacy::LegacyMapViewport& viewport) {
+    auto draw_actor = [&](const std::uint64_t actor_id) {
+      if (actor_id == 0) {
+        return;
+      }
+      const auto actor_it = context.state->world.actors.find(actor_id);
+      if (actor_it == context.state->world.actors.end()) {
+        return;
+      }
+      const auto pose = animation_.pose_for(actor_id);
+      if (!pose.has_value()) {
+        return;
+      }
+      render_actor(context, *pose, viewport, actor_id == context.state->world.self_actor_id, 168U);
+    };
+
+    const auto self_id = context.state->world.self_actor_id;
+    draw_actor(self_id);
+    if (context.state->world.focus_actor_id != self_id) {
+      draw_actor(context.state->world.focus_actor_id);
+    }
+    if (context.state->world.target_actor_id != self_id &&
+        context.state->world.target_actor_id != context.state->world.focus_actor_id) {
+      draw_actor(context.state->world.target_actor_id);
+    }
+  }
+
+  struct ActorOverlayPosition {
+    int say_x{0};
+    int say_y{0};
+    int base_x{0};
+    int base_y{0};
+  };
+
+  [[nodiscard]] static ActorOverlayPosition actor_overlay_position(
+      const legacy::LegacyMapViewport& viewport, const ActorRenderPose& pose) {
+    ActorOverlayPosition result;
+    result.base_x = legacy::legacy_actor_base_x(viewport, pose.rx, pose.shift_x);
+    result.base_y = legacy::legacy_actor_base_y(viewport, pose.ry, pose.shift_y);
+    result.say_x = result.base_x + legacy::kLegacyHalfX;
+    result.say_y = pose.dead ? result.base_y - 12 : result.base_y - 47;
+    return result;
+  }
+
+  void render_actor_overlays_after_scene(ClientContext& context,
+                                         const legacy::LegacyMapViewport& viewport) const {
+    const auto& world = context.state->world;
+    auto draw_for_actor = [&](const std::uint64_t actor_id, const bool draw_health,
+                              const bool draw_saying) {
+      const auto actor_it = world.actors.find(actor_id);
+      if (actor_it == world.actors.end()) {
+        return;
+      }
+      const auto pose = animation_.pose_for(actor_id);
+      if (!pose.has_value() || !pose->visible) {
+        return;
+      }
+      const auto position = actor_overlay_position(viewport, *pose);
+      if (draw_health) {
+        render_actor_health(context, actor_it->second, position);
+      }
+      if (draw_saying) {
+        render_actor_saying(context, actor_it->second, position);
+      }
+    };
+
+    if (!world.actor_draw_order.empty()) {
+      for (const auto actor_id : world.actor_draw_order) {
+        draw_for_actor(actor_id, true, false);
+      }
+    } else {
+      for (const auto& [actor_id, actor] : world.actors) {
+        (void)actor;
+        draw_for_actor(actor_id, true, false);
+      }
+    }
+
+    render_focus_actor_name(context, viewport);
+
+    if (!world.actor_draw_order.empty()) {
+      for (const auto actor_id : world.actor_draw_order) {
+        draw_for_actor(actor_id, false, true);
+      }
+    } else {
+      for (const auto& [actor_id, actor] : world.actors) {
+        (void)actor;
+        draw_for_actor(actor_id, false, true);
+      }
+    }
+  }
+
+  void render_actor_health(ClientContext& context, const ActorState& actor,
+                           const ActorOverlayPosition& position) const {
     if (actor.max_hp > 0 && actor.hp >= 0 && actor.hp < actor.max_hp) {
       const auto width = 34;
       const auto filled = std::clamp((actor.hp * width) / actor.max_hp, 0, width);
-      context.renderer->fill_rect(RectI{base_x + 7, base_y - 54, width, 4}, 0xCC1F2937U);
-      context.renderer->fill_rect(RectI{base_x + 7, base_y - 54, filled, 4}, 0xCCE11D48U);
+      context.renderer->fill_rect(RectI{position.say_x - width / 2, position.say_y - 10, width, 4},
+                                  0xCC1F2937U);
+      context.renderer->fill_rect(RectI{position.say_x - width / 2, position.say_y - 10, filled, 4},
+                                  0xCCE11D48U);
     }
-    render_actor_saying(context, actor, base_x, base_y);
   }
 
-  void render_actor_saying(ClientContext& context, const ActorState& actor, const int base_x,
-                           const int base_y) const {
+  void render_focus_actor_name(ClientContext& context,
+                               const legacy::LegacyMapViewport& viewport) const {
+    const auto actor_id = context.state->world.focus_actor_id;
+    const auto actor_it = context.state->world.actors.find(actor_id);
+    if (actor_it == context.state->world.actors.end() || actor_it->second.name.empty()) {
+      return;
+    }
+    const auto pose = animation_.pose_for(actor_id);
+    if (!pose.has_value() || !pose->visible) {
+      return;
+    }
+    const auto position = actor_overlay_position(viewport, *pose);
+    const auto text = widen(actor_it->second.name);
+    const auto width = context.renderer->measure_text_width(text);
+    context.renderer->draw_text(position.say_x - width / 2, position.say_y + 30, text,
+                                0xFFFFFFFFU);
+  }
+
+  void render_actor_saying(ClientContext& context, const ActorState& actor,
+                           const ActorOverlayPosition& position) const {
     if (actor.saying.empty() || actor.saying_started_ms == 0) {
       return;
     }
@@ -7293,8 +7413,8 @@ class WorldScene final : public Scene {
     }
     const auto text = widen(actor.saying);
     const auto width = context.renderer->measure_text_width(text);
-    const auto x = base_x + 24 - width / 2;
-    const auto y = base_y - 72;
+    const auto x = position.say_x - width / 2;
+    const auto y = position.say_y - 16;
     const auto back = legacy_color_to_argb(actor.saying_back_color);
     if ((back >> 24U) != 0U) {
       context.renderer->fill_rect(RectI{x - 2, y - 1, width + 4, 14}, back);

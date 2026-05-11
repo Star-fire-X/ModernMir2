@@ -319,6 +319,8 @@ struct WorldViewState {
   std::uint64_t self_actor_id{0};                                 ///< 自己的 actor_id
   std::unordered_map<std::uint64_t, ActorState> actors{};         ///< 所有在线角色（key = actor_id）
   std::unordered_map<std::uint64_t, client_v1::GroundItemState> ground_items{};  ///< 地面物品
+  std::vector<std::uint64_t> actor_draw_order{};       ///< Delphi ActorList-equivalent draw order
+  std::vector<std::uint64_t> ground_item_draw_order{}; ///< Delphi DropedItemList-equivalent draw order
   std::vector<std::string> sys_messages{};    ///< 系统消息队列（黄色文字，显示在聊天框）
   std::vector<ChatLineState> chat_lines{};     ///< 底部聊天板，最多 200 行
   int chat_board_top{0};                       ///< 聊天板顶部可见行
@@ -825,6 +827,8 @@ struct GameStateStore {
     world.self_actor_id = message.self_actor_id;
     world.actors.clear();
     world.ground_items.clear();
+    world.actor_draw_order.clear();
+    world.ground_item_draw_order.clear();
     world.chat_lines.clear();
     world.chat_board_top = 0;
     world.whisper_name.clear();
@@ -853,6 +857,7 @@ struct GameStateStore {
       world.actors[actor.actor_id] = ActorState{actor.actor_id, actor.name, actor.x, actor.y,
                                                 actor.x, actor.y, actor.dir, actor.feature,
                                                 actor.status, actor.actor_type};
+      world.actor_draw_order.push_back(actor.actor_id);
     }
   }
 
@@ -881,6 +886,7 @@ struct GameStateStore {
   /// 应用角色新增/更新消息
   /// 服务端通知有新的角色进入视野或更新已有角色
   void apply(const client_v1::ActorUpsert& message) {
+    const auto inserted = world.actors.find(message.actor.actor_id) == world.actors.end();
     auto& actor = world.actors[message.actor.actor_id];
     const auto previous_x = actor.actor_id == 0 ? message.actor.x : actor.x;
     const auto previous_y = actor.actor_id == 0 ? message.actor.y : actor.y;
@@ -896,6 +902,9 @@ struct GameStateStore {
     actor.feature = message.actor.feature;
     actor.status = message.actor.status;
     actor.actor_type = message.actor.actor_type;
+    if (inserted) {
+      world.actor_draw_order.push_back(message.actor.actor_id);
+    }
   }
 
   /// 应用角色删除消息
@@ -905,6 +914,10 @@ struct GameStateStore {
       return;
     }
     world.actors.erase(message.actor_id);
+    world.actor_draw_order.erase(std::remove(world.actor_draw_order.begin(),
+                                             world.actor_draw_order.end(),
+                                             message.actor_id),
+                                 world.actor_draw_order.end());
     if (world.focus_actor_id == message.actor_id) {
       world.focus_actor_id = 0;
     }
@@ -1261,7 +1274,11 @@ struct GameStateStore {
 
   /// 应用地面物品添加消息
   void apply(const client_v1::GroundItemAdd& message) {
+    const auto inserted = world.ground_items.find(message.item.object_id) == world.ground_items.end();
     world.ground_items[message.item.object_id] = message.item;
+    if (inserted) {
+      world.ground_item_draw_order.push_back(message.item.object_id);
+    }
   }
 
   /// 应用完整背包快照：覆盖本地 46 格背包镜像
@@ -1351,11 +1368,21 @@ struct GameStateStore {
   void apply(const client_v1::GroundItemRemove& message) {
     if (message.object_id != 0) {
       world.ground_items.erase(message.object_id);
+      world.ground_item_draw_order.erase(std::remove(world.ground_item_draw_order.begin(),
+                                                     world.ground_item_draw_order.end(),
+                                                     message.object_id),
+                                         world.ground_item_draw_order.end());
     } else {
       // object_id 为 0 时按坐标移除所有匹配的物品
       for (auto it = world.ground_items.begin(); it != world.ground_items.end();) {
         if (it->second.x == message.x && it->second.y == message.y) {
+          const auto removed_id = it->first;
           it = world.ground_items.erase(it);
+          world.ground_item_draw_order.erase(
+              std::remove(world.ground_item_draw_order.begin(),
+                          world.ground_item_draw_order.end(),
+                          removed_id),
+              world.ground_item_draw_order.end());
         } else {
           ++it;
         }
