@@ -34,6 +34,7 @@ constexpr std::uint16_t kSmUpdateIdFail = 533;
 constexpr std::uint16_t kSmTurn = 10;
 constexpr std::uint16_t kSmRush = 6;
 constexpr std::uint16_t kSmRushKung = 7;
+constexpr std::uint16_t kSmBackStep = 9;
 constexpr std::uint16_t kSmWalk = 11;
 constexpr std::uint16_t kSmSitDown = 12;
 constexpr std::uint16_t kSmRun = 13;

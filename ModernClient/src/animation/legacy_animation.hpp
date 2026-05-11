@@ -312,6 +312,7 @@ class LegacyActorAnimation {
   std::uint64_t actor_id_{0};      ///< 关联的角色 ID
   std::uint64_t last_move_started_ms_{0};    ///< 上次移动开始时间（用于检测新移动）
   std::uint64_t last_action_started_ms_{0};  ///< 上次动作开始时间（用于检测新动作）
+  std::uint64_t last_legacy_event_sequence_{0};
   client_v1::ActorActionKind last_action_kind_{client_v1::ActorActionKind::turn};
   std::uint16_t last_legacy_ident_{0};  ///< 上次旧版动作标识
   std::uint16_t last_magic_id_{0};      ///< 上次魔法 ID
@@ -325,6 +326,11 @@ class LegacyActorAnimation {
   int current_default_frame_{0};  ///< 待机动画的当前帧（循环帧序号）
   int default_frame_count_{1};    ///< 待机动画总帧数
   int move_step_{0};     ///< 移动步数（用于位移插值计算）
+  bool move_backwards_{false};
+  bool rush_kung_move_{false};
+  std::uint8_t move_shift_dir_{0};
+  int move_return_x_{0};
+  int move_return_y_{0};
   std::uint64_t frame_started_ms_{0};    ///< 当前帧开始时间
   std::uint64_t default_frame_time_ms_{0}; ///< 待机帧切换时间
   std::uint64_t smooth_move_time_ms_{0};  ///< 移动结束时间（用于从移动平滑过渡到待机）

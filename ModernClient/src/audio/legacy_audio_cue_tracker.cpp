@@ -118,6 +118,10 @@ void play_action_start(const WorldViewState& world, const ActorState& actor,
     case client_v1::ActorActionKind::turn:
     case client_v1::ActorActionKind::walk:
     case client_v1::ActorActionKind::run:
+    case client_v1::ActorActionKind::rush:
+    case client_v1::ActorActionKind::rush_kung:
+    case client_v1::ActorActionKind::backstep:
+    case client_v1::ActorActionKind::knockback:
     default:
       break;
   }
@@ -151,7 +155,11 @@ void play_frame_cues(const ActorState& actor, const ActorRenderPose& pose,
   }
 
   if (!actor.dead && (actor.current_action == client_v1::ActorActionKind::walk ||
-                      actor.current_action == client_v1::ActorActionKind::run)) {
+                      actor.current_action == client_v1::ActorActionKind::run ||
+                      actor.current_action == client_v1::ActorActionKind::rush ||
+                      actor.current_action == client_v1::ActorActionKind::rush_kung ||
+                      actor.current_action == client_v1::ActorActionKind::backstep ||
+                      actor.current_action == client_v1::ActorActionKind::knockback)) {
     if (actor_is_monster_audio(actor) &&
         crossed_frame(state.last_move_local_frame, local_frame, 1) &&
         tracker.next_monster_normal_sound_hit()) {
@@ -163,7 +171,9 @@ void play_frame_cues(const ActorState& actor, const ActorRenderPose& pose,
         !state.left_foot_played && actor_is_human_audio(actor) && is_self) {
       play_sound(audio, footstep_sound_id(footstep_cell_for_actor(map, actor),
                                           actor.running ||
-                                              actor.current_action == client_v1::ActorActionKind::run,
+                                             actor.current_action == client_v1::ActorActionKind::run ||
+                                                 actor.current_action == client_v1::ActorActionKind::rush ||
+                                                 actor.current_action == client_v1::ActorActionKind::rush_kung,
                                           false),
                  now_ms);
       state.left_foot_played = true;
@@ -172,7 +182,9 @@ void play_frame_cues(const ActorState& actor, const ActorRenderPose& pose,
         !state.right_foot_played && actor_is_human_audio(actor) && is_self) {
       play_sound(audio, footstep_sound_id(footstep_cell_for_actor(map, actor),
                                           actor.running ||
-                                              actor.current_action == client_v1::ActorActionKind::run,
+                                             actor.current_action == client_v1::ActorActionKind::run ||
+                                                 actor.current_action == client_v1::ActorActionKind::rush ||
+                                                 actor.current_action == client_v1::ActorActionKind::rush_kung,
                                           true),
                  now_ms);
       state.right_foot_played = true;

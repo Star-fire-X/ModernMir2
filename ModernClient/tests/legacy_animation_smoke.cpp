@@ -272,6 +272,92 @@ int main() {
   assert(pose->body_index == 600 + 80);
   assert(pose->rx == 10 && pose->shift_x == 8);
 
+  WorldViewState forced_world;
+  forced_world.self_actor_id = 1;
+  ActorState forced_actor;
+  forced_actor.actor_id = 1;
+  forced_actor.actor_type = mir2::client_v1::ActorType::player;
+  forced_actor.feature = make_legacy_feature(0, 1, 2, 3);
+  forced_actor.dir = 2;
+  forced_actor.from_x = 10;
+  forced_actor.from_y = 10;
+  forced_actor.x = 11;
+  forced_actor.y = 10;
+  forced_actor.current_action = mir2::client_v1::ActorActionKind::rush;
+  forced_actor.legacy_action_ident = mir2::legacy::kSmRush;
+  forced_actor.move_started_ms = 1000;
+  forced_actor.action_started_ms = 1000;
+  forced_world.actors[1] = forced_actor;
+  AnimationManager forced_animations;
+  forced_animations.reset(900);
+  forced_animations.update(forced_world, 1000);
+  auto forced_pose = forced_animations.pose_for(1);
+  assert(forced_pose.has_value());
+  assert(forced_pose->body_index == 600 + 144);
+  assert(forced_pose->rx == 10 && forced_pose->shift_x == 16);
+
+  forced_actor.current_action = mir2::client_v1::ActorActionKind::rush_kung;
+  forced_actor.legacy_action_ident = mir2::legacy::kSmRushKung;
+  forced_actor.x = 10;
+  forced_actor.y = 10;
+  forced_actor.from_x = 10;
+  forced_actor.from_y = 10;
+  forced_actor.action_target_x = 11;
+  forced_actor.action_target_y = 10;
+  forced_world.actors[1] = forced_actor;
+  forced_animations.reset(900);
+  forced_animations.update(forced_world, 1000);
+  forced_pose = forced_animations.pose_for(1);
+  assert(forced_pose.has_value());
+  assert(forced_pose->rx == 10 && forced_pose->shift_x == 8);
+  forced_animations.update(forced_world, 1100);
+  forced_animations.update(forced_world, 1200);
+  forced_pose = forced_animations.pose_for(1);
+  assert(forced_pose.has_value());
+  assert(forced_pose->rx == 10 && forced_pose->shift_x == 0);
+
+  forced_actor.current_action = mir2::client_v1::ActorActionKind::backstep;
+  forced_actor.legacy_action_ident = mir2::legacy::kSmBackStep;
+  forced_actor.x = 9;
+  forced_actor.y = 10;
+  forced_actor.from_x = 10;
+  forced_actor.from_y = 10;
+  forced_actor.action_target_x = -1;
+  forced_actor.action_target_y = -1;
+  forced_world.actors[1] = forced_actor;
+  forced_animations.reset(900);
+  forced_animations.update(forced_world, 1000);
+  forced_pose = forced_animations.pose_for(1);
+  const auto expected_backstep = legacy_shift(9, 10, 6, 1, 1, 6);
+  assert(forced_pose.has_value());
+  assert(forced_pose->rx == expected_backstep.rx);
+  assert(forced_pose->shift_x == expected_backstep.shift_x);
+
+  GameStateStore queued_store;
+  queued_store.world.self_actor_id = 1;
+  ActorState queued_move_actor;
+  queued_move_actor.actor_id = 1;
+  queued_move_actor.actor_type = mir2::client_v1::ActorType::player;
+  queued_move_actor.feature = make_legacy_feature(0, 1, 2, 3);
+  queued_move_actor.x = 10;
+  queued_move_actor.y = 10;
+  queued_move_actor.from_x = 10;
+  queued_move_actor.from_y = 10;
+  queued_move_actor.dir = 2;
+  queued_store.world.actors[1] = queued_move_actor;
+  queued_store.apply(mir2::client_v1::ActorAction{
+      1, mir2::client_v1::ActorActionKind::walk, 11, 10, 2, 0, 0,
+      mir2::legacy::kSmWalk, 0, false, 0});
+  queued_store.apply(mir2::client_v1::ActorAction{
+      1, mir2::client_v1::ActorActionKind::walk, 12, 10, 2, 0, 0,
+      mir2::legacy::kSmWalk, 0, false, 0});
+  AnimationManager queued_animations;
+  queued_animations.reset(900);
+  queued_animations.update(queued_store.world, 1000);
+  auto queued_pose = queued_animations.pose_for(1);
+  assert(queued_pose.has_value());
+  assert(queued_pose->rx == 10 && queued_pose->shift_x == 8);
+
   animations.reset(2000);
   world.actors[1].x = 10;
   world.actors[1].y = 10;
