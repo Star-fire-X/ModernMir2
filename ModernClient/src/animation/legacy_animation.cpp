@@ -410,6 +410,7 @@ constexpr int kLegacyDefY = -64;   ///< 默认 Y 偏移
 constexpr int kMagicFlyBase = 10;       ///< 魔法飞行帧基址偏移（effect_base + 10 开始飞行帧）
 constexpr int kMagicExplosionBase = 170; ///< 魔法爆炸帧基址偏移（effect_base + 170 开始爆炸帧）
 constexpr std::uint64_t kMagicTimeoutMs = 10000;  ///< 魔法特效超时时间（10秒，防止永久残留）
+constexpr int kDefaultSpellFrame = 10;
 
 /// 魔法效果帧基址表：索引 = MagicDB.Effect - 1
 /// 值为 0 的项表示该特效无独立精灵区（复用其他特效的帧）
@@ -616,6 +617,50 @@ bool axis_reached_or_passed(const int current, const int target, const int delta
   return current == target;
 }
 
+bool over_through(const int old_dir, const int new_dir) {
+  if (std::abs(old_dir - new_dir) < 2) {
+    return false;
+  }
+  return !((old_dir == 0 && new_dir == 15) || (old_dir == 15 && new_dir == 0));
+}
+
+int spell_frame_count_for_effect(const int effect) {
+  switch (effect) {
+    case 22:
+      return 10;
+    case 26:
+      return 20;
+    case 35:
+      return 15;
+    case 43:
+      return 20;
+    default:
+      return kDefaultSpellFrame;
+  }
+}
+
+std::pair<int, int> firedis_toward(const int from_x, const int from_y,
+                                   const int target_x, const int target_y) {
+  const auto tax = std::max(1, std::abs(target_x - from_x));
+  const auto tay = std::max(1, std::abs(target_y - from_y));
+  if (std::abs(from_x - target_x) > std::abs(from_y - target_y)) {
+    return {delphi_round(static_cast<double>(target_x - from_x) * (500.0 / tax)),
+            delphi_round(static_cast<double>(target_y - from_y) * (500.0 / tax))};
+  }
+  return {delphi_round(static_cast<double>(target_x - from_x) * (500.0 / tay)),
+          delphi_round(static_cast<double>(target_y - from_y) * (500.0 / tay))};
+}
+
+int approach_firedis(const int current, const int target) {
+  if (current < target) {
+    return current + std::max(1, (target - current) / 10);
+  }
+  if (current > target) {
+    return current - std::max(1, (current - target) / 10);
+  }
+  return current;
+}
+
 /// 安全获取帧数（最小为 0）
 int frame_safe_count(const LegacyEffectManager::Effect& effect) {
   return std::max(0, effect.frame_count);
@@ -739,7 +784,8 @@ void begin_magic_explosion(LegacyEffectManager::Effect& effect,
 ///
 /// @return false 表示特效已结束或超时，应从列表中移除
 bool run_magic_effect(LegacyEffectManager::Effect& effect, const std::uint64_t now_ms,
-                      std::vector<LegacyMagicAudioCue>& audio_cues) {
+                      std::vector<LegacyMagicAudioCue>& audio_cues,
+                      const std::unordered_map<std::uint64_t, ActorRenderPose>& actor_poses) {
   if (elapsed_ms(now_ms, effect.spawned_ms) > kMagicTimeoutMs) {
     return false;  // 超时移除（防止卡住的飞行弹道永久残留）
   }
@@ -757,29 +803,63 @@ bool run_magic_effect(LegacyEffectManager::Effect& effect, const std::uint64_t n
     return true;
   }
 
-  // 飞行弹道：线性插值从发射点到目标点（900ms 到达）
-  // 公式：fly = fire + firedis * (elapsed / 900)
-  const auto elapsed = static_cast<double>(elapsed_ms(now_ms, effect.spawned_ms));
-  effect.fly_x = effect.fire_x +
-      delphi_round((static_cast<double>(effect.firedis_x) / 900.0) * elapsed);
-  effect.fly_y = effect.fire_y +
-      delphi_round((static_cast<double>(effect.firedis_y) / 900.0) * elapsed);
+  auto crash = false;
+  auto target_world_x = map_to_world_x(effect.target_x);
+  auto target_world_y = map_to_world_y(effect.target_y);
+  if (effect.target_actor_id != 0) {
+    if (const auto target = actor_poses.find(effect.target_actor_id);
+        target != actor_poses.end()) {
+      target_world_x = map_to_world_x(target->second.rx) + target->second.shift_x;
+      target_world_y = map_to_world_y(target->second.ry) + target->second.shift_y;
+      effect.target_x = target->second.rx;
+      effect.target_y = target->second.ry;
+    }
+    const auto ms = elapsed_ms(now_ms, effect.move_step_ms);
+    effect.move_step_ms = now_ms;
+    const auto [target_firedis_x, target_firedis_y] =
+        firedis_toward(effect.fly_x, effect.fly_y, target_world_x, target_world_y);
+    effect.firedis_x = approach_firedis(effect.firedis_x, target_firedis_x);
+    effect.firedis_y = approach_firedis(effect.firedis_y, target_firedis_y);
+    effect.fly_xf += (static_cast<double>(effect.firedis_x) / 700.0) *
+                     static_cast<double>(ms);
+    effect.fly_yf += (static_cast<double>(effect.firedis_y) / 700.0) *
+                     static_cast<double>(ms);
+    effect.fly_x = delphi_round(effect.fly_xf);
+    effect.fly_y = delphi_round(effect.fly_yf);
+
+    const auto pass_dir16 = legacy_fly_direction16(effect.fly_x, effect.fly_y,
+                                                   target_world_x, target_world_y);
+    const auto distance_x = std::abs(target_world_x - effect.fly_x);
+    const auto distance_y = std::abs(target_world_y - effect.fly_y);
+    crash = (distance_x <= 15 && distance_y <= 15) ||
+            (distance_x >= effect.prev_distance_x && distance_y >= effect.prev_distance_y) ||
+            over_through(effect.old_dir16, pass_dir16);
+    effect.prev_distance_x = distance_x;
+    effect.prev_distance_y = distance_y;
+    effect.old_dir16 = static_cast<std::uint8_t>(pass_dir16);
+  } else {
+    // 飞行弹道：固定目标使用 Delphi 的 /900 时间基准。
+    const auto elapsed = static_cast<double>(elapsed_ms(now_ms, effect.spawned_ms));
+    effect.fly_x = effect.fire_x +
+        delphi_round((static_cast<double>(effect.firedis_x) / 900.0) * elapsed);
+    effect.fly_y = effect.fire_y +
+        delphi_round((static_cast<double>(effect.firedis_y) / 900.0) * elapsed);
+  }
   effect.rx = effect.fly_x / kLegacyUnitX;
   effect.ry = effect.fly_y / kLegacyUnitY;
 
-  const auto target_world_x = map_to_world_x(effect.target_x);
-  const auto target_world_y = map_to_world_y(effect.target_y);
   const auto distance_x = std::abs(target_world_x - effect.fly_x);
   const auto distance_y = std::abs(target_world_y - effect.fly_y);
-  // 越过目标检测：按运动轴判断，避免水平/垂直弹道跳过 <15 阈值后不爆炸。
   const auto passed_target =
       axis_reached_or_passed(effect.fly_x, target_world_x, effect.firedis_x) &&
       axis_reached_or_passed(effect.fly_y, target_world_y, effect.firedis_y);
-  effect.prev_distance_x = distance_x;
-  effect.prev_distance_y = distance_y;
+  if (effect.target_actor_id == 0) {
+    effect.prev_distance_x = distance_x;
+    effect.prev_distance_y = distance_y;
+  }
 
   // 到达目标附近或已越过目标 → 触发爆炸
-  if ((distance_x < 15 && distance_y < 15) || passed_target) {
+  if ((distance_x < 15 && distance_y < 15) || passed_target || crash) {
     begin_magic_explosion(effect, audio_cues);
   }
   return true;
@@ -1385,40 +1465,50 @@ void LegacyActorAnimation::initialize(const ActorState& actor, const std::uint64
   last_legacy_ident_ = actor.legacy_action_ident;
   last_magic_id_ = actor.magic_id;
   last_dead_ = actor.dead;
+  active_action_started_ms_ = actor.action_started_ms;
+  pending_actions_.clear();
+  lock_end_frame_ = false;
+  spell_active_ = false;
+  spell_effect_ready_started_ms_.reset();
+  spell_effect_spawned_started_ms_ = 0;
 }
 
 /// 与服务端角色状态同步：检测新移动、新动作、新死亡
-void LegacyActorAnimation::sync_actor(const ActorState& actor, const std::uint64_t now_ms) {
+void LegacyActorAnimation::sync_actor(const ActorState& actor, const std::uint64_t now_ms,
+                                      const bool self_actor) {
+  const auto was_initialized = initialized_;
   if (!initialized_) {
     initialize(actor, now_ms);
   }
   actor_id_ = actor.actor_id;
+  self_actor_ = self_actor;
   dir_ = actor.dir % 8U;
-  dead_ = actor.dead;
 
   // 检测是否有新的移动开始
   const auto new_move = actor.move_started_ms != 0 &&
-                        actor.move_started_ms != last_move_started_ms_ &&
+                        (!was_initialized || actor.move_started_ms != last_move_started_ms_) &&
                         (actor.x != actor.from_x || actor.y != actor.from_y);
   // 检测是否有新的动作开始
   const auto new_action =
       actor.action_started_ms != 0 &&
-      (actor.action_started_ms != last_action_started_ms_ ||
+      (!was_initialized ||
+       actor.action_started_ms != last_action_started_ms_ ||
        actor.current_action != last_action_kind_ ||
        actor.legacy_action_ident != last_legacy_ident_ || actor.magic_id != last_magic_id_);
   // 检测是否刚死亡
   const auto newly_dead = actor.dead && !last_dead_;
 
   if (newly_dead) {
+    pending_actions_.clear();
     begin_motion(actor, die_action_for(actor), MotionKind::action, 0, now_ms);
   } else if (new_move) {
-    begin_move(actor, now_ms);
+    queue_or_begin(actor, true, now_ms);
   } else if (new_action) {
     if (actor.current_action == client_v1::ActorActionKind::walk ||
         actor.current_action == client_v1::ActorActionKind::run) {
-      begin_move(actor, now_ms);
+      queue_or_begin(actor, true, now_ms);
     } else {
-      begin_action(actor, now_ms);
+      queue_or_begin(actor, false, now_ms);
     }
   } else if (motion_kind_ == MotionKind::idle && (xx_ != actor.x || yy_ != actor.y)) {
     // 空闲时坐标变化，直接跟随
@@ -1436,6 +1526,47 @@ void LegacyActorAnimation::sync_actor(const ActorState& actor, const std::uint64
   last_dead_ = actor.dead;
 }
 
+void LegacyActorAnimation::queue_or_begin(const ActorState& actor, const bool is_move,
+                                          const std::uint64_t now_ms) {
+  if (motion_kind_ == MotionKind::idle && !lock_end_frame_) {
+    if (is_move) {
+      begin_move(actor, now_ms);
+    } else {
+      begin_action(actor, now_ms);
+    }
+    return;
+  }
+  pending_actions_.push_back(actor);
+}
+
+void LegacyActorAnimation::begin_queued_or_idle(const ActorState& fallback_actor,
+                                                const std::uint64_t now_ms) {
+  if (!pending_actions_.empty()) {
+    const auto next = pending_actions_.front();
+    pending_actions_.erase(pending_actions_.begin());
+    if (next.current_action == client_v1::ActorActionKind::walk ||
+        next.current_action == client_v1::ActorActionKind::run) {
+      begin_move(next, now_ms);
+    } else {
+      begin_action(next, now_ms);
+    }
+    return;
+  }
+  motion_kind_ = MotionKind::idle;
+  smooth_move_time_ms_ = now_ms;
+  reset_default_frame(fallback_actor, now_ms);
+}
+
+void LegacyActorAnimation::finish_motion(const ActorState& actor, const std::uint64_t now_ms) {
+  spell_active_ = false;
+  if (actor.dead || dead_) {
+    motion_kind_ = MotionKind::idle;
+    current_frame_ = end_frame_;
+    return;
+  }
+  begin_queued_or_idle(actor, now_ms);
+}
+
 /// 开始移动动画：选择 walk 或 run 的动作信息
 void LegacyActorAnimation::begin_move(const ActorState& actor, const std::uint64_t now_ms) {
   const auto action = actor.current_action == client_v1::ActorActionKind::run || actor.running
@@ -1446,12 +1577,18 @@ void LegacyActorAnimation::begin_move(const ActorState& actor, const std::uint64
   current_frame_ = start_frame_ - 1;
   shift_ = legacy_shift(xx_, yy_, frame_dir_for(actor), move_step_, 0,
                         std::max(1, end_frame_ - start_frame_ + 1));
+  lock_end_frame_ = false;
 }
 
 /// 开始动作动画（攻击/施法/受击等），并设置战斗模式
 void LegacyActorAnimation::begin_action(const ActorState& actor, const std::uint64_t now_ms) {
   begin_motion(actor, action_info_for(actor, actor.current_action), MotionKind::action, 0, now_ms);
   shift_ = legacy_shift(xx_, yy_, frame_dir_for(actor), 0, 0, 1);
+  if (actor.current_action == client_v1::ActorActionKind::spell) {
+    setup_spell_runtime(actor, now_ms);
+  } else {
+    spell_active_ = false;
+  }
   if (actor_is_human(actor) && (actor.current_action == client_v1::ActorActionKind::hit ||
                                 actor.current_action == client_v1::ActorActionKind::spell)) {
     war_mode_ = true;            // 进入战斗姿态
@@ -1477,6 +1614,30 @@ void LegacyActorAnimation::begin_motion(const ActorState& actor, const LegacyAct
   default_frame_time_ms_ = now_ms;
   default_frame_count_ = std::max(1, stand_action_for(actor).frame);
   dead_ = actor.dead;
+  active_action_started_ms_ = actor.action_started_ms;
+  lock_end_frame_ = false;
+}
+
+void LegacyActorAnimation::setup_spell_runtime(const ActorState& actor,
+                                               const std::uint64_t now_ms) {
+  spell_active_ = true;
+  cur_eff_frame_ = 0;
+  spell_frame_ = spell_frame_count_for_effect(actor.action_magic_effect);
+  wait_magic_request_ms_ = now_ms;
+  spell_effect_ready_started_ms_.reset();
+  auto spell_action = legacy_human_action_info(LegacyHumanAction::spell);
+  if (actor.action_magic_effect == 26) {
+    spell_action.frame_time_ms /= 2U;
+  }
+  action_.frame_time_ms = std::max<std::uint64_t>(1U, spell_action.frame_time_ms);
+}
+
+bool LegacyActorAnimation::spell_magic_ready(const ActorState& actor,
+                                             const std::uint64_t now_ms) const {
+  const auto timeout_ms = self_actor_ ? 3000U : 2000U;
+  return actor.action_magic_effect_type >= 0 ||
+         actor.action_magic_effect <= 0 ||
+         elapsed_ms(now_ms, wait_magic_request_ms_) > timeout_ms;
 }
 
 /// 更新动画：根据 motion_kind 推进帧
@@ -1500,14 +1661,16 @@ void LegacyActorAnimation::update(const ActorState& actor, const LegacyAnimation
       }
       if (current_frame_ < end_frame_) {
         ++current_frame_;
+        if (pending_actions_.size() >= 2 && current_frame_ < end_frame_) {
+          ++current_frame_;
+        }
         const auto cur_step = current_frame_ - start_frame_ + 1;
         const auto max_step = end_frame_ - start_frame_ + 1;
         shift_ = legacy_shift(xx_, yy_, frame_dir_for(actor), move_step_, cur_step, max_step);
       }
       if (current_frame_ >= end_frame_) {
-        motion_kind_ = MotionKind::idle;  // 移动结束回到待机
-        smooth_move_time_ms_ = now_ms;
-        reset_default_frame(actor, now_ms);
+        lock_end_frame_ = true;
+        begin_queued_or_idle(actor, now_ms);
       }
     }
     return;
@@ -1519,16 +1682,31 @@ void LegacyActorAnimation::update(const ActorState& actor, const LegacyAnimation
       current_frame_ = start_frame_;
     }
     if (elapsed_ms(now_ms, frame_started_ms_) > action_.frame_time_ms) {
+      if (spell_active_) {
+        if ((cur_eff_frame_ == spell_frame_ - 2) && !spell_magic_ready(actor, now_ms)) {
+          return;
+        }
+        if (current_frame_ < end_frame_) {
+          if (current_frame_ < end_frame_ - 1 || cur_eff_frame_ >= spell_frame_ - 2) {
+            ++current_frame_;
+          }
+        }
+        ++cur_eff_frame_;
+        frame_started_ms_ = now_ms;
+        if (cur_eff_frame_ == spell_frame_ - 1 &&
+            spell_effect_ready_started_ms_ != active_action_started_ms_) {
+          spell_effect_ready_started_ms_ = active_action_started_ms_;
+        }
+        if (current_frame_ >= end_frame_ && cur_eff_frame_ >= spell_frame_) {
+          finish_motion(actor, now_ms);
+        }
+        return;
+      }
       if (current_frame_ < end_frame_) {
         ++current_frame_;
         frame_started_ms_ = now_ms;
       } else {
-        motion_kind_ = MotionKind::idle;  // 动作结束回到待机
-        smooth_move_time_ms_ = now_ms;
-        reset_default_frame(actor, now_ms);
-        if (actor.dead) {
-          current_frame_ = end_frame_;  // 死亡则停在最后一帧
-        }
+        finish_motion(actor, now_ms);
       }
     }
     return;
@@ -1561,6 +1739,18 @@ void LegacyActorAnimation::refresh_default_frame(const ActorState& actor,
   yy_ = actor.y;
   shift_ = LegacyShiftResult{xx_, yy_, 0, 0};
   current_frame_ = default_frame_for(actor);
+}
+
+std::optional<std::uint64_t> LegacyActorAnimation::spell_effect_ready_started_ms() const {
+  if (spell_effect_ready_started_ms_.has_value() &&
+      spell_effect_ready_started_ms_.value() != spell_effect_spawned_started_ms_) {
+    return spell_effect_ready_started_ms_;
+  }
+  return std::nullopt;
+}
+
+void LegacyActorAnimation::mark_spell_effect_spawned(const std::uint64_t action_started_ms) {
+  spell_effect_spawned_started_ms_ = action_started_ms;
 }
 
 /// 重置待机帧计数器
@@ -1770,6 +1960,9 @@ void LegacyEffectManager::spawn_magic_effect(const Effect& effect) {
   if (normalized.frame_step_ms == 0) {
     normalized.frame_step_ms = normalized.spawned_ms;
   }
+  if (normalized.move_step_ms == 0) {
+    normalized.move_step_ms = normalized.spawned_ms;
+  }
   if (normalized.fire_x == 0 && normalized.fire_y == 0) {
     normalized.fire_x = map_to_world_x(normalized.x);
     normalized.fire_y = map_to_world_y(normalized.y);
@@ -1781,6 +1974,9 @@ void LegacyEffectManager::spawn_magic_effect(const Effect& effect) {
                                                 : normalized.fire_y;
   }
   normalized.active = true;
+  normalized.fly_xf = static_cast<double>(normalized.fly_x);
+  normalized.fly_yf = static_cast<double>(normalized.fly_y);
+  normalized.old_dir16 = normalized.dir16;
   fly_effects_.push_back(normalized);
 }
 
@@ -1855,12 +2051,16 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
   effect.fire_y = map_to_world_y(create.source_y);
   effect.fly_x = effect.fire_x;
   effect.fly_y = effect.fire_y;
+  effect.fly_xf = static_cast<double>(effect.fly_x);
+  effect.fly_yf = static_cast<double>(effect.fly_y);
   effect.spawned_ms = create.now_ms;
   effect.frame_step_ms = create.now_ms;
+  effect.move_step_ms = create.now_ms;
   effect.next_frame_ms = create.next_frame_ms == 0 ? 50 : create.next_frame_ms;
   effect.dir16 = static_cast<std::uint8_t>(
       legacy_fly_direction16(effect.fire_x, effect.fire_y, map_to_world_x(create.target_x),
                              map_to_world_y(create.target_y)));
+  effect.old_dir16 = effect.dir16;
   effect.light = 1;
   effect.blend = true;
 
@@ -2013,6 +2213,12 @@ void LegacyEffectManager::del_magic(const int server_magic_id) {
 
 /// 更新所有特效：移除已结束的特效
 void LegacyEffectManager::update(const std::uint64_t now_ms) {
+  update(now_ms, {});
+}
+
+void LegacyEffectManager::update(
+    const std::uint64_t now_ms,
+    const std::unordered_map<std::uint64_t, ActorRenderPose>& actor_poses) {
   ground_effects_.erase(
       std::remove_if(ground_effects_.begin(), ground_effects_.end(),
                      [now_ms](Effect& effect) { return !advance_effect_frame(effect, now_ms); }),
@@ -2029,8 +2235,9 @@ void LegacyEffectManager::update(const std::uint64_t now_ms) {
       overlay_effects_.end());
   fly_effects_.erase(
       std::remove_if(fly_effects_.begin(), fly_effects_.end(),
-                     [this, now_ms](Effect& effect) {
-                       return !run_magic_effect(effect, now_ms, magic_audio_cues_);
+                     [this, now_ms, &actor_poses](Effect& effect) {
+                       return !run_magic_effect(effect, now_ms, magic_audio_cues_,
+                                                actor_poses);
                      }),
       fly_effects_.end());
 }
@@ -2115,7 +2322,7 @@ void AnimationManager::sync_world(const WorldViewState& world, const std::uint64
   actor_snapshots_ = world.actors;
   for (const auto& [actor_id, actor] : world.actors) {
     auto& animation = actors_[actor_id];
-    animation.sync_actor(actor, now_ms);
+    animation.sync_actor(actor, now_ms, actor_id == world.self_actor_id);
   }
   for (auto it = actors_.begin(); it != actors_.end();) {
     if (world.actors.find(it->first) == world.actors.end()) {
@@ -2139,7 +2346,17 @@ void AnimationManager::update(const WorldViewState& world, const std::uint64_t n
     }
   }
   spawn_spell_effects(world, now_ms);
-  effects_.update(now_ms);
+  std::unordered_map<std::uint64_t, ActorRenderPose> poses;
+  for (const auto& [actor_id, actor] : actor_snapshots_) {
+    const auto animation = actors_.find(actor_id);
+    if (animation == actors_.end()) {
+      continue;
+    }
+    if (auto pose = animation->second.pose_for(actor); pose.has_value()) {
+      poses.emplace(actor_id, *pose);
+    }
+  }
+  effects_.update(now_ms, poses);
 }
 
 std::vector<LegacyMagicAudioCue> AnimationManager::drain_magic_audio_cues() {
@@ -2167,83 +2384,91 @@ std::vector<LegacyMagicAudioCue> AnimationManager::drain_magic_audio_cues() {
 void AnimationManager::spawn_spell_effects(const WorldViewState& world,
                                            const std::uint64_t now_ms) {
   for (const auto& [actor_id, actor] : world.actors) {
-    // 只处理正在施法的角色（action=spell 且有 magic_id 和 action_started_ms）
-    if (actor.current_action != client_v1::ActorActionKind::spell || actor.magic_id == 0 ||
-        actor.action_started_ms == 0) {
+    const auto animation = actors_.find(actor_id);
+    if (animation == actors_.end()) {
       continue;
     }
-    auto& last_started = spell_effect_started_ms_[actor_id];
-    if (last_started == actor.action_started_ms) {
-      continue;  // 已生成过特效（通过时间戳去重）
-    }
-    if (actor.action_magic_effect > 0 && actor.action_magic_effect_type < 0) {
-      continue;  // 等待 SM_MAGICFIRE 提供 Delphi EffectType。
-    }
-    last_started = actor.action_started_ms;
-
-    auto target_actor_id = actor.action_target_actor_id;
-    auto target_x = actor.action_target_x;
-    auto target_y = actor.action_target_y;
-    if (target_actor_id != 0) {
-      if (const auto target = world.actors.find(target_actor_id); target != world.actors.end()) {
-        target_x = target->second.x;
-        target_y = target->second.y;
-      }
-    }
-    if (target_x < 0 || target_y < 0) {
-      const auto [dx, dy] = dir_tile_delta(actor.dir);
-      target_x = actor.x + dx;
-      target_y = actor.y + dy;
-    }
-    target_x = std::clamp(target_x, 0, std::max(0, world.width - 1));
-    target_y = std::clamp(target_y, 0, std::max(0, world.height - 1));
-
-    const auto magic_id = static_cast<int>(actor.magic_id);
-    const auto has_effect = actor.action_magic_effect > 0;
-    const auto effect = has_effect ? actor.action_magic_effect : magic_id;
-    const auto effect_index = has_effect ? std::max(0, effect - 1) : magic_id;
-    const auto has_server_effect_type = actor.action_magic_effect_type >= 0;
-    magic_audio_cues_.push_back(LegacyMagicAudioCue{
-        actor_id,
-        magic_id,
-        LegacyMagicAudioCuePhase::fire,
-    });
-    // 角色附着特效（如火球/雷电/冰咆哮的命中效果）
-    if (!has_server_effect_type && spell_prefers_char_effect(magic_id)) {
-      if (target_actor_id == 0) {
-        target_actor_id = actor_id;
-      }
-      const auto base = legacy_magic_effect_base(effect_index, 1);
-      effects_.spawn_char_effect(target_actor_id, base.archive, base.frame_base, 10, now_ms, 80);
+    const auto ready_started = animation->second.spell_effect_ready_started_ms();
+    if (!ready_started.has_value()) {
       continue;
     }
-
-    // 地图地面特效（如火墙）
-    if (!has_server_effect_type && spell_prefers_map_effect(magic_id)) {
-      const auto base = legacy_magic_effect_base(effect_index, 0);
-      effects_.spawn_map_effect(base.archive, base.frame_base, 10, target_x, target_y, now_ms, 80);
+    if (spell_effect_started_ms_[actor_id] == ready_started.value()) {
       continue;
     }
-
-    // 飞行魔法特效
-    LegacyEffectManager::MagicCreate create;
-    create.magic_id = magic_id;
-    create.server_magic_id = static_cast<int>(
-        ((actor_id & 0x7FFFU) << 16U) ^ (actor.action_started_ms & 0xFFFFU));
-    create.effect_type = actor.action_magic_effect_type;
-    create.effect = effect;
-    create.source_x = actor.x;
-    create.source_y = actor.y;
-    create.target_x = target_x;
-    create.target_y = target_y;
-    create.owner_actor_id = actor_id;
-    create.target_actor_id = target_actor_id;
-    create.magic_type = spell_magic_type(magic_id, actor.x == target_x && actor.y == target_y);
-    create.repetition = true;
-    create.now_ms = now_ms;
-    create.next_frame_ms = 50;
-    effects_.spawn_magic_effect(create);
+    spell_effect_started_ms_[actor_id] = ready_started.value();
+    animation->second.mark_spell_effect_spawned(ready_started.value());
+    spawn_spell_effect_for_actor(world, actor, actor_id, now_ms);
   }
+}
+
+void AnimationManager::spawn_spell_effect_for_actor(const WorldViewState& world,
+                                                    const ActorState& actor,
+                                                    const std::uint64_t actor_id,
+                                                    const std::uint64_t now_ms) {
+  if (actor.current_action != client_v1::ActorActionKind::spell || actor.magic_id == 0 ||
+      actor.action_started_ms == 0) {
+    return;
+  }
+
+  auto target_actor_id = actor.action_target_actor_id;
+  auto target_x = actor.action_target_x;
+  auto target_y = actor.action_target_y;
+  if (target_actor_id != 0) {
+    if (const auto target = world.actors.find(target_actor_id); target != world.actors.end()) {
+      target_x = target->second.x;
+      target_y = target->second.y;
+    }
+  }
+  if (target_x < 0 || target_y < 0) {
+    const auto [dx, dy] = dir_tile_delta(actor.dir);
+    target_x = actor.x + dx;
+    target_y = actor.y + dy;
+  }
+  target_x = std::clamp(target_x, 0, std::max(0, world.width - 1));
+  target_y = std::clamp(target_y, 0, std::max(0, world.height - 1));
+
+  const auto magic_id = static_cast<int>(actor.magic_id);
+  const auto has_effect = actor.action_magic_effect > 0;
+  const auto effect = has_effect ? actor.action_magic_effect : magic_id;
+  const auto effect_index = has_effect ? std::max(0, effect - 1) : magic_id;
+  const auto has_server_effect_type = actor.action_magic_effect_type >= 0;
+  magic_audio_cues_.push_back(LegacyMagicAudioCue{
+      actor_id,
+      magic_id,
+      LegacyMagicAudioCuePhase::fire,
+  });
+  if (!has_server_effect_type && spell_prefers_char_effect(magic_id)) {
+    if (target_actor_id == 0) {
+      target_actor_id = actor_id;
+    }
+    const auto base = legacy_magic_effect_base(effect_index, 1);
+    effects_.spawn_char_effect(target_actor_id, base.archive, base.frame_base, 10, now_ms);
+    return;
+  }
+
+  if (!has_server_effect_type && spell_prefers_map_effect(magic_id)) {
+    const auto base = legacy_magic_effect_base(effect_index, 0);
+    effects_.spawn_map_effect(base.archive, base.frame_base, 10, target_x, target_y, now_ms);
+    return;
+  }
+
+  LegacyEffectManager::MagicCreate create;
+  create.magic_id = magic_id;
+  create.server_magic_id = static_cast<int>(
+      ((actor_id & 0x7FFFU) << 16U) ^ (actor.action_started_ms & 0xFFFFU));
+  create.effect_type = actor.action_magic_effect_type;
+  create.effect = effect;
+  create.source_x = actor.x;
+  create.source_y = actor.y;
+  create.target_x = target_x;
+  create.target_y = target_y;
+  create.owner_actor_id = actor_id;
+  create.target_actor_id = target_actor_id;
+  create.magic_type = spell_magic_type(magic_id, actor.x == target_x && actor.y == target_y);
+  create.repetition = true;
+  create.now_ms = now_ms;
+  create.next_frame_ms = 50;
+  effects_.spawn_magic_effect(create);
 }
 
 /// 获取指定角色的渲染姿态

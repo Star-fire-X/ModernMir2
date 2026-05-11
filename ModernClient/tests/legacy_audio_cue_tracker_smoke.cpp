@@ -138,6 +138,13 @@ int main() {
   assert(count_sound_id(audio, s_walk_ground_l) == 0);
   assert(count_sound_id(audio, s_walk_ground_r) == 0);
 
+  tracker.reset();
+  animation.reset(2200);
+  world.actors[1].current_action = mir2::client_v1::ActorActionKind::turn;
+  world.actors[1].move_started_ms = 0;
+  world.actors[2].current_action = mir2::client_v1::ActorActionKind::turn;
+  world.actors[2].move_started_ms = 0;
+  update_all(world, animation, tracker, audio, 2200);
   auto& hit_actor = world.actors[1];
   hit_actor.current_action = mir2::client_v1::ActorActionKind::hit;
   hit_actor.action_started_ms = 2300;
@@ -254,12 +261,13 @@ int main() {
   audio.clear_trace_events();
   update_all(world, animation, tracker, audio, 5100);
   assert(has_sound_id(audio, magic_sound_id(1, LegacyMagicSoundPhase::start)));
-  assert(has_sound_id(audio, magic_sound_id(1, LegacyMagicSoundPhase::fire)));
+  assert(!has_sound_id(audio, magic_sound_id(1, LegacyMagicSoundPhase::fire)));
 
   audio.clear_trace_events();
   for (std::uint64_t now = 5200; now <= 6200; now += 100) {
     update_all(world, animation, tracker, audio, now);
   }
+  assert(has_sound_id(audio, magic_sound_id(1, LegacyMagicSoundPhase::fire)));
   assert(has_sound_id(audio, magic_sound_id(1, LegacyMagicSoundPhase::explosion)));
 
   audio.set_sound_enabled(false);
