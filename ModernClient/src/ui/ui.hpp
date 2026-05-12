@@ -397,6 +397,10 @@ class UiTree {
 
   /// 更新 UI 树：处理输入事件并返回消费结果
   UiInputResult update(const InputState& input);
+  /// 捕获 UI 输入命中和消费状态，但不执行控件回调
+  UiInputResult capture_input(const InputState& input);
+  /// 处理最近一次 capture_input 排队的输入事件
+  void process_queued_events(const InputState& input);
   /// 渲染 UI 树
   void paint(SoftwareRenderer& renderer);
   /// 清除整个 UI 树
@@ -455,6 +459,9 @@ class UiTree {
   UiNode* mouse_down_{nullptr};     ///< 鼠标按下时的目标节点
   UiNode* modal_{nullptr};          ///< 当前模态节点
   UiNode* active_menu_{nullptr};    ///< 当前活动菜单节点（预留）
+  InputState queued_input_{};       ///< capture_input 记录的输入快照
+  UiNode* queued_hit_{nullptr};     ///< capture_input 时的命中节点
+  bool queued_input_active_{false}; ///< 是否有待处理的输入事件
 
   friend class Button;  ///< Button 需要访问 select_radio_button
 };

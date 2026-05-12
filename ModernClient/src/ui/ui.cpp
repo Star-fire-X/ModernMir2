@@ -860,11 +860,18 @@ void DragSpriteOverlay::paint(SoftwareRenderer& renderer) {
 
 UiTree::UiTree() = default;
 
-/// 更新 UI 树：主输入事件分发入口
-/// 流程：清理失效引用 → 递归更新 → 命中测试 → 鼠标/键盘事件分发
 UiInputResult UiTree::update(const InputState& input) {
+  auto result = capture_input(input);
+  process_queued_events(input);
+  return result;
+}
+
+/// 捕获 UI 输入：只计算命中/消费/焦点，不执行控件回调
+UiInputResult UiTree::capture_input(const InputState& input) {
   UiInputResult result;
   if (root_ == nullptr) {
+    queued_input_active_ = false;
+    queued_hit_ = nullptr;
     return result;
   }
 
@@ -880,48 +887,109 @@ UiInputResult UiTree::update(const InputState& input) {
     result.consumed = true;
   }
 
-  // 鼠标移动：先分发到捕获节点，否则分发到命中节点
   if (captured_ != nullptr && (input.left_down || input.right_down)) {
-    result.consumed = dispatch_mouse_move(captured_, input) || result.consumed;
-  } else if (hit != nullptr) {
-    dispatch_mouse_move(hit, input);
+    result.consumed = true;
   }
 
-  // 鼠标按下：捕获模式优先，否则命中节点
   auto* target = captured_ != nullptr ? captured_ : hit;
   if (input.left_pressed) {
-    mouse_down_ = target;
     result.consumed = (target != nullptr && !target->background) || result.consumed;
-    result.consumed = dispatch_mouse_down(target, input, UiMouseButton::left) || result.consumed;
+    if (is_valid_target(target)) {
+      if (target->focusable) {
+        focus(target);
+      } else if (target->background) {
+        focus(nullptr);
+      }
+    }
   }
   if (input.right_pressed) {
-    mouse_down_ = target;
     result.consumed = (target != nullptr && !target->background) || result.consumed;
-    result.consumed = dispatch_mouse_down(target, input, UiMouseButton::right) || result.consumed;
+    if (is_valid_target(target)) {
+      if (target->focusable) {
+        focus(target);
+      } else if (target->background) {
+        focus(nullptr);
+      }
+    }
   }
 
-  // 鼠标释放
   if (input.left_released) {
     target = captured_ != nullptr ? captured_ : hit;
     result.consumed = (target != nullptr && !target->background) || result.consumed;
-    result.consumed = dispatch_mouse_up(target, input, UiMouseButton::left) || result.consumed;
-    if (mouse_down_ == target || captured_ == nullptr) {
-      mouse_down_ = nullptr;
-    }
   }
   if (input.right_released) {
     target = captured_ != nullptr ? captured_ : hit;
     result.consumed = (target != nullptr && !target->background) || result.consumed;
-    result.consumed = dispatch_mouse_up(target, input, UiMouseButton::right) || result.consumed;
+  }
+
+  result.dragging = captured_ != nullptr && input.left_down;
+  result.text_focus = focused_ != nullptr && focused_->accepts_text_input();
+  if (result.text_focus &&
+      (!input.text_input.empty() || input.backspace_pressed || input.enter_pressed)) {
+    result.consumed = true;
+  }
+  queued_input_ = input;
+  queued_hit_ = hit;
+  queued_input_active_ = true;
+  clear_stale_references();
+  return result;
+}
+
+/// 处理 capture_input 排队的输入事件，执行控件回调
+void UiTree::process_queued_events(const InputState& input) {
+  if (root_ == nullptr) {
+    queued_input_active_ = false;
+    queued_hit_ = nullptr;
+    return;
+  }
+  if (!queued_input_active_) {
+    capture_input(input);
+  }
+
+  auto event_input = queued_input_;
+  auto* hit = queued_hit_;
+  queued_input_active_ = false;
+  queued_hit_ = nullptr;
+
+  clear_stale_references();
+  if (!is_valid_target(hit)) {
+    hit = priority_hit_test(event_input.mouse_x, event_input.mouse_y);
+  }
+
+  if (captured_ != nullptr && (event_input.left_down || event_input.right_down)) {
+    dispatch_mouse_move(captured_, event_input);
+  } else if (hit != nullptr) {
+    dispatch_mouse_move(hit, event_input);
+  }
+
+  auto* target = captured_ != nullptr ? captured_ : hit;
+  if (event_input.left_pressed) {
+    mouse_down_ = target;
+    dispatch_mouse_down(target, event_input, UiMouseButton::left);
+  }
+  if (event_input.right_pressed) {
+    mouse_down_ = target;
+    dispatch_mouse_down(target, event_input, UiMouseButton::right);
+  }
+
+  if (event_input.left_released) {
+    target = captured_ != nullptr ? captured_ : hit;
+    dispatch_mouse_up(target, event_input, UiMouseButton::left);
+    if (mouse_down_ == target || captured_ == nullptr) {
+      mouse_down_ = nullptr;
+    }
+  }
+  if (event_input.right_released) {
+    target = captured_ != nullptr ? captured_ : hit;
+    dispatch_mouse_up(target, event_input, UiMouseButton::right);
     if (mouse_down_ == target || captured_ == nullptr) {
       mouse_down_ = nullptr;
     }
   }
 
-  result.dragging = captured_ != nullptr && input.left_down;
-  dispatch_keyboard(input, result);
+  UiInputResult result;
+  dispatch_keyboard(event_input, result);
   clear_stale_references();
-  return result;
 }
 
 /// 渲染 UI 树：设置全局 assets 指针后递归渲染
@@ -942,6 +1010,8 @@ void UiTree::clear() {
   mouse_down_ = nullptr;
   modal_ = nullptr;
   active_menu_ = nullptr;
+  queued_input_active_ = false;
+  queued_hit_ = nullptr;
   root_.reset();
 }
 
@@ -1038,6 +1108,9 @@ void UiTree::clear_references_if_descendant(UiNode* node) {
   if (active_menu_ != nullptr && node->contains_descendant(active_menu_)) {
     active_menu_ = nullptr;
   }
+  if (queued_hit_ != nullptr && node->contains_descendant(queued_hit_)) {
+    queued_hit_ = nullptr;
+  }
 }
 
 /// 优先级命中测试：先检测活动菜单，再检测模态，最后检测根节点
@@ -1097,6 +1170,9 @@ void UiTree::clear_stale_references() {
   }
   if (!is_valid_target(active_menu_)) {
     active_menu_ = nullptr;
+  }
+  if (!is_valid_target(queued_hit_)) {
+    queued_hit_ = nullptr;
   }
 }
 

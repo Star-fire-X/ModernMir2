@@ -6113,16 +6113,45 @@ class WorldScene final : public Scene {
   }
 
   void update(ClientContext& context, float delta_seconds) override {
+    capture_ui_input(context);
+    process_key_messages(context);
+    process_action_messages(context, delta_seconds);
+    dwin_process(context);
+    scene_run(context, delta_seconds);
+  }
+
+  void capture_ui_input(ClientContext& context) override {
     sync_map(context);
     legacy_hud_.sync(context);
+    Scene::capture_ui_input(context);
+  }
+
+  void process_key_messages(ClientContext& context) override {
     auto& world = context.state->world;
     const auto now_ms = detail::monotonic_ms();
-    animation_.update(world, now_ms);
-    if (context.audio != nullptr) {
-      update_main_theme(*context.audio, delta_seconds, now_ms);
-      audio_cues_.update(world, animation_, map_.get(), *context.audio, now_ms);
-      context.audio->flush_queued_sounds(now_ms);
+    const auto input_guard =
+        context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging;
+    if (legacy_hud_.handle_shortcuts(context, ui_)) {
+      return;
     }
+    if (input_guard || legacy_hud_.blocks_world_input()) {
+      return;
+    }
+    for (int index = 0; index < 8; ++index) {
+      if (context.input->key_pressed[VK_F1 + index] && magic_for_slot(world, index) != 0) {
+        world.action_key = index;
+        if (legacy_trace_enabled()) {
+          std::ostringstream out;
+          out << "action_key now=" << now_ms << " slot=" << index;
+          legacy_trace(out.str());
+        }
+      }
+    }
+  }
+
+  void process_action_messages(ClientContext& context, float /*delta_seconds*/) override {
+    auto& world = context.state->world;
+    const auto now_ms = detail::monotonic_ms();
     const auto& input = *context.input;
     if (world.self_actor_id == 0) {
       return;
@@ -6159,13 +6188,6 @@ class WorldScene final : public Scene {
       legacy_trace(out.str());
     }
 
-    if (legacy_hud_.process_pending_actions(context)) {
-      return;
-    }
-
-    if (legacy_hud_.handle_shortcuts(context, ui_)) {
-      return;
-    }
     if (legacy_hud_.blocks_world_input()) {
       world.legacy_target_x = -1;
       world.legacy_target_y = -1;
@@ -6212,6 +6234,24 @@ class WorldScene final : public Scene {
     }
     if (process_pending_move(context, now_ms)) {
       return;
+    }
+  }
+
+  void dwin_process(ClientContext& context) override {
+    ui_.process_queued_events(*context.input);
+    legacy_hud_.process_pending_actions(context);
+  }
+
+  void scene_run(ClientContext& context, float delta_seconds) override {
+    sync_map(context);
+    legacy_hud_.sync(context);
+    auto& world = context.state->world;
+    const auto now_ms = detail::monotonic_ms();
+    animation_.update(world, now_ms);
+    if (context.audio != nullptr) {
+      update_main_theme(*context.audio, delta_seconds, now_ms);
+      audio_cues_.update(world, animation_, map_.get(), *context.audio, now_ms);
+      context.audio->flush_queued_sounds(now_ms);
     }
   }
 
@@ -6537,19 +6577,6 @@ class WorldScene final : public Scene {
   void collect_keyboard_ops(ClientContext& context, const LegacyInputFrame& input,
                             const ActorState& self) {
     auto& world = context.state->world;
-    for (int index = 0; index < 8; ++index) {
-      if (context.input->key_pressed[VK_F1 + index]) {
-        if (magic_for_slot(world, index) != 0) {
-          world.action_key = index;
-          if (legacy_trace_enabled()) {
-            std::ostringstream out;
-            out << "action_key now=" << input.tick << " slot=" << index;
-            legacy_trace(out.str());
-          }
-        }
-      }
-    }
-
     for (int index = 0; index < 6; ++index) {
       if (context.input->key_pressed['1' + index]) {
         if (self.dead || context.app == nullptr || world.pending_item_action.active ||
@@ -7429,6 +7456,37 @@ class WorldScene final : public Scene {
 
 }  // namespace
 
+void Scene::capture_ui_input(ClientContext& context) {
+  if (context.input == nullptr) {
+    context.ui_input = {};
+    return;
+  }
+  ui_tree().set_asset_manager(context.assets);
+  context.ui_input = ui_tree().capture_input(*context.input);
+}
+
+void Scene::process_key_messages(ClientContext& /*context*/) {}
+
+void Scene::process_action_messages(ClientContext& /*context*/, float /*delta_seconds*/) {}
+
+void Scene::dwin_process(ClientContext& context) {
+  if (context.input != nullptr) {
+    ui_tree().process_queued_events(*context.input);
+  }
+}
+
+void Scene::scene_run(ClientContext& context, const float delta_seconds) {
+  update(context, delta_seconds);
+}
+
+void Scene::render_scene(ClientContext& context) { render(context); }
+
+void Scene::paint_ui(ClientContext& context) {
+  if (context.renderer != nullptr) {
+    ui_tree().paint(*context.renderer);
+  }
+}
+
 void SceneManager::initialize(ClientContext& context) { change_scene(SceneId::boot, context); }
 
 /// 切换场景：退出当前场景 → 创建新场景 → 进入新场景
@@ -7441,20 +7499,64 @@ void SceneManager::change_scene(SceneId id, ClientContext& context) {
   current_scene_->enter(context);
 }
 
-/// 更新当前场景：先更新 UI 输入，再更新场景逻辑
+/// 兼容更新入口：按 Delphi AppOnIdle 语义拆开的阶段顺序执行
 void SceneManager::update(ClientContext& context, float delta_seconds) {
   if (current_scene_ != nullptr) {
-    current_scene_->ui_tree().set_asset_manager(context.assets);
-    context.ui_input = current_scene_->ui_tree().update(*context.input);
-    current_scene_->update(context, delta_seconds);
+    capture_ui_input(context);
+    process_key_messages(context);
+    process_action_messages(context, delta_seconds);
+    dwin_process(context);
+    scene_run(context, delta_seconds);
+  }
+}
+
+void SceneManager::capture_ui_input(ClientContext& context) {
+  if (current_scene_ != nullptr) {
+    current_scene_->capture_ui_input(context);
+  }
+}
+
+void SceneManager::process_key_messages(ClientContext& context) {
+  if (current_scene_ != nullptr) {
+    current_scene_->process_key_messages(context);
+  }
+}
+
+void SceneManager::process_action_messages(ClientContext& context, const float delta_seconds) {
+  if (current_scene_ != nullptr) {
+    current_scene_->process_action_messages(context, delta_seconds);
+  }
+}
+
+void SceneManager::dwin_process(ClientContext& context) {
+  if (current_scene_ != nullptr) {
+    current_scene_->dwin_process(context);
+  }
+}
+
+void SceneManager::scene_run(ClientContext& context, const float delta_seconds) {
+  if (current_scene_ != nullptr) {
+    current_scene_->scene_run(context, delta_seconds);
+  }
+}
+
+void SceneManager::render_scene(ClientContext& context) {
+  if (current_scene_ != nullptr) {
+    current_scene_->render_scene(context);
+  }
+}
+
+void SceneManager::paint_ui(ClientContext& context) {
+  if (current_scene_ != nullptr) {
+    current_scene_->paint_ui(context);
   }
 }
 
 /// 渲染当前场景：先绘制场景内容，再绘制 UI 层
 void SceneManager::render(ClientContext& context) {
   if (current_scene_ != nullptr) {
-    current_scene_->render(context);
-    current_scene_->ui_tree().paint(*context.renderer);
+    render_scene(context);
+    paint_ui(context);
   }
 }
 

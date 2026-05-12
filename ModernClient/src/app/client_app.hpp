@@ -24,6 +24,7 @@
 #include <optional>
 #include <string>
 
+#include "app/legacy_frame_scheduler.hpp"
 #include "assets/asset_manager.hpp"
 #include "audio/audio_service.hpp"
 #include "game/game_state.hpp"
@@ -147,6 +148,11 @@ class ClientApp {
   void maybe_start_auto_play();
   void handle_auto_character_list();
   void handle_protocol_events();
+  void flush_scene_change_if_pending(ClientContext& context);
+  void capture_ui_input(ClientContext& context);
+  void dwin_process(ClientContext& context);
+  void process_modal_input();
+  [[nodiscard]] bool can_draw_frame() const;
   /// 将窗口输入的像素坐标转换为逻辑坐标（考虑缩放）
   void refresh_mapped_input();
   /// 驱动所有定时器的 Tick
@@ -188,6 +194,7 @@ class ClientApp {
   AssetManager assets_{};           ///< 资源管理器（WIL/WIX 精灵 + 地图文件）
   AudioService audio_{};            ///< 音频服务（目前为空桩）
   SceneManager scenes_{};           ///< 场景管理器（驱动场景切换）
+  LegacyFrameScheduler frame_scheduler_{};  ///< Delphi AppOnIdle 帧内阶段调度器
   ui::UiTree modal_ui_{};           ///< 模态对话框 UI 树（叠加在场景之上）
   std::function<void()> modal_confirm_action_{};  ///< 确认弹窗的 Yes/Enter 回调
   bool modal_has_cancel_{false};                  ///< 当前弹窗是否可用 Esc/Cancel 关闭

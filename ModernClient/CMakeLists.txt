@@ -82,6 +82,9 @@ add_modern_client_core_smoke(modern_client_map_render_alignment_smoke tests/map_
 add_modern_client_core_smoke(modern_client_world_render_smoke tests/world_render_smoke.cpp)
 add_modern_client_core_smoke(modern_client_combat_presentation_smoke tests/combat_presentation_smoke.cpp)
 add_modern_client_core_smoke(modern_client_ui_smoke tests/ui_smoke.cpp)
+add_modern_client_header_smoke(modern_client_frame_order_smoke tests/client_app_frame_order_smoke.cpp)
+add_modern_client_core_smoke(modern_client_ui_capture_process_order_smoke tests/ui_capture_process_order_smoke.cpp)
+add_modern_client_core_smoke(modern_client_world_scene_legacy_order_smoke tests/world_scene_legacy_order_smoke.cpp)
 add_modern_client_core_smoke(modern_client_inventory_ui_smoke tests/inventory_ui_smoke.cpp)
 add_modern_client_core_smoke(modern_client_chat_magic_ui_smoke tests/chat_magic_ui_smoke.cpp)
 add_modern_client_core_smoke(modern_client_trade_group_guild_ui_smoke tests/trade_group_guild_ui_smoke.cpp)
@@ -103,6 +106,9 @@ add_custom_target(modern_client_ci_phase2_fast
     modern_client_text_encoding_smoke
     modern_client_movement_smoke
     modern_client_item_pending_smoke
+    modern_client_frame_order_smoke
+    modern_client_ui_capture_process_order_smoke
+    modern_client_world_scene_legacy_order_smoke
     modern_client_inventory_ui_smoke
     modern_client_chat_magic_ui_smoke
     modern_client_trade_group_guild_ui_smoke
