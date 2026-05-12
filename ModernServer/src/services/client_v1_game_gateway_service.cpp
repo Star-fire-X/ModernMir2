@@ -2606,6 +2606,23 @@ void ClientV1GameGatewayService::translate_legacy_packet(
           "Gold: " + std::to_string(decoded->message.recog), 0});
       break;
     }
+    case kSmDealChangeGoldOk:
+    case kSmDealChangeGoldFail: {
+      const auto gold = (decoded->message.param & 0xffff) |
+                        ((decoded->message.tag & 0xffff) << 16);
+      client_v1::SelfAbility self_ability;
+      client_v1::SelfAbilityDetail self_ability_detail;
+      {
+        std::scoped_lock lock(mutex_);
+        auto& current = sessions_[session_id];
+        current.character.gold = gold;
+        self_ability = self_ability_from_character(current.character);
+        self_ability_detail = self_ability_detail_from_character(current.character);
+      }
+      messages.push_back(self_ability);
+      messages.push_back(self_ability_detail);
+      break;
+    }
     case kSmHear: {
       const auto text = legacy_decode_string(decoded->body);
       messages.push_back(client_v1::SysMessage{text, 0});

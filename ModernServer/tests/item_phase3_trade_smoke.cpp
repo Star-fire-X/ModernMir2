@@ -74,6 +74,14 @@ bool has_raw_text_for(const mir2::RuntimeDispatch& dispatch, std::uint64_t sessi
   return false;
 }
 
+bool has_packet_message(const mir2::RuntimeDispatch& dispatch, std::uint64_t session_id,
+                        std::uint16_t ident, std::int32_t recog, std::int32_t param = 0,
+                        std::int32_t tag = 0) {
+  const auto packet = find_packet(dispatch, session_id, ident);
+  return packet.has_value() && packet->message.recog == recog &&
+         packet->message.param == param && packet->message.tag == tag;
+}
+
 void append_dispatch(mir2::RuntimeDispatch& target, mir2::RuntimeDispatch source) {
   target.session_events.insert(target.session_events.end(),
                                std::make_move_iterator(source.session_events.begin()),
@@ -232,7 +240,13 @@ int main() {
 
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_set_gold, 7, 0, {}, 15)));
-  static_cast<void>(tick_players(runtime));
+  const auto gold_a_offer = tick_players(runtime);
+  const auto hero_a_after_gold_offer = runtime.snapshot_character_actor("HeroA");
+  if (!hero_a_after_gold_offer.has_value() || hero_a_after_gold_offer->gold != 85 ||
+      !has_packet_message(gold_a_offer, 7, mir2::kSmDealChangeGoldOk, 15, 85, 0) ||
+      !has_packet_message(gold_a_offer, 8, mir2::kSmDealRemoteChangeGold, 15)) {
+    return fail(5);
+  }
 
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_add_item, 8, 2001, "Sapphire")));
@@ -240,12 +254,18 @@ int main() {
   if (!find_packet(add_b, 8, mir2::kSmDelItem).has_value() ||
       !find_packet(add_b, 8, mir2::kSmWeightChanged).has_value() ||
       has_save_character(add_b, "HeroB")) {
-    return fail(5);
+    return fail(6);
   }
 
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_set_gold, 8, 0, {}, 7)));
-  static_cast<void>(tick_players(runtime));
+  const auto gold_b_offer = tick_players(runtime);
+  const auto hero_b_after_gold_offer = runtime.snapshot_character_actor("HeroB");
+  if (!hero_b_after_gold_offer.has_value() || hero_b_after_gold_offer->gold != 43 ||
+      !has_packet_message(gold_b_offer, 8, mir2::kSmDealChangeGoldOk, 7, 43, 0) ||
+      !has_packet_message(gold_b_offer, 7, mir2::kSmDealRemoteChangeGold, 7)) {
+    return fail(7);
+  }
   static_cast<void>(tick_players(runtime, 60));
 
   static_cast<void>(runtime.route_logic_command(
@@ -253,7 +273,7 @@ int main() {
   const auto first_accept = tick_players(runtime);
   if (find_packet(first_accept, 7, mir2::kSmAddItem).has_value() ||
       find_packet(first_accept, 8, mir2::kSmAddItem).has_value()) {
-    return fail(6);
+    return fail(8);
   }
 
   static_cast<void>(runtime.route_logic_command(
@@ -267,7 +287,7 @@ int main() {
       !gold_a.has_value() || !gold_b.has_value() ||
       gold_a->message.recog != 92 || gold_b->message.recog != 58 ||
       !has_save_character(commit, "HeroA") || !has_save_character(commit, "HeroB")) {
-    return fail(7);
+    return fail(9);
   }
 
   const auto bag_a = query_bag(runtime, 7);
@@ -275,7 +295,7 @@ int main() {
   if (bag_a.size() != 1 || bag_b.size() != 1 ||
       bag_a.front().make_index != 2001 || mir2::to_string(bag_a.front().item.name) != "Sapphire" ||
       bag_b.front().make_index != 1001 || mir2::to_string(bag_b.front().item.name) != "Ruby") {
-    return fail(8);
+    return fail(10);
   }
 
   static_cast<void>(runtime.route_logic_command(
@@ -294,12 +314,12 @@ int main() {
       !has_raw_text_for(remove_window_cancel, 8, "Trade cancelled.") ||
       !find_packet(remove_window_cancel, 7, mir2::kSmDealCancel).has_value() ||
       !find_packet(remove_window_cancel, 8, mir2::kSmDealCancel).has_value()) {
-    return fail(9);
+    return fail(11);
   }
 
   auto bag_after_remove_window = query_bag(runtime, 7);
   if (bag_after_remove_window.size() != 1 || bag_after_remove_window.front().make_index != 2001) {
-    return fail(10);
+    return fail(12);
   }
 
   static_cast<void>(runtime.route_logic_command(
@@ -316,20 +336,33 @@ int main() {
       !has_raw_text_for(early_accept, 8, "Trade cancelled.") ||
       !find_packet(early_accept, 7, mir2::kSmDealCancel).has_value() ||
       !find_packet(early_accept, 8, mir2::kSmDealCancel).has_value()) {
-    return fail(11);
+    return fail(13);
   }
 
   const auto bag_after_early_accept = query_bag(runtime, 7);
   if (bag_after_early_accept.size() != 1 || bag_after_early_accept.front().make_index != 2001) {
-    return fail(12);
+    return fail(14);
   }
 
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_try, 7, 0, "HeroB")));
   static_cast<void>(tick_players(runtime));
   static_cast<void>(runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_set_gold, 7, 0, {}, 999)));
+  const auto gold_fail = tick_players(runtime);
+  const auto hero_a_after_gold_fail = runtime.snapshot_character_actor("HeroA");
+  if (!hero_a_after_gold_fail.has_value() || hero_a_after_gold_fail->gold != 92 ||
+      !has_packet_message(gold_fail, 7, mir2::kSmDealChangeGoldFail, 0, 92, 0)) {
+    return fail(15);
+  }
+  static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_set_gold, 7, 0, {}, 5)));
-  static_cast<void>(tick_players(runtime));
+  const auto gold_reserve = tick_players(runtime);
+  const auto hero_a_after_gold_reserve = runtime.snapshot_character_actor("HeroA");
+  if (!hero_a_after_gold_reserve.has_value() || hero_a_after_gold_reserve->gold != 87 ||
+      !has_packet_message(gold_reserve, 7, mir2::kSmDealChangeGoldOk, 5, 87, 0)) {
+    return fail(16);
+  }
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_accept, 7)));
   const auto gold_window_cancel = tick_players(runtime);
@@ -341,7 +374,7 @@ int main() {
       !has_raw_text_for(gold_window_cancel, 8, "Trade cancelled.") ||
       !find_packet(gold_window_cancel, 7, mir2::kSmDealCancel).has_value() ||
       !find_packet(gold_window_cancel, 8, mir2::kSmDealCancel).has_value()) {
-    return fail(13);
+    return fail(17);
   }
 
   static_cast<void>(runtime.route_logic_command(
@@ -357,12 +390,12 @@ int main() {
       !has_save_character(cancel, "HeroA") ||
       !find_packet(cancel, 7, mir2::kSmDealCancel).has_value() ||
       !find_packet(cancel, 8, mir2::kSmDealCancel).has_value()) {
-    return fail(14);
+    return fail(18);
   }
 
   const auto bag_after_cancel = query_bag(runtime, 7);
   if (bag_after_cancel.size() != 1 || bag_after_cancel.front().make_index != 2001) {
-    return fail(15);
+    return fail(19);
   }
 
   return 0;

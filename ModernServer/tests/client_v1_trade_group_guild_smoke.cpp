@@ -333,7 +333,9 @@ int main() {
   if (!reader_a.wait_for_matching<mir2::client_v1::TradeState>(
           [](const auto& state) { return state.remote_gold == 7; }) ||
       !reader_b.wait_for_matching<mir2::client_v1::TradeState>(
-          [](const auto& state) { return state.local_gold == 7; })) {
+          [](const auto& state) { return state.local_gold == 7; }) ||
+      !reader_b.wait_for_matching<mir2::client_v1::SelfAbility>(
+          [](const auto& ability) { return ability.gold == 43; })) {
     stop_services();
     return fail("trade gold");
   }

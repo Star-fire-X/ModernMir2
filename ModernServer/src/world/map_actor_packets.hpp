@@ -556,6 +556,20 @@ LegacyPacket make_deal_simple_packet(std::uint64_t session_id, std::uint16_t ide
                                  make_default_message(ident, 0, 0, 0, 0));
 }
 
+LegacyPacket make_deal_change_gold_packet(std::uint64_t session_id, std::uint16_t ident,
+                                          std::int32_t deal_gold, std::int32_t bag_gold) {
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(ident, deal_gold, low_word(bag_gold), high_word(bag_gold), 0));
+}
+
+LegacyPacket make_deal_remote_change_gold_packet(std::uint64_t session_id,
+                                                 std::int32_t deal_gold) {
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmDealRemoteChangeGold, deal_gold, 0, 0, 0));
+}
+
 LegacyPacket make_send_user_sell_packet(std::uint64_t session_id, std::uint64_t merchant_actor_id) {
   return make_legacy_game_packet(
       session_id, 0, 0,
