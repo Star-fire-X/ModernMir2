@@ -23,6 +23,17 @@ std::optional<mir2::DecodedLegacyGamePacket> find_packet(const mir2::RuntimeDisp
   return std::nullopt;
 }
 
+std::optional<std::size_t> packet_index(const mir2::RuntimeDispatch& dispatch,
+                                        std::uint16_t ident) {
+  for (std::size_t index = 0; index < dispatch.session_events.size(); ++index) {
+    const auto decoded = mir2::decode_legacy_game_packet(dispatch.session_events[index].packet);
+    if (decoded.has_value() && decoded->message.ident == ident) {
+      return index;
+    }
+  }
+  return std::nullopt;
+}
+
 void write_file(const std::filesystem::path& path, std::string_view content) {
   std::filesystem::create_directories(path.parent_path());
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
@@ -53,6 +64,13 @@ mir2::LogicCommand make_buy_command(std::uint64_t session_id, std::uint64_t merc
   return command;
 }
 
+mir2::RuntimeDispatch route_due(mir2::LogicRuntime& runtime, std::uint64_t& now_ms,
+                                mir2::LogicCommand command) {
+  static_cast<void>(runtime.route_logic_command(std::move(command)));
+  now_ms += 251;
+  return runtime.tick(now_ms);
+}
+
 }  // namespace
 
 int main() {
@@ -81,8 +99,8 @@ int main() {
   write_file(root / "maps" / "0.toml",
              "id = \"0\"\n"
              "title = \"ScriptMap\"\n"
-             "width = 0\n"
-             "height = 0\n"
+             "width = 20\n"
+             "height = 20\n"
              "home_x = 10\n"
              "home_y = 10\n");
   write_file(root / "items" / "default_items.toml",
@@ -134,6 +152,7 @@ int main() {
   }
   mir2::LogicRuntime runtime(std::move(config));
   runtime.initialize();
+  std::uint64_t now_ms = 1000;
 
   mir2::CharacterRecord hero;
   hero.account_id = "guest";
@@ -160,18 +179,19 @@ int main() {
   enter.character = hero;
   static_cast<void>(runtime.route_logic_command(enter));
 
-  const auto login_dispatch = runtime.tick();
+  const auto login_dispatch = runtime.tick(now_ms);
   if (!find_packet(login_dispatch, mir2::kSmNewMap).has_value()) {
     std::filesystem::remove_all(root, ec);
     return 1;
   }
+  now_ms += 251;
+  static_cast<void>(runtime.tick(now_ms));
 
   mir2::LogicCommand click_npc;
   click_npc.kind = mir2::LogicCommandKind::click_npc;
   click_npc.session_id = 11;
   click_npc.target_actor_id = 1;
-  static_cast<void>(runtime.route_logic_command(click_npc));
-  const auto dialog_dispatch = runtime.tick();
+  const auto dialog_dispatch = route_due(runtime, now_ms, std::move(click_npc));
   const auto merchant_say = find_packet(dialog_dispatch, mir2::kSmMerchantSay);
   if (!merchant_say.has_value()) {
     std::filesystem::remove_all(root, ec);
@@ -185,12 +205,15 @@ int main() {
     return 1;
   }
 
-  static_cast<void>(runtime.route_logic_command(make_menu_command(11, 1, "@buy")));
-  const auto buy_dispatch = runtime.tick();
+  const auto buy_dispatch = route_due(runtime, now_ms, make_menu_command(11, 1, "@buy"));
   const auto buy_say = find_packet(buy_dispatch, mir2::kSmMerchantSay);
   const auto goods_list = find_packet(buy_dispatch, mir2::kSmSendGoodsList);
+  const auto buy_say_index = packet_index(buy_dispatch, mir2::kSmMerchantSay);
+  const auto goods_list_index = packet_index(buy_dispatch, mir2::kSmSendGoodsList);
   if (!buy_say.has_value() || !goods_list.has_value() ||
-      goods_list->message.recog != 1 || goods_list->message.param != 1) {
+      goods_list->message.recog != 1 || goods_list->message.param != 1 ||
+      !buy_say_index.has_value() || !goods_list_index.has_value() ||
+      *buy_say_index >= *goods_list_index) {
     std::filesystem::remove_all(root, ec);
     return 1;
   }
@@ -205,8 +228,7 @@ int main() {
     return 1;
   }
 
-  static_cast<void>(runtime.route_logic_command(make_buy_command(11, 1, "Potion")));
-  const auto potion_buy_dispatch = runtime.tick();
+  const auto potion_buy_dispatch = route_due(runtime, now_ms, make_buy_command(11, 1, "Potion"));
   const auto add_item = find_packet(potion_buy_dispatch, mir2::kSmAddItem);
   const auto buy_ok = find_packet(potion_buy_dispatch, mir2::kSmBuyItemSuccess);
   if (!add_item.has_value() || !buy_ok.has_value() || buy_ok->message.recog != 20) {
@@ -214,8 +236,7 @@ int main() {
     return 1;
   }
 
-  static_cast<void>(runtime.route_logic_command(make_menu_command(11, 1, "@buy")));
-  const auto buy_after_dispatch = runtime.tick();
+  const auto buy_after_dispatch = route_due(runtime, now_ms, make_menu_command(11, 1, "@buy"));
   const auto goods_after_buy = find_packet(buy_after_dispatch, mir2::kSmSendGoodsList);
   if (!goods_after_buy.has_value() ||
       mir2::legacy_decode_string(goods_after_buy->body).find("Potion/0/80/1/") ==
@@ -224,19 +245,21 @@ int main() {
     return 1;
   }
 
-  static_cast<void>(runtime.route_logic_command(make_buy_command(11, 1, "Potion")));
-  const auto potion_fail_dispatch = runtime.tick();
+  const auto potion_fail_dispatch = route_due(runtime, now_ms, make_buy_command(11, 1, "Potion"));
   const auto buy_fail = find_packet(potion_fail_dispatch, mir2::kSmBuyItemFail);
   if (!buy_fail.has_value() || buy_fail->message.recog != 3) {
     std::filesystem::remove_all(root, ec);
     return 1;
   }
 
-  static_cast<void>(runtime.route_logic_command(make_menu_command(11, 1, "@repair")));
-  const auto repair_dispatch = runtime.tick();
+  const auto repair_dispatch = route_due(runtime, now_ms, make_menu_command(11, 1, "@repair"));
   const auto repair_say = find_packet(repair_dispatch, mir2::kSmMerchantSay);
   const auto repair_menu = find_packet(repair_dispatch, mir2::kSmSendUserRepair);
-  if (!repair_say.has_value() || !repair_menu.has_value()) {
+  const auto repair_say_index = packet_index(repair_dispatch, mir2::kSmMerchantSay);
+  const auto repair_menu_index = packet_index(repair_dispatch, mir2::kSmSendUserRepair);
+  if (!repair_say.has_value() || !repair_menu.has_value() ||
+      !repair_say_index.has_value() || !repair_menu_index.has_value() ||
+      *repair_say_index >= *repair_menu_index) {
     std::filesystem::remove_all(root, ec);
     return 1;
   }
