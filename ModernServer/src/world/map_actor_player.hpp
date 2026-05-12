@@ -38,6 +38,7 @@ void MapActor::dispatch_legacy_close(Player& player, RuntimeDispatch& dispatch) 
   const auto actor_id = player.id();
   const auto now_ms = player.legacy_ghost_time_ms() != 0 ? player.legacy_ghost_time_ms()
                                                          : static_cast<std::uint64_t>(tick_count_ms());
+  cancel_trade_for(actor_id, dispatch, true);
   queue_save_player_character(dispatch, player, now_ms);
   detach_owned_slaves(player, dispatch, now_ms, true);
   queue_force_disconnect(dispatch, player.session_id(), "legacy_player_closed");

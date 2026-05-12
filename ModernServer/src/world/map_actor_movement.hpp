@@ -66,6 +66,7 @@ bool MapActor::try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
                                            true, now_ms, moving_state_for(player)) != 1) {
       return false;
     }
+    cancel_trade_for(player.id(), dispatch, true);
     ActorMail move_mail;
     move_mail.kind = ActorMailKind::move;
     move_mail.map_id = config_.id;
@@ -89,6 +90,13 @@ bool MapActor::try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
     return true;
   }
 
+  cancel_trade_for(player.id(), dispatch, true);
+  snapshot = player.persistent_snapshot();
+  snapshot.map_id = gate->gate.target_map_id;
+  snapshot.x = gate->gate.target_x;
+  snapshot.y = gate->gate.target_y;
+  snapshot.dir = player.character().dir;
+  snapshot.slaves = snapshot_owned_slaves(player, now_ms);
   ActorMail transfer;
   transfer.kind = ActorMailKind::spawn_player;
   transfer.map_id = snapshot.map_id;
@@ -173,6 +181,7 @@ bool MapActor::try_item_map_move(Player& player, std::string target_map_id,
                                            moving_state_for(player)) != 1) {
       return false;
     }
+    cancel_trade_for(player.id(), dispatch, true);
     ActorMail move_mail;
     move_mail.kind = ActorMailKind::move;
     move_mail.map_id = config_.id;
@@ -193,6 +202,13 @@ bool MapActor::try_item_map_move(Player& player, std::string target_map_id,
     return true;
   }
 
+  cancel_trade_for(player.id(), dispatch, true);
+  snapshot = player.persistent_snapshot();
+  snapshot.map_id = target_map_id;
+  snapshot.x = target_x;
+  snapshot.y = target_y;
+  snapshot.dir = player.character().dir;
+  snapshot.slaves = snapshot_owned_slaves(player, now_ms);
   ActorMail transfer;
   transfer.kind = ActorMailKind::spawn_player;
   transfer.map_id = snapshot.map_id;
