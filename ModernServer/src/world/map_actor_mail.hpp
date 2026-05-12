@@ -1271,18 +1271,32 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
     }
     case ActorMailKind::trade_try: {
       auto* requester = find_player(mail.actor_id);
-      auto* target = find_player_by_name(mail.payload);
+      Player* target = nullptr;
+      if (requester != nullptr) {
+        for (auto& [object_id, object] : objects_) {
+          if (object_id == requester->id()) {
+            continue;
+          }
+          auto* candidate = as_player(object.get());
+          if (candidate != nullptr && is_directly_in_front_of(*requester, *candidate)) {
+            target = candidate;
+            break;
+          }
+        }
+      }
       if (requester == nullptr || target == nullptr || requester == target ||
           requester->is_dead() || target->is_dead()) {
         if (requester != nullptr) {
-          queue_system_notice(dispatch, *requester, "Trade request failed.");
+          queue_packet(dispatch, requester->session_id(),
+                       make_deal_simple_packet(requester->session_id(), kSmDealTryFail));
         }
         break;
       }
-      if (!in_interaction_range(*requester, *target) ||
+      if (!mutually_facing(*requester, *target) ||
           trade_session_for(requester->id()) != nullptr ||
           trade_session_for(target->id()) != nullptr) {
-        queue_system_notice(dispatch, *requester, "Trade request failed.");
+        queue_packet(dispatch, requester->session_id(),
+                     make_deal_simple_packet(requester->session_id(), kSmDealTryFail));
         break;
       }
       TradeSession session;
@@ -1298,6 +1312,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                target->character().character_name + ".");
       queue_system_notice(dispatch, *target, "Trade started with " +
                                             requester->character().character_name + ".");
+      queue_packet(dispatch, requester->session_id(),
+                   make_deal_menu_packet(requester->session_id(),
+                                         target->character().character_name));
+      queue_packet(dispatch, target->session_id(),
+                   make_deal_menu_packet(target->session_id(),
+                                         requester->character().character_name));
       break;
     }
     case ActorMailKind::trade_cancel: {

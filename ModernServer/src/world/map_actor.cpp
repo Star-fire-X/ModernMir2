@@ -2230,6 +2230,17 @@ void MapActor::cancel_trade_for(std::uint64_t actor_id, RuntimeDispatch& dispatc
   const auto session_id = session->id;
   auto* first = find_player(session->first_actor_id);
   auto* second = find_player(session->second_actor_id);
+  if (notify) {
+    if (first != nullptr) {
+      queue_packet(dispatch, first->session_id(),
+                   make_deal_simple_packet(first->session_id(), kSmDealCancel));
+    }
+    if (second != nullptr) {
+      queue_packet(dispatch, second->session_id(),
+                   make_deal_simple_packet(second->session_id(), kSmDealCancel));
+    }
+  }
+
   bool returned_all = true;
   auto return_offer = [&](Player* player, TradeOffer& offer) {
     if (player == nullptr) {
