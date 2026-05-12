@@ -7290,6 +7290,14 @@ class WorldScene final : public Scene {
     }
     draw_sprite(*context.renderer, body, base_x + body->hotspot_x, base_y + body->hotspot_y,
                 alpha);
+    for (std::uint8_t index = 0; index < pose.overlay_count; ++index) {
+      const auto& overlay = pose.overlays[index];
+      const auto frame = context.assets->get_frame(overlay.archive, overlay.frame_index);
+      if (frame != nullptr) {
+        draw_sprite(*context.renderer, frame, base_x + frame->hotspot_x,
+                    base_y + frame->hotspot_y, overlay.blend ? alpha : 255U);
+      }
+    }
     if (hair != nullptr) {
       draw_sprite(*context.renderer, hair, base_x + hair->hotspot_x, base_y + hair->hotspot_y,
                   alpha);
