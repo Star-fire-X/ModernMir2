@@ -234,6 +234,18 @@ std::optional<ExpectedKinds> expected_kinds(std::uint16_t ident) {
       return ExpectedKinds{C::eat_item, L::eat_item};
     case mir2::kCmDropGold:
       return ExpectedKinds{C::drop_gold, L::drop_gold};
+    case mir2::kCmDealTry:
+      return ExpectedKinds{C::trade_try, L::trade_try};
+    case mir2::kCmDealAddItem:
+      return ExpectedKinds{C::trade_add_item, L::trade_add_item};
+    case mir2::kCmDealDelItem:
+      return ExpectedKinds{C::trade_remove_item, L::trade_remove_item};
+    case mir2::kCmDealCancel:
+      return ExpectedKinds{C::trade_cancel, L::trade_cancel};
+    case mir2::kCmDealChangeGold:
+      return ExpectedKinds{C::trade_set_gold, L::trade_set_gold};
+    case mir2::kCmDealEnd:
+      return ExpectedKinds{C::trade_accept, L::trade_accept};
     case mir2::kCmUserBuyItem:
       return ExpectedKinds{C::buy_item, L::buy_item};
     case mir2::kCmUserSellItem:
@@ -264,6 +276,9 @@ std::string expected_text(std::uint16_t ident, const std::string& decoded_bytes)
     case mir2::kCmTakeOnItem:
     case mir2::kCmTakeOffItem:
     case mir2::kCmEat:
+    case mir2::kCmDealTry:
+    case mir2::kCmDealAddItem:
+    case mir2::kCmDealDelItem:
     case mir2::kCmUserSellItem:
     case mir2::kCmUserBuyItem:
     case mir2::kCmUserRepairItem:
@@ -347,6 +362,8 @@ bool check_expected_fields(const LegacyCommandCase& test_case,
     case mir2::kCmTakeOnItem:
     case mir2::kCmTakeOffItem:
     case mir2::kCmEat:
+    case mir2::kCmDealAddItem:
+    case mir2::kCmDealDelItem:
       expected_item = test_case.recog;
       break;
     case mir2::kCmPickup:
@@ -354,6 +371,7 @@ bool check_expected_fields(const LegacyCommandCase& test_case,
       expected_y = test_case.tag;
       break;
     case mir2::kCmDropGold:
+    case mir2::kCmDealChangeGold:
       expected_amount = test_case.recog;
       break;
     default:
