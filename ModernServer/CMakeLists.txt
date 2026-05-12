@@ -163,6 +163,12 @@ if(BUILD_TESTING)
   add_test(NAME mir2_legacy_protocol_command_golden_smoke
     COMMAND mir2_legacy_protocol_command_golden_smoke)
 
+  add_executable(mir2_trade_protocol_golden_smoke
+    tests/trade_protocol_golden_smoke.cpp)
+  target_link_libraries(mir2_trade_protocol_golden_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_trade_protocol_golden_smoke
+    COMMAND mir2_trade_protocol_golden_smoke)
+
   add_executable(mir2_canonical_legacy_command_smoke
     tests/canonical_legacy_command_smoke.cpp)
   target_link_libraries(mir2_canonical_legacy_command_smoke PRIVATE mir2_hostlib)
@@ -844,6 +850,7 @@ if(BUILD_TESTING)
       mir2_logic_smoke
       mir2_legacy_frame_smoke
       mir2_legacy_protocol_command_golden_smoke
+      mir2_trade_protocol_golden_smoke
       mir2_canonical_legacy_command_smoke
       mir2_legacy_string_semantics_smoke
       mir2_canonical_login_state_smoke
