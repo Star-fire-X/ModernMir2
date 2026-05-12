@@ -2256,10 +2256,13 @@ void MapActor::cancel_trade_for(std::uint64_t actor_id, RuntimeDispatch& dispatc
       queue_packet(dispatch, player->session_id(),
                    make_add_item_packet(player->session_id(), item, item_configs_));
     }
-    offer.items = std::move(remaining);
-    if (offer.items.empty()) {
+    if (offer.gold > 0) {
+      player->add_gold(offer.gold);
+      queue_packet(dispatch, player->session_id(),
+                   make_gold_changed_packet(player->session_id(), player->character().gold));
       offer.gold = 0;
     }
+    offer.items = std::move(remaining);
     offer.accepted = false;
     player->refresh_derived_state(item_configs_);
     queue_packet(dispatch, player->session_id(),
@@ -2296,8 +2299,6 @@ bool MapActor::commit_trade(TradeSession& session, RuntimeDispatch& dispatch) {
   }
   if (first->is_dead() || second->is_dead() || !in_interaction_range(*first, *second) ||
       (session.first.gold < 0 || session.second.gold < 0) ||
-      (session.first.gold > 0 && !first->can_spend_gold(session.first.gold)) ||
-      (session.second.gold > 0 && !second->can_spend_gold(session.second.gold)) ||
       static_cast<std::int64_t>(first->character().gold) + session.second.gold > kLegacyBagGold ||
       static_cast<std::int64_t>(second->character().gold) + session.first.gold > kLegacyBagGold ||
       !can_receive_trade_items(*first, session.second.items) ||
@@ -2348,11 +2349,9 @@ bool MapActor::commit_trade(TradeSession& session, RuntimeDispatch& dispatch) {
   }
 
   if (session.first.gold > 0) {
-    first->spend_gold(session.first.gold);
     second->add_gold(session.first.gold);
   }
   if (session.second.gold > 0) {
-    second->spend_gold(session.second.gold);
     first->add_gold(session.second.gold);
   }
 

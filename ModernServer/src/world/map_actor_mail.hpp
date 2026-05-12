@@ -1410,15 +1410,34 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       auto* offer = trade_offer_for(*session, mail.actor_id);
       auto* peer_offer = trade_peer_offer_for(*session, mail.actor_id);
       if (offer == nullptr || peer_offer == nullptr || mail.amount < 0 ||
-          mail.amount > player->character().gold || offer->accepted) {
-        queue_system_notice(dispatch, *player, "Trade gold failed.");
+          offer->accepted ||
+          static_cast<std::int64_t>(player->character().gold) + offer->gold < mail.amount) {
+        queue_packet(dispatch, player->session_id(),
+                     make_deal_change_gold_packet(player->session_id(), kSmDealChangeGoldFail,
+                                                  offer != nullptr ? offer->gold : 0,
+                                                  player->character().gold));
         break;
+      }
+      if (offer->gold > 0) {
+        player->add_gold(offer->gold);
+      }
+      if (mail.amount > 0) {
+        player->spend_gold(mail.amount);
       }
       offer->gold = mail.amount;
       offer->accepted = false;
       peer_offer->accepted = false;
       offer->last_change_time_ms = now_ms;
       peer_offer->last_change_time_ms = now_ms;
+      queue_packet(dispatch, player->session_id(),
+                   make_deal_change_gold_packet(player->session_id(), kSmDealChangeGoldOk,
+                                                offer->gold, player->character().gold));
+      auto* peer = session->first_actor_id == mail.actor_id ? find_player(session->second_actor_id)
+                                                            : find_player(session->first_actor_id);
+      if (peer != nullptr) {
+        queue_packet(dispatch, peer->session_id(),
+                     make_deal_remote_change_gold_packet(peer->session_id(), offer->gold));
+      }
       break;
     }
     case ActorMailKind::trade_accept: {
