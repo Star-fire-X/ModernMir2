@@ -7419,7 +7419,7 @@ class WorldScene final : public Scene {
     const auto text = widen(actor_it->second.name);
     const auto width = context.renderer->measure_text_width(text);
     context.renderer->draw_text(position.say_x - width / 2, position.say_y + 30, text,
-                                0xFFFFFFFFU);
+                                actor_it->second.name_color);
   }
 
   void render_actor_saying(ClientContext& context, const ActorState& actor,

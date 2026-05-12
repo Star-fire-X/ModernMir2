@@ -473,6 +473,7 @@ struct ActorUpsert {
 /// 删除角色：服务端通知角色离开九宫格视野或被清理
 struct ActorRemove {
   std::uint64_t actor_id{0};
+  std::uint16_t legacy_ident{0};
 };
 
 /// 角色动作：服务端同步角色的动作事件（攻击、施法等）
@@ -497,10 +498,12 @@ struct ActorMagicFire {
   std::int32_t y{0};
   std::uint8_t effect_type{0};
   std::uint8_t effect{0};
+  std::uint16_t legacy_ident{0};
 };
 
 struct ActorMagicFireFail {
   std::uint64_t actor_id{0};
+  std::uint16_t legacy_ident{0};
 };
 
 /// 角色生命/魔法值：服务端同步角色的 HP/MP 变化
@@ -513,6 +516,7 @@ struct ActorVitals {
   std::int32_t damage{0};
   std::uint64_t source_actor_id{0};
   bool magic{false};
+  std::uint16_t legacy_ident{0};
 };
 
 /// 角色死亡事件
@@ -521,6 +525,7 @@ struct ActorDeath {
   std::int32_t x{0};
   std::int32_t y{0};
   std::uint8_t dir{0};
+  std::uint16_t legacy_ident{0};
 };
 
 /// 魔法条目：角色已学习的魔法信息
@@ -1886,10 +1891,11 @@ inline bool decode(ByteReader& reader, ActorUpsert& value) { return decode(reade
 
 inline void encode(ByteWriter& writer, const ActorRemove& value) {
   writer.write_u64(value.actor_id);
+  writer.write_u16(value.legacy_ident);
 }
 
 inline bool decode(ByteReader& reader, ActorRemove& value) {
-  return reader.read_u64(value.actor_id);
+  return reader.read_u64(value.actor_id) && reader.read_u16(value.legacy_ident);
 }
 
 inline void encode(ByteWriter& writer, const ActorAction& value) {
@@ -1926,20 +1932,23 @@ inline void encode(ByteWriter& writer, const ActorMagicFire& value) {
   writer.write_i32(value.y);
   writer.write_u8(value.effect_type);
   writer.write_u8(value.effect);
+  writer.write_u16(value.legacy_ident);
 }
 
 inline bool decode(ByteReader& reader, ActorMagicFire& value) {
   return reader.read_u64(value.actor_id) && reader.read_u64(value.target_actor_id) &&
          reader.read_i32(value.x) && reader.read_i32(value.y) &&
-         reader.read_u8(value.effect_type) && reader.read_u8(value.effect);
+         reader.read_u8(value.effect_type) && reader.read_u8(value.effect) &&
+         reader.read_u16(value.legacy_ident);
 }
 
 inline void encode(ByteWriter& writer, const ActorMagicFireFail& value) {
   writer.write_u64(value.actor_id);
+  writer.write_u16(value.legacy_ident);
 }
 
 inline bool decode(ByteReader& reader, ActorMagicFireFail& value) {
-  return reader.read_u64(value.actor_id);
+  return reader.read_u64(value.actor_id) && reader.read_u16(value.legacy_ident);
 }
 
 inline void encode(ByteWriter& writer, const ActorVitals& value) {
@@ -1951,13 +1960,15 @@ inline void encode(ByteWriter& writer, const ActorVitals& value) {
   writer.write_i32(value.damage);
   writer.write_u64(value.source_actor_id);
   writer.write_bool(value.magic);
+  writer.write_u16(value.legacy_ident);
 }
 
 inline bool decode(ByteReader& reader, ActorVitals& value) {
   return reader.read_u64(value.actor_id) && reader.read_i32(value.hp) &&
          reader.read_i32(value.max_hp) && reader.read_i32(value.mp) &&
          reader.read_i32(value.max_mp) && reader.read_i32(value.damage) &&
-         reader.read_u64(value.source_actor_id) && reader.read_bool(value.magic);
+         reader.read_u64(value.source_actor_id) && reader.read_bool(value.magic) &&
+         reader.read_u16(value.legacy_ident);
 }
 
 inline void encode(ByteWriter& writer, const ActorDeath& value) {
@@ -1965,11 +1976,13 @@ inline void encode(ByteWriter& writer, const ActorDeath& value) {
   writer.write_i32(value.x);
   writer.write_i32(value.y);
   writer.write_u8(value.dir);
+  writer.write_u16(value.legacy_ident);
 }
 
 inline bool decode(ByteReader& reader, ActorDeath& value) {
   return reader.read_u64(value.actor_id) && reader.read_i32(value.x) &&
-         reader.read_i32(value.y) && reader.read_u8(value.dir);
+         reader.read_i32(value.y) && reader.read_u8(value.dir) &&
+         reader.read_u16(value.legacy_ident);
 }
 
 inline void encode(ByteWriter& writer, const MagicList& value) {

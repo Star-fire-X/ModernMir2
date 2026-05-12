@@ -39,6 +39,7 @@ int main() {
          600 + legacy_frame_index(legacy_human_action_info(LegacyHumanAction::hit), 2, 0));
 
   state.apply(ActorVitals{2000, 7, 12, -1, -1, 5, 1000, false});
+  state.apply(ActorAction{2000, ActorActionKind::struck, 0, 0, 0, 1000, 5, 31, 0, false, 0});
   state.world.actors[2000].action_started_ms = 1200;
   animations.sync_world(state.world, 1200);
   animations.update(state.world, 1200);
@@ -84,6 +85,8 @@ int main() {
   state.world.target_actor_id = 2000;
   state.world.actors[1000].action_target_actor_id = 2000;
   state.apply(ActorRemove{2000});
+  state.world.actors[2000].action_started_ms = 0;
+  state.prune_pending_actor_removals(mir2::client::detail::monotonic_ms());
   assert(state.world.actors.find(2000) == state.world.actors.end());
   assert(state.world.focus_actor_id == 0);
   assert(state.world.target_actor_id == 0);
