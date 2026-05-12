@@ -17,7 +17,7 @@ int main() {
   world.action_lock_started_ms = 1000;
   assert(!server_accept_next_action(world, 1100));
   assert(!can_next_action(world, self, 1100));
-  assert(server_accept_next_action(world, 11001));
+  assert(!server_accept_next_action(world, 11001));
   assert(!world.action_locked);
   assert(can_next_action(world, self, 11001));
   assert(server_accept_next_action(world, 11002));

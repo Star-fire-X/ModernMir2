@@ -420,7 +420,6 @@ inline bool server_accept_next_action(WorldViewState& world, const std::uint64_t
   }
   if (elapsed_ms(now, world.action_lock_started_ms) > 10000U) {
     world.action_locked = false;
-    return true;
   }
   return false;
 }
