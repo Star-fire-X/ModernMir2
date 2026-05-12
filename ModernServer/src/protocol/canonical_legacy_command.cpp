@@ -284,6 +284,38 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
       command.amount = decoded->message.recog;
       return ok(std::move(command));
     }
+    case kCmDealTry: {
+      auto command = make_command(session_id, packet, decoded->message,
+                                  CanonicalLegacyCommandKind::trade_try);
+      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      return ok(std::move(command));
+    }
+    case kCmDealAddItem: {
+      auto command = make_command(session_id, packet, decoded->message,
+                                  CanonicalLegacyCommandKind::trade_add_item);
+      command.item_make_index = decoded->message.recog;
+      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      return ok(std::move(command));
+    }
+    case kCmDealDelItem: {
+      auto command = make_command(session_id, packet, decoded->message,
+                                  CanonicalLegacyCommandKind::trade_remove_item);
+      command.item_make_index = decoded->message.recog;
+      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      return ok(std::move(command));
+    }
+    case kCmDealCancel:
+      return ok(make_command(session_id, packet, decoded->message,
+                             CanonicalLegacyCommandKind::trade_cancel));
+    case kCmDealChangeGold: {
+      auto command = make_command(session_id, packet, decoded->message,
+                                  CanonicalLegacyCommandKind::trade_set_gold);
+      command.amount = decoded->message.recog;
+      return ok(std::move(command));
+    }
+    case kCmDealEnd:
+      return ok(make_command(session_id, packet, decoded->message,
+                             CanonicalLegacyCommandKind::trade_accept));
     case kCmUserSellItem: {
       auto command = make_command(session_id, packet, decoded->message,
                                   CanonicalLegacyCommandKind::sell_item);

@@ -281,11 +281,14 @@ CanonicalLegacyCommand decode_client_v1_trade_try_command(
     std::uint64_t session_id, const client_v1::TradeTryRequest& request) {
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::trade_try);
   command.text = copy_legacy_bytes(request.target_name);
+  command.game_message = make_default_message(kCmDealTry, 0, 0, 0, 0);
   return command;
 }
 
 CanonicalLegacyCommand decode_client_v1_trade_cancel_command(std::uint64_t session_id) {
-  return make_client_v1_command(session_id, CanonicalLegacyCommandKind::trade_cancel);
+  auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::trade_cancel);
+  command.game_message = make_default_message(kCmDealCancel, 0, 0, 0, 0);
+  return command;
 }
 
 CanonicalLegacyCommand decode_client_v1_trade_add_item_command(
@@ -293,6 +296,7 @@ CanonicalLegacyCommand decode_client_v1_trade_add_item_command(
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::trade_add_item);
   command.item_make_index = request.item_make_index;
   command.text = copy_legacy_bytes(request.name);
+  command.game_message = make_default_message(kCmDealAddItem, request.item_make_index, 0, 0, 0);
   return command;
 }
 
@@ -302,6 +306,7 @@ CanonicalLegacyCommand decode_client_v1_trade_remove_item_command(
       make_client_v1_command(session_id, CanonicalLegacyCommandKind::trade_remove_item);
   command.item_make_index = request.item_make_index;
   command.text = copy_legacy_bytes(request.name);
+  command.game_message = make_default_message(kCmDealDelItem, request.item_make_index, 0, 0, 0);
   return command;
 }
 
@@ -309,11 +314,14 @@ CanonicalLegacyCommand decode_client_v1_trade_set_gold_command(
     std::uint64_t session_id, std::int32_t amount) {
   auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::trade_set_gold);
   command.amount = amount;
+  command.game_message = make_default_message(kCmDealChangeGold, amount, 0, 0, 0);
   return command;
 }
 
 CanonicalLegacyCommand decode_client_v1_trade_accept_command(std::uint64_t session_id) {
-  return make_client_v1_command(session_id, CanonicalLegacyCommandKind::trade_accept);
+  auto command = make_client_v1_command(session_id, CanonicalLegacyCommandKind::trade_accept);
+  command.game_message = make_default_message(kCmDealEnd, 0, 0, 0, 0);
+  return command;
 }
 
 CanonicalLegacyCommand decode_client_v1_chat_command(std::uint64_t session_id,

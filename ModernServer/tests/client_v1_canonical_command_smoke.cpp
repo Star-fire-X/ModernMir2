@@ -229,13 +229,14 @@ bool check_trade_chat() {
       77, mir2::client_v1::TradeTryRequest{legacy_bytes});
   if (!check_common(command, mir2::CanonicalLegacyCommandKind::trade_try,
                     mir2::LogicCommandKind::trade_try) ||
-      command.text != legacy_bytes) {
+      command.text != legacy_bytes || command.game_message.ident != mir2::kCmDealTry) {
     return false;
   }
 
   command = mir2::decode_client_v1_trade_cancel_command(77);
   if (!check_common(command, mir2::CanonicalLegacyCommandKind::trade_cancel,
-                    mir2::LogicCommandKind::trade_cancel)) {
+                    mir2::LogicCommandKind::trade_cancel) ||
+      command.game_message.ident != mir2::kCmDealCancel) {
     return false;
   }
 
@@ -243,7 +244,9 @@ bool check_trade_chat() {
       77, mir2::client_v1::TradeAddItemRequest{1008, "Gem"});
   if (!check_common(command, mir2::CanonicalLegacyCommandKind::trade_add_item,
                     mir2::LogicCommandKind::trade_add_item) ||
-      command.item_make_index != 1008 || command.text != "Gem") {
+      command.item_make_index != 1008 || command.text != "Gem" ||
+      command.game_message.ident != mir2::kCmDealAddItem ||
+      command.game_message.recog != 1008) {
     return false;
   }
 
@@ -251,20 +254,24 @@ bool check_trade_chat() {
       77, mir2::client_v1::TradeRemoveItemRequest{1008, "Gem"});
   if (!check_common(command, mir2::CanonicalLegacyCommandKind::trade_remove_item,
                     mir2::LogicCommandKind::trade_remove_item) ||
-      command.item_make_index != 1008 || command.text != "Gem") {
+      command.item_make_index != 1008 || command.text != "Gem" ||
+      command.game_message.ident != mir2::kCmDealDelItem ||
+      command.game_message.recog != 1008) {
     return false;
   }
 
   command = mir2::decode_client_v1_trade_set_gold_command(77, 123);
   if (!check_common(command, mir2::CanonicalLegacyCommandKind::trade_set_gold,
                     mir2::LogicCommandKind::trade_set_gold) ||
-      command.amount != 123) {
+      command.amount != 123 || command.game_message.ident != mir2::kCmDealChangeGold ||
+      command.game_message.recog != 123) {
     return false;
   }
 
   command = mir2::decode_client_v1_trade_accept_command(77);
   if (!check_common(command, mir2::CanonicalLegacyCommandKind::trade_accept,
-                    mir2::LogicCommandKind::trade_accept)) {
+                    mir2::LogicCommandKind::trade_accept) ||
+      command.game_message.ident != mir2::kCmDealEnd) {
     return false;
   }
 
