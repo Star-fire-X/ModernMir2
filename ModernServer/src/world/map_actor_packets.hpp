@@ -545,6 +545,17 @@ LegacyPacket make_gold_changed_packet(std::uint64_t session_id, std::int32_t gol
                                  make_default_message(kSmGoldChanged, gold, 0, 0, 0));
 }
 
+LegacyPacket make_deal_menu_packet(std::uint64_t session_id, std::string_view peer_name) {
+  return make_legacy_game_packet(session_id, 0, 0,
+                                 make_default_message(kSmDealMenu, 0, 0, 0, 0),
+                                 legacy_encode_string(std::string(peer_name)));
+}
+
+LegacyPacket make_deal_simple_packet(std::uint64_t session_id, std::uint16_t ident) {
+  return make_legacy_game_packet(session_id, 0, 0,
+                                 make_default_message(ident, 0, 0, 0, 0));
+}
+
 LegacyPacket make_send_user_sell_packet(std::uint64_t session_id, std::uint64_t merchant_actor_id) {
   return make_legacy_game_packet(
       session_id, 0, 0,

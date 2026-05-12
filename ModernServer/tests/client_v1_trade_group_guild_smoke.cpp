@@ -193,6 +193,7 @@ int main() {
     hero_a.map_id = "0";
     hero_a.x = 10;
     hero_a.y = 10;
+    hero_a.dir = 2;
     hero_a.ability.level = 30;
     hero_a.ability.hp = 50;
     hero_a.ability.max_hp = 50;
@@ -214,6 +215,7 @@ int main() {
     hero_b.account_id = "guest_b";
     hero_b.character_name = "HeroB";
     hero_b.x = 11;
+    hero_b.dir = 6;
     hero_b.gold = 50;
     hero_b.guild_name.clear();
     hero_b.guild_title.clear();

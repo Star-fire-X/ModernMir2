@@ -768,6 +768,15 @@ bool in_interaction_range(const GameObject& lhs, const GameObject& rhs) {
   return std::abs(lhs.x() - rhs.x()) <= 15 && std::abs(lhs.y() - rhs.y()) <= 15;
 }
 
+bool is_directly_in_front_of(const GameObject& viewer, const GameObject& target) {
+  const auto [dx, dy] = direction_delta(actor_dir(viewer));
+  return target.x() == viewer.x() + dx && target.y() == viewer.y() + dy;
+}
+
+bool mutually_facing(const GameObject& lhs, const GameObject& rhs) {
+  return is_directly_in_front_of(lhs, rhs) && is_directly_in_front_of(rhs, lhs);
+}
+
 bool in_legacy_view_range(std::int32_t lhs_x, std::int32_t lhs_y,
                           std::int32_t rhs_x, std::int32_t rhs_y) {
   return std::abs(lhs_x - rhs_x) <= kLegacyViewRange &&
