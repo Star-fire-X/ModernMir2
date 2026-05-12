@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "description": "Expected Delphi player deal traces derived from Source/M2Server/ObjBase.pas and Source/Client/ClMain.pas.",
+  "actors": {
+    "A": "HeroA",
+    "B": "HeroB"
+  },
+  "cases": [
+    {
+      "name": "successful_item_and_gold_deal",
+      "preconditions": [
+        "A is not dealing",
+        "B is not dealing",
+        "A front creature is B",
+        "B front creature is A",
+        "B is RC_USERHUMAN",
+        "B BoExchangeAvailable is true",
+        "both players remain face-to-face until commit"
+      ],
+      "trace": [
+        {"seq": 1, "direction": "client_to_server", "actor": "A", "message": "CM_DEALTRY", "ident": 1025, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": "HeroB"},
+        {"seq": 2, "direction": "server_to_client", "actor": "A", "message": "SM_DEALMENU", "ident": 673, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": "HeroB"},
+        {"seq": 3, "direction": "server_to_client", "actor": "B", "message": "SM_DEALMENU", "ident": 673, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": "HeroA"},
+        {"seq": 4, "direction": "client_to_server", "actor": "A", "message": "CM_DEALADDITEM", "ident": 1026, "recog": 1001, "param": 0, "tag": 0, "series": 0, "body": "Ruby"},
+        {"seq": 5, "direction": "server_to_client", "actor": "A", "message": "SM_DEALADDITEM_OK", "ident": 675, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 6, "direction": "server_to_client", "actor": "B", "message": "SM_DEALREMOTEADDITEM", "ident": 682, "recog": "actor_pointer_A", "param": 0, "tag": 0, "series": 1, "body": "TClientItem(Ruby,MakeIndex=1001)"},
+        {"seq": 7, "direction": "client_to_server", "actor": "B", "message": "CM_DEALCHGGOLD", "ident": 1029, "recog": 7, "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 8, "direction": "server_to_client", "actor": "B", "message": "SM_DEALCHGGOLD_OK", "ident": 684, "recog": 7, "param": "Loword(B.Gold)", "tag": "Hiword(B.Gold)", "series": 0, "body": ""},
+        {"seq": 9, "direction": "server_to_client", "actor": "A", "message": "SM_DEALREMOTECHGGOLD", "ident": 686, "recog": 7, "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 10, "direction": "client_to_server", "actor": "A", "message": "CM_DEALEND", "ident": 1030, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 11, "direction": "client_to_server", "actor": "B", "message": "CM_DEALEND", "ident": 1030, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 12, "direction": "server_to_client", "actor": "B", "message": "SM_ADDITEM", "ident": 200, "body": "TClientItem(Ruby,MakeIndex=1001)"},
+        {"seq": 13, "direction": "server_to_client", "actor": "A", "message": "SM_GOLDCHANGED", "ident": 653, "recog": "A.Gold"},
+        {"seq": 14, "direction": "server_to_client", "actor": "B", "message": "SM_DEALSUCCESS", "ident": 687, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 15, "direction": "server_to_client", "actor": "A", "message": "SM_DEALSUCCESS", "ident": 687, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""}
+      ]
+    },
+    {
+      "name": "try_fail_when_not_mutual_front",
+      "trace": [
+        {"seq": 1, "direction": "client_to_server", "actor": "A", "message": "CM_DEALTRY", "ident": 1025, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": "HeroB"},
+        {"seq": 2, "direction": "server_to_client", "actor": "A", "message": "SM_DEALTRY_FAIL", "ident": 674, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""}
+      ]
+    },
+    {
+      "name": "add_item_success",
+      "trace": [
+        {"seq": 1, "direction": "client_to_server", "actor": "A", "message": "CM_DEALADDITEM", "ident": 1026, "recog": 1001, "param": 0, "tag": 0, "series": 0, "body": "Ruby"},
+        {"seq": 2, "direction": "server_to_client", "actor": "A", "message": "SM_DEALADDITEM_OK", "ident": 675, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 3, "direction": "server_to_client", "actor": "B", "message": "SM_DEALREMOTEADDITEM", "ident": 682, "recog": "actor_pointer_A", "param": 0, "tag": 0, "series": 1, "body": "TClientItem(Ruby,MakeIndex=1001)"}
+      ]
+    },
+    {
+      "name": "change_gold_success",
+      "trace": [
+        {"seq": 1, "direction": "client_to_server", "actor": "A", "message": "CM_DEALCHGGOLD", "ident": 1029, "recog": 15, "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 2, "direction": "server_to_client", "actor": "A", "message": "SM_DEALCHGGOLD_OK", "ident": 684, "recog": 15, "param": "Loword(A.Gold)", "tag": "Hiword(A.Gold)", "series": 0, "body": ""},
+        {"seq": 3, "direction": "server_to_client", "actor": "B", "message": "SM_DEALREMOTECHGGOLD", "ident": 686, "recog": 15, "param": 0, "tag": 0, "series": 0, "body": ""}
+      ]
+    },
+    {
+      "name": "early_confirm_cancels",
+      "preconditions": [
+        "Either DealItemChangeTime is less than 1000 ms old"
+      ],
+      "trace": [
+        {"seq": 1, "direction": "client_to_server", "actor": "A", "message": "CM_DEALEND", "ident": 1030, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 2, "direction": "server_to_client", "actor": "A", "message": "SM_DEALCANCEL", "ident": 681, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 3, "direction": "server_to_client", "actor": "B", "message": "SM_DEALCANCEL", "ident": 681, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""}
+      ]
+    },
+    {
+      "name": "explicit_cancel",
+      "trace": [
+        {"seq": 1, "direction": "client_to_server", "actor": "A", "message": "CM_DEALCANCEL", "ident": 1028, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 2, "direction": "server_to_client", "actor": "A", "message": "SM_DEALCANCEL", "ident": 681, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 3, "direction": "server_to_client", "actor": "B", "message": "SM_DEALCANCEL", "ident": 681, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""}
+      ]
+    }
+  ],
+  "notes": [
+    "System messages are intentionally omitted from this trace until their exact encoded text and order are captured.",
+    "SM_DEALREMOTEADDITEM and SM_DEALREMOTEDELITEM use a Delphi object pointer in recog; C++ should use the legacy-compatible actor id already used for object recog fields.",
+    "The successful_item_and_gold_deal case omits B-to-A item movement because the minimal trace covers one item from A and gold from B. A symmetric item-plus-item case should be added when the packet encoder test is implemented."
+  ]
+}
