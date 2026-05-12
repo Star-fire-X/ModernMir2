@@ -33,17 +33,25 @@ mir2::LogicCommand make_menu_command(std::uint64_t session_id, std::uint64_t mer
   return command;
 }
 
+mir2::RuntimeDispatch route_due(mir2::LogicRuntime& runtime, std::uint64_t& now_ms,
+                                mir2::LogicCommand command) {
+  static_cast<void>(runtime.route_logic_command(std::move(command)));
+  now_ms += 251;
+  return runtime.tick(now_ms);
+}
+
 }  // namespace
 
 int main() {
   mir2::HostConfig config;
-  config.maps.push_back(mir2::MapConfig{"0", "MerchantMap", {}, 0, 0, 10, 10});
+  config.maps.push_back(mir2::MapConfig{"0", "MerchantMap", {}, 0, 0, 20, 20});
   config.items.push_back(mir2::ItemConfig{1, "Potion", 1, 40, 0, 1, 1, 1000, -1, 0, 0});
   config.npcs.push_back(
       mir2::NpcConfig{"merchant_1", "0", "Trader", 11, 10, "merchant_1.txt", "sell_repair", {1}});
 
   mir2::LogicRuntime runtime(config);
   runtime.initialize();
+  std::uint64_t now_ms = 1000;
 
   mir2::CharacterRecord hero;
   hero.account_id = "guest";
@@ -63,18 +71,18 @@ int main() {
   enter.character = hero;
   static_cast<void>(runtime.route_logic_command(enter));
 
-  const auto login_dispatch = runtime.tick();
+  const auto login_dispatch = runtime.tick(now_ms);
   if (!find_packet(login_dispatch, mir2::kSmNewMap).has_value()) {
     return 1;
   }
+  now_ms += 251;
+  static_cast<void>(runtime.tick(now_ms));
 
   mir2::LogicCommand click_npc;
   click_npc.kind = mir2::LogicCommandKind::click_npc;
   click_npc.session_id = 10;
   click_npc.target_actor_id = 1;
-  static_cast<void>(runtime.route_logic_command(click_npc));
-
-  const auto dialog_dispatch = runtime.tick();
+  const auto dialog_dispatch = route_due(runtime, now_ms, std::move(click_npc));
   const auto merchant_say = find_packet(dialog_dispatch, mir2::kSmMerchantSay);
   if (!merchant_say.has_value()) {
     return 1;
@@ -87,26 +95,22 @@ int main() {
     return 1;
   }
 
-  static_cast<void>(runtime.route_logic_command(make_menu_command(10, 1, "@buy")));
-  const auto buy_dispatch = runtime.tick();
+  const auto buy_dispatch = route_due(runtime, now_ms, make_menu_command(10, 1, "@buy"));
   if (!find_packet(buy_dispatch, mir2::kSmSendGoodsList).has_value()) {
     return 1;
   }
 
-  static_cast<void>(runtime.route_logic_command(make_menu_command(10, 1, "@repair")));
-  const auto repair_dispatch = runtime.tick();
+  const auto repair_dispatch = route_due(runtime, now_ms, make_menu_command(10, 1, "@repair"));
   if (!find_packet(repair_dispatch, mir2::kSmSendUserRepair).has_value()) {
     return 1;
   }
 
-  static_cast<void>(runtime.route_logic_command(make_menu_command(10, 1, "@main")));
-  const auto main_dispatch = runtime.tick();
+  const auto main_dispatch = route_due(runtime, now_ms, make_menu_command(10, 1, "@main"));
   if (!find_packet(main_dispatch, mir2::kSmMerchantSay).has_value()) {
     return 1;
   }
 
-  static_cast<void>(runtime.route_logic_command(make_menu_command(10, 1, "@exit")));
-  const auto close_dispatch = runtime.tick();
+  const auto close_dispatch = route_due(runtime, now_ms, make_menu_command(10, 1, "@exit"));
   if (!find_packet(close_dispatch, mir2::kSmMerchantDlgClose).has_value()) {
     return 1;
   }

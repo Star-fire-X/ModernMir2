@@ -42,6 +42,13 @@ mir2::LogicCommand make_menu_command(std::uint64_t session_id, std::uint64_t npc
   return command;
 }
 
+mir2::RuntimeDispatch route_due(mir2::LogicRuntime& runtime, std::uint64_t& now_ms,
+                                mir2::LogicCommand command) {
+  static_cast<void>(runtime.route_logic_command(std::move(command)));
+  now_ms += 251;
+  return runtime.tick(now_ms);
+}
+
 }  // namespace
 
 int main() {
@@ -70,8 +77,8 @@ int main() {
   write_file(root / "maps" / "0.toml",
              "id = \"0\"\n"
              "title = \"NpcMap\"\n"
-             "width = 0\n"
-             "height = 0\n"
+             "width = 20\n"
+             "height = 20\n"
              "home_x = 10\n"
              "home_y = 10\n");
   write_file(root / "items" / "default_items.toml", "items = []\n");
@@ -110,6 +117,7 @@ int main() {
   auto config = loader.load(root);
   mir2::LogicRuntime runtime(std::move(config));
   runtime.initialize();
+  std::uint64_t now_ms = 1000;
 
   mir2::CharacterRecord hero;
   hero.account_id = "guest";
@@ -129,18 +137,19 @@ int main() {
   enter.character = hero;
   static_cast<void>(runtime.route_logic_command(enter));
 
-  const auto login_dispatch = runtime.tick();
+  const auto login_dispatch = runtime.tick(now_ms);
   if (!find_packet(login_dispatch, mir2::kSmNewMap).has_value()) {
     std::filesystem::remove_all(root, ec);
     return 1;
   }
+  now_ms += 251;
+  static_cast<void>(runtime.tick(now_ms));
 
   mir2::LogicCommand click_npc;
   click_npc.kind = mir2::LogicCommandKind::click_npc;
   click_npc.session_id = 12;
   click_npc.target_actor_id = 1;
-  static_cast<void>(runtime.route_logic_command(click_npc));
-  const auto main_dispatch = runtime.tick();
+  const auto main_dispatch = route_due(runtime, now_ms, std::move(click_npc));
   const auto main_packet = find_packet(main_dispatch, mir2::kSmMerchantSay);
   if (!main_packet.has_value()) {
     std::filesystem::remove_all(root, ec);
@@ -153,8 +162,7 @@ int main() {
     return 1;
   }
 
-  static_cast<void>(runtime.route_logic_command(make_menu_command(12, 1, "@about")));
-  const auto about_dispatch = runtime.tick();
+  const auto about_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@about"));
   const auto about_packet = find_packet(about_dispatch, mir2::kSmMerchantSay);
   if (!about_packet.has_value()) {
     std::filesystem::remove_all(root, ec);
@@ -166,8 +174,7 @@ int main() {
     return 1;
   }
 
-  static_cast<void>(runtime.route_logic_command(make_menu_command(12, 1, "@call")));
-  const auto call_dispatch = runtime.tick();
+  const auto call_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@call"));
   const auto call_packet = find_packet(call_dispatch, mir2::kSmMerchantSay);
   if (!call_packet.has_value()) {
     std::filesystem::remove_all(root, ec);
@@ -179,8 +186,7 @@ int main() {
     return 1;
   }
 
-  static_cast<void>(runtime.route_logic_command(make_menu_command(12, 1, "@done")));
-  const auto done_dispatch = runtime.tick();
+  const auto done_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@done"));
   const auto done_packet = find_packet(done_dispatch, mir2::kSmMerchantSay);
   if (!done_packet.has_value()) {
     std::filesystem::remove_all(root, ec);
@@ -192,8 +198,7 @@ int main() {
     return 1;
   }
 
-  static_cast<void>(runtime.route_logic_command(make_menu_command(12, 1, "@exit")));
-  const auto close_dispatch = runtime.tick();
+  const auto close_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@exit"));
   if (!find_packet(close_dispatch, mir2::kSmMerchantDlgClose).has_value()) {
     std::filesystem::remove_all(root, ec);
     return 1;
