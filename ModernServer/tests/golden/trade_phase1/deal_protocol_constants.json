@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "description": "Delphi player deal protocol constants from Source/Common/Grobal2.pas.",
+  "client_messages": {
+    "CM_DEALTRY": 1025,
+    "CM_DEALADDITEM": 1026,
+    "CM_DEALDELITEM": 1027,
+    "CM_DEALCANCEL": 1028,
+    "CM_DEALCHGGOLD": 1029,
+    "CM_DEALEND": 1030
+  },
+  "server_messages": {
+    "SM_DEALMENU": 673,
+    "SM_DEALTRY_FAIL": 674,
+    "SM_DEALADDITEM_OK": 675,
+    "SM_DEALADDITEM_FAIL": 676,
+    "SM_DEALDELITEM_OK": 677,
+    "SM_DEALDELITEM_FAIL": 678,
+    "SM_DEALCANCEL": 681,
+    "SM_DEALREMOTEADDITEM": 682,
+    "SM_DEALREMOTEDELITEM": 683,
+    "SM_DEALCHGGOLD_OK": 684,
+    "SM_DEALCHGGOLD_FAIL": 685,
+    "SM_DEALREMOTECHGGOLD": 686,
+    "SM_DEALSUCCESS": 687
+  },
+  "limits": {
+    "MAXDEALITEM": 10,
+    "stable_window_ms": 1000
+  }
+}
