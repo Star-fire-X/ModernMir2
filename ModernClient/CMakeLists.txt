@@ -77,6 +77,9 @@ add_modern_client_header_smoke(modern_client_text_encoding_smoke tests/text_enco
 add_modern_client_header_smoke(modern_client_item_pending_smoke tests/item_pending_smoke.cpp)
 add_modern_client_header_smoke(modern_client_character_select_smoke tests/character_select_smoke.cpp)
 add_modern_client_core_smoke(modern_client_movement_smoke tests/movement_smoke.cpp)
+add_modern_client_header_smoke(modern_client_movement_action_gate_smoke tests/movement_action_gate_smoke.cpp)
+add_modern_client_header_smoke(modern_client_legacy_move_decision_smoke tests/legacy_move_decision_smoke.cpp)
+add_modern_client_header_smoke(modern_client_legacy_attack_timing_smoke tests/legacy_attack_timing_smoke.cpp)
 add_modern_client_core_smoke(modern_client_legacy_animation_smoke tests/legacy_animation_smoke.cpp)
 add_modern_client_core_smoke(modern_client_map_render_alignment_smoke tests/map_render_alignment_smoke.cpp)
 add_modern_client_core_smoke(modern_client_world_render_smoke tests/world_render_smoke.cpp)
@@ -106,6 +109,9 @@ add_custom_target(modern_client_ci_phase2_fast
     modern_client_flow_smoke
     modern_client_text_encoding_smoke
     modern_client_movement_smoke
+    modern_client_movement_action_gate_smoke
+    modern_client_legacy_move_decision_smoke
+    modern_client_legacy_attack_timing_smoke
     modern_client_item_pending_smoke
     modern_client_frame_order_smoke
     modern_client_ui_capture_process_order_smoke

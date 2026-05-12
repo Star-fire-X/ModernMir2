@@ -386,6 +386,7 @@ class LegacyActorAnimation {
   /// 获取当前角色的渲染姿态（精灵帧索引、坐标偏移等）
   [[nodiscard]] std::optional<ActorRenderPose> pose_for(const ActorState& actor) const;
   [[nodiscard]] std::uint64_t actor_id() const { return actor_id_; }
+  [[nodiscard]] bool is_legacy_idle() const;
   [[nodiscard]] std::optional<std::uint64_t> spell_effect_ready_started_ms() const;
   [[nodiscard]] std::vector<LegacySpecialEffectEvent> drain_special_effect_events();
   void mark_spell_effect_spawned(std::uint64_t action_started_ms);
@@ -636,6 +637,7 @@ class AnimationManager {
 
   /// 获取指定角色的渲染姿态（用于渲染器绘制）
   [[nodiscard]] std::optional<ActorRenderPose> pose_for(std::uint64_t actor_id) const;
+  [[nodiscard]] bool is_actor_legacy_idle(std::uint64_t actor_id) const;
   /// 获取地图物件的动画帧索引
   [[nodiscard]] int map_object_frame(const MapCell& cell) const;
   /// 判断地图物件是否使用混合模式渲染

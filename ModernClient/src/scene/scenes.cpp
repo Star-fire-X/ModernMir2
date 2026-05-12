@@ -6161,9 +6161,8 @@ class WorldScene final : public Scene {
       return;
     }
 
-    if (world.action_locked && now_ms - world.action_lock_started_ms > 10000U) {
-      world.action_locked = false;
-    }
+    update_legacy_weight_slow(world);
+    server_accept_next_action(world, now_ms);
 
     const auto legacy_input = make_legacy_input(context, it->second, now_ms);
     world.focus_actor_id = focused_actor_at(context, legacy_input);
@@ -6696,6 +6695,13 @@ class WorldScene final : public Scene {
   }
 
   bool can_walk(ClientContext& context, const ActorState& self, int x, int y) const {
+    if (!map_can_move(context, x, y)) {
+      return false;
+    }
+    return !crash_man(context, self, x, y);
+  }
+
+  bool map_can_move(ClientContext& context, int x, int y) const {
     if (map_ != nullptr) {
       if (!map_->can_move(x, y)) {
         return false;
@@ -6704,16 +6710,19 @@ class WorldScene final : public Scene {
                !legacy::in_bounds(context.state->world.width, context.state->world.height, x, y)) {
       return false;
     }
+    return true;
+  }
 
+  bool crash_man(ClientContext& context, const ActorState& self, int x, int y) const {
     for (const auto& [actor_id, actor] : context.state->world.actors) {
       if (actor_id == self.actor_id || actor.dead) {
         continue;
       }
       if (actor.x == x && actor.y == y) {
-        return false;
+        return true;
       }
     }
-    return true;
+    return false;
   }
 
   bool can_send_move(ClientContext& context, const ActorState& self, int x, int y,
@@ -6758,7 +6767,7 @@ class WorldScene final : public Scene {
     }
   }
 
-  bool process_pending_move(ClientContext& context, std::uint64_t now_ms) const {
+  bool process_pending_move(ClientContext& context, std::uint64_t now_ms) {
     auto& world = context.state->world;
     if (world.legacy_target_x < 0 || world.legacy_chr_action == LegacyChrAction::none) {
       return false;
@@ -6767,56 +6776,100 @@ class WorldScene final : public Scene {
     if (self_it == world.actors.end()) {
       return false;
     }
-    if (!can_next_action(world, self_it->second, now_ms)) {
+    const auto animation_idle = self_actor_legacy_idle(world, now_ms);
+    if (!server_accept_next_action(world, now_ms) ||
+        !can_next_action(world, self_it->second, animation_idle, now_ms)) {
       return false;
     }
-    const auto running = world.legacy_chr_action == LegacyChrAction::run;
+    if (legacy_move_skip_due_to_slow(world)) {
+      return false;
+    }
     const auto sent = send_move(context, self_it->second, world.legacy_target_x,
-                                world.legacy_target_y, running);
+                                world.legacy_target_y, world.legacy_chr_action, now_ms);
     world.legacy_target_x = -1;
     world.legacy_target_y = -1;
     world.legacy_chr_action = LegacyChrAction::none;
     if (sent) {
       world.last_move_ms = now_ms;
-      if (running) {
-        ++world.run_ready_count;
-      }
     }
     return sent;
   }
 
   bool send_move(ClientContext& context, const ActorState& self, int x, int y,
-                 bool running) const {
-    const auto [next_x, next_y] = step_toward(self, x, y, running);
-    if (!can_send_move(context, self, next_x, next_y, running)) {
-      if (running) {
-        const auto [walk_x, walk_y] = step_toward(self, x, y, false);
-        if (!can_send_move(context, self, walk_x, walk_y, false)) {
-          return false;
+                 LegacyChrAction action_kind, std::uint64_t now_ms) const {
+    auto& world = context.state->world;
+    const auto width = map_ != nullptr ? map_->width : world.width;
+    const auto height = map_ != nullptr ? map_->height : world.height;
+    auto desired = action_kind;
+    if (desired == LegacyChrAction::run) {
+      if (world.run_ready_count < 1) {
+        ++world.run_ready_count;
+        desired = LegacyChrAction::walk;
+      } else {
+        const auto run_target = legacy::requested_run_target(width, height, self.x, self.y, x, y);
+        const auto distance = std::max(std::abs(x - self.x), std::abs(y - self.y));
+        if (!run_target.has_value() || distance < 2 ||
+            !can_send_move(context, self, run_target->x, run_target->y, true)) {
+          desired = LegacyChrAction::walk;
         }
-        client_v1::ActionIntent action;
-        action.kind = client_v1::WorldActionKind::walk;
-        action.x = walk_x;
-        action.y = walk_y;
-        action.dir = direction_between(self.x, self.y, walk_x, walk_y, self.dir);
-        context.app->request_action(action);
-        return true;
       }
-      return false;
     }
-    client_v1::ActionIntent action;
-    action.kind = running ? client_v1::WorldActionKind::run : client_v1::WorldActionKind::walk;
-    action.x = next_x;
-    action.y = next_y;
-    action.dir = direction_between(self.x, self.y, next_x, next_y, self.dir);
-    context.app->request_action(action);
-    return true;
+
+    if (desired == LegacyChrAction::run) {
+      const auto target = legacy::requested_run_target(width, height, self.x, self.y, x, y);
+      if (!target.has_value()) {
+        return false;
+      }
+      if (!is_unlock_action(world, static_cast<std::uint16_t>(3000U + legacy::kSmRun),
+                            target->dir, now_ms)) {
+        return false;
+      }
+      client_v1::ActionIntent action;
+      action.kind = client_v1::WorldActionKind::run;
+      action.x = target->x;
+      action.y = target->y;
+      action.dir = target->dir;
+      context.app->request_action(action);
+      return true;
+    }
+
+    const auto decision = legacy::resolve_legacy_walk(
+        width, height, self.x, self.y, x, y, self.dir,
+        [this, &context](const int mx, const int my) { return map_can_move(context, mx, my); },
+        [this, &context, &self](const int mx, const int my) {
+          return crash_man(context, self, mx, my);
+        });
+    if (decision.kind == legacy::LegacyMoveDecisionKind::walk) {
+      if (!is_unlock_action(world, static_cast<std::uint16_t>(3000U + legacy::kSmWalk),
+                            decision.dir, now_ms)) {
+        return false;
+      }
+      client_v1::ActionIntent action;
+      action.kind = client_v1::WorldActionKind::walk;
+      action.x = decision.x;
+      action.y = decision.y;
+      action.dir = decision.dir;
+      context.app->request_action(action);
+      return true;
+    }
+    if (decision.kind == legacy::LegacyMoveDecisionKind::turn) {
+      client_v1::ActionIntent action;
+      action.kind = client_v1::WorldActionKind::turn;
+      action.x = self.x;
+      action.y = self.y;
+      action.dir = decision.dir;
+      context.app->request_action(action);
+      return true;
+    }
+    return false;
   }
 
   bool try_turn(ClientContext& context, const ActorState& self, int x, int y,
-                std::uint64_t now_ms) const {
+                std::uint64_t now_ms) {
     auto& world = context.state->world;
-    if (!can_next_action(world, self, now_ms)) {
+    const auto animation_idle = self_actor_legacy_idle(world, now_ms);
+    if (!server_accept_next_action(world, now_ms) ||
+        !can_next_action(world, self, animation_idle, now_ms)) {
       return false;
     }
     client_v1::ActionIntent action;
@@ -6868,15 +6921,20 @@ class WorldScene final : public Scene {
     return false;
   }
 
-  bool try_attack_ground(ClientContext& context, int x, int y, std::uint64_t now_ms) const {
+  bool try_attack_ground(ClientContext& context, int x, int y, std::uint64_t now_ms) {
     auto& world = context.state->world;
     auto self_it = world.actors.find(world.self_actor_id);
-    if (self_it == world.actors.end() || !can_next_action(world, self_it->second, now_ms) ||
+    const auto animation_idle = self_actor_legacy_idle(world, now_ms);
+    if (self_it == world.actors.end() || !server_accept_next_action(world, now_ms) ||
+        !can_next_action(world, self_it->second, animation_idle, now_ms) ||
         !can_next_hit(world, self_it->second, now_ms)) {
       return false;
     }
     const auto dir = direction_between(self_it->second.x, self_it->second.y, x, y,
                                        self_it->second.dir);
+    if (!is_unlock_action(world, legacy::kCmHit, dir, now_ms)) {
+      return false;
+    }
     send_attack(context, self_it->second.x, self_it->second.y, dir, 0, 0);
     world.latest_hit_ms = now_ms;
     world.last_attack_ms = now_ms;
@@ -6910,11 +6968,17 @@ class WorldScene final : public Scene {
       return process_pending_move(context, now_ms);
     }
 
-    if (!can_next_action(world, self, now_ms) || !can_next_hit(world, self, now_ms)) {
+    const auto animation_idle = self_actor_legacy_idle(world, now_ms);
+    if (!server_accept_next_action(world, now_ms) ||
+        !can_next_action(world, self, animation_idle, now_ms) ||
+        !can_next_hit(world, self, now_ms)) {
       world.target_actor_id = target_actor_id;
       return false;
     }
 
+    if (!is_unlock_action(world, legacy::kCmHit, dir, now_ms)) {
+      return false;
+    }
     send_attack(context, self.x, self.y, dir, target_actor_id, 0);
     world.latest_hit_ms = now_ms;
     world.last_attack_ms = now_ms;
@@ -6962,7 +7026,8 @@ class WorldScene final : public Scene {
     if (self_it->second.mp == 0) {
       return false;
     }
-    if (!can_next_action(world, self_it->second, input.tick)) {
+    const auto animation_idle = self_actor_legacy_idle(world, input.tick);
+    if (!can_next_action(world, self_it->second, animation_idle, input.tick)) {
       return false;
     }
     send_spell(context, self_it->second, input.map_x, input.map_y,
@@ -6981,6 +7046,11 @@ class WorldScene final : public Scene {
     action.target_actor_id = target_actor_id;
     action.legacy_ident = legacy_ident;
     context.app->request_action(action);
+  }
+
+  bool self_actor_legacy_idle(const WorldViewState& world, const std::uint64_t now_ms) {
+    animation_.sync_world(world, now_ms);
+    return animation_.is_actor_legacy_idle(world.self_actor_id);
   }
 
   static void send_spell(ClientContext& context, const ActorState& self, int x, int y,
