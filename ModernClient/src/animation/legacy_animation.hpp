@@ -85,6 +85,75 @@ enum class LegacyMonsterAction : std::uint8_t {
   death,     ///< 死亡后骨架状态（永久静止或逐渐消失）
 };
 
+/// Delphi 客户端特殊 Actor 子类画像。
+/// 这些值冻结 TPlayScene.NewActor 的 race → class 分派，不直接改变当前渲染逻辑。
+enum class LegacySpecialActorProfile : std::uint8_t {
+  base_actor,
+  human_actor,
+  soccer_ball,
+  killing_herb,
+  bee_queen,
+  centipede_king,
+  big_heart,
+  spider_house,
+  skeleton_oma,
+  dual_axe_oma,
+  cat_mon,
+  archer_mon,
+  scorpion_mon,
+  hu_su_abi,
+  zombi_dig_out,
+  zombi_zilkin,
+  white_skeleton,
+  gas_ku_de_gi,
+  fire_cow_face_mon,
+  cow_face_king,
+  zombi_lighting,
+  superior_guard,
+  explosion_spider,
+  flying_spider,
+  sculpture_mon,
+  sculpture_king,
+  small_elf_monster,
+  warrior_elf_monster,
+  electronic_scolpion,
+  boss_pig,
+  king_of_sculpure_king,
+  skeleton_king,
+  samurai,
+  skeleton_soldier,
+  skeleton_archer,
+  banya_guard,
+  npc_actor,
+  castle_door,
+  wall_structure,
+};
+
+struct LegacySpecialActorProfileInfo {
+  LegacySpecialActorProfile profile{LegacySpecialActorProfile::base_actor};
+  const char* delphi_class_name{"TActor"};
+  bool direction_independent_stand{false};
+  bool direction_independent_attack{false};
+  bool direction_independent_death{false};
+  bool supports_dig_up{false};
+  bool supports_dig_down{false};
+  bool supports_fly_axe{false};
+  bool supports_lighting{false};
+  bool supports_alive{false};
+  bool supports_skeleton{false};
+  bool supports_now_death{false};
+  bool has_body_overlay{false};
+  bool has_death_effect{false};
+  bool has_projectile_trigger{false};
+  bool has_structure_animation{false};
+  int effect_base{0};
+  int alternate_effect_base{0};
+  int death_effect_base{0};
+  int projectile_base{0};
+  int alternate_projectile_base{0};
+  int projectile_trigger_frame{0};
+};
+
 /// 旧版怪物动作表：每个怪物 race 对应一个包含 7 种动作的数组
 /// 怪物的动作表由其 race（种族）和 appearance（外观编号）决定
 using LegacyMonsterActionTable =
@@ -117,6 +186,12 @@ struct LegacyShiftResult {
   int shift_y{0};  ///< Y 方向像素偏移
 };
 
+struct ActorOverlaySprite {
+  ArchiveId archive{ArchiveId::effect};
+  int frame_index{-1};
+  bool blend{true};
+};
+
 /// 角色渲染姿态：由 LegacyActorAnimation 计算得出的当前渲染参数
 /// 包含精灵帧索引、坐标偏移、透明度等信息
 struct ActorRenderPose {
@@ -136,6 +211,8 @@ struct ActorRenderPose {
   std::uint8_t alpha{255};        ///< 透明度（0-255，用于隐身/渐隐效果）
   std::uint8_t dir{0};            ///< 面向方向（0-7）
   int current_frame{0};           ///< 当前帧序号（动作内的帧序号，非绝对索引）
+  std::array<ActorOverlaySprite, 2> overlays{};
+  std::uint8_t overlay_count{0};
 };
 
 /// 魔法音效事件：动画/特效系统只产生事件，不直接依赖 AudioService
@@ -170,6 +247,33 @@ enum class LegacyMagicType : std::uint8_t {
   fire_thunder,       ///< 火焰雷电（组合效果）
 };
 
+struct LegacySpecialEffectEvent {
+  enum class Kind : std::uint8_t {
+    projectile,
+    magic_projectile,
+  };
+
+  Kind kind{Kind::projectile};
+  std::uint64_t actor_id{0};
+  std::uint64_t action_started_ms{0};
+  std::uint64_t target_actor_id{0};
+  int source_x{0};
+  int source_y{0};
+  int target_x{0};
+  int target_y{0};
+  ArchiveId archive{ArchiveId::effect};
+  int effect_base{0};
+  int magic_id{0};
+  int effect{0};
+  LegacyMagicType magic_type{LegacyMagicType::fly_axe};
+  int frame_count{0};
+  int explosion_frame_count{0};
+  int ready_distance{15};
+  int fly_frame_offset{0};
+  int fly_frame_stride{10};
+  std::uint64_t next_frame_ms{30};
+};
+
 /// 旧版魔法效果基础信息：精灵归档和帧基址
 struct LegacyMagicEffectBase {
   ArchiveId archive{ArchiveId::magic};  ///< 魔法效果所在精灵归档
@@ -196,6 +300,11 @@ struct LegacyMagicEffectBase {
 [[nodiscard]] const LegacyActionInfo& legacy_human_action_info(LegacyHumanAction action);
 /// 获取怪物指定 race/appearance 的动作表
 [[nodiscard]] const LegacyMonsterActionTable* legacy_monster_action_table(int race, int appearance);
+/// 获取 Delphi 特殊 Actor 子类画像
+[[nodiscard]] LegacySpecialActorProfile legacy_special_actor_profile_for(int race, int appearance);
+/// 获取特殊 Actor 子类的行为事实
+[[nodiscard]] LegacySpecialActorProfileInfo legacy_special_actor_profile_info(
+    LegacySpecialActorProfile profile);
 /// 计算动作帧在精灵表中的绝对索引
 /// @param action 动作信息
 /// @param dir 方向（0-7）
@@ -278,6 +387,7 @@ class LegacyActorAnimation {
   [[nodiscard]] std::optional<ActorRenderPose> pose_for(const ActorState& actor) const;
   [[nodiscard]] std::uint64_t actor_id() const { return actor_id_; }
   [[nodiscard]] std::optional<std::uint64_t> spell_effect_ready_started_ms() const;
+  [[nodiscard]] std::vector<LegacySpecialEffectEvent> drain_special_effect_events();
   void mark_spell_effect_spawned(std::uint64_t action_started_ms);
 
  private:
@@ -288,11 +398,20 @@ class LegacyActorAnimation {
     action  ///< 动作（hit/spell/struck/die 等，单次播放）
   };
 
+  struct ResolvedAction {
+    LegacyActionInfo action{};
+    bool direction_independent{false};
+    bool reverse{false};
+    bool lock_single_frame{false};
+  };
+
   void initialize(const ActorState& actor, std::uint64_t now_ms);
   void begin_queued_or_idle(const ActorState& fallback_actor, std::uint64_t now_ms);
   void begin_move(const ActorState& actor, std::uint64_t now_ms);
   void begin_action(const ActorState& actor, std::uint64_t now_ms);
   void begin_motion(const ActorState& actor, const LegacyActionInfo& action,
+                    MotionKind kind, int move_step, std::uint64_t now_ms);
+  void begin_motion(const ActorState& actor, const ResolvedAction& resolved,
                     MotionKind kind, int move_step, std::uint64_t now_ms);
   void queue_or_begin(const ActorState& actor, bool is_move, std::uint64_t now_ms);
   void finish_motion(const ActorState& actor, std::uint64_t now_ms);
@@ -305,6 +424,9 @@ class LegacyActorAnimation {
   [[nodiscard]] const LegacyActionInfo& death_action_for(const ActorState& actor) const;
   [[nodiscard]] LegacyActionInfo action_info_for(const ActorState& actor,
                                                  client_v1::ActorActionKind kind) const;
+  [[nodiscard]] ResolvedAction resolved_action_for(const ActorState& actor,
+                                                   client_v1::ActorActionKind kind) const;
+  void maybe_emit_special_frame_event(const ActorState& actor);
   [[nodiscard]] std::uint8_t frame_dir_for(const ActorState& actor) const;
   [[nodiscard]] int default_frame_for(const ActorState& actor) const;
 
@@ -327,6 +449,8 @@ class LegacyActorAnimation {
   int default_frame_count_{1};    ///< 待机动画总帧数
   int move_step_{0};     ///< 移动步数（用于位移插值计算）
   bool move_backwards_{false};
+  bool action_reverse_{false};
+  bool action_lock_single_frame_{false};
   bool rush_kung_move_{false};
   std::uint8_t move_shift_dir_{0};
   int move_return_x_{0};
@@ -348,6 +472,9 @@ class LegacyActorAnimation {
   std::uint64_t wait_magic_request_ms_{0};
   std::optional<std::uint64_t> spell_effect_ready_started_ms_{};
   std::uint64_t spell_effect_spawned_started_ms_{0};
+  std::vector<LegacySpecialEffectEvent> special_effect_events_{};
+  std::uint64_t last_special_event_action_started_ms_{0};
+  int last_special_event_local_frame_{-1};
 
   int xx_{0};             ///< 当前 X 坐标（内部副本，用于检测坐标变化）
   int yy_{0};             ///< 当前 Y 坐标
@@ -410,6 +537,9 @@ class LegacyEffectManager {
     std::uint8_t dir16{0};    ///< 16 方向编号（飞行弹道的方向）
     std::uint8_t old_dir16{0};
     int light{0};             ///< 光照值（影响周围环境的亮度）
+    int ready_distance{15};
+    int fly_frame_offset{10};
+    int fly_frame_stride{10};
 
     /// 计算当前帧在精灵表中的实际绝对索引
     [[nodiscard]] int draw_frame_index() const;
@@ -433,6 +563,11 @@ class LegacyEffectManager {
     bool repetition{true};     ///< 是否循环
     std::uint64_t now_ms{0};   ///< 当前时间
     std::uint64_t next_frame_ms{50};  ///< 帧间隔（毫秒）
+    int frame_count{0};
+    int explosion_frame_count{0};
+    int ready_distance{15};
+    int fly_frame_offset{10};
+    int fly_frame_stride{10};
   };
 
   void clear();
@@ -513,12 +648,17 @@ class AnimationManager {
   void spawn_spell_effects(const WorldViewState& world, std::uint64_t now_ms);
   void spawn_spell_effect_for_actor(const WorldViewState& world, const ActorState& actor,
                                     std::uint64_t actor_id, std::uint64_t now_ms);
+  void spawn_special_effect_events(const WorldViewState& world, std::uint64_t now_ms);
+  void spawn_special_effect_event(const WorldViewState& world,
+                                  const LegacySpecialEffectEvent& event,
+                                  std::uint64_t now_ms);
 
   LegacyAnimationClock clock_{};  ///< 动画时钟（驱动所有帧推进）
   LegacyEffectManager effects_{}; ///< 特效管理器
   std::unordered_map<std::uint64_t, ActorState> actor_snapshots_{};  ///< 角色快照缓存（用于 pose_for 查询）
   std::unordered_map<std::uint64_t, LegacyActorAnimation> actors_{}; ///< 各角色的动画状态机
   std::unordered_map<std::uint64_t, std::uint64_t> spell_effect_started_ms_{};  ///< 上次生成法术特效的时间（防重复生成）
+  std::unordered_map<std::uint64_t, std::uint64_t> special_effect_started_ms_{};
   std::vector<LegacyMagicAudioCue> magic_audio_cues_{};
 };
 

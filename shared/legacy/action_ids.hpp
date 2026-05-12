@@ -19,7 +19,14 @@ constexpr std::uint16_t kSmHeavyHit = 15;
 constexpr std::uint16_t kSmBigHit = 16;
 constexpr std::uint16_t kSmPowerHit = 18;
 constexpr std::uint16_t kSmLongHit = 19;
+constexpr std::uint16_t kSmDigUp = 20;
+constexpr std::uint16_t kSmDigDown = 21;
+constexpr std::uint16_t kSmFlyAxe = 22;
+constexpr std::uint16_t kSmLighting = 23;
 constexpr std::uint16_t kSmWideHit = 24;
+constexpr std::uint16_t kSmAlive = 27;
+constexpr std::uint16_t kSmSkeleton = 33;
+constexpr std::uint16_t kSmNowDeath = 34;
 constexpr std::uint16_t kSmCrossHit = 35;
 
 constexpr std::uint16_t kCmHit = 3014;
