@@ -65,6 +65,21 @@ mir2::LegacyPacket make_magic_fire_fail_packet(std::uint64_t session_id) {
       session_id, 0, 0, mir2::make_default_message(mir2::kSmMagicFireFail, 42, 0, 0, 0));
 }
 
+mir2::LegacyPacket make_actor_walk_packet(std::uint64_t session_id) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmWalk, 42, 12, 13, 2));
+}
+
+mir2::LegacyPacket make_actor_struck_packet(std::uint64_t session_id) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmStruck, 42, 5, 12, 7));
+}
+
+mir2::LegacyPacket make_actor_death_packet(std::uint64_t session_id) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmDeath, 42, 12, 13, 2));
+}
+
 mir2::LegacyPacket make_actor_hide_packet(std::uint64_t session_id, std::uint16_t ident) {
   return mir2::make_legacy_game_packet(
       session_id, 0, 0, mir2::make_default_message(ident, 77, 12, 13, 0));
@@ -138,6 +153,7 @@ int main() {
   assert(magic_fire->y == 13);
   assert(magic_fire->effect_type == 7);
   assert(magic_fire->effect == 32);
+  assert(magic_fire->legacy_ident == mir2::kSmMagicFire);
 
   messages.clear();
   service.translate_legacy_packet_for_test(kSessionId, make_magic_fire_fail_packet(kSessionId),
@@ -146,6 +162,36 @@ int main() {
   const auto* magic_fail = std::get_if<mir2::client_v1::ActorMagicFireFail>(&messages.front());
   assert(magic_fail != nullptr);
   assert(magic_fail->actor_id == 42);
+  assert(magic_fail->legacy_ident == mir2::kSmMagicFireFail);
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_actor_walk_packet(kSessionId),
+                                           messages);
+  assert(messages.size() == 3);
+  assert(std::holds_alternative<mir2::client_v1::ActorUpsert>(messages[0]));
+  assert(std::holds_alternative<mir2::client_v1::ActorStateDelta>(messages[1]));
+  const auto* walk = std::get_if<mir2::client_v1::ActorAction>(&messages[2]);
+  assert(walk != nullptr);
+  assert(walk->legacy_ident == mir2::kSmWalk);
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_actor_struck_packet(kSessionId),
+                                           messages);
+  assert(messages.size() == 2);
+  const auto* vitals = std::get_if<mir2::client_v1::ActorVitals>(&messages[0]);
+  assert(vitals != nullptr);
+  assert(vitals->legacy_ident == mir2::kSmStruck);
+  const auto* struck = std::get_if<mir2::client_v1::ActorAction>(&messages[1]);
+  assert(struck != nullptr);
+  assert(struck->legacy_ident == mir2::kSmStruck);
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_actor_death_packet(kSessionId),
+                                           messages);
+  assert(messages.size() == 1);
+  const auto* death = std::get_if<mir2::client_v1::ActorDeath>(&messages.front());
+  assert(death != nullptr);
+  assert(death->legacy_ident == mir2::kSmDeath);
 
   messages.clear();
   service.translate_legacy_packet_for_test(
@@ -154,6 +200,7 @@ int main() {
   const auto* remove = std::get_if<mir2::client_v1::ActorRemove>(&messages.front());
   assert(remove != nullptr);
   assert(remove->actor_id == 77);
+  assert(remove->legacy_ident == mir2::kSmDisappear);
 
   messages.clear();
   service.translate_legacy_packet_for_test(
@@ -162,5 +209,6 @@ int main() {
   remove = std::get_if<mir2::client_v1::ActorRemove>(&messages.front());
   assert(remove != nullptr);
   assert(remove->actor_id == 77);
+  assert(remove->legacy_ident == mir2::kSmSpaceMoveHide2);
   return 0;
 }

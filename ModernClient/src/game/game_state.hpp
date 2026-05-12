@@ -49,6 +49,15 @@ inline std::uint64_t monotonic_ms() {
 
 }  // namespace detail
 
+namespace legacy_sm {
+
+constexpr std::uint16_t kTurn = 10;
+constexpr std::uint16_t kDeath = 32;
+constexpr std::uint16_t kNowDeath = 34;
+constexpr std::uint16_t kStruck = 31;
+
+}  // namespace legacy_sm
+
 /// 客户端配置，从 client.ini 加载
 /// 对应原传奇客户端的 Mir2.ini 配置文件
 struct ClientConfig {
@@ -124,6 +133,8 @@ struct ActorState {
   std::uint32_t saying_fore_color{0xFFFFFFFFU};
   std::uint32_t saying_back_color{0x00000000U};
   std::uint64_t saying_started_ms{0};   ///< 头顶说话开始时间，4 秒后隐藏
+  std::uint32_t name_color{0xFFFFFFFFU};
+  bool pending_remove{false};
 };
 
 /// 魔法快捷键状态
@@ -517,6 +528,7 @@ struct GameStateStore {
   void record_legacy_actor_event(ActorState& actor) {
     auto event = actor;
     event.legacy_pending_actions.clear();
+    event.pending_remove = false;
     event.legacy_event_sequence = ++legacy_actor_event_sequence;
     actor.legacy_pending_actions.push_back(event);
     if (actor.legacy_pending_actions.size() > 32U) {
@@ -602,6 +614,66 @@ struct GameStateStore {
     world.chat_board_top =
         std::clamp(world.chat_board_top, 0,
                    std::max(0, static_cast<int>(world.chat_lines.size()) - 1));
+  }
+
+  void erase_actor(const std::uint64_t actor_id) {
+    if (actor_id == 0 || actor_id == world.self_actor_id) {
+      return;
+    }
+    world.actors.erase(actor_id);
+    world.actor_draw_order.erase(std::remove(world.actor_draw_order.begin(),
+                                             world.actor_draw_order.end(),
+                                             actor_id),
+                                 world.actor_draw_order.end());
+    if (world.focus_actor_id == actor_id) {
+      world.focus_actor_id = 0;
+    }
+    if (world.target_actor_id == actor_id) {
+      world.target_actor_id = 0;
+    }
+    if (world.npc_dialog.merchant_id == actor_id) {
+      world.npc_dialog = NpcDialogState{};
+      world.merchant_shop = MerchantShopState{};
+      world.repair = RepairState{};
+      world.storage = StorageState{};
+    }
+    for (auto& entry : world.actors) {
+      auto& actor = entry.second;
+      if (actor.action_target_actor_id == actor_id) {
+        actor.action_target_actor_id = 0;
+      }
+    }
+  }
+
+  void prune_pending_actor_removals(const std::uint64_t now_ms) {
+    std::vector<std::uint64_t> removals;
+    for (const auto& [actor_id, actor] : world.actors) {
+      if (actor.pending_remove && !actor_action_animating(actor, now_ms)) {
+        removals.push_back(actor_id);
+      }
+    }
+    for (const auto actor_id : removals) {
+      erase_actor(actor_id);
+    }
+  }
+
+  void apply_actor_feature_changed(const std::uint64_t actor_id, const std::int32_t feature) {
+    auto& actor = world.actors[actor_id];
+    actor.actor_id = actor_id;
+    actor.feature = feature;
+  }
+
+  void apply_actor_status_changed(const std::uint64_t actor_id, const std::int32_t status) {
+    auto& actor = world.actors[actor_id];
+    actor.actor_id = actor_id;
+    actor.status = status;
+  }
+
+  void apply_actor_name_color_changed(const std::uint64_t actor_id,
+                                      const std::uint32_t name_color) {
+    auto& actor = world.actors[actor_id];
+    actor.actor_id = actor_id;
+    actor.name_color = name_color;
   }
 
   void close_npc_dialog() {
@@ -926,22 +998,10 @@ struct GameStateStore {
   /// 服务端通知某个角色的位置或朝向发生了变化
   void apply(const client_v1::ActorStateDelta& message) {
     auto& actor = world.actors[message.actor_id];
-    const auto previous_x = actor.x;
-    const auto previous_y = actor.y;
     actor.actor_id = message.actor_id;
     actor.x = message.x;
     actor.y = message.y;
     actor.dir = message.dir;
-    const auto distance =
-        std::max(std::abs(actor.x - previous_x), std::abs(actor.y - previous_y));
-    // 有位移时记录移动起始位置，用于渲染插值
-    if (distance > 0) {
-      actor.from_x = previous_x;
-      actor.from_y = previous_y;
-      actor.running = distance > 1;   // 单步 = 走，多步 = 跑
-      actor.move_started_ms = detail::monotonic_ms();
-      actor.move_duration_ms = actor.running ? 140U : 180U;
-    }
   }
 
   /// 应用角色新增/更新消息
@@ -974,29 +1034,17 @@ struct GameStateStore {
     if (message.actor_id == 0 || message.actor_id == world.self_actor_id) {
       return;
     }
-    world.actors.erase(message.actor_id);
-    world.actor_draw_order.erase(std::remove(world.actor_draw_order.begin(),
-                                             world.actor_draw_order.end(),
-                                             message.actor_id),
-                                 world.actor_draw_order.end());
-    if (world.focus_actor_id == message.actor_id) {
-      world.focus_actor_id = 0;
+    const auto now_ms = detail::monotonic_ms();
+    auto it = world.actors.find(message.actor_id);
+    if (it == world.actors.end()) {
+      return;
     }
-    if (world.target_actor_id == message.actor_id) {
-      world.target_actor_id = 0;
+    auto& actor = it->second;
+    if (actor.dead || actor_action_animating(actor, now_ms)) {
+      actor.pending_remove = true;
+      return;
     }
-    if (world.npc_dialog.merchant_id == message.actor_id) {
-      world.npc_dialog = NpcDialogState{};
-      world.merchant_shop = MerchantShopState{};
-      world.repair = RepairState{};
-      world.storage = StorageState{};
-    }
-    for (auto& entry : world.actors) {
-      auto& actor = entry.second;
-      if (actor.action_target_actor_id == message.actor_id) {
-        actor.action_target_actor_id = 0;
-      }
-    }
+    erase_actor(message.actor_id);
   }
 
   /// 应用角色动作消息
@@ -1066,6 +1114,9 @@ struct GameStateStore {
       actor.last_damage = message.value;
       actor.last_hitter_id = message.target_actor_id;
       actor.last_damage_magic = message.magic;
+      if (message.actor_id == world.self_actor_id) {
+        world.latest_struck_ms = actor.action_started_ms;
+      }
     }
   }
 
@@ -1080,6 +1131,7 @@ struct GameStateStore {
     actor.action_magic_effect_type =
         legacy_visual_effect_type(actor.magic_id, message.effect_type);
     actor.action_magic_failed = false;
+    record_legacy_actor_event(actor);
   }
 
   void apply(const client_v1::ActorMagicFireFail& message) {
@@ -1089,6 +1141,7 @@ struct GameStateStore {
     actor.action_magic_effect = 0;
     actor.action_magic_effect_type = -1;
     actor.action_magic_failed = true;
+    record_legacy_actor_event(actor);
   }
 
   /// 应用角色属性（血量/蓝量）更新消息
@@ -1127,15 +1180,6 @@ struct GameStateStore {
             static_cast<std::uint16_t>(std::clamp(message.max_mp, 0, 65535));
       }
     }
-    // 受到伤害时自动切换到受击动画
-    if (message.damage > 0) {
-      actor.current_action = client_v1::ActorActionKind::struck;
-      actor.action_started_ms = detail::monotonic_ms();
-      actor.action_duration_ms = action_duration_ms(actor.current_action, 0);
-      if (message.actor_id == world.self_actor_id) {
-        world.latest_struck_ms = actor.action_started_ms;
-      }
-    }
   }
 
   /// 应用角色死亡消息
@@ -1148,10 +1192,12 @@ struct GameStateStore {
     actor.dead = true;
     actor.skeleton = false;
     actor.hp = 0;
-    // 死亡时播放受击动画（倒地效果）
-    actor.current_action = client_v1::ActorActionKind::struck;
+    actor.current_action = client_v1::ActorActionKind::turn;
+    actor.legacy_action_ident =
+        message.legacy_ident != 0 ? message.legacy_ident : legacy_sm::kDeath;
     actor.action_started_ms = detail::monotonic_ms();
-    actor.action_duration_ms = 480;
+    actor.action_duration_ms = action_duration_ms(client_v1::ActorActionKind::turn, 0);
+    record_legacy_actor_event(actor);
   }
 
   /// 应用魔法列表消息

@@ -2243,11 +2243,12 @@ void ClientV1GameGatewayService::translate_legacy_packet(
           decoded->message.param,
           decoded->message.tag,
           static_cast<std::uint8_t>(decoded->message.series & 0xFFU),
-          static_cast<std::uint8_t>((decoded->message.series >> 8U) & 0xFFU)});
+          static_cast<std::uint8_t>((decoded->message.series >> 8U) & 0xFFU),
+          decoded->message.ident});
       break;
     }
     case kSmMagicFireFail: {
-      messages.push_back(client_v1::ActorMagicFireFail{actor_id});
+      messages.push_back(client_v1::ActorMagicFireFail{actor_id, decoded->message.ident});
       break;
     }
     case kSmStruck: {
@@ -2256,7 +2257,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       const auto magic = body.has_value() && body->ltag2 != 0;
       messages.push_back(client_v1::ActorVitals{
           actor_id, decoded->message.param, decoded->message.tag, -1, -1,
-          decoded->message.series, source, magic});
+          decoded->message.series, source, magic, decoded->message.ident});
       messages.push_back(client_v1::ActorAction{
           actor_id, client_v1::ActorActionKind::struck, 0, 0, 0, source,
           decoded->message.series, decoded->message.ident, 0, magic});
@@ -2266,7 +2267,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
     case kSmNowDeath:
       messages.push_back(client_v1::ActorDeath{
           actor_id, decoded->message.param, decoded->message.tag,
-          static_cast<std::uint8_t>(decoded->message.series)});
+          static_cast<std::uint8_t>(decoded->message.series), decoded->message.ident});
       if (decoded->message.ident == kSmNowDeath) {
         messages.push_back(client_v1::SysMessage{"You died.", 1});
       }
@@ -2274,7 +2275,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
     case kSmDisappear:
     case kSmSpaceMoveHide:
     case kSmSpaceMoveHide2:
-      messages.push_back(client_v1::ActorRemove{actor_id});
+      messages.push_back(client_v1::ActorRemove{actor_id, decoded->message.ident});
       break;
     case kSmAlive: {
       client_v1::ActorUpsert upsert;

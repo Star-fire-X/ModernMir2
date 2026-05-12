@@ -135,6 +135,7 @@ int main() {
   assert(self.current_action == ActorActionKind::turn);
 
   state.apply(ActorVitals{100, 10, 15, -1, -1, 3, 200, false});
+  state.apply(ActorAction{100, ActorActionKind::struck, 0, 0, 0, 200, 3, 31, 0, false, 0});
   assert(state.world.latest_struck_ms != 0);
   return 0;
 }

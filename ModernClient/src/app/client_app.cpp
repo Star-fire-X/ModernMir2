@@ -1752,6 +1752,7 @@ void ClientApp::handle_protocol_events() {
 //          -> 每分钟任务 -> 外挂检测 -> 心跳发送
 void ClientApp::run_timers(const float delta_seconds) {
   timer1_tick();  // 兼容 Delph Timer1，目前为空
+  state_.prune_pending_actor_removals(detail::monotonic_ms());
   run_repeating_timer(mouse_timer_, delta_seconds, [this] { mouse_timer_tick(); });
   run_one_shot_timer(wait_msg_timer_, delta_seconds);    // 网络等待超时提示
   run_one_shot_timer(sel_chr_wait_timer_, delta_seconds); // 选角等待超时提示

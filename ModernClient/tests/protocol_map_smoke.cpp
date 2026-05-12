@@ -260,6 +260,7 @@ void assert_p0_protocol_goldens() {
 
   payload.clear();
   append_u64(payload, 2000);
+  append_u16(payload, 0);
   assert_golden(ActorRemove{2000}, 316, 141, payload);
 
   payload.clear();
