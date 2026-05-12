@@ -2623,21 +2623,37 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       messages.push_back(self_ability_detail);
       break;
     }
+    case kSmDealCancel:
+    case kSmDealSuccess: {
+      bool was_visible = false;
+      {
+        std::scoped_lock lock(mutex_);
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end()) {
+          was_visible = it->second.trade_visible;
+          clear_trade_locked(it->second);
+        }
+      }
+      if (was_visible) {
+        messages.push_back(client_v1::TradeState{});
+      }
+      break;
+    }
     case kSmHear: {
       const auto text = legacy_decode_string(decoded->body);
       messages.push_back(client_v1::SysMessage{text, 0});
       if (text.find("Trade cancelled.") != std::string::npos ||
           text.find("Trade completed.") != std::string::npos) {
+        bool was_visible = false;
         std::scoped_lock lock(mutex_);
         auto it = sessions_.find(session_id);
         if (it != sessions_.end()) {
-          const auto peer_id = it->second.trade_peer_session_id;
+          was_visible = it->second.trade_visible;
           clear_trade_locked(it->second);
-          if (auto peer_it = sessions_.find(peer_id); peer_it != sessions_.end()) {
-            clear_trade_locked(peer_it->second);
-          }
         }
-        messages.push_back(client_v1::TradeState{});
+        if (was_visible) {
+          messages.push_back(client_v1::TradeState{});
+        }
       } else if (text.find("Trade failed.") != std::string::npos) {
         std::scoped_lock lock(mutex_);
         auto it = sessions_.find(session_id);

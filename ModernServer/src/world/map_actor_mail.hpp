@@ -1332,8 +1332,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       auto* offer = trade_offer_for(*session, mail.actor_id);
       auto* peer_offer = trade_peer_offer_for(*session, mail.actor_id);
+      auto* peer = session->first_actor_id == mail.actor_id ? find_player(session->second_actor_id)
+                                                            : find_player(session->first_actor_id);
       if (offer == nullptr || peer_offer == nullptr || offer->accepted) {
-        queue_system_notice(dispatch, *player, "Trade item failed.");
+        queue_packet(dispatch, player->session_id(),
+                     make_deal_simple_packet(player->session_id(), kSmDealAddItemFail));
         break;
       }
       const auto already_offered =
@@ -1341,12 +1344,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             return !is_empty(item) && item.make_index == mail.item_make_index;
           });
       if (already_offered) {
-        queue_system_notice(dispatch, *player, "Trade item failed.");
+        queue_packet(dispatch, player->session_id(),
+                     make_deal_simple_packet(player->session_id(), kSmDealAddItemFail));
         break;
       }
       const auto item = player->remove_bag_item(mail.item_make_index, mail.payload, item_configs_);
       if (!item.has_value()) {
-        queue_system_notice(dispatch, *player, "Trade item failed.");
+        queue_packet(dispatch, player->session_id(),
+                     make_deal_simple_packet(player->session_id(), kSmDealAddItemFail));
         break;
       }
       offer->items.push_back(*item);
@@ -1359,6 +1364,13 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                    make_del_item_packet(player->session_id(), player->id(), *item, item_configs_));
       queue_packet(dispatch, player->session_id(),
                    make_weight_changed_packet(player->session_id(), player->character()));
+      queue_packet(dispatch, player->session_id(),
+                   make_deal_simple_packet(player->session_id(), kSmDealAddItemOk));
+      if (peer != nullptr) {
+        queue_packet(dispatch, peer->session_id(),
+                     make_deal_remote_add_item_packet(peer->session_id(), player->id(), *item,
+                                                      item_configs_));
+      }
       break;
     }
     case ActorMailKind::trade_remove_item: {
@@ -1369,8 +1381,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       auto* offer = trade_offer_for(*session, mail.actor_id);
       auto* peer_offer = trade_peer_offer_for(*session, mail.actor_id);
+      auto* peer = session->first_actor_id == mail.actor_id ? find_player(session->second_actor_id)
+                                                            : find_player(session->first_actor_id);
       if (offer == nullptr || peer_offer == nullptr || offer->accepted) {
-        queue_system_notice(dispatch, *player, "Trade remove failed.");
+        queue_packet(dispatch, player->session_id(),
+                     make_deal_simple_packet(player->session_id(), kSmDealDelItemFail));
         break;
       }
       const auto item_it = std::find_if(
@@ -1380,14 +1395,16 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           });
       if (item_it == offer->items.end() ||
           !player->can_add_bag_item(*item_it, item_configs_)) {
-        queue_system_notice(dispatch, *player, "Trade remove failed.");
+        queue_packet(dispatch, player->session_id(),
+                     make_deal_simple_packet(player->session_id(), kSmDealDelItemFail));
         break;
       }
       const auto item = *item_it;
       offer->items.erase(item_it);
       if (!player->add_bag_item(item)) {
         offer->items.push_back(item);
-        queue_system_notice(dispatch, *player, "Trade remove failed.");
+        queue_packet(dispatch, player->session_id(),
+                     make_deal_simple_packet(player->session_id(), kSmDealDelItemFail));
         break;
       }
       offer->accepted = false;
@@ -1399,6 +1416,13 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                    make_add_item_packet(player->session_id(), item, item_configs_));
       queue_packet(dispatch, player->session_id(),
                    make_weight_changed_packet(player->session_id(), player->character()));
+      queue_packet(dispatch, player->session_id(),
+                   make_deal_simple_packet(player->session_id(), kSmDealDelItemOk));
+      if (peer != nullptr) {
+        queue_packet(dispatch, peer->session_id(),
+                     make_deal_remote_del_item_packet(peer->session_id(), player->id(),
+                                                      item.make_index));
+      }
       break;
     }
     case ActorMailKind::trade_set_gold: {
