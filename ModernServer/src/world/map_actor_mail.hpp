@@ -2142,6 +2142,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (attacker == nullptr || attacker->is_dead()) {
         break;
       }
+      cancel_trade_for(attacker->id(), dispatch, true);
 
       ActorMail effective_mail = mail;
       auto effective_ident = mail.game_message.ident;
@@ -2667,6 +2668,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         queue_packet(dispatch, attacker->session_id(), make_ack_packet(attacker->session_id(), false));
         break;
       }
+      cancel_trade_for(attacker->id(), dispatch, true);
 
       if (magic_it->second.legacy.legacy_present && magic_it->second.legacy.is_sword_skill) {
         if (!legacy_p14_sword_skill(magic_id)) {
@@ -4847,6 +4849,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             effective_mail.y = expected->y;
             effective_mail.dir = expected->dir;
             moved_player = true;
+            cancel_trade_for(player->id(), dispatch, true);
           } else if (mail.kind == ActorMailKind::turn && effective_mail.dir >= 8) {
             reject_move(false);
             break;

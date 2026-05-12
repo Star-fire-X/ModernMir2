@@ -3226,6 +3226,7 @@ bool MapActor::settle_player_death(Player& player, RuntimeDispatch& dispatch,
     return false;
   }
   player.mark_legacy_death_drop_settled();
+  cancel_trade_for(player.id(), dispatch, true);
   player.add_body_luck(-static_cast<double>(player.character().ability.level) * 5.0);
   if (config_.fight_zone || config_.fight3_zone) {
     queue_save_character(dispatch, player);

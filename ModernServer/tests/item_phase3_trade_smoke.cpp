@@ -166,6 +166,15 @@ mir2::LogicCommand turn_command(std::uint64_t session_id, std::int32_t x, std::i
   return command;
 }
 
+mir2::LogicCommand walk_command(std::uint64_t session_id, std::int32_t x, std::int32_t y) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::walk;
+  command.session_id = session_id;
+  command.x = x;
+  command.y = y;
+  return command;
+}
+
 mir2::LogicCommand client_v1_trade_accept(std::uint64_t session_id) {
   return mir2::to_logic_command(mir2::decode_client_v1_trade_accept_command(session_id));
 }
@@ -396,6 +405,33 @@ int main() {
   const auto bag_after_cancel = query_bag(runtime, 7);
   if (bag_after_cancel.size() != 1 || bag_after_cancel.front().make_index != 2001) {
     return fail(19);
+  }
+
+  static_cast<void>(runtime.route_logic_command(turn_command(7, 10, 10, 2)));
+  static_cast<void>(tick_players(runtime));
+  static_cast<void>(runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_try, 7, 0, "HeroB")));
+  static_cast<void>(tick_players(runtime));
+  static_cast<void>(runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_add_item, 7, 2001, "Sapphire")));
+  static_cast<void>(tick_players(runtime));
+  static_cast<void>(runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_set_gold, 7, 0, {}, 3)));
+  static_cast<void>(tick_players(runtime));
+  static_cast<void>(runtime.route_logic_command(walk_command(7, 9, 10)));
+  const auto move_cancel = tick_players(runtime);
+  const auto hero_a_after_move_cancel = runtime.snapshot_character_actor("HeroA");
+  if (!hero_a_after_move_cancel.has_value() || hero_a_after_move_cancel->gold != 92 ||
+      !find_packet(move_cancel, 7, mir2::kSmDealCancel).has_value() ||
+      !find_packet(move_cancel, 8, mir2::kSmDealCancel).has_value() ||
+      !find_packet(move_cancel, 7, mir2::kSmAddItem).has_value() ||
+      !has_save_character(move_cancel, "HeroA")) {
+    return fail(20);
+  }
+
+  const auto bag_after_move_cancel = query_bag(runtime, 7);
+  if (bag_after_move_cancel.size() != 1 || bag_after_move_cancel.front().make_index != 2001) {
+    return fail(21);
   }
 
   return 0;
