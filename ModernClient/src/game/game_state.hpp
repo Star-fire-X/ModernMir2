@@ -118,6 +118,10 @@ struct ActorState {
   bool action_magic_failed{false};
   std::uint64_t action_started_ms{0};
   std::uint64_t action_duration_ms{0};
+  int legacy_old_x{0};
+  int legacy_old_y{0};
+  std::uint8_t legacy_old_dir{0};
+  bool legacy_has_old_position{false};
   std::uint64_t legacy_event_sequence{0};
   std::vector<ActorState> legacy_pending_actions{};
   bool dead{false};
@@ -363,6 +367,18 @@ struct WorldViewState {
   std::uint64_t action_lock_started_ms{0}; ///< 动作锁定开始时间
   std::uint64_t last_action_ack_ms{0};     ///< 最近一次动作确认时间
   bool last_action_ack_ok{true};           ///< 上次动作确认结果（false 表示被服务端拒绝）
+  bool action_fail_lock{false};
+  std::uint16_t fail_action_ident{0};
+  std::uint8_t fail_dir{0};
+  std::uint64_t fail_action_time_ms{0};
+  std::uint16_t last_sent_action_ident{0};
+  std::uint8_t last_sent_action_dir{0};
+  std::uint64_t dizzy_delay_start_ms{0};
+  std::uint64_t dizzy_delay_time_ms{0};
+  int skip_tick{0};
+  int move_slow_level{0};
+  bool move_slow{false};
+  bool attack_slow{false};
   std::uint64_t latest_struck_ms{0};       ///< 最近一次被击中的时间戳
   std::uint64_t latest_spell_ms{0};        ///< 最近一次施法时间戳
   std::uint64_t magic_pk_delay_ms{300};    ///< 魔法/PK 最小间隔（毫秒，防速攻）
@@ -398,6 +414,44 @@ inline bool action_lock_active(const WorldViewState& world, const std::uint64_t 
   return world.action_locked && elapsed_ms(now, world.action_lock_started_ms) <= 10000U;
 }
 
+inline bool server_accept_next_action(WorldViewState& world, const std::uint64_t now) {
+  if (!world.action_locked) {
+    return true;
+  }
+  if (elapsed_ms(now, world.action_lock_started_ms) > 10000U) {
+    world.action_locked = false;
+    return true;
+  }
+  return false;
+}
+
+inline void update_legacy_weight_slow(WorldViewState& world) {
+  const auto& ability = world.self_ability_detail;
+  world.move_slow = false;
+  world.attack_slow = false;
+  world.move_slow_level = 0;
+  if (ability.max_weight > 0 && ability.weight > ability.max_weight) {
+    world.move_slow_level += ability.weight / ability.max_weight;
+    world.move_slow = true;
+  }
+  if (ability.max_wear_weight > 0 && ability.wear_weight > ability.max_wear_weight) {
+    world.move_slow_level += ability.wear_weight / ability.max_wear_weight;
+    world.move_slow = true;
+  }
+  if (ability.max_hand_weight > 0 && ability.hand_weight > ability.max_hand_weight) {
+    world.attack_slow = true;
+  }
+}
+
+inline bool legacy_move_skip_due_to_slow(WorldViewState& world) {
+  if (world.move_slow && world.skip_tick < world.move_slow_level) {
+    ++world.skip_tick;
+    return true;
+  }
+  world.skip_tick = 0;
+  return false;
+}
+
 /// 检查角色是否正在播放动作动画
 /// 动作动画播放期间不能执行新动作（与传奇客户端的行为一致）
 inline bool actor_action_animating(const ActorState& actor, const std::uint64_t now) {
@@ -408,24 +462,80 @@ inline bool actor_action_animating(const ActorState& actor, const std::uint64_t 
 /// 检查角色是否可以执行下一个动作
 /// 死亡或动作锁定或动画播放中均不可执行新动作
 inline bool can_next_action(const WorldViewState& world, const ActorState& self,
+                            const bool animation_idle, const std::uint64_t now) {
+  if (self.dead || action_lock_active(world, now)) {
+    return false;
+  }
+  if (world.dizzy_delay_time_ms != 0 &&
+      elapsed_ms(now, world.dizzy_delay_start_ms) <= world.dizzy_delay_time_ms) {
+    return false;
+  }
+  return animation_idle;
+}
+
+inline bool can_next_action(const WorldViewState& world, const ActorState& self,
                             const std::uint64_t now) {
   if (self.dead || action_lock_active(world, now)) {
+    return false;
+  }
+  if (world.dizzy_delay_time_ms != 0 &&
+      elapsed_ms(now, world.dizzy_delay_start_ms) <= world.dizzy_delay_time_ms) {
     return false;
   }
   return !actor_action_animating(self, now);
 }
 
 /// 检查角色是否可以发起下一次攻击
-/// 攻击速度受等级和装备影响（本实现简化计算）
 inline bool can_next_hit(const WorldViewState& world, const ActorState& self,
                          const std::uint64_t now) {
-  const auto level_fast = 0;     // TODO: 需要从装备和等级计算攻击速度
-  const auto hit_speed_fast = 0;
-  const auto next_hit = static_cast<std::uint64_t>(1400 - std::min(800, level_fast + hit_speed_fast));
   if (self.dead) {
     return false;
   }
-  return world.latest_hit_ms == 0 || elapsed_ms(now, world.latest_hit_ms) >= next_hit;
+  auto level_fast = std::min(370, static_cast<int>(world.self_ability_detail.level) * 14);
+  level_fast = std::min(800, level_fast + static_cast<int>(world.self_ability_detail.speed) * 60);
+  auto next_hit = 1400 - level_fast;
+  if (world.attack_slow) {
+    next_hit += 1500;
+  }
+  next_hit = std::max(0, next_hit);
+  return world.latest_hit_ms == 0 ||
+         elapsed_ms(now, world.latest_hit_ms) > static_cast<std::uint64_t>(next_hit);
+}
+
+inline bool is_unlock_action(WorldViewState& world, const std::uint16_t action_ident,
+                             const std::uint8_t dir, const std::uint64_t now) {
+  if (world.action_fail_lock && action_ident == world.fail_action_ident &&
+      dir == world.fail_dir && elapsed_ms(now, world.fail_action_time_ms) < 1000U) {
+    return false;
+  }
+  world.action_fail_lock = false;
+  return true;
+}
+
+inline void legacy_action_failed(WorldViewState& world, ActorState& self,
+                                 const std::uint64_t now) {
+  world.legacy_target_x = -1;
+  world.legacy_target_y = -1;
+  world.legacy_chr_action = LegacyChrAction::none;
+  world.action_fail_lock = true;
+  world.fail_action_ident = world.last_sent_action_ident;
+  world.fail_dir = world.last_sent_action_dir;
+  world.fail_action_time_ms = now;
+  self.x = self.legacy_has_old_position ? self.legacy_old_x : self.from_x;
+  self.y = self.legacy_has_old_position ? self.legacy_old_y : self.from_y;
+  if (self.legacy_has_old_position) {
+    self.dir = self.legacy_old_dir;
+  }
+  self.from_x = self.x;
+  self.from_y = self.y;
+  self.running = false;
+  self.move_started_ms = 0;
+  self.move_duration_ms = 0;
+  self.current_action = client_v1::ActorActionKind::turn;
+  self.action_started_ms = 0;
+  self.action_duration_ms = 0;
+  self.legacy_pending_actions.clear();
+  self.legacy_has_old_position = false;
 }
 
 inline bool item_empty(const client_v1::ItemState& item) { return item.empty(); }
@@ -1403,27 +1513,7 @@ struct GameStateStore {
     // 动作被服务端拒绝时，客户端需要回滚
     if (!message.ok) {
       if (auto it = world.actors.find(world.self_actor_id); it != world.actors.end()) {
-        auto& actor = it->second;
-        if (actor.current_action == client_v1::ActorActionKind::walk ||
-            actor.current_action == client_v1::ActorActionKind::run ||
-            actor.current_action == client_v1::ActorActionKind::rush ||
-            actor.current_action == client_v1::ActorActionKind::rush_kung ||
-            actor.current_action == client_v1::ActorActionKind::backstep ||
-            actor.current_action == client_v1::ActorActionKind::knockback) {
-          // 移动被拒绝：回到移动前的位置
-          actor.x = actor.from_x;
-          actor.y = actor.from_y;
-          actor.running = false;
-          actor.move_started_ms = 0;
-          actor.move_duration_ms = 0;
-          actor.current_action = client_v1::ActorActionKind::turn;
-          actor.action_duration_ms = 0;
-        } else if (actor.current_action == client_v1::ActorActionKind::hit ||
-                   actor.current_action == client_v1::ActorActionKind::spell) {
-          // 攻击/施法被拒绝：回到待机状态
-          actor.current_action = client_v1::ActorActionKind::turn;
-          actor.action_duration_ms = 0;
-        }
+        legacy_action_failed(world, it->second, world.last_action_ack_ms);
       }
     }
   }

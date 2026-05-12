@@ -269,6 +269,46 @@ int main() {
   assert(pose->hair_index == 4200 + 16);
   assert(pose->weapon_index == 1200 + 16);
   assert(pose->down_draw_level == 0);
+  assert(animations.is_actor_legacy_idle(1));
+  assert(!animations.is_actor_legacy_idle(999));
+
+  auto idle_actor = actor;
+  WorldViewState idle_world;
+  idle_world.self_actor_id = 1;
+  idle_world.actors[1] = idle_actor;
+  AnimationManager idle_animations;
+  idle_animations.reset(12000);
+  idle_animations.sync_world(idle_world, 12000);
+  assert(idle_animations.is_actor_legacy_idle(1));
+  idle_actor.current_action = mir2::client_v1::ActorActionKind::hit;
+  idle_actor.action_started_ms = 12100;
+  idle_world.actors[1] = idle_actor;
+  idle_animations.sync_world(idle_world, 12100);
+  assert(!idle_animations.is_actor_legacy_idle(1));
+  auto idle_queued_actor = idle_actor;
+  idle_queued_actor.action_started_ms = 12200;
+  idle_world.actors[1] = idle_queued_actor;
+  idle_animations.sync_world(idle_world, 12200);
+  assert(!idle_animations.is_actor_legacy_idle(1));
+  for (std::uint64_t tick = 12300; tick <= 15000; tick += 100) {
+    idle_animations.update(idle_world, tick);
+  }
+  assert(idle_animations.is_actor_legacy_idle(1));
+
+  WorldViewState move_idle_world;
+  move_idle_world.self_actor_id = 1;
+  auto moving_actor = actor;
+  moving_actor.from_x = 10;
+  moving_actor.from_y = 10;
+  moving_actor.x = 11;
+  moving_actor.y = 10;
+  moving_actor.current_action = mir2::client_v1::ActorActionKind::walk;
+  moving_actor.move_started_ms = 14000;
+  move_idle_world.actors[1] = moving_actor;
+  AnimationManager move_idle_animations;
+  move_idle_animations.reset(13900);
+  move_idle_animations.sync_world(move_idle_world, 14000);
+  assert(!move_idle_animations.is_actor_legacy_idle(1));
 
   WorldViewState war_world;
   war_world.self_actor_id = 1;

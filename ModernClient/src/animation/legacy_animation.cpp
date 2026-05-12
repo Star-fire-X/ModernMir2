@@ -1948,6 +1948,10 @@ void LegacyActorAnimation::finish_motion(const ActorState& actor, const std::uin
   begin_queued_or_idle(actor, now_ms);
 }
 
+bool LegacyActorAnimation::is_legacy_idle() const {
+  return motion_kind_ == MotionKind::idle && pending_actions_.empty();
+}
+
 /// 开始移动动画：选择 walk 或 run 的动作信息
 void LegacyActorAnimation::begin_move(const ActorState& actor, const std::uint64_t now_ms) {
   const auto action = resolved_action_for(actor, actor.current_action);
@@ -3447,6 +3451,14 @@ std::optional<ActorRenderPose> AnimationManager::pose_for(const std::uint64_t ac
     return std::nullopt;
   }
   return animation->second.pose_for(actor->second);
+}
+
+bool AnimationManager::is_actor_legacy_idle(const std::uint64_t actor_id) const {
+  const auto animation = actors_.find(actor_id);
+  if (animation == actors_.end()) {
+    return false;
+  }
+  return animation->second.is_legacy_idle();
 }
 
 int AnimationManager::map_object_frame(const MapCell& cell) const {

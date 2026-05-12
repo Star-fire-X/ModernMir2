@@ -38,6 +38,20 @@ struct MoveTarget {
   std::uint8_t dir{kDirDown};
 };
 
+enum class LegacyMoveDecisionKind {
+  none,
+  turn,
+  walk,
+  run
+};
+
+struct LegacyMoveDecision {
+  LegacyMoveDecisionKind kind{LegacyMoveDecisionKind::none};
+  int x{0};
+  int y{0};
+  std::uint8_t dir{kDirDown};
+};
+
 /// 根据方向返回瓦片坐标增量
 inline StepDelta direction_delta(std::uint8_t dir) {
   switch (dir) {
@@ -51,6 +65,14 @@ inline StepDelta direction_delta(std::uint8_t dir) {
     case kDirUpLeft:    return {-1, -1};
     default:            return {0, 0};
   }
+}
+
+inline std::uint8_t previous_direction(std::uint8_t dir) {
+  return static_cast<std::uint8_t>((dir + 7U) & 7U);
+}
+
+inline std::uint8_t next_direction_clockwise(std::uint8_t dir) {
+  return static_cast<std::uint8_t>((dir + 1U) & 7U);
 }
 
 /// 计算从源点 (sx, sy) 到目标点 (dx, dy) 的朝向
@@ -164,6 +186,46 @@ inline std::optional<MoveTarget> next_position(int width, int height, int sx, in
     return std::nullopt;
   }
   return MoveTarget{x, y, dir};
+}
+
+template <typename MapCanMove, typename CrashMan>
+inline LegacyMoveDecision resolve_legacy_walk(int width, int height, int sx, int sy, int tx,
+                                              int ty, std::uint8_t current_dir,
+                                              MapCanMove map_can_move, CrashMan crash_man) {
+  const auto dir = next_direction(sx, sy, tx, ty);
+  const auto forward = step_target(width, height, sx, sy, dir, 1);
+  if (!forward.has_value()) {
+    return {LegacyMoveDecisionKind::none, sx, sy, dir};
+  }
+  if (map_can_move(forward->x, forward->y) && !crash_man(forward->x, forward->y)) {
+    return {LegacyMoveDecisionKind::walk, forward->x, forward->y, dir};
+  }
+
+  if (!crash_man(forward->x, forward->y)) {
+    const auto left_dir = previous_direction(dir);
+    if (const auto left = step_target(width, height, sx, sy, left_dir, 1);
+        left.has_value() && map_can_move(left->x, left->y)) {
+      return {LegacyMoveDecisionKind::walk, left->x, left->y, left_dir};
+    }
+    const auto right_dir = next_direction_clockwise(dir);
+    if (const auto right = step_target(width, height, sx, sy, right_dir, 1);
+        right.has_value() && map_can_move(right->x, right->y)) {
+      return {LegacyMoveDecisionKind::walk, right->x, right->y, right_dir};
+    }
+  }
+
+  if (dir != current_dir) {
+    return {LegacyMoveDecisionKind::turn, sx, sy, dir};
+  }
+  return {LegacyMoveDecisionKind::none, sx, sy, dir};
+}
+
+template <typename CanWalk>
+inline bool legacy_can_run(int width, int height, int sx, int sy, int ex, int ey,
+                           CanWalk can_walk) {
+  const auto dir = next_direction(sx, sy, ex, ey);
+  const auto middle = step_target(width, height, sx, sy, dir, 1);
+  return middle.has_value() && can_walk(middle->x, middle->y) && can_walk(ex, ey);
 }
 
 }  // namespace mir2::legacy

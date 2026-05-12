@@ -613,6 +613,22 @@ void ClientApp::request_action(const client_v1::ActionIntent& intent) {
   const auto now_ms = detail::monotonic_ms();
   state_.world.action_locked = true;
   state_.world.action_lock_started_ms = now_ms;
+  const auto sent_ident = [&] {
+    switch (intent.kind) {
+      case client_v1::WorldActionKind::walk:
+        return static_cast<std::uint16_t>(3000U + legacy::kSmWalk);
+      case client_v1::WorldActionKind::run:
+        return static_cast<std::uint16_t>(3000U + legacy::kSmRun);
+      case client_v1::WorldActionKind::attack:
+        return legacy::sm_attack_ident_to_cm(legacy::normalize_attack_ident_to_sm(
+            intent.legacy_ident));
+      case client_v1::WorldActionKind::turn:
+      default:
+        return static_cast<std::uint16_t>(3010U);
+    }
+  }();
+  state_.world.last_sent_action_ident = sent_ident;
+  state_.world.last_sent_action_dir = intent.dir;
   if (legacy_trace_enabled()) {
     std::ostringstream out;
     out << "request_action now=" << now_ms << " kind=" << static_cast<int>(intent.kind)
@@ -624,6 +640,10 @@ void ClientApp::request_action(const client_v1::ActionIntent& intent) {
   if (auto it = state_.world.actors.find(state_.world.self_actor_id);
       it != state_.world.actors.end()) {
     auto& actor = it->second;
+    actor.legacy_old_x = actor.x;
+    actor.legacy_old_y = actor.y;
+    actor.legacy_old_dir = actor.dir;
+    actor.legacy_has_old_position = true;
     const auto legacy_ident =
         intent.kind == client_v1::WorldActionKind::attack
             ? legacy::normalize_attack_ident_to_sm(intent.legacy_ident)
@@ -665,6 +685,8 @@ void ClientApp::request_spell(const client_v1::SpellIntent& intent) {
   const auto now_ms = detail::monotonic_ms();
   state_.world.action_locked = true;
   state_.world.action_lock_started_ms = now_ms;
+  state_.world.last_sent_action_ident = 3017U;
+  state_.world.last_sent_action_dir = intent.dir;
   state_.world.latest_spell_ms = state_.world.action_lock_started_ms;
   state_.world.magic_pk_delay_ms = 300;  // 魔法攻击最小间隔 300ms
   if (legacy_trace_enabled()) {
@@ -678,6 +700,10 @@ void ClientApp::request_spell(const client_v1::SpellIntent& intent) {
   if (auto it = state_.world.actors.find(state_.world.self_actor_id);
       it != state_.world.actors.end()) {
     auto& actor = it->second;
+    actor.legacy_old_x = actor.x;
+    actor.legacy_old_y = actor.y;
+    actor.legacy_old_dir = actor.dir;
+    actor.legacy_has_old_position = true;
     actor.dir = intent.dir;
     actor.current_action = client_v1::ActorActionKind::spell;
     actor.magic_id = intent.magic_id;
