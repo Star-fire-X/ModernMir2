@@ -314,53 +314,45 @@ int ClientApp::run() {
     // 重新映射鼠标坐标（考虑缩放）
     refresh_mapped_input();
 
-    // ---- 网络事件处理阶段 ----
-    protocol_.poll();           // 非阻塞轮询 socket，收取数据
-    handle_protocol_events();   // 分发并处理所有已到达的协议消息
-
-    // ---- 定时器更新阶段 ----
     const auto now = clock::now();
     const auto delta =
         std::chrono::duration_cast<std::chrono::duration<float>>(now - last_tick).count();
     last_tick = now;
-    run_timers(delta);  // 驱动鼠标轮询、心跳、外挂检测等定时器
 
-    // ---- 场景更新阶段 ----
     ClientContext context{this, &config_, &state_, &assets_, &audio_, &renderer_, &mapped_input_};
-    if (!state_.modal.visible) {
-      // 无模态对话框：正常更新场景
-      scenes_.update(context, delta);
-    } else {
-      // 模态对话框弹出时：屏蔽所有输入，防止对话框下层界面被操作
-      auto blocked_input = mapped_input_;
-      blocked_input.left_down = false;
-      blocked_input.left_pressed = false;
-      blocked_input.left_released = false;
-      blocked_input.right_down = false;
-      blocked_input.right_pressed = false;
-      blocked_input.right_released = false;
-      blocked_input.key_down.fill(false);
-      blocked_input.key_pressed.fill(false);
-      blocked_input.text_input.clear();
-      blocked_input.backspace_pressed = false;
-      blocked_input.enter_pressed = false;
-      ClientContext blocked_context{this, &config_, &state_, &assets_, &audio_, &renderer_,
-                                    &blocked_input};
-      scenes_.update(blocked_context, delta);
-    }
-    // 执行待处理的场景切换
-    if (scene_change_pending_) {
-      scenes_.change_scene(requested_scene_, context);
-      scene_change_pending_ = false;
-    }
-    // 自动播放模式：到达登录场景时自动触发登录流程
-    maybe_start_auto_play();
-
-    // ---- 渲染阶段 ----
-    renderer_.begin_frame(0xFF0B1016U);  // 清屏为深蓝灰色背景
-    scenes_.render(context);              // 绘制当前场景
-    render_modal();                       // 在场景之上绘制模态对话框
-    renderer_.present();                  // 将后台缓冲区提交到屏幕
+    frame_scheduler_.run_frame(
+        delta,
+        LegacyFrameScheduler::Hooks{
+            [this, &context, delta] {
+              protocol_.poll();
+              handle_protocol_events();
+              flush_scene_change_if_pending(context);
+              run_timers(delta);
+            },
+            [this, &context] { capture_ui_input(context); },
+            [this, &context] { scenes_.process_key_messages(context); },
+            [this, &context, delta] {
+              scenes_.process_action_messages(context, delta);
+              flush_scene_change_if_pending(context);
+            },
+            [this, &context] {
+              dwin_process(context);
+              flush_scene_change_if_pending(context);
+              maybe_start_auto_play();
+            },
+            [this, &context, delta] {
+              scenes_.scene_run(context, delta);
+              flush_scene_change_if_pending(context);
+              maybe_start_auto_play();
+            },
+            [this, &context] {
+              renderer_.begin_frame(0xFF0B1016U);
+              scenes_.render_scene(context);
+            },
+            [this, &context] { scenes_.paint_ui(context); },
+            [this] { render_modal(); },
+            [this] { renderer_.present(); },
+            [this] { return can_draw_frame(); }});
     std::this_thread::sleep_for(std::chrono::milliseconds(1));  // 让渡 CPU，降低功耗
   }
 
@@ -381,6 +373,38 @@ void ClientApp::refresh_mapped_input() {
 void ClientApp::request_scene_change(SceneId id) {
   requested_scene_ = id;
   scene_change_pending_ = true;
+}
+
+void ClientApp::flush_scene_change_if_pending(ClientContext& context) {
+  if (!scene_change_pending_) {
+    return;
+  }
+  scenes_.change_scene(requested_scene_, context);
+  scene_change_pending_ = false;
+}
+
+void ClientApp::capture_ui_input(ClientContext& context) {
+  if (!state_.modal.visible) {
+    scenes_.capture_ui_input(context);
+    return;
+  }
+
+  modal_ui_.set_asset_manager(&assets_);
+  context.ui_input = modal_ui_.capture_input(mapped_input_);
+  context.ui_input.consumed = true;
+}
+
+void ClientApp::dwin_process(ClientContext& context) {
+  if (state_.modal.visible) {
+    process_modal_input();
+    return;
+  }
+  scenes_.dwin_process(context);
+}
+
+bool ClientApp::can_draw_frame() const {
+  const auto hwnd = window_.handle();
+  return hwnd == nullptr || !IsIconic(hwnd);
 }
 
 // 请求登录网关：清理旧状态 -> 重置角色/选服/世界数据 -> 发起 TCP 连接
@@ -2003,8 +2027,7 @@ void ClientApp::show_destructive_confirm_modal(const std::wstring& title,
   cancel_button->on_click = close_without_confirm;
 }
 
-// 渲染模态对话框：在场景之上绘制对话框背景精灵和 UI 按钮
-void ClientApp::render_modal() {
+void ClientApp::process_modal_input() {
   if (!state_.modal.visible) {
     return;
   }
@@ -2031,6 +2054,14 @@ void ClientApp::render_modal() {
     }
     return;
   }
+  modal_ui_.process_queued_events(mapped_input_);
+}
+
+// 渲染模态对话框：在场景之上绘制对话框背景精灵和 UI 按钮
+void ClientApp::render_modal() {
+  if (!state_.modal.visible) {
+    return;
+  }
   const auto dialog_frame = assets_.get_frame(ArchiveId::prguse, kMessageDialogIndex);
   const auto dialog_rect =
       centered_rect(dialog_frame, renderer_.logical_width(), renderer_.logical_height(), 360, 180);
@@ -2048,7 +2079,6 @@ void ClientApp::render_modal() {
     y += 14;
   }
   modal_ui_.set_asset_manager(&assets_);
-  modal_ui_.update(mapped_input_);
   modal_ui_.paint(renderer_);
 }
 

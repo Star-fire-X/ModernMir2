@@ -40,7 +40,7 @@ class ClientApp;
 /// 设计目的：避免场景直接依赖 ClientApp，通过单一的 Context 指针传递
 /// 所有子系统（配置/状态/资源/渲染器/输入），使得场景可以独立测试。
 ///
-/// ui_input 在每帧 UiTree::update() 后被填充，场景根据它决定是否
+/// ui_input 在每帧 UiTree::capture_input() 后被填充，场景根据它决定是否
 /// 继续处理输入事件（如果 UI 已消费，场景不应再响应）。
 struct ClientContext {
   ClientApp* app{nullptr};
@@ -68,8 +68,9 @@ enum class SceneId {
 ///
 /// 执行顺序：
 ///   1. enter()  — 场景创建后立即调用，初始化 UI 树和注册回调
-///   2. update() — 每帧调用，处理网络消息、动画、输入等
-///   3. render() — 每帧调用，绘制背景、精灵和 UI
+///   2. capture_ui_input() → process_key_messages() → process_action_messages()
+///      → dwin_process() → scene_run()
+///   3. render_scene() → paint_ui()
 ///   4. exit()   — 切换场景前调用，释放场景持有的资源
 ///
 /// 场景切换是同步的：exit(old) → enter(new) 在同一帧内完成。
@@ -80,6 +81,13 @@ class Scene {
   virtual void exit(ClientContext& context) = 0;    ///< 离开场景时的清理（释放精灵缓存、断开网络）
   virtual void update(ClientContext& context, float delta_seconds) = 0;  ///< 每帧逻辑更新（网络轮询、动画、状态同步）
   virtual void render(ClientContext& context) = 0;  ///< 每帧渲染（清屏、绘制背景、精灵、UI）
+  virtual void capture_ui_input(ClientContext& context);
+  virtual void process_key_messages(ClientContext& context);
+  virtual void process_action_messages(ClientContext& context, float delta_seconds);
+  virtual void dwin_process(ClientContext& context);
+  virtual void scene_run(ClientContext& context, float delta_seconds);
+  virtual void render_scene(ClientContext& context);
+  virtual void paint_ui(ClientContext& context);
   [[nodiscard]] virtual ui::UiTree& ui_tree() = 0; ///< 获取场景的 UI 树（用于输入分发和精灵缓存）
 };
 
@@ -94,9 +102,16 @@ class SceneManager {
   void initialize(ClientContext& context);
   /// 切换到指定场景（延迟到下一帧 update 时执行）
   void change_scene(SceneId id, ClientContext& context);
-  /// 更新当前场景
+  /// 兼容入口：按 legacy 阶段顺序更新当前场景
   void update(ClientContext& context, float delta_seconds);
-  /// 渲染当前场景
+  void capture_ui_input(ClientContext& context);
+  void process_key_messages(ClientContext& context);
+  void process_action_messages(ClientContext& context, float delta_seconds);
+  void dwin_process(ClientContext& context);
+  void scene_run(ClientContext& context, float delta_seconds);
+  void render_scene(ClientContext& context);
+  void paint_ui(ClientContext& context);
+  /// 兼容入口：渲染当前场景和 UI
   void render(ClientContext& context);
   /// 获取当前场景 ID
   [[nodiscard]] SceneId current_id() const { return current_id_; }
