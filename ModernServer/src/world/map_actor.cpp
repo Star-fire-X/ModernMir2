@@ -2377,6 +2377,10 @@ bool MapActor::commit_trade(TradeSession& session, RuntimeDispatch& dispatch) {
                make_weight_changed_packet(second->session_id(), second->character()));
   queue_save_character(dispatch, *first);
   queue_save_character(dispatch, *second);
+  queue_packet(dispatch, second->session_id(),
+               make_deal_simple_packet(second->session_id(), kSmDealSuccess));
+  queue_packet(dispatch, first->session_id(),
+               make_deal_simple_packet(first->session_id(), kSmDealSuccess));
   queue_system_notice(dispatch, *first, "Trade completed.");
   queue_system_notice(dispatch, *second, "Trade completed.");
 

@@ -243,6 +243,8 @@ int main() {
   const auto add_a = tick_players(runtime);
   if (!find_packet(add_a, 7, mir2::kSmDelItem).has_value() ||
       !find_packet(add_a, 7, mir2::kSmWeightChanged).has_value() ||
+      !find_packet(add_a, 7, mir2::kSmDealAddItemOk).has_value() ||
+      !find_packet(add_a, 8, mir2::kSmDealRemoteAddItem).has_value() ||
       has_save_character(add_a, "HeroA")) {
     return fail(4);
   }
@@ -262,6 +264,8 @@ int main() {
   const auto add_b = tick_players(runtime);
   if (!find_packet(add_b, 8, mir2::kSmDelItem).has_value() ||
       !find_packet(add_b, 8, mir2::kSmWeightChanged).has_value() ||
+      !find_packet(add_b, 8, mir2::kSmDealAddItemOk).has_value() ||
+      !find_packet(add_b, 7, mir2::kSmDealRemoteAddItem).has_value() ||
       has_save_character(add_b, "HeroB")) {
     return fail(6);
   }
@@ -295,6 +299,8 @@ int main() {
   if (!add_to_a.has_value() || !add_to_b.has_value() ||
       !gold_a.has_value() || !gold_b.has_value() ||
       gold_a->message.recog != 92 || gold_b->message.recog != 58 ||
+      !find_packet(commit, 7, mir2::kSmDealSuccess).has_value() ||
+      !find_packet(commit, 8, mir2::kSmDealSuccess).has_value() ||
       !has_save_character(commit, "HeroA") || !has_save_character(commit, "HeroB")) {
     return fail(9);
   }
@@ -315,7 +321,11 @@ int main() {
   static_cast<void>(tick_players(runtime));
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_remove_item, 7, 2001, "Sapphire")));
-  static_cast<void>(tick_players(runtime));
+  const auto remove_item = tick_players(runtime);
+  if (!find_packet(remove_item, 7, mir2::kSmDealDelItemOk).has_value() ||
+      !find_packet(remove_item, 8, mir2::kSmDealRemoteDelItem).has_value()) {
+    return fail(11);
+  }
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_accept, 7)));
   const auto remove_window_cancel = tick_players(runtime);
@@ -323,12 +333,12 @@ int main() {
       !has_raw_text_for(remove_window_cancel, 8, "Trade cancelled.") ||
       !find_packet(remove_window_cancel, 7, mir2::kSmDealCancel).has_value() ||
       !find_packet(remove_window_cancel, 8, mir2::kSmDealCancel).has_value()) {
-    return fail(11);
+    return fail(12);
   }
 
   auto bag_after_remove_window = query_bag(runtime, 7);
   if (bag_after_remove_window.size() != 1 || bag_after_remove_window.front().make_index != 2001) {
-    return fail(12);
+    return fail(13);
   }
 
   static_cast<void>(runtime.route_logic_command(
@@ -345,12 +355,12 @@ int main() {
       !has_raw_text_for(early_accept, 8, "Trade cancelled.") ||
       !find_packet(early_accept, 7, mir2::kSmDealCancel).has_value() ||
       !find_packet(early_accept, 8, mir2::kSmDealCancel).has_value()) {
-    return fail(13);
+    return fail(14);
   }
 
   const auto bag_after_early_accept = query_bag(runtime, 7);
   if (bag_after_early_accept.size() != 1 || bag_after_early_accept.front().make_index != 2001) {
-    return fail(14);
+    return fail(15);
   }
 
   static_cast<void>(runtime.route_logic_command(
@@ -362,7 +372,7 @@ int main() {
   const auto hero_a_after_gold_fail = runtime.snapshot_character_actor("HeroA");
   if (!hero_a_after_gold_fail.has_value() || hero_a_after_gold_fail->gold != 92 ||
       !has_packet_message(gold_fail, 7, mir2::kSmDealChangeGoldFail, 0, 92, 0)) {
-    return fail(15);
+    return fail(16);
   }
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_set_gold, 7, 0, {}, 5)));
@@ -370,7 +380,7 @@ int main() {
   const auto hero_a_after_gold_reserve = runtime.snapshot_character_actor("HeroA");
   if (!hero_a_after_gold_reserve.has_value() || hero_a_after_gold_reserve->gold != 87 ||
       !has_packet_message(gold_reserve, 7, mir2::kSmDealChangeGoldOk, 5, 87, 0)) {
-    return fail(16);
+    return fail(17);
   }
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_accept, 7)));
@@ -383,7 +393,7 @@ int main() {
       !has_raw_text_for(gold_window_cancel, 8, "Trade cancelled.") ||
       !find_packet(gold_window_cancel, 7, mir2::kSmDealCancel).has_value() ||
       !find_packet(gold_window_cancel, 8, mir2::kSmDealCancel).has_value()) {
-    return fail(17);
+    return fail(18);
   }
 
   static_cast<void>(runtime.route_logic_command(
@@ -399,12 +409,12 @@ int main() {
       !has_save_character(cancel, "HeroA") ||
       !find_packet(cancel, 7, mir2::kSmDealCancel).has_value() ||
       !find_packet(cancel, 8, mir2::kSmDealCancel).has_value()) {
-    return fail(18);
+    return fail(19);
   }
 
   const auto bag_after_cancel = query_bag(runtime, 7);
   if (bag_after_cancel.size() != 1 || bag_after_cancel.front().make_index != 2001) {
-    return fail(19);
+    return fail(20);
   }
 
   static_cast<void>(runtime.route_logic_command(turn_command(7, 10, 10, 2)));
@@ -426,12 +436,12 @@ int main() {
       !find_packet(move_cancel, 8, mir2::kSmDealCancel).has_value() ||
       !find_packet(move_cancel, 7, mir2::kSmAddItem).has_value() ||
       !has_save_character(move_cancel, "HeroA")) {
-    return fail(20);
+    return fail(21);
   }
 
   const auto bag_after_move_cancel = query_bag(runtime, 7);
   if (bag_after_move_cancel.size() != 1 || bag_after_move_cancel.front().make_index != 2001) {
-    return fail(21);
+    return fail(22);
   }
 
   return 0;

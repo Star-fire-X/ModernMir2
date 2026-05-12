@@ -570,6 +570,26 @@ LegacyPacket make_deal_remote_change_gold_packet(std::uint64_t session_id,
       make_default_message(kSmDealRemoteChangeGold, deal_gold, 0, 0, 0));
 }
 
+LegacyPacket make_deal_remote_add_item_packet(
+    std::uint64_t session_id, std::uint64_t actor_id, const LegacyUserItem& item,
+    const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
+  const auto client_item = make_client_item(item, item_configs);
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmDealRemoteAddItem, static_cast<std::int32_t>(actor_id),
+                           0, 0, 1),
+      legacy_encode_buffer(&client_item, sizeof(client_item)));
+}
+
+LegacyPacket make_deal_remote_del_item_packet(std::uint64_t session_id,
+                                              std::uint64_t actor_id,
+                                              std::int32_t make_index) {
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmDealRemoteDelItem, static_cast<std::int32_t>(actor_id),
+                           low_word(make_index), high_word(make_index), 0));
+}
+
 LegacyPacket make_send_user_sell_packet(std::uint64_t session_id, std::uint64_t merchant_actor_id) {
   return make_legacy_game_packet(
       session_id, 0, 0,
