@@ -6442,14 +6442,11 @@ class WorldScene final : public Scene {
   }
 
   std::pair<int, int> screen_to_map_tile(ClientContext& context, const ActorState& self) const {
-    const auto fallback_width = map_ != nullptr ? map_->width : 0;
-    const auto fallback_height = map_ != nullptr ? map_->height : 0;
-    const auto map_width =
-        context.state->world.width > 0 ? context.state->world.width : fallback_width;
-    const auto map_height =
-        context.state->world.height > 0 ? context.state->world.height : fallback_height;
     return legacy::legacy_mouse_to_map_clamped(viewport_for_self(self), context.input->mouse_x,
-                                               context.input->mouse_y, map_width, map_height);
+                                               context.input->mouse_y, context.state->world.width,
+                                               context.state->world.height,
+                                               map_ != nullptr ? map_->width : 0,
+                                               map_ != nullptr ? map_->height : 0);
   }
 
   std::uint64_t focused_actor_at(ClientContext& context, const LegacyInputFrame& input) const {
@@ -7148,9 +7145,10 @@ class WorldScene final : public Scene {
 
   /// 渲染地图瓦片层：背景瓦片（偶数格）+ 中间层物件
   void render_tiles(ClientContext& context, const legacy::LegacyMapViewport& viewport) {
+    const auto bounds = legacy::legacy_map_render_bounds(viewport);
     legacy_trace_map_layer(legacy::LegacyMapDrawLayer::background_tiles);
-    for (int y = viewport.top - 1; y <= viewport.bottom + 1; ++y) {
-      for (int x = viewport.left - 2; x <= viewport.right + 1; ++x) {
+    for (int y = bounds.tile_top; y <= bounds.tile_bottom; ++y) {
+      for (int x = bounds.tile_left; x <= bounds.tile_right; ++x) {
         const auto* cell = map_->cell(x, y);
         if (cell == nullptr) {
           continue;
@@ -7167,8 +7165,8 @@ class WorldScene final : public Scene {
     }
 
     legacy_trace_map_layer(legacy::LegacyMapDrawLayer::middle_tiles);
-    for (int y = viewport.top - 1; y <= viewport.bottom + 1; ++y) {
-      for (int x = viewport.left - 2; x <= viewport.right + 1; ++x) {
+    for (int y = bounds.tile_top; y <= bounds.tile_bottom; ++y) {
+      for (int x = bounds.tile_left; x <= bounds.tile_right; ++x) {
         const auto* cell = map_->cell(x, y);
         if (cell == nullptr) {
           continue;
@@ -7186,8 +7184,9 @@ class WorldScene final : public Scene {
   }
 
   void render_small_objects(ClientContext& context, const legacy::LegacyMapViewport& viewport) {
-    for (int y = viewport.top; y <= viewport.bottom + legacy::kLegacyLongHeightRows; ++y) {
-      for (int x = viewport.left - 2; x <= viewport.right + 2; ++x) {
+    const auto bounds = legacy::legacy_map_render_bounds(viewport);
+    for (int y = bounds.object_top; y <= bounds.object_bottom; ++y) {
+      for (int x = bounds.object_left; x <= bounds.object_right; ++x) {
         const auto* cell = map_->cell(x, y);
         if (cell == nullptr) {
           continue;
@@ -7253,12 +7252,13 @@ class WorldScene final : public Scene {
   }
 
   void render_world_rows(ClientContext& context, const legacy::LegacyMapViewport& viewport) {
+    const auto bounds = legacy::legacy_map_render_bounds(viewport);
     const auto actors = collect_row_actor_draws(context, viewport);
     auto actor_it = actors.begin();
-    for (int y = viewport.top; y <= viewport.bottom + legacy::kLegacyLongHeightRows; ++y) {
+    for (int y = bounds.object_top; y <= bounds.object_bottom; ++y) {
       render_large_objects_for_row(context, viewport, y);
 
-      if (y <= viewport.bottom) {
+      if (y <= bounds.visible_bottom) {
         render_ground_items_for_row(context, viewport, y);
         while (actor_it != actors.end() && actor_it->draw_row < y) {
           ++actor_it;
@@ -7295,9 +7295,10 @@ class WorldScene final : public Scene {
     constexpr auto kMouseColor = 0xFFFACC15U;
     constexpr auto kTextColor = 0xFFE0F2FEU;
     auto& renderer = *context.renderer;
+    const auto bounds = legacy::legacy_map_render_bounds(viewport);
 
-    for (int y = viewport.top; y <= viewport.bottom; ++y) {
-      for (int x = viewport.left; x <= viewport.right; ++x) {
+    for (int y = bounds.visible_top; y <= bounds.visible_bottom; ++y) {
+      for (int x = bounds.visible_left; x <= bounds.visible_right; ++x) {
         renderer.stroke_rect(RectI{legacy::legacy_tile_draw_x(viewport, x),
                                    legacy::legacy_ground_mid_y(viewport, y),
                                    legacy::kLegacyUnitX, legacy::kLegacyUnitY},
@@ -7342,7 +7343,8 @@ class WorldScene final : public Scene {
 
   void render_large_objects_for_row(ClientContext& context,
                                     const legacy::LegacyMapViewport& viewport, const int y) {
-    for (int x = viewport.left - 2; x <= viewport.right + 2; ++x) {
+    const auto bounds = legacy::legacy_map_render_bounds(viewport);
+    for (int x = bounds.object_left; x <= bounds.object_right; ++x) {
       const auto* cell = map_->cell(x, y);
       if (cell == nullptr) {
         continue;

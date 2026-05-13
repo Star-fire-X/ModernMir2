@@ -37,6 +37,21 @@ struct LegacyMapViewport {
   int draw_origin_y{kLegacyDrawOriginY};
 };
 
+struct LegacyMapRenderBounds {
+  int tile_left{0};
+  int tile_top{0};
+  int tile_right{0};
+  int tile_bottom{0};
+  int object_left{0};
+  int object_top{0};
+  int object_right{0};
+  int object_bottom{0};
+  int visible_left{0};
+  int visible_top{0};
+  int visible_right{0};
+  int visible_bottom{0};
+};
+
 inline int legacy_up_int(const double value) {
   const auto truncated = static_cast<int>(value);
   return value > static_cast<double>(truncated) ? truncated + 1 : truncated;
@@ -57,6 +72,23 @@ inline LegacyMapViewport make_legacy_map_viewport(const int rx, const int ry,
   viewport.draw_origin_x = kLegacyDrawOriginX - shift_x;
   viewport.draw_origin_y = kLegacyDrawOriginY - shift_y;
   return viewport;
+}
+
+inline LegacyMapRenderBounds legacy_map_render_bounds(const LegacyMapViewport& viewport) {
+  return LegacyMapRenderBounds{
+      viewport.left - 2,
+      viewport.top - 1,
+      viewport.right + 1,
+      viewport.bottom + 1,
+      viewport.left - 2,
+      viewport.top,
+      viewport.right + 2,
+      viewport.bottom + kLegacyLongHeightRows,
+      viewport.left,
+      viewport.top,
+      viewport.right,
+      viewport.bottom,
+  };
 }
 
 inline std::pair<int, int> legacy_screen_from_map(const LegacyMapViewport& viewport,
@@ -88,6 +120,19 @@ inline std::pair<int, int> legacy_mouse_to_map_clamped(const LegacyMapViewport& 
   x = std::clamp(x, 0, std::max(0, map_width - 1));
   y = std::clamp(y, 0, std::max(0, map_height - 1));
   return {x, y};
+}
+
+inline int legacy_effective_map_extent(const int server_extent, const int loaded_extent) {
+  return server_extent > 0 ? server_extent : std::max(0, loaded_extent);
+}
+
+inline std::pair<int, int> legacy_mouse_to_map_clamped(
+    const LegacyMapViewport& viewport, const int mouse_x, const int mouse_y,
+    const int server_width, const int server_height, const int loaded_width,
+    const int loaded_height) {
+  return legacy_mouse_to_map_clamped(
+      viewport, mouse_x, mouse_y, legacy_effective_map_extent(server_width, loaded_width),
+      legacy_effective_map_extent(server_height, loaded_height));
 }
 
 inline int legacy_tile_draw_x(const LegacyMapViewport& viewport, const int map_x) {
