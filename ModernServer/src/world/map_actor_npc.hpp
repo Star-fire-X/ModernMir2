@@ -532,6 +532,27 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       stop_script = true;
       return std::nullopt;
     }
+    if (command_name == "SENDMSG" || command_name == "SYSMSG") {
+      std::size_t message_start = 0;
+      std::int32_t channel = 0;
+      if (tokens.size() > 1) {
+        const auto maybe_channel = parse_int32(tokens[0]);
+        if (maybe_channel.has_value()) {
+          channel = *maybe_channel;
+          message_start = 1;
+        }
+      }
+      auto message = tokens.empty() ? std::string{} : join_tokens(tokens, message_start);
+      message = render_npc_dialog_text(npc, player, config_, castle_dialog_context_,
+                                       std::move(message), item_configs_);
+      if (message.empty()) {
+        trace(util::lower_copy(command_name) + "_reject", false, channel, action_line);
+        return std::nullopt;
+      }
+      queue_system_notice(dispatch, player, message);
+      trace(util::lower_copy(command_name), true, channel, message);
+      return std::nullopt;
+    }
     if (command_name == "BREAK" || command_name == "ENDQUEST") {
       trace(util::lower_copy(command_name), true, 0, action_line);
       stop_script = true;
