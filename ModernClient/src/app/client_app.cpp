@@ -409,6 +409,10 @@ bool ClientApp::can_draw_frame() const {
 
 // 请求登录网关：清理旧状态 -> 重置角色/选服/世界数据 -> 发起 TCP 连接
 void ClientApp::request_login(const std::string& account_id, const std::string& password) {
+  if (state_.login.request_pending) {
+    return;
+  }
+  state_.login.request_pending = true;
   state_.login.status = L"Connecting login gateway...";
   state_.login.account_id = legacy_byte_payload(account_id);
   state_.login.password = legacy_byte_payload(password);
@@ -432,6 +436,7 @@ void ClientApp::request_login(const std::string& account_id, const std::string& 
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for login gateway..."); });
   if (!protocol_.connect(config_.login_host, config_.login_port)) {
+    state_.login.request_pending = false;
     pending_connect_ = PendingConnect::none;
     cancel_one_shot_timer(wait_msg_timer_);
     state_.login.status = L"Login gateway connection failed.";
@@ -442,6 +447,10 @@ void ClientApp::request_login(const std::string& account_id, const std::string& 
 // 请求注册账号：保存注册信息并连接登录网关
 void ClientApp::request_create_account(const std::string& account_id, const std::string& password,
                                        const client_v1::AccountProfile& profile) {
+  if (state_.login.request_pending) {
+    return;
+  }
+  state_.login.request_pending = true;
   state_.login.status = L"Connecting login gateway for registration...";
   state_.login.login_state = LoginState::lsNewid;
   state_.login.account_id = legacy_byte_payload(account_id);
@@ -453,6 +462,7 @@ void ClientApp::request_create_account(const std::string& account_id, const std:
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for registration..."); });
   if (!protocol_.connect(config_.login_host, config_.login_port)) {
+    state_.login.request_pending = false;
     pending_connect_ = PendingConnect::none;
     cancel_one_shot_timer(wait_msg_timer_);
     state_.login.status = L"Login gateway connection failed.";
@@ -463,12 +473,16 @@ void ClientApp::request_create_account(const std::string& account_id, const std:
 // 请求更新账号资料（需先登录，在已有连接上直接发送 UpdateAccountRequest）
 void ClientApp::request_update_account(const std::string& account_id, const std::string& password,
                                        const client_v1::AccountProfile& profile) {
+  if (state_.login.request_pending) {
+    return;
+  }
   if (!protocol_.connected()) {
     state_.login.status = L"Login gateway is not connected.";
     show_modal(L"Connection Required", L"Log in again before updating account details.");
     return;
   }
   state_.login.status = L"Updating account details...";
+  state_.login.request_pending = true;
   state_.login.login_state = LoginState::lsNewid;
   state_.login.account_id = legacy_byte_payload(account_id);
   state_.login.password = legacy_byte_payload(password);
@@ -482,6 +496,10 @@ void ClientApp::request_update_account(const std::string& account_id, const std:
 // 请求修改密码：发起独立的修改密码连接
 void ClientApp::request_change_password(const std::string& account_id, const std::string& password,
                                         const std::string& new_password) {
+  if (state_.login.request_pending) {
+    return;
+  }
+  state_.login.request_pending = true;
   state_.login.status = L"Connecting login gateway for password change...";
   state_.login.login_state = LoginState::lsChgpw;
   state_.login.account_id = legacy_byte_payload(account_id);
@@ -492,6 +510,7 @@ void ClientApp::request_change_password(const std::string& account_id, const std
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for password change..."); });
   if (!protocol_.connect(config_.login_host, config_.login_port)) {
+    state_.login.request_pending = false;
     pending_connect_ = PendingConnect::none;
     cancel_one_shot_timer(wait_msg_timer_);
     state_.login.status = L"Login gateway connection failed.";
@@ -501,6 +520,9 @@ void ClientApp::request_change_password(const std::string& account_id, const std
 
 // 请求选择游戏服务器：在已登录的连接上发送选服请求
 void ClientApp::request_select_server(const std::string& server_name) {
+  if (state_.lobby.server_select_pending) {
+    return;
+  }
   if (server_name.empty()) {
     show_modal(L"Select Server", L"No server is selected.");
     return;
@@ -517,6 +539,7 @@ void ClientApp::request_select_server(const std::string& server_name) {
   state_.lobby.characters.clear();
   state_.connection_phase = GameStateStore::ConnectionPhase::login;
   state_.login.status = L"Selecting server...";
+  state_.lobby.server_select_pending = true;
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for server selection..."); });
   protocol_.send(client_v1::SelectServerRequest{server_name});
@@ -524,6 +547,10 @@ void ClientApp::request_select_server(const std::string& server_name) {
 
 // 请求角色列表：向角色网关发送列表请求（需先通过 SelectServerResult 获取 lobby_token）
 void ClientApp::request_character_list() {
+  if (state_.lobby.character_list_pending) {
+    return;
+  }
+  state_.lobby.character_list_pending = true;
   state_.connection_phase = GameStateStore::ConnectionPhase::select_character;
   state_.login.status = L"Requesting character list...";
   schedule_one_shot_timer(sel_chr_wait_timer_, 5.0f,
@@ -534,9 +561,13 @@ void ClientApp::request_character_list() {
 // 请求创建角色：发送名字/职业/性别/发型到角色网关
 void ClientApp::request_create_character(const std::string& name, const std::uint8_t job,
                                          const std::uint8_t sex, const std::uint8_t hair) {
+  if (state_.lobby.create_character_pending) {
+    return;
+  }
   if (name.empty()) {
     return;
   }
+  state_.lobby.create_character_pending = true;
   schedule_one_shot_timer(cmd_timer_, 3.0f,
                           [this] { cmd_timer_tick(L"Still waiting for character creation..."); });
   protocol_.send(client_v1::CreateCharacterRequest{legacy_byte_payload(name), job, sex, hair});
@@ -544,6 +575,9 @@ void ClientApp::request_create_character(const std::string& name, const std::uin
 
 // 请求删除当前选中的角色：弹出确认对话框，确认后发送删除请求
 void ClientApp::request_delete_selected_character() {
+  if (state_.lobby.delete_character_pending) {
+    return;
+  }
   if (state_.lobby.selected_index < 0 ||
       state_.lobby.selected_index >= static_cast<int>(state_.lobby.characters.size())) {
     return;
@@ -556,6 +590,7 @@ void ClientApp::request_delete_selected_character() {
       L"Delete \"" + character_name +
           L"\"?\\Deleted characters cannot be restored.\\You may be unable to reuse this name for a while.",
       [this, name] {
+        state_.lobby.delete_character_pending = true;
         schedule_one_shot_timer(
             cmd_timer_, 3.0f,
             [this] { cmd_timer_tick(L"Still waiting for character deletion..."); });
@@ -565,12 +600,16 @@ void ClientApp::request_delete_selected_character() {
 
 // 请求使用选中角色进入游戏：发送 SelectCharacterRequest，服务端返回 enter_world_token
 void ClientApp::request_selected_character_enter() {
+  if (state_.lobby.enter_character_pending) {
+    return;
+  }
   if (state_.lobby.selected_index < 0 ||
       state_.lobby.selected_index >= static_cast<int>(state_.lobby.characters.size())) {
     return;
   }
   state_.selected_character = legacy_byte_payload(
       state_.lobby.characters[static_cast<std::size_t>(state_.lobby.selected_index)].name);
+  state_.lobby.enter_character_pending = true;
   schedule_one_shot_timer(sel_chr_wait_timer_, 5.0f,
                           [this] { sel_chr_wait_timer_tick(L"Still waiting for character entry..."); });
   protocol_.send(client_v1::SelectCharacterRequest{state_.selected_character});
@@ -1176,6 +1215,12 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
     // ---- 连接断开事件 ----
     if (auto* disconnected = std::get_if<DisconnectedEvent>(&event)) {
       cancel_network_wait_timers();
+      state_.login.request_pending = false;
+      state_.lobby.server_select_pending = false;
+      state_.lobby.character_list_pending = false;
+      state_.lobby.create_character_pending = false;
+      state_.lobby.delete_character_pending = false;
+      state_.lobby.enter_character_pending = false;
       state_.clear_world_ui_state();
       // 客户端主动发起的断开（reason="client_disconnect"）不弹提示
       if (!disconnected->reason.empty() && disconnected->reason != "client_disconnect") {
@@ -1211,6 +1256,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
               state_.login.needs_account_update = false;
               state_.login.status = L"Authenticated. Waiting for server list...";
             } else {
+              state_.login.request_pending = false;
               state_.login.needs_account_update = false;
               // 自动播放模式：账号不存在（code=-4）时自动创建
               if (config_.auto_play.enabled && config_.auto_play.create_account &&
@@ -1230,6 +1276,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
 
           // 服务端要求补充账号资料（如 SSN、生日等）
           } else if constexpr (std::is_same_v<T, client_v1::NeedUpdateAccount>) {
+            state_.login.request_pending = false;
             state_.login.account_id = value.account_id;
             state_.login.account_profile = normalize_account_profile(value.account_id, value.profile);
             state_.login.needs_account_update = true;
@@ -1246,6 +1293,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
 
           // 服务器列表：自动模式或重连时自动选服，否则切换到选服界面
           } else if constexpr (std::is_same_v<T, client_v1::ServerList>) {
+            state_.login.request_pending = false;
             state_.login.needs_account_update = false;
             state_.apply(value);
             if (state_.lobby.servers.empty()) {
@@ -1277,12 +1325,14 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           // 选服结果：保存角色网关地址并发起连接
           } else if constexpr (std::is_same_v<T, client_v1::SelectServerResult>) {
             if (!value.success) {
+              state_.lobby.server_select_pending = false;
               show_modal(L"Select Server Failed", widen(value.error_message));
               return;
             }
             state_.apply(value);
             if (state_.pending_lobby_token.empty() || state_.pending_character_host.empty() ||
                 state_.pending_character_port == 0) {
+              state_.lobby.server_select_pending = false;
               pending_connect_ = PendingConnect::none;
               state_.login.status = L"Server selection returned an invalid character gateway.";
               show_modal(L"Select Server Failed", L"Character gateway details were missing.");
@@ -1291,6 +1341,8 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.login.status = L"Connecting character gateway...";
             pending_connect_ = PendingConnect::select_character;
             if (!protocol_.connect(value.address, value.port)) {
+              state_.lobby.server_select_pending = false;
+              state_.lobby.character_list_pending = false;
               pending_connect_ = PendingConnect::none;
               cancel_one_shot_timer(sel_chr_wait_timer_);
               state_.login.status = L"Character gateway connection failed.";
@@ -1300,6 +1352,8 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           // 角色列表：切换到选角场景，自动模式/重连时自动处理
           } else if constexpr (std::is_same_v<T, client_v1::CharacterList>) {
             pending_connect_ = PendingConnect::none;
+            state_.lobby.server_select_pending = false;
+            state_.lobby.character_list_pending = false;
             state_.apply(value);
             state_.connection_phase = GameStateStore::ConnectionPhase::select_character;
             state_.login.status = L"Character list received.";
@@ -1325,6 +1379,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
 
           // 选中角色结果：获取 enter_world_token 和游戏网关地址，连接世界服务器
           } else if constexpr (std::is_same_v<T, client_v1::SelectCharacterResult>) {
+            state_.lobby.enter_character_pending = false;
             if (!value.success) {
               show_modal(L"Character Select Failed", widen(value.error_message));
               return;
@@ -1337,6 +1392,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.login.status = L"Connecting game gateway...";
             pending_connect_ = PendingConnect::game;
             if (!protocol_.connect(value.address, value.port)) {
+              state_.lobby.enter_character_pending = false;
               pending_connect_ = PendingConnect::none;
               cancel_one_shot_timer(wait_msg_timer_);
               state_.login.status = L"Game gateway connection failed.";
@@ -1537,6 +1593,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
 
           // ---- 账号操作结果 ----
           } else if constexpr (std::is_same_v<T, client_v1::CreateAccountResult>) {
+            state_.login.request_pending = false;
             if (!value.success) {
               state_.login.login_state = LoginState::lsNewidRetry;
               state_.login.status = L"Account creation failed. Please retry.";
@@ -1553,11 +1610,13 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             // 自动模式：创建成功后立即用刚注册的账号登录
             state_.login.status = L"Autoplay account ready. Logging in...";
+            state_.login.request_pending = true;
             protocol_.send(client_v1::LoginRequest{
                 legacy_byte_payload(config_.auto_play.account_id),
                 legacy_byte_payload(config_.auto_play.password)});
 
           } else if constexpr (std::is_same_v<T, client_v1::UpdateAccountResult>) {
+            state_.login.request_pending = false;
             if (!value.success) {
               state_.login.needs_account_update = true;
               state_.login.login_state = LoginState::lsNewid;
@@ -1570,6 +1629,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.login.status = L"Account details updated. Waiting for server list...";
 
           } else if constexpr (std::is_same_v<T, client_v1::ChangePasswordResult>) {
+            state_.login.request_pending = false;
             if (!value.success) {
               show_modal(L"Operation Failed", widen(value.error_message));
               state_.login.status = L"Password change failed.";
@@ -1581,6 +1641,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             show_modal(L"Password Changed", L"Password updated successfully.");
 
           } else if constexpr (std::is_same_v<T, client_v1::CreateCharacterResult>) {
+            state_.lobby.create_character_pending = false;
             if (!value.success) {
               state_.login.status = L"Character creation failed. Please retry.";
               show_modal(L"Create Character Failed", widen(value.error_message));
@@ -1590,6 +1651,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             request_character_list();
 
           } else if constexpr (std::is_same_v<T, client_v1::DeleteCharacterResult>) {
+            state_.lobby.delete_character_pending = false;
             if (!value.success) {
               show_modal(L"Delete Character Failed", widen(value.error_message));
               return;
