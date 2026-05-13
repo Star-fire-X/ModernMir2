@@ -241,4 +241,44 @@ inline constexpr std::array<MappingEntry, 39> kDelphiClientGetMappings{{
      "Detailed ability state drives the state window."},
 }};
 
+// ====================================================================
+// 场景切换相关协议映射表
+// 仅列出会直接驱动登录/选服/选角/创建角色/PlayScene 切换的消息。
+// ====================================================================
+inline constexpr std::array<MappingEntry, 13> kSceneTransitionMappings{{
+    {"SendLogin", "LoginRequest", "login", MigrationStatus::implemented,
+     "Login button sends this before any scene change; LoginResult/ServerList drive the next scene."},
+    {"ClientGetPasswdSuccess", "LoginResult + ServerList -> ServerSelectScene", "login",
+     MigrationStatus::partial,
+     "client_v1 keeps LoginResult and ServerList typed but preserves receive order in the frame drain."},
+    {"SendSelectServer", "SelectServerRequest", "server_select", MigrationStatus::implemented,
+     "Server-select click sends the selected name and leaves the current UI pending until result."},
+    {"ClientGetSelectServer", "SelectServerResult -> character gateway connect", "server_select",
+     MigrationStatus::implemented,
+     "Successful result carries lobby token and endpoint; CharacterListRequest follows connection."},
+    {"SendQueryChr", "CharacterListRequest", "character", MigrationStatus::implemented,
+     "Sent after selecting a server or refreshing create/delete results."},
+    {"ClientGetReceiveChrs", "CharacterList -> CharacterSelectScene", "character",
+     MigrationStatus::implemented,
+     "Character slots are replaced from the typed list before switching to character select."},
+    {"SendNewChr", "CreateCharacterRequest", "character_create", MigrationStatus::implemented,
+     "Create dialog submits name/job/sex and waits for CreateCharacterResult."},
+    {"ClientGetNewChr", "CreateCharacterResult -> CharacterListRequest", "character_create",
+     MigrationStatus::implemented,
+     "Success refreshes the character list; failure stays in create-character UI with modal text."},
+    {"SendDelChr", "DeleteCharacterRequest", "character", MigrationStatus::implemented,
+     "Delete confirmation sends the selected name and waits for DeleteCharacterResult."},
+    {"ClientGetDelChr", "DeleteCharacterResult -> CharacterListRequest", "character",
+     MigrationStatus::implemented,
+     "Success refreshes the character list; failure keeps the current character-select scene."},
+    {"SendSelChr", "SelectCharacterRequest", "character", MigrationStatus::implemented,
+     "Selecting a character enters pending/loading only after the gateway accepts it."},
+    {"ClientGetStartPlay", "SelectCharacterResult + LoginNotice + EnterWorldResult + WorldSnapshot",
+     "world_entry", MigrationStatus::implemented,
+     "Typed messages remain ordered; WorldSnapshot is the frame that applies world state and switches to PlayScene."},
+    {"ClientGetServerDown", "DisconnectReason / DisconnectedEvent -> LoginScene", "connection",
+     MigrationStatus::partial,
+     "Server disconnect notices show modal text; complete Delphi reconnect edge cases remain planned."},
+}};
+
 }  // namespace mir2::client::protocol_migration

@@ -450,6 +450,57 @@ void assert_p3_protocol_goldens() {
                 554, 520, payload);
 }
 
+void assert_scene_transition_drain_order() {
+  using namespace mir2::client_v1;
+
+  std::vector<std::uint8_t> buffer;
+  const auto append_frame = [&buffer](const auto& message, const std::uint32_t sequence) {
+    auto bytes = encode_frame(make_frame(message, sequence));
+    buffer.insert(buffer.end(), bytes.begin(), bytes.end());
+  };
+
+  append_frame(LoginResult{true, 0, "guest", "Guest", ""}, 1);
+  append_frame(ServerList{{ServerEntry{"S1", "127.0.0.1", 5600}}}, 2);
+  append_frame(SelectServerResult{true, "S1", "127.0.0.1", 5601, "lobby", ""}, 3);
+
+  CharacterList characters;
+  characters.characters.push_back(CharacterSummary{"Hero", 1, 0, 1, 2, "0"});
+  characters.selected_name = "Hero";
+  append_frame(characters, 4);
+
+  append_frame(SelectCharacterResult{true, "Hero", "world", "127.0.0.1", 5602, ""}, 5);
+  append_frame(LoginNotice{"Welcome", "Notice"}, 6);
+  append_frame(EnterWorldResult{true, 1000, "Hero", "0", 330, 270, ""}, 7);
+
+  WorldSnapshot snapshot;
+  snapshot.map_id = "0";
+  snapshot.width = 700;
+  snapshot.height = 700;
+  snapshot.self_actor_id = 1000;
+  snapshot.actors.push_back(WorldActor{1000, "Hero", 330, 270, 2, 0, 0, ActorType::player});
+  append_frame(snapshot, 8);
+
+  auto frames = drain_frames(buffer);
+  assert(buffer.empty());
+  assert(frames.size() == 8);
+  assert(frames[0].message_id == MessageId::login_result);
+  assert(frames[1].message_id == MessageId::server_list);
+  assert(frames[2].message_id == MessageId::select_server_result);
+  assert(frames[3].message_id == MessageId::character_list);
+  assert(frames[4].message_id == MessageId::select_character_result);
+  assert(frames[5].message_id == MessageId::login_notice);
+  assert(frames[6].message_id == MessageId::enter_world_result);
+  assert(frames[7].message_id == MessageId::world_snapshot);
+  assert(decode_message<LoginResult>(frames[0]).has_value());
+  assert(decode_message<ServerList>(frames[1]).has_value());
+  assert(decode_message<SelectServerResult>(frames[2]).has_value());
+  assert(decode_message<CharacterList>(frames[3]).has_value());
+  assert(decode_message<SelectCharacterResult>(frames[4]).has_value());
+  assert(decode_message<LoginNotice>(frames[5]).has_value());
+  assert(decode_message<EnterWorldResult>(frames[6]).has_value());
+  assert(decode_message<WorldSnapshot>(frames[7]).has_value());
+}
+
 }  // namespace
 
 int main() {
@@ -458,6 +509,7 @@ int main() {
 
   static_assert(kDelphiSendMappings.size() == 57);
   static_assert(kDelphiClientGetMappings.size() == 39);
+  static_assert(kSceneTransitionMappings.size() == 13);
 
   assert(has_entry(kDelphiSendMappings, "SendSelectServer"));
   assert(has_entry(kDelphiSendMappings, "SendRunLogin"));
@@ -466,6 +518,10 @@ int main() {
   assert(has_entry(kDelphiClientGetMappings, "ClientGetNeedUpdateAccount"));
   assert(has_entry(kDelphiClientGetMappings, "ClientGetSelectServer"));
   assert(has_entry(kDelphiClientGetMappings, "ClientGetStartPlay"));
+  assert(has_entry(kSceneTransitionMappings, "SendLogin"));
+  assert(has_entry(kSceneTransitionMappings, "ClientGetPasswdSuccess"));
+  assert(has_entry(kSceneTransitionMappings, "ClientGetStartPlay"));
+  assert(has_entry(kSceneTransitionMappings, "ClientGetServerDown"));
 
   const auto assert_not_planned = [](const auto* entry) {
     assert(entry != nullptr);
@@ -486,6 +542,7 @@ int main() {
   assert_p0_protocol_goldens();
   assert_p2_protocol_goldens();
   assert_p3_protocol_goldens();
+  assert_scene_transition_drain_order();
 
   SelectServerRequest request;
   request.name = "ModernServer";
