@@ -38,7 +38,25 @@ bool LegacyMapEnvironment::static_can_move(std::int32_t x, std::int32_t y) const
     return false;
   }
   if (movement_map_ != nullptr) {
-    return movement_map_->can_move(x, y);
+    const auto* target = movement_map_->cell(x, y);
+    if (target == nullptr || legacy::MapDocument::terrain_blocks_move(*target)) {
+      return false;
+    }
+    return !legacy::MapDocument::door_blocks_move(*target) || door_is_open(x, y);
+  }
+  return true;
+}
+
+bool LegacyMapEnvironment::static_can_fly(std::int32_t x, std::int32_t y) const {
+  if (!in_bounds(x, y)) {
+    return false;
+  }
+  if (movement_map_ != nullptr) {
+    const auto* target = movement_map_->cell(x, y);
+    if (target == nullptr || (target->fr_img & 0x8000U) != 0U) {
+      return false;
+    }
+    return !legacy::MapDocument::door_blocks_move(*target) || door_is_open(x, y);
   }
   return true;
 }
@@ -84,11 +102,36 @@ bool LegacyMapEnvironment::can_fly_line(std::int32_t from_x, std::int32_t from_y
     const auto dy = to_y == y ? 0 : (to_y > y ? 1 : -1);
     x += dx;
     y += dy;
+    if (!static_can_move(x, y)) {
+      return false;
+    }
     if (x == to_x && y == to_y) {
       return true;
     }
-    if (!static_can_move(x, y)) {
+  }
+  return false;
+}
+
+bool LegacyMapEnvironment::can_fire_fly_line(std::int32_t from_x, std::int32_t from_y,
+                                             std::int32_t to_x, std::int32_t to_y) const {
+  if (!in_bounds(from_x, from_y) || !in_bounds(to_x, to_y)) {
+    return false;
+  }
+  auto x = from_x;
+  auto y = from_y;
+  for (std::int32_t step = 0; step < 32; ++step) {
+    if (x == to_x && y == to_y) {
+      return true;
+    }
+    const auto dx = to_x == x ? 0 : (to_x > x ? 1 : -1);
+    const auto dy = to_y == y ? 0 : (to_y > y ? 1 : -1);
+    x += dx;
+    y += dy;
+    if (!static_can_fly(x, y)) {
       return false;
+    }
+    if (x == to_x && y == to_y) {
+      return true;
     }
   }
   return false;

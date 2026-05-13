@@ -47,6 +47,19 @@ struct MapDocument {
                   static_cast<std::size_t>(x)];
   }
 
+  [[nodiscard]] static bool terrain_blocks_move(const MapCell& cell) {
+    return (cell.bk_img & 0x8000U) != 0U || (cell.fr_img & 0x8000U) != 0U;
+  }
+
+  [[nodiscard]] static bool door_blocks_move(const MapCell& cell) {
+    return (cell.door_index & 0x80U) != 0U && (cell.door_offset & 0x80U) == 0U;
+  }
+
+  [[nodiscard]] bool terrain_can_move(int x, int y) const {
+    const auto* target = cell(x, y);
+    return target != nullptr && !terrain_blocks_move(*target);
+  }
+
   /// 碰撞检测：检查 bk_img 和 fr_img 的高 bit（0x8000）是否未设置
   /// 高位为 0 表示可通过，为 1 表示阻挡
   [[nodiscard]] bool can_move(int x, int y) const {
@@ -54,10 +67,22 @@ struct MapDocument {
     if (target == nullptr) {
       return false;
     }
-    if ((target->bk_img & 0x8000U) != 0U || (target->fr_img & 0x8000U) != 0U) {
+    if (terrain_blocks_move(*target)) {
       return false;
     }
-    return ((target->door_index & 0x80U) == 0U) || ((target->door_offset & 0x80U) != 0U);
+    return !door_blocks_move(*target);
+  }
+
+  /// 飞行检测：Delphi CanFly 只检查前景高墙和关闭的门。
+  [[nodiscard]] bool can_fly(int x, int y) const {
+    const auto* target = cell(x, y);
+    if (target == nullptr) {
+      return false;
+    }
+    if ((target->fr_img & 0x8000U) != 0U) {
+      return false;
+    }
+    return !door_blocks_move(*target);
   }
 };
 
