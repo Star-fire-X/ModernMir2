@@ -46,6 +46,10 @@ std::vector<LegacyPacket> LegacyProtocolCodec::drain_packets(std::vector<std::ui
 
     std::string payload(buffer.begin() + static_cast<std::ptrdiff_t>(consumed + 1), frame_end);
 
+    if (!payload.empty() && payload.front() >= '0' && payload.front() <= '9') {
+      payload.erase(0, 1);
+    }
+
     LegacyPacket packet;
     if (!payload.empty()) {
       packet.body.assign(payload.begin(), payload.end());
