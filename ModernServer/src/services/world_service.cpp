@@ -753,6 +753,31 @@ RuntimeDispatch WorldService::run_legacy_socket_stage(std::uint64_t now_ms) {
   return dispatch;
 }
 
+// ── Session lifecycle state machine ──────────────────────────────────
+//
+//  State                  Entered by                     Exited by
+//  ─────────────────────  ─────────────────────────────  ──────────────────
+//  Disconnected           (initial)                      TCP accept
+//  Connected              SessionEvent::connected         CM_IDPASSWORD ok
+//  LoginPending           PersistRequest to DB           auth response
+//  LoggedInAccount        SM_PASSOK_SELECTSERVER          CM_SELECTSERVER
+//  SelectingCharacter     SM_SELECTSERVER_OK              CM_SELCHR
+//  EnteringWorld          admission advance               SM_STARTPLAY
+//  InGame                 character loaded + map joined    disconnect/kick
+//  Disconnecting          SessionEvent::disconnected       cleanup done
+//  Kicked                 SessionEvent::force_disconnect   close socket
+//
+//  Kick sequence (matches Delphi SendForcedClose):
+//    1. Post send_packet_and_close with kLegacyKickCloseDelayMs (50ms)
+//    2. Gateway sends SM_OUTOFCONNECTION to client, waits 50ms
+//    3. Gateway closes TCP socket
+//    4. Gateway notifies world_service with SessionEvent::disconnected
+//    5. WorldService revokes authentication, cleans up session
+//
+//  Reconnect rule: old session must be fully cleaned (actor removed,
+//  session_gateways_ erased) before a new session for the same character
+//  can enter the world.
+// ──────────────────────────────────────────────────────────────────────
 RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
   if (event.kind == SessionEventKind::packet_received) {
     if (const auto run_login = decode_run_login(event.packet); run_login.has_value()) {
