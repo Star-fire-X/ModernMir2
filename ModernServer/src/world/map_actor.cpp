@@ -2303,10 +2303,7 @@ bool MapActor::commit_trade(TradeSession& session, RuntimeDispatch& dispatch) {
       static_cast<std::int64_t>(second->character().gold) + session.first.gold > kLegacyBagGold ||
       !can_receive_trade_items(*first, session.second.items) ||
       !can_receive_trade_items(*second, session.first.items)) {
-    session.first.accepted = false;
-    session.second.accepted = false;
-    queue_system_notice(dispatch, *first, "Trade failed.");
-    queue_system_notice(dispatch, *second, "Trade failed.");
+    cancel_trade_for(first->id(), dispatch, true);
     return false;
   }
 
@@ -2328,10 +2325,7 @@ bool MapActor::commit_trade(TradeSession& session, RuntimeDispatch& dispatch) {
   for (const auto& item : session.second.items) {
     if (!first->add_bag_item(item)) {
       rollback_added();
-      session.first.accepted = false;
-      session.second.accepted = false;
-      queue_system_notice(dispatch, *first, "Trade failed.");
-      queue_system_notice(dispatch, *second, "Trade failed.");
+      cancel_trade_for(first->id(), dispatch, true);
       return false;
     }
     added_to_first.push_back(item);
@@ -2339,10 +2333,7 @@ bool MapActor::commit_trade(TradeSession& session, RuntimeDispatch& dispatch) {
   for (const auto& item : session.first.items) {
     if (!second->add_bag_item(item)) {
       rollback_added();
-      session.first.accepted = false;
-      session.second.accepted = false;
-      queue_system_notice(dispatch, *first, "Trade failed.");
-      queue_system_notice(dispatch, *second, "Trade failed.");
+      cancel_trade_for(first->id(), dispatch, true);
       return false;
     }
     added_to_second.push_back(item);

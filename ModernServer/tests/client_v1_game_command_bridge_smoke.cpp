@@ -12,6 +12,8 @@
 #include "core/metrics_registry.hpp"
 #include "core/module.hpp"
 #include "core/shutdown_token.hpp"
+#include "protocol/legacy_edcode.hpp"
+#include "protocol/legacy_game_codec.hpp"
 #include "services/client_v1_admission_registry.hpp"
 #include "services/client_v1_game_gateway_service.hpp"
 #include "shared/legacy/action_ids.hpp"
@@ -40,6 +42,14 @@ mir2::CharacterRecord make_character() {
   return character;
 }
 
+mir2::CharacterRecord make_trade_target() {
+  auto character = make_character();
+  character.account_id = "bridge_target";
+  character.character_name = "Other";
+  character.x = 11;
+  return character;
+}
+
 void seed_database(const std::filesystem::path& source_root,
                    const std::filesystem::path& database_path) {
   mir2::Repository repository(database_path);
@@ -52,6 +62,20 @@ void seed_database(const std::filesystem::path& source_root,
   account.display_name = "Bridge";
   static_cast<void>(repository.create_account(account));
   static_cast<void>(repository.create_character(make_character()));
+
+  mir2::AccountRecord target_account;
+  target_account.account_id = "bridge_target";
+  target_account.password = "pw";
+  target_account.display_name = "BridgeTarget";
+  static_cast<void>(repository.create_account(target_account));
+  static_cast<void>(repository.create_character(make_trade_target()));
+}
+
+mir2::LegacyPacket make_deal_menu_packet(std::uint64_t session_id,
+                                         std::string_view peer_name) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmDealMenu, 0, 0, 0, 0),
+      mir2::legacy_encode_string(peer_name));
 }
 
 std::optional<asio::ip::tcp::socket> connect_game(asio::io_context& io_context) {
@@ -174,6 +198,27 @@ int main() {
     return fail("enter world command");
   }
   const auto session_id = enter_command->session_id;
+
+  auto target_socket = connect_game(io_context);
+  if (!target_socket.has_value()) {
+    stop_services();
+    return fail("target connect");
+  }
+  mir2::tests::ClientV1SocketReader target_reader(*target_socket);
+  std::uint32_t target_sequence = 1;
+  mir2::tests::send_client_v1_message(*target_socket, mir2::client_v1::ClientHello{},
+                                      target_sequence);
+  const auto target_token = admissions->issue("bridge_target", "Other");
+  mir2::tests::send_client_v1_message(
+      *target_socket, mir2::client_v1::EnterWorldRequest{target_token, 1, 1},
+      target_sequence);
+  const auto target_enter_command =
+      wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::enter_world);
+  if (!target_enter_command.has_value() || target_enter_command->account_id != "bridge_target" ||
+      target_enter_command->character_name != "Other") {
+    stop_services();
+    return fail("target enter world command");
+  }
 
   mir2::tests::send_client_v1_message(
       *socket, mir2::client_v1::MoveIntent{11, 10, mir2::client_v1::MoveMode::walk},
@@ -400,6 +445,15 @@ int main() {
       command->text != "Other") {
     stop_services();
     return fail("trade try command");
+  }
+  bus.post("client_v1_game_gateway",
+           mir2::SessionEvent{mir2::SessionEventKind::send_packet, "client_v1_game_gateway",
+                              session_id, {}, make_deal_menu_packet(session_id, "Other"),
+                              {}});
+  if (!reader.wait_for_matching<mir2::client_v1::TradeState>(
+          [](const auto& state) { return state.visible && state.remote_name == "Other"; })) {
+    stop_services();
+    return fail("trade menu state");
   }
 
   mir2::tests::send_client_v1_message(

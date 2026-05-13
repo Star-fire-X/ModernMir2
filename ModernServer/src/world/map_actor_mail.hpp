@@ -1421,7 +1421,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (peer != nullptr) {
         queue_packet(dispatch, peer->session_id(),
                      make_deal_remote_del_item_packet(peer->session_id(), player->id(),
-                                                      item.make_index));
+                                                      item, item_configs_));
       }
       break;
     }
