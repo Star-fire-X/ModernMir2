@@ -77,6 +77,10 @@ int main() {
     assert(!map->can_move(0, 1));
     assert(!map->can_move(1, 0));
     assert(map->can_move(1, 1));
+    assert(map->terrain_can_move(1, 0));
+    assert(mir2::legacy::MapDocument::door_blocks_move(*map->cell(1, 0)));
+    assert(!map->can_fly(1, 0));
+    assert(map->can_fly(1, 1));
   }
 
   {

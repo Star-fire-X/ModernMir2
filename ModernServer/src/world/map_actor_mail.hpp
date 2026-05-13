@@ -3264,7 +3264,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
               if (!environment_.in_bounds(sx, sy)) {
                 break;
               }
-              if (!environment_.can_fly_line(attacker->x(), attacker->y(), sx, sy)) {
+              if (!environment_.can_fire_fly_line(attacker->x(), attacker->y(), sx, sy)) {
                 add_legacy_trace(dispatch, "LegacySpell", "line_blocked", mail,
                                  current_tick, now_ms, false, magic_id, step,
                                  "CanFireFly");

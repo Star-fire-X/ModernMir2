@@ -16,6 +16,15 @@ std::shared_ptr<mir2::legacy::MapDocument> make_map() {
   return map;
 }
 
+std::shared_ptr<mir2::legacy::MapDocument> make_door_map() {
+  auto map = std::make_shared<mir2::legacy::MapDocument>();
+  map->width = 3;
+  map->height = 3;
+  map->cells.resize(9);
+  map->cells[1 * 3 + 1].door_index = 0x80U | 1U;
+  return map;
+}
+
 const mir2::LegacyMapObject* find_object(const mir2::LegacyMapEnvironment::Cell& cell,
                                          mir2::LegacyMapObjectShape shape,
                                          std::uint64_t object_id) {
@@ -83,6 +92,23 @@ int main() {
   assert(split_gold.ok && !split_gold.merged && split_gold.object_id == 2);
   gold_cell = gold_env.cell(2, 2);
   assert(gold_cell != nullptr && gold_cell->obj_list.size() == 2);
+
+  mir2::LegacyMapEnvironment door_env(3, 3, make_door_map());
+  assert(door_env.door_core_count() == 1);
+  assert(!door_env.static_can_move(1, 1));
+  const auto opened = door_env.open_doors_around(1, 1, 400);
+  assert(opened.size() == 1);
+  assert(door_env.door_is_open(1, 1));
+  assert(door_env.static_can_move(1, 1));
+  assert(door_env.static_can_fly(1, 1));
+  assert(door_env.can_walk(1, 1, false));
+  assert(door_env.can_fly_line(0, 1, 2, 1));
+  assert(door_env.can_fire_fly_line(0, 1, 2, 1));
+  const auto closed = door_env.close_expired_doors(5401, 5000);
+  assert(closed.size() == 1);
+  assert(!door_env.static_can_move(1, 1));
+  assert(!door_env.static_can_fly(1, 1));
+  assert(!door_env.can_fire_fly_line(0, 1, 2, 1));
 
   return 0;
 }
