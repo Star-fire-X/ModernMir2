@@ -71,6 +71,8 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
     bool group_visible{false};
     std::uint64_t group_id{0};
     bool trade_visible{false};
+    std::string pending_trade_remote_name{};
+    std::uint64_t pending_trade_peer_session_id{0};
     std::uint64_t trade_peer_session_id{0};
     std::string trade_remote_name{};
     std::vector<client_v1::ItemSlotState> trade_local_items{};
@@ -189,6 +191,7 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
   [[nodiscard]] std::vector<std::pair<std::uint64_t, client_v1::TradeState>>
   trade_pair_states_locked(std::uint64_t session_id) const;
   void clear_trade_locked(SessionState& state);
+  void clear_pending_trade_locked(std::uint64_t session_id);
   [[nodiscard]] std::optional<client_v1::ItemSlotState> trade_item_from_bag_locked(
       const SessionState& state, std::int32_t make_index, std::string_view name) const;
   void ensure_guild_member_locked(SessionState& state);

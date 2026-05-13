@@ -44,6 +44,14 @@ std::vector<mir2::LegacyClientItem> decode_client_items(std::string_view body) {
   return items;
 }
 
+std::optional<mir2::LegacyClientItem> decode_client_item(std::string_view body) {
+  mir2::LegacyClientItem item;
+  if (!mir2::legacy_decode_buffer(body, &item, sizeof(item))) {
+    return std::nullopt;
+  }
+  return item;
+}
+
 bool has_save_character(const mir2::RuntimeDispatch& dispatch, std::string_view name) {
   for (const auto& request : dispatch.persist_requests) {
     if (request.kind == mir2::PersistRequestKind::save_character &&
@@ -322,8 +330,14 @@ int main() {
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_remove_item, 7, 2001, "Sapphire")));
   const auto remove_item = tick_players(runtime);
+  const auto remote_remove = find_packet(remove_item, 8, mir2::kSmDealRemoteDelItem);
+  const auto remote_remove_item =
+      remote_remove.has_value() ? decode_client_item(remote_remove->body) : std::nullopt;
   if (!find_packet(remove_item, 7, mir2::kSmDealDelItemOk).has_value() ||
-      !find_packet(remove_item, 8, mir2::kSmDealRemoteDelItem).has_value()) {
+      !remote_remove.has_value() || !remote_remove_item.has_value() ||
+      remote_remove->message.recog == 0 || remote_remove->message.series != 1 ||
+      remote_remove_item->make_index != 2001 ||
+      mir2::to_string(remote_remove_item->item.name) != "Sapphire") {
     return fail(11);
   }
   static_cast<void>(runtime.route_logic_command(
@@ -442,6 +456,38 @@ int main() {
   const auto bag_after_move_cancel = query_bag(runtime, 7);
   if (bag_after_move_cancel.size() != 1 || bag_after_move_cancel.front().make_index != 2001) {
     return fail(22);
+  }
+
+  mir2::LogicRuntime fail_runtime(config);
+  fail_runtime.initialize();
+  auto rich_a = make_character("guest_c", "RichA", 10, mir2::kLegacyBagGold - 2, ruby);
+  auto rich_b = make_character("guest_d", "RichB", 11, 50, sapphire);
+  rich_a.dir = 2;
+  rich_b.dir = 6;
+  static_cast<void>(fail_runtime.route_logic_command(enter_command(17, rich_a)));
+  static_cast<void>(fail_runtime.route_logic_command(enter_command(18, rich_b)));
+  static_cast<void>(fail_runtime.tick());
+  static_cast<void>(fail_runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_try, 17, 0, "RichB")));
+  static_cast<void>(tick_players(fail_runtime));
+  static_cast<void>(fail_runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_set_gold, 18, 0, {}, 7)));
+  static_cast<void>(tick_players(fail_runtime));
+  static_cast<void>(tick_players(fail_runtime, 60));
+  static_cast<void>(fail_runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_accept, 17)));
+  static_cast<void>(tick_players(fail_runtime));
+  static_cast<void>(fail_runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_accept, 18)));
+  const auto failed_commit = tick_players(fail_runtime);
+  const auto rich_a_after = fail_runtime.snapshot_character_actor("RichA");
+  const auto rich_b_after = fail_runtime.snapshot_character_actor("RichB");
+  if (!rich_a_after.has_value() || !rich_b_after.has_value() ||
+      rich_a_after->gold != mir2::kLegacyBagGold - 2 || rich_b_after->gold != 50 ||
+      !find_packet(failed_commit, 17, mir2::kSmDealCancel).has_value() ||
+      !find_packet(failed_commit, 18, mir2::kSmDealCancel).has_value() ||
+      !find_packet(failed_commit, 18, mir2::kSmGoldChanged).has_value()) {
+    return fail(23);
   }
 
   return 0;
