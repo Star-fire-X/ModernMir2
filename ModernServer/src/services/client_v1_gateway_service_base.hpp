@@ -31,11 +31,13 @@ class ClientV1GatewayServiceBase : public Module, public ClientV1SessionOwner {
   void on_client_v1_disconnected(std::uint64_t session_id, const std::string& peer_address,
                                  const std::string& reason) override;
   void on_client_v1_message(std::uint64_t session_id, const std::string& peer_address,
+                            std::uint32_t sequence,
                             const client_v1::Message& message) override;
 
  protected:
   virtual PortBinding binding(const HostContext& context) const = 0;
   virtual void handle_message(std::uint64_t session_id, const std::string& peer_address,
+                              std::uint32_t sequence,
                               const client_v1::Message& message) = 0;
   virtual void handle_connected(std::uint64_t session_id, const std::string& peer_address) = 0;
   virtual void handle_disconnected(std::uint64_t session_id, const std::string& peer_address,
@@ -56,6 +58,7 @@ class ClientV1GatewayServiceBase : public Module, public ClientV1SessionOwner {
   std::vector<std::thread> io_threads_{};
   mutable std::mutex mutex_{};
   std::unordered_map<std::uint64_t, std::shared_ptr<ClientV1Session>> sessions_{};
+  std::unordered_map<std::uint64_t, std::uint32_t> client_frame_sequences_{};
   std::atomic_bool running_{false};
   std::atomic_uint64_t next_session_id_{1};
 };

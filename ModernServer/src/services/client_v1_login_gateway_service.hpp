@@ -23,6 +23,7 @@ class ClientV1LoginGatewayService : public ClientV1GatewayServiceBase {
  protected:
   PortBinding binding(const HostContext& context) const override;
   void handle_message(std::uint64_t session_id, const std::string& peer_address,
+                      std::uint32_t sequence,
                       const client_v1::Message& message) override;
   void handle_connected(std::uint64_t session_id, const std::string& peer_address) override;
   void handle_disconnected(std::uint64_t session_id, const std::string& peer_address,

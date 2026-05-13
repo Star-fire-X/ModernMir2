@@ -81,7 +81,8 @@ void ClientV1Session::do_read() {
                                 queue_disconnect_and_close(400, "protocol_decode_error");
                                 return;
                               }
-                              owner_.on_client_v1_message(session_id_, peer_address_, *decoded);
+                              owner_.on_client_v1_message(session_id_, peer_address_,
+                                                          frame.sequence, *decoded);
                             }
                             do_read();
                           }));

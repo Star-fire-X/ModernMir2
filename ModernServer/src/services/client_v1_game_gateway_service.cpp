@@ -536,14 +536,21 @@ PortBinding ClientV1GameGatewayService::binding(const HostContext& context) cons
 
 void ClientV1GameGatewayService::handle_message(std::uint64_t session_id,
                                                 const std::string& /*peer_address*/,
+                                                std::uint32_t sequence,
                                                 const client_v1::Message& message) {
+  {
+    std::scoped_lock lock(mutex_);
+    if (auto it = sessions_.find(session_id); it != sessions_.end() && sequence > 0U) {
+      it->second.next_session_seq = static_cast<std::uint64_t>(sequence - 1U);
+    }
+  }
   std::visit(
       [&](const auto& value) {
         using T = std::decay_t<decltype(value)>;
         if constexpr (std::is_same_v<T, client_v1::ClientHello>) {
           handle_client_hello(session_id, value);
         } else if constexpr (std::is_same_v<T, client_v1::EnterWorldRequest>) {
-          handle_enter_world_request(session_id, value);
+          handle_enter_world_request(session_id, sequence, value);
         } else if constexpr (std::is_same_v<T, client_v1::LoginNoticeOk>) {
           handle_login_notice_ok(session_id);
         } else if constexpr (std::is_same_v<T, client_v1::MoveIntent>) {
@@ -729,7 +736,8 @@ void ClientV1GameGatewayService::handle_client_hello(std::uint64_t session_id,
 }
 
 void ClientV1GameGatewayService::handle_enter_world_request(
-    std::uint64_t session_id, const client_v1::EnterWorldRequest& request) {
+    std::uint64_t session_id, std::uint32_t sequence,
+    const client_v1::EnterWorldRequest& request) {
   auto session_state = session(session_id);
   if (!session_state.has_value() || !session_state->greeted) {
     const auto error = client_error(CanonicalLoginErrorKind::missing_client_hello);
@@ -761,6 +769,9 @@ void ClientV1GameGatewayService::handle_enter_world_request(
   updated.greeted = true;
   updated.entered_world = true;
   updated.pending_login_notice = !context().config.runtime.login_notice_text.empty();
+  if (sequence > 0U) {
+    updated.next_session_seq = static_cast<std::uint64_t>(sequence - 1U);
+  }
   updated.stage = advance(CanonicalLoginStage::character_selected,
                           CanonicalLoginTransition::enter_game);
   updated.account_id = admission->account_id;
@@ -2003,17 +2014,19 @@ void ClientV1GameGatewayService::handle_ping(std::uint64_t session_id,
   send_message(session_id, client_v1::Pong{ping.client_time_ms, static_cast<std::uint64_t>(now)});
 }
 
-void ClientV1GameGatewayService::post_canonical_command(CanonicalLegacyCommand command) {
+void ClientV1GameGatewayService::post_canonical_command(CanonicalLegacyCommand command,
+                                                        bool assign_session_sequence) {
   auto logic = to_logic_command(command);
   logic.gateway = name();
-  post_logic_command(std::move(logic));
+  post_logic_command(std::move(logic), assign_session_sequence);
 }
 
-void ClientV1GameGatewayService::post_logic_command(LogicCommand command) {
+void ClientV1GameGatewayService::post_logic_command(LogicCommand command,
+                                                    bool assign_session_sequence) {
   if (command.gateway.empty()) {
     command.gateway = name();
   }
-  if (command.session_id != 0 && command.session_seq == 0) {
+  if (assign_session_sequence && command.session_id != 0 && command.session_seq == 0) {
     std::scoped_lock lock(mutex_);
     if (auto it = sessions_.find(command.session_id); it != sessions_.end()) {
       command.session_seq = ++it->second.next_session_seq;
@@ -3055,13 +3068,14 @@ void ClientV1GameGatewayService::translate_legacy_packet(
   }
 
   if (request_bag_items) {
-    post_canonical_command(decode_client_v1_query_bag_items_command(session_id));
+    post_canonical_command(decode_client_v1_query_bag_items_command(session_id), false);
   }
   if (request_storage_items) {
     const auto current = session(session_id);
     if (current.has_value() && current->current_merchant_id != 0) {
       post_canonical_command(decode_client_v1_query_storage_items_command(
-          session_id, current->current_merchant_id));
+                                session_id, current->current_merchant_id),
+                              false);
     }
   }
 }
