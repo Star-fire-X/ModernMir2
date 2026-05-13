@@ -52,6 +52,15 @@ inline constexpr std::string_view to_string(const MigrationStatus status) {
 }
 
 // ====================================================================
+// Migration status summary (as of PR-8 protocol mapping audit):
+//   Send mappings:    6 implemented, 43 partial, 6 planned, 2 internal = 57
+//   Receive mappings:  2 implemented, 35 partial, 1 planned, 1 internal = 39
+//   Scene transitions: 7 implemented,  5 partial, 1 planned, 0 internal = 13
+//
+// All legacy Delphi client messages are accounted for.  Partial entries
+// have core functionality working; details and edge cases are tracked.
+// No known Delphi message is missing from the mapping.
+// ====================================================================
 // 客户端发送消息映射表（57 条）
 // 列出所有从 Delphi 客户端发送到服务端的消息及其新版映射
 // ====================================================================
