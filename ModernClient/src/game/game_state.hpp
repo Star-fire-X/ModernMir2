@@ -333,6 +333,11 @@ struct LobbyViewState {
   bool enter_character_pending{false};
 };
 
+struct MapDoorRuntimeState {
+  bool open{false};
+  std::uint64_t updated_ms{0};
+};
+
 /// 世界视图状态：包含所有动态游戏数据
 /// 这是客户端中最大、最核心的状态结构，对应原传奇客户端中的
 /// 大量全局变量（Actor列表、物品列表、魔法列表、战斗状态等）
@@ -344,7 +349,7 @@ struct WorldViewState {
   std::uint64_t self_actor_id{0};                                 ///< 自己的 actor_id
   std::unordered_map<std::uint64_t, ActorState> actors{};         ///< 所有在线角色（key = actor_id）
   std::unordered_map<std::uint64_t, client_v1::GroundItemState> ground_items{};  ///< 地面物品
-  std::unordered_map<std::uint64_t, bool> map_doors{};            ///< 动态门状态（key = x/y）
+  std::unordered_map<std::uint64_t, MapDoorRuntimeState> map_doors{};  ///< 动态门状态（key = x/y）
   std::vector<std::uint64_t> actor_draw_order{};       ///< Delphi ActorList-equivalent draw order
   std::vector<std::uint64_t> ground_item_draw_order{}; ///< Delphi DropedItemList-equivalent draw order
   std::vector<std::string> sys_messages{};    ///< 系统消息队列（黄色文字，显示在聊天框）
@@ -415,6 +420,8 @@ struct WorldViewState {
 inline std::uint64_t elapsed_ms(const std::uint64_t now, const std::uint64_t then) {
   return now >= then ? now - then : 0;
 }
+
+constexpr std::uint64_t kLegacyMapDoorOpenExpireMs = 6000U;
 
 /// 检查动作锁定是否仍然有效
 /// 锁定超过 10 秒自动解除（安全措施，避免锁死）
@@ -1213,11 +1220,7 @@ struct GameStateStore {
 
   void apply(const client_v1::MapDoorState& message) {
     const auto key = map_door_key(message.x, message.y);
-    if (message.open) {
-      world.map_doors[key] = true;
-    } else {
-      world.map_doors.erase(key);
-    }
+    world.map_doors[key] = MapDoorRuntimeState{message.open, detail::monotonic_ms()};
   }
 
   /// 应用角色增量更新消息（坐标/方向变化）
@@ -1235,8 +1238,28 @@ struct GameStateStore {
            static_cast<std::uint32_t>(y);
   }
 
+  static std::int32_t map_door_key_x(const std::uint64_t key) {
+    return static_cast<std::int32_t>(static_cast<std::uint32_t>(key >> 32U));
+  }
+
+  static std::int32_t map_door_key_y(const std::uint64_t key) {
+    return static_cast<std::int32_t>(static_cast<std::uint32_t>(key));
+  }
+
   [[nodiscard]] bool map_door_open(std::int32_t x, std::int32_t y) const {
-    return world.map_doors.find(map_door_key(x, y)) != world.map_doors.end();
+    const auto it = world.map_doors.find(map_door_key(x, y));
+    return it != world.map_doors.end() && it->second.open;
+  }
+
+  void expire_map_door_states(const std::uint64_t now_ms) {
+    for (auto it = world.map_doors.begin(); it != world.map_doors.end();) {
+      if (it->second.open &&
+          elapsed_ms(now_ms, it->second.updated_ms) >= kLegacyMapDoorOpenExpireMs) {
+        it = world.map_doors.erase(it);
+      } else {
+        ++it;
+      }
+    }
   }
 
   /// 应用角色新增/更新消息

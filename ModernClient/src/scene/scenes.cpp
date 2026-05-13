@@ -6310,6 +6310,7 @@ class WorldScene final : public Scene {
     legacy_hud_.sync(context);
     auto& world = context.state->world;
     const auto now_ms = detail::monotonic_ms();
+    context.state->expire_map_door_states(now_ms);
     animation_.update(world, now_ms);
     if (context.audio != nullptr) {
       update_main_theme(*context.audio, delta_seconds, now_ms);
@@ -6777,9 +6778,12 @@ class WorldScene final : public Scene {
       if ((cell->bk_img & 0x8000U) != 0U || (cell->fr_img & 0x8000U) != 0U) {
         return false;
       }
-      if ((cell->door_index & 0x80U) != 0U && (cell->door_offset & 0x80U) == 0U &&
-          !context.state->map_door_open(x, y)) {
-        return false;
+      if ((cell->door_index & 0x80U) != 0U) {
+        const auto dynamic_open = dynamic_door_state_for(context, *cell, x, y);
+        const auto open = dynamic_open.value_or((cell->door_offset & 0x80U) != 0U);
+        if (!open) {
+          return false;
+        }
       }
     } else if (context.state->world.width > 0 && context.state->world.height > 0 &&
                !legacy::in_bounds(context.state->world.width, context.state->world.height, x, y)) {
@@ -6791,10 +6795,48 @@ class WorldScene final : public Scene {
   MapCell map_cell_with_dynamic_door(ClientContext& context, const MapCell& cell,
                                      int x, int y) const {
     auto result = cell;
-    if ((result.door_index & 0x80U) != 0U && context.state->map_door_open(x, y)) {
-      result.door_offset |= 0x80U;
+    if ((result.door_index & 0x7FU) != 0U) {
+      const auto dynamic_open = dynamic_door_state_for(context, result, x, y);
+      if (dynamic_open.has_value()) {
+        if (*dynamic_open) {
+          result.door_offset |= 0x80U;
+        } else {
+          result.door_offset &= 0x7FU;
+        }
+      }
     }
     return result;
+  }
+
+  std::optional<bool> dynamic_door_state_for(ClientContext& context, const MapCell& cell,
+                                             int x, int y) const {
+    const auto exact = context.state->world.map_doors.find(
+        GameStateStore::map_door_key(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)));
+    if (exact != context.state->world.map_doors.end()) {
+      return exact->second.open;
+    }
+
+    if (map_ == nullptr) {
+      return std::nullopt;
+    }
+
+    const auto door_id = static_cast<std::uint8_t>(cell.door_index & 0x7FU);
+    if (door_id == 0U) {
+      return std::nullopt;
+    }
+
+    for (const auto& [key, state] : context.state->world.map_doors) {
+      const auto door_x = GameStateStore::map_door_key_x(key);
+      const auto door_y = GameStateStore::map_door_key_y(key);
+      if (std::abs(door_x - x) > 8 || std::abs(door_y - y) > 8) {
+        continue;
+      }
+      const auto* door_cell = map_->cell(door_x, door_y);
+      if (door_cell != nullptr && (door_cell->door_index & 0x7FU) == door_id) {
+        return state.open;
+      }
+    }
+    return std::nullopt;
   }
 
   bool crash_man(ClientContext& context, const ActorState& self, int x, int y) const {

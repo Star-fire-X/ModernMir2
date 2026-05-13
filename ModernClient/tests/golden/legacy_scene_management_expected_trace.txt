@@ -121,3 +121,11 @@ drop_stale_runtime_deltas
 recv_world_snapshot
 apply_new_map_snapshot
 resume_runtime_deltas
+
+[play.map_door_state]
+recv_open_door
+door_open_visible
+recv_close_door
+door_close_override_kept
+missed_close_expiry
+stale_open_removed
