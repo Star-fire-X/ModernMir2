@@ -134,6 +134,19 @@ int main() {
   assert(viewport.bottom == 208);
   assert(viewport.draw_origin_x == -66);
   assert(viewport.draw_origin_y == -64);
+  const auto bounds = legacy_map_render_bounds(viewport);
+  assert(bounds.tile_left == 89);
+  assert(bounds.tile_top == 190);
+  assert(bounds.tile_right == 110);
+  assert(bounds.tile_bottom == 209);
+  assert(bounds.object_left == 89);
+  assert(bounds.object_top == 191);
+  assert(bounds.object_right == 111);
+  assert(bounds.object_bottom == 243);
+  assert(bounds.visible_left == 91);
+  assert(bounds.visible_top == 191);
+  assert(bounds.visible_right == 109);
+  assert(bounds.visible_bottom == 208);
 
   const auto shifted = make_legacy_map_viewport(100, 200, 12, -8);
   assert(shifted.left == 91);
@@ -144,6 +157,10 @@ int main() {
   const auto edge = make_legacy_map_viewport(4, 5);
   assert(edge.left == -5);
   assert(edge.top == -4);
+  const auto edge_bounds = legacy_map_render_bounds(edge);
+  assert(edge_bounds.tile_left == -7);
+  assert(edge_bounds.tile_top == -5);
+  assert(edge_bounds.object_bottom == 48);
 
   const auto same_tile = legacy_screen_from_map(viewport, 100, 200);
   assert(same_tile.first == 388);
@@ -164,6 +181,13 @@ int main() {
          std::make_pair(100, 200));
   assert(legacy_mouse_to_map_clamped(shifted, -9999, -9999, 700, 700) == std::make_pair(0, 0));
   assert(legacy_mouse_to_map_clamped(shifted, 99999, 99999, 700, 700) ==
+         std::make_pair(699, 699));
+  assert(legacy_effective_map_extent(400, 700) == 400);
+  assert(legacy_effective_map_extent(0, 700) == 700);
+  assert(legacy_effective_map_extent(0, -1) == 0);
+  assert(legacy_mouse_to_map_clamped(shifted, 99999, 99999, 400, 300, 700, 700) ==
+         std::make_pair(399, 299));
+  assert(legacy_mouse_to_map_clamped(shifted, 99999, 99999, 0, 0, 700, 700) ==
          std::make_pair(699, 699));
 
   assert(legacy_tile_draw_x(shifted, 100) == 354);
