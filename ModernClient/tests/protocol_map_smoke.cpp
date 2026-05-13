@@ -749,6 +749,31 @@ int main() {
   assert(decoded_door_state->y == 13);
   assert(decoded_door_state->open);
 
+  WorldSnapshot transfer_snapshot;
+  transfer_snapshot.map_id = "1";
+  transfer_snapshot.width = 500;
+  transfer_snapshot.height = 400;
+  transfer_snapshot.self_actor_id = 1000;
+  transfer_snapshot.actors.push_back(
+      WorldActor{1000, "Hero", 5, 5, 2, 0, 0, ActorType::player});
+  const auto ordered_hen = WorldActor{2000, "Hen", 6, 5, 4, 0, 0, ActorType::monster};
+  Bytes ordered_frames;
+  const auto clear_frame = encode_frame(make_frame(WorldClearObjects{}, 300));
+  const auto change_frame = encode_frame(make_frame(MapChange{"1"}, 301));
+  const auto snapshot_frame = encode_frame(make_frame(transfer_snapshot, 302));
+  const auto upsert_frame = encode_frame(make_frame(ActorUpsert{ordered_hen}, 303));
+  ordered_frames.insert(ordered_frames.end(), clear_frame.begin(), clear_frame.end());
+  ordered_frames.insert(ordered_frames.end(), change_frame.begin(), change_frame.end());
+  ordered_frames.insert(ordered_frames.end(), snapshot_frame.begin(), snapshot_frame.end());
+  ordered_frames.insert(ordered_frames.end(), upsert_frame.begin(), upsert_frame.end());
+  frames = drain_frames(ordered_frames);
+  assert(ordered_frames.empty());
+  assert(frames.size() == 4);
+  assert(frames[0].message_id == MessageId::world_clear_objects);
+  assert(frames[1].message_id == MessageId::map_change);
+  assert(frames[2].message_id == MessageId::world_snapshot);
+  assert(frames[3].message_id == MessageId::actor_upsert);
+
   frame_bytes = encode_frame(make_frame(UseItemResult{true}, 22));
   buffer = frame_bytes;
   frames = drain_frames(buffer);
