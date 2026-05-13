@@ -864,13 +864,23 @@ std::size_t merchant_service_group_count(const Npc& merchant) {
 }
 
 const std::string* find_npc_dialog_text(const Npc& merchant, std::string_view action) {
-  const auto wanted = util::lower_copy(action);
+  auto normalize_action = [](std::string_view value) {
+    auto normalized = util::lower_copy(util::trim(std::string(value)));
+    if (normalized == "@home") {
+      return std::string{"@main"};
+    }
+    if (normalized == "~@home") {
+      return std::string{"~@main"};
+    }
+    return normalized;
+  };
+  const auto wanted = normalize_action(action);
   const auto tilde_wanted =
       util::starts_with(wanted, "@") ? "~" + wanted : std::string{};
   const auto plain_wanted =
       util::starts_with(wanted, "~@") ? wanted.substr(1) : std::string{};
   for (const auto& section : merchant.dialog_sections()) {
-    const auto current = util::lower_copy(section.action);
+    const auto current = normalize_action(section.action);
     if (current == wanted || (!tilde_wanted.empty() && current == tilde_wanted) ||
         (!plain_wanted.empty() && current == plain_wanted)) {
       return &section.text;

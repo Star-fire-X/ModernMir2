@@ -198,6 +198,18 @@ int main() {
     return 1;
   }
 
+  const auto home_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@HOME"));
+  const auto home_packet = find_packet(home_dispatch, mir2::kSmMerchantSay);
+  if (!home_packet.has_value()) {
+    std::filesystem::remove_all(root, ec);
+    return 1;
+  }
+  const auto home_text = decode_merchant_dialog(home_packet->body);
+  if (home_text.find("Old Sage/Welcome, Hero\\") != 0) {
+    std::filesystem::remove_all(root, ec);
+    return 1;
+  }
+
   const auto close_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@exit"));
   if (!find_packet(close_dispatch, mir2::kSmMerchantDlgClose).has_value()) {
     std::filesystem::remove_all(root, ec);
