@@ -101,5 +101,45 @@ int main() {
     std::cerr << "raw_packet\n";
     return 1;
   }
+
+  // Full round-trip: game message → encode → frame → deframe → decode
+  {
+    const auto msg = mir2::make_default_message(mir2::kSmHear, 42, 0, 0, 1);
+    const auto body = mir2::legacy_encode_string("Hello World");
+    const auto pkt = mir2::make_legacy_game_packet(99, 1, 2, msg, body);
+    if (pkt.header.socket_number != 99 || pkt.header.user_gate_index != 1 ||
+        pkt.header.user_list_index != 2 || pkt.header.ident != mir2::kSmHear) {
+      std::cerr << "roundtrip_packet_header\n";
+      return 1;
+    }
+    const auto framed = mir2::LegacyProtocolCodec::encode(pkt);
+    if (framed.size() < 2 || framed.front() != static_cast<std::uint8_t>('#') ||
+        framed.back() != static_cast<std::uint8_t>('!')) {
+      std::cerr << "roundtrip_framing\n";
+      return 1;
+    }
+    std::vector<std::uint8_t> buffer = framed;
+    const auto drained = mir2::LegacyProtocolCodec::drain_packets(buffer);
+    if (!buffer.empty() || drained.size() != 1) {
+      std::cerr << "roundtrip_drain\n";
+      return 1;
+    }
+    const auto decoded = mir2::decode_legacy_game_packet(drained.front());
+    if (!decoded.has_value() || decoded->message.ident != mir2::kSmHear ||
+        decoded->message.recog != 42 || decoded->message.series != 1) {
+      std::cerr << "roundtrip_message\n";
+      return 1;
+    }
+    if (decoded->body != body) {
+      std::cerr << "roundtrip_body\n";
+      return 1;
+    }
+    const auto decoded_text = mir2::legacy_decode_string(decoded->body);
+    if (decoded_text != "Hello World") {
+      std::cerr << "roundtrip_text\n";
+      return 1;
+    }
+  }
+
   return 0;
 }
