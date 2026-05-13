@@ -491,4 +491,3 @@ PR-1 is complete when this document exists and covers:
 - visibility/protocol ids
 - C++ reuse and known gap list
 - open verification questions
-
