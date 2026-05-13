@@ -814,6 +814,7 @@ RuntimeDispatch WorldService::run_legacy_socket_stage(std::uint64_t now_ms) {
 //    3. Gateway closes TCP socket
 //    4. Gateway notifies world_service with SessionEvent::disconnected
 //    5. WorldService revokes authentication, cleans up session
+//    PR-7 acceptance requires this exact send_packet_and_close path.
 //
 //  Reconnect rule: old session must be fully cleaned (actor removed,
 //  session_gateways_ erased) before a new session for the same character
