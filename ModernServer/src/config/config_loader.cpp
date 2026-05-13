@@ -214,16 +214,31 @@ std::optional<std::int32_t> parse_first_int32(std::string_view value) {
 }
 
 std::optional<MerchantProductConfig> parse_merchant_product_line(std::string_view value) {
-  std::istringstream stream{std::string(value)};
+  auto line = util::trim(std::string(value));
+  if (const auto comment = line.find(';'); comment != std::string::npos) {
+    line = util::trim(line.substr(0, comment));
+  }
   MerchantProductConfig product;
-  std::string count;
-  std::string refresh_hours;
-  if (!(stream >> product.item_name >> count >> refresh_hours)) {
+  const auto refresh_separator = line.find_last_of(" \t");
+  if (refresh_separator == std::string::npos) {
     return std::nullopt;
+  }
+  auto refresh_hours = util::trim(line.substr(refresh_separator + 1));
+  line = util::trim(line.substr(0, refresh_separator));
+  const auto count_separator = line.find_last_of(" \t");
+  if (count_separator == std::string::npos) {
+    return std::nullopt;
+  }
+  auto count = util::trim(line.substr(count_separator + 1));
+  product.item_name = util::trim(line.substr(0, count_separator));
+  if (product.item_name.size() >= 2 && product.item_name.front() == '"' &&
+      product.item_name.back() == '"') {
+    product.item_name = product.item_name.substr(1, product.item_name.size() - 2);
   }
   const auto parsed_count = parse_int32_token(count);
   const auto parsed_refresh_hours = parse_int32_token(refresh_hours);
-  if (!parsed_count.has_value() || *parsed_count <= 0 || !parsed_refresh_hours.has_value()) {
+  if (product.item_name.empty() || !parsed_count.has_value() || *parsed_count <= 0 ||
+      !parsed_refresh_hours.has_value()) {
     return std::nullopt;
   }
   product.count = *parsed_count;
