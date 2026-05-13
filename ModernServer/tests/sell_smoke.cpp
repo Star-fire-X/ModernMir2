@@ -8,6 +8,7 @@
 #include "protocol/legacy_game_codec.hpp"
 #include "protocol/legacy_types.hpp"
 #include "util/string_utils.hpp"
+#include "world/legacy_map_environment.hpp"
 #include "world/logic_runtime.hpp"
 
 namespace {
@@ -216,6 +217,46 @@ int main() {
       make_sell_command(mir2::LogicCommandKind::sell_item, 7, 1, 1001, "Sell Sword")));
   const auto sell_fail_dispatch = run_legacy_ticks(runtime);
   if (!find_packet(sell_fail_dispatch, mir2::kSmUserSellItemFail).has_value()) {
+    return 1;
+  }
+
+  mir2::LogicRuntime capped_runtime(config);
+  capped_runtime.initialize();
+
+  mir2::CharacterRecord capped_hero = hero;
+  capped_hero.character_name = "CappedHero";
+  capped_hero.gold = mir2::kLegacyBagGold - 10;
+  capped_hero.bag_items[0].make_index = 2001;
+
+  mir2::LogicCommand capped_enter = enter;
+  capped_enter.session_id = 8;
+  capped_enter.character_name = "CappedHero";
+  capped_enter.character = capped_hero;
+  static_cast<void>(capped_runtime.route_logic_command(capped_enter));
+  if (!find_packet(run_legacy_ticks(capped_runtime), mir2::kSmNewMap).has_value()) {
+    return 1;
+  }
+
+  static_cast<void>(capped_runtime.route_logic_command(
+      make_sell_command(mir2::LogicCommandKind::sell_item, 8, 1, 2001, "Sell Sword")));
+  const auto capped_sell_dispatch = run_legacy_ticks(capped_runtime);
+  if (!find_packet(capped_sell_dispatch, mir2::kSmUserSellItemFail).has_value() ||
+      find_packet(capped_sell_dispatch, mir2::kSmWeightChanged).has_value() ||
+      has_save_character(capped_sell_dispatch, "CappedHero")) {
+    return 1;
+  }
+
+  mir2::LogicCommand capped_bag_query;
+  capped_bag_query.kind = mir2::LogicCommandKind::query_bag_items;
+  capped_bag_query.session_id = 8;
+  static_cast<void>(capped_runtime.route_logic_command(capped_bag_query));
+  const auto capped_bag_dispatch = run_legacy_ticks(capped_runtime);
+  const auto capped_bag_packet = find_packet(capped_bag_dispatch, mir2::kSmBagItems);
+  if (!capped_bag_packet.has_value()) {
+    return 1;
+  }
+  const auto capped_items = decode_bag_items(capped_bag_packet->body);
+  if (capped_items.size() != 1 || capped_items.front().make_index != 2001) {
     return 1;
   }
 
