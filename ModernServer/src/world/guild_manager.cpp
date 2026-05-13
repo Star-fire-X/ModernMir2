@@ -146,8 +146,53 @@ GuildRankGroup& Guild::ensure_rank(std::uint8_t rank, std::string rank_name) {
   GuildRankGroup group;
   group.rank = rank;
   group.rank_name = std::move(rank_name);
+  if (rank == kGuildLordRank) {
+    return *ranks_.insert(ranks_.begin(), std::move(group));
+  }
   ranks_.push_back(std::move(group));
   return ranks_.back();
+}
+
+bool Guild::transfer_lord(std::string_view current_lord, std::string_view target_name,
+                          std::string old_lord_rank_name, std::string new_lord_rank_name) {
+  if (!is_lord(current_lord) || is_lord(target_name) || find_member(target_name) == nullptr) {
+    return false;
+  }
+
+  std::string target_copy;
+  std::uint64_t target_actor_id = 0;
+  for (auto rank_it = ranks_.begin(); rank_it != ranks_.end(); ++rank_it) {
+    auto& members = rank_it->members;
+    const auto member_it = std::find_if(members.begin(), members.end(),
+                                        [&](const GuildMember& member) {
+                                          return equals_name(member.name, target_name);
+                                        });
+    if (member_it == members.end()) {
+      continue;
+    }
+    target_copy = member_it->name;
+    target_actor_id = member_it->online_actor_id;
+    members.erase(member_it);
+    if (members.empty()) {
+      ranks_.erase(rank_it);
+    }
+    break;
+  }
+
+  auto* old_lord = find_member(current_lord);
+  if (old_lord == nullptr || target_copy.empty()) {
+    return false;
+  }
+  const auto old_lord_name = old_lord->name;
+  const auto old_lord_actor_id = old_lord->online_actor_id;
+  remove_member(current_lord);
+
+  auto& lord_rank = ensure_rank(kGuildLordRank, std::move(new_lord_rank_name));
+  lord_rank.members.insert(lord_rank.members.begin(),
+                           GuildMember{target_copy, kGuildLordRank, lord_rank.rank_name,
+                                       target_actor_id});
+  add_member(old_lord_name, std::move(old_lord_rank_name), old_lord_actor_id);
+  return true;
 }
 
 Guild* GuildManager::find_guild(std::string_view name) {
@@ -211,6 +256,98 @@ bool GuildManager::erase_guild(std::string_view name) {
                                }),
                 guilds_.end());
   return guilds_.size() != old_size;
+}
+
+GuildMemberOpResult GuildManager::add_member_by_lord(
+    std::string_view guild_name, std::string_view requester_name, std::string target_name,
+    const GuildAddMemberContext& context) {
+  auto* guild = find_guild(guild_name);
+  if (guild == nullptr) {
+    return GuildMemberOpResult::guild_not_found;
+  }
+  if (!guild->is_lord(requester_name)) {
+    return GuildMemberOpResult::requester_not_lord;
+  }
+  target_name = normalize_name(std::move(target_name));
+  if (target_name.empty()) {
+    return GuildMemberOpResult::target_not_found;
+  }
+  if (!context.target_online) {
+    return GuildMemberOpResult::target_not_online;
+  }
+  if (!context.target_facing_requester) {
+    return GuildMemberOpResult::target_not_facing_requester;
+  }
+  if (!context.target_allows_guild) {
+    return GuildMemberOpResult::target_rejects_guild;
+  }
+  if (guild->has_member(target_name)) {
+    return GuildMemberOpResult::already_member;
+  }
+  if (find_guild_by_member(target_name) != nullptr) {
+    return GuildMemberOpResult::target_in_other_guild;
+  }
+  if (context.max_member_count > 0 && guild->member_count() >= context.max_member_count) {
+    return GuildMemberOpResult::member_limit_reached;
+  }
+  return guild->add_member(std::move(target_name), "Guild Member", context.target_actor_id)
+             ? GuildMemberOpResult::ok
+             : GuildMemberOpResult::target_not_found;
+}
+
+GuildMemberOpResult GuildManager::remove_member_by_lord(std::string_view guild_name,
+                                                        std::string_view requester_name,
+                                                        std::string_view target_name) {
+  auto* guild = find_guild(guild_name);
+  if (guild == nullptr) {
+    return GuildMemberOpResult::guild_not_found;
+  }
+  if (!guild->is_lord(requester_name)) {
+    return GuildMemberOpResult::requester_not_lord;
+  }
+  if (!guild->has_member(target_name)) {
+    return GuildMemberOpResult::not_member;
+  }
+  const auto remove_self = equals_name(requester_name, target_name);
+  if (!guild->remove_member(target_name)) {
+    return GuildMemberOpResult::not_member;
+  }
+  if (guild->empty() || remove_self) {
+    erase_guild(guild_name);
+  }
+  return GuildMemberOpResult::ok;
+}
+
+GuildMemberOpResult GuildManager::leave_member(std::string_view member_name) {
+  auto* guild = find_guild_by_member(member_name);
+  if (guild == nullptr) {
+    return GuildMemberOpResult::not_member;
+  }
+  if (guild->is_lord(member_name)) {
+    return GuildMemberOpResult::lord_cannot_leave;
+  }
+  return guild->remove_member(member_name) ? GuildMemberOpResult::ok
+                                           : GuildMemberOpResult::not_member;
+}
+
+GuildMemberOpResult GuildManager::transfer_lord(std::string_view guild_name,
+                                                std::string_view requester_name,
+                                                std::string_view target_name) {
+  auto* guild = find_guild(guild_name);
+  if (guild == nullptr) {
+    return GuildMemberOpResult::guild_not_found;
+  }
+  if (!guild->is_lord(requester_name)) {
+    return GuildMemberOpResult::requester_not_lord;
+  }
+  if (!guild->has_member(target_name)) {
+    return GuildMemberOpResult::not_member;
+  }
+  if (guild->is_lord(target_name)) {
+    return GuildMemberOpResult::target_is_lord;
+  }
+  return guild->transfer_lord(requester_name, target_name) ? GuildMemberOpResult::ok
+                                                           : GuildMemberOpResult::not_member;
 }
 
 }  // namespace mir2
