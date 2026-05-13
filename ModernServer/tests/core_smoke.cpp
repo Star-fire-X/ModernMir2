@@ -47,11 +47,21 @@ int main() {
     return 1;
   }
 
+  // Uplink from old client carries a check-code digit that LegacyProtocolCodec must strip.
   std::vector<std::uint8_t> client_frame{'#', '1', 'P', 'I', 'N', 'G', '!'};
   auto from_client = mir2::LegacyProtocolCodec::drain_packets(client_frame);
   if (from_client.size() != 1 ||
-      std::string(from_client.front().body.begin(), from_client.front().body.end()) != "1PING") {
+      std::string(from_client.front().body.begin(), from_client.front().body.end()) != "PING") {
     std::cerr << "client_frame\n";
+    return 1;
+  }
+
+  // Downstream frames never carry a check-code; digits that are real data must be preserved.
+  std::vector<std::uint8_t> downstream_frame{'#', 'D', 'A', 'T', 'A', '!'};
+  auto from_server = mir2::LegacyProtocolCodec::drain_packets(downstream_frame);
+  if (from_server.size() != 1 ||
+      std::string(from_server.front().body.begin(), from_server.front().body.end()) != "DATA") {
+    std::cerr << "downstream_frame\n";
     return 1;
   }
 
