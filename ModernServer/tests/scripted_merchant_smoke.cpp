@@ -106,7 +106,9 @@ int main() {
   write_file(root / "items" / "default_items.toml",
              "items = [\n"
              "  { id = 1, name = \"Potion\", weight = 1, price = 40, std_mode = 0, shape = 1, "
-             "looks = 1, dura_max = 1000, equip_slot = -1, hp_add = 0, mp_add = 0 }\n"
+             "looks = 1, dura_max = 1000, equip_slot = -1, hp_add = 0, mp_add = 0 },\n"
+             "  { id = 2, name = \"Greater Potion\", weight = 1, price = 60, std_mode = 0, "
+             "shape = 1, looks = 1, dura_max = 1000, equip_slot = -1, hp_add = 0, mp_add = 0 }\n"
              "]\n");
   write_file(root / "npcs" / "default_npcs.toml",
              "npcs = [\n"
@@ -135,7 +137,8 @@ int main() {
              "\n"
              "[goods]\n"
              "; item count refresh-hour\n"
-             "Potion 2 1\n");
+             "Potion 2 1\n"
+             "Greater Potion 1 1 ; multi-word item name\n");
 
   mir2::ConfigLoader loader;
   auto config = loader.load(root);
@@ -143,10 +146,13 @@ int main() {
       config.npcs.front().legacy_deal_std_modes.size() != 2 ||
       config.npcs.front().legacy_deal_std_modes[0] != 40 ||
       config.npcs.front().legacy_deal_std_modes[1] != 1 ||
-      config.npcs.front().merchant_products.size() != 1 ||
+      config.npcs.front().merchant_products.size() != 2 ||
       config.npcs.front().merchant_products.front().item_name != "Potion" ||
       config.npcs.front().merchant_products.front().count != 2 ||
-      config.npcs.front().merchant_products.front().refresh_hours != 1) {
+      config.npcs.front().merchant_products.front().refresh_hours != 1 ||
+      config.npcs.front().merchant_products[1].item_name != "Greater Potion" ||
+      config.npcs.front().merchant_products[1].count != 1 ||
+      config.npcs.front().merchant_products[1].refresh_hours != 1) {
     std::filesystem::remove_all(root, ec);
     return 1;
   }
@@ -211,7 +217,7 @@ int main() {
   const auto buy_say_index = packet_index(buy_dispatch, mir2::kSmMerchantSay);
   const auto goods_list_index = packet_index(buy_dispatch, mir2::kSmSendGoodsList);
   if (!buy_say.has_value() || !goods_list.has_value() ||
-      goods_list->message.recog != 1 || goods_list->message.param != 1 ||
+      goods_list->message.recog != 1 || goods_list->message.param != 2 ||
       !buy_say_index.has_value() || !goods_list_index.has_value() ||
       *buy_say_index >= *goods_list_index) {
     std::filesystem::remove_all(root, ec);
@@ -223,7 +229,8 @@ int main() {
     return 1;
   }
   const auto goods_body = mir2::legacy_decode_string(goods_list->body);
-  if (goods_body.find("Potion/0/80/2/") == std::string::npos) {
+  if (goods_body.find("Potion/0/80/2/") == std::string::npos ||
+      goods_body.find("Greater Potion/0/120/1/") == std::string::npos) {
     std::filesystem::remove_all(root, ec);
     return 1;
   }
