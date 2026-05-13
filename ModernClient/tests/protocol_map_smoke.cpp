@@ -262,6 +262,12 @@ void assert_p0_protocol_goldens() {
   assert_golden(MapChange{"1"}, 319, 143, payload);
 
   payload.clear();
+  append_i32(payload, 12);
+  append_i32(payload, 13);
+  append_u8(payload, 1);
+  assert_golden(MapDoorState{12, 13, true}, 320, 144, payload);
+
+  payload.clear();
   append_world_actor(payload, 2000, "Hen", 332, 271, 4, 0, 0, 2);
   assert_golden(ActorUpsert{hen}, 306, 14, payload);
 
@@ -731,6 +737,17 @@ int main() {
   const auto decoded_map_change = decode_message<MapChange>(frames.front());
   assert(decoded_map_change.has_value());
   assert(decoded_map_change->map_id == "1");
+
+  frame_bytes = encode_frame(make_frame(MapDoorState{12, 13, true}, 214));
+  buffer = frame_bytes;
+  frames = drain_frames(buffer);
+  assert(frames.size() == 1);
+  assert(frames.front().message_id == MessageId::map_door_state);
+  const auto decoded_door_state = decode_message<MapDoorState>(frames.front());
+  assert(decoded_door_state.has_value());
+  assert(decoded_door_state->x == 12);
+  assert(decoded_door_state->y == 13);
+  assert(decoded_door_state->open);
 
   frame_bytes = encode_frame(make_frame(UseItemResult{true}, 22));
   buffer = frame_bytes;

@@ -1452,6 +1452,11 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
               return;
             }
             state_.apply(value);
+          } else if constexpr (std::is_same_v<T, client_v1::MapDoorState>) {
+            if (drop_world_runtime_if_inactive("MapDoorState")) {
+              return;
+            }
+            state_.apply(value);
           } else if constexpr (std::is_same_v<T, client_v1::ActorStateDelta>) {
             if (drop_world_runtime_if_inactive("ActorStateDelta")) {
               return;
@@ -1771,6 +1776,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
         break;
       case client_v1::MessageId::map_change:
         decoded = decode_and_dispatch.operator()<client_v1::MapChange>();
+        break;
+      case client_v1::MessageId::map_door_state:
+        decoded = decode_and_dispatch.operator()<client_v1::MapDoorState>();
         break;
       case client_v1::MessageId::actor_state_delta:
         decoded = decode_and_dispatch.operator()<client_v1::ActorStateDelta>();

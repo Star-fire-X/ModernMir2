@@ -2128,6 +2128,14 @@ void ClientV1GameGatewayService::translate_legacy_packet(
     case kSmChangeMap:
       messages.push_back(client_v1::MapChange{legacy_decode_string(decoded->body)});
       break;
+    case kSmOpenDoorOk:
+      messages.push_back(client_v1::MapDoorState{decoded->message.param,
+                                                 decoded->message.tag, true});
+      break;
+    case kSmCloseDoor:
+      messages.push_back(client_v1::MapDoorState{decoded->message.param,
+                                                 decoded->message.tag, false});
+      break;
     case kSmNewMap: {
       const auto map_id = legacy_decode_string(decoded->body);
       std::scoped_lock lock(mutex_);

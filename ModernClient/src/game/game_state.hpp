@@ -344,6 +344,7 @@ struct WorldViewState {
   std::uint64_t self_actor_id{0};                                 ///< 自己的 actor_id
   std::unordered_map<std::uint64_t, ActorState> actors{};         ///< 所有在线角色（key = actor_id）
   std::unordered_map<std::uint64_t, client_v1::GroundItemState> ground_items{};  ///< 地面物品
+  std::unordered_map<std::uint64_t, bool> map_doors{};            ///< 动态门状态（key = x/y）
   std::vector<std::uint64_t> actor_draw_order{};       ///< Delphi ActorList-equivalent draw order
   std::vector<std::uint64_t> ground_item_draw_order{}; ///< Delphi DropedItemList-equivalent draw order
   std::vector<std::string> sys_messages{};    ///< 系统消息队列（黄色文字，显示在聊天框）
@@ -1027,6 +1028,7 @@ struct GameStateStore {
     world.self_actor_id = 0;
     world.actors.clear();
     world.ground_items.clear();
+    world.map_doors.clear();
     world.actor_draw_order.clear();
     world.ground_item_draw_order.clear();
     world.npc_dialog = NpcDialogState{};
@@ -1149,6 +1151,7 @@ struct GameStateStore {
     world.self_actor_id = message.self_actor_id;
     world.actors.clear();
     world.ground_items.clear();
+    world.map_doors.clear();
     world.actor_draw_order.clear();
     world.ground_item_draw_order.clear();
     world.chat_lines.clear();
@@ -1208,6 +1211,15 @@ struct GameStateStore {
     }
   }
 
+  void apply(const client_v1::MapDoorState& message) {
+    const auto key = map_door_key(message.x, message.y);
+    if (message.open) {
+      world.map_doors[key] = true;
+    } else {
+      world.map_doors.erase(key);
+    }
+  }
+
   /// 应用角色增量更新消息（坐标/方向变化）
   /// 服务端通知某个角色的位置或朝向发生了变化
   void apply(const client_v1::ActorStateDelta& message) {
@@ -1216,6 +1228,15 @@ struct GameStateStore {
     actor.x = message.x;
     actor.y = message.y;
     actor.dir = message.dir;
+  }
+
+  static std::uint64_t map_door_key(const std::int32_t x, const std::int32_t y) {
+    return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(x)) << 32U) |
+           static_cast<std::uint32_t>(y);
+  }
+
+  [[nodiscard]] bool map_door_open(std::int32_t x, std::int32_t y) const {
+    return world.map_doors.find(map_door_key(x, y)) != world.map_doors.end();
   }
 
   /// 应用角色新增/更新消息

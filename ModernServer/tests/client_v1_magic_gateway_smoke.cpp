@@ -96,6 +96,11 @@ mir2::LegacyPacket make_change_map_packet(std::uint64_t session_id) {
       mir2::legacy_encode_string("1"));
 }
 
+mir2::LegacyPacket make_door_packet(std::uint64_t session_id, std::uint16_t ident) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(ident, 0, 12, 13, 0));
+}
+
 const mir2::client_v1::MagicList& only_magic_list(
     const std::vector<mir2::client_v1::Message>& messages) {
   assert(messages.size() == 1);
@@ -235,5 +240,21 @@ int main() {
   const auto* map_change = std::get_if<mir2::client_v1::MapChange>(&messages.front());
   assert(map_change != nullptr);
   assert(map_change->map_id == "1");
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(
+      kSessionId, make_door_packet(kSessionId, mir2::kSmOpenDoorOk), messages);
+  assert(messages.size() == 1);
+  const auto* open_door = std::get_if<mir2::client_v1::MapDoorState>(&messages.front());
+  assert(open_door != nullptr);
+  assert(open_door->x == 12 && open_door->y == 13 && open_door->open);
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(
+      kSessionId, make_door_packet(kSessionId, mir2::kSmCloseDoor), messages);
+  assert(messages.size() == 1);
+  const auto* close_door = std::get_if<mir2::client_v1::MapDoorState>(&messages.front());
+  assert(close_door != nullptr);
+  assert(close_door->x == 12 && close_door->y == 13 && !close_door->open);
   return 0;
 }
