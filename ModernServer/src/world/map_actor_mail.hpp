@@ -1121,33 +1121,41 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
     }
     case ActorMailKind::repair_item: {
       auto requester_it = objects_.find(mail.actor_id);
-      auto target_it = objects_.find(mail.target_actor_id);
-      if (requester_it == objects_.end() || target_it == objects_.end() ||
-          target_it->second->kind() != GameObjectKind::npc) {
+      if (requester_it == objects_.end()) {
         break;
       }
       auto* requester = as_player(requester_it->second.get());
+      if (requester == nullptr) {
+        break;
+      }
+      auto fail_repair = [&] {
+        queue_packet(dispatch, requester->session_id(),
+                     make_user_repair_result_packet(requester->session_id(), false, 0, 0, 0));
+      };
+      auto target_it = objects_.find(mail.target_actor_id);
+      if (target_it == objects_.end() || target_it->second->kind() != GameObjectKind::npc) {
+        fail_repair();
+        break;
+      }
       const auto* merchant = as_npc(target_it->second.get());
-      if (requester == nullptr || merchant == nullptr || !merchant->supports_repair() ||
+      if (merchant == nullptr || !merchant->supports_repair() ||
           !in_interaction_range(*requester, *target_it->second)) {
+        fail_repair();
         break;
       }
       if (reject_trade_locked_item_change(requester)) {
-        queue_packet(dispatch, requester->session_id(),
-                     make_user_repair_result_packet(requester->session_id(), false, 0, 0, 0));
+        fail_repair();
         break;
       }
       auto* item = requester->bag_item_mutable(mail.item_make_index, mail.payload, item_configs_);
       if (item == nullptr) {
-        queue_packet(dispatch, requester->session_id(),
-                     make_user_repair_result_packet(requester->session_id(), false, 0, 0, 0));
+        fail_repair();
         break;
       }
       const auto repair_mode = requester->legacy_repair_mode();
       const auto cost = compute_repair_cost(*item, item_configs_, *merchant, repair_mode);
       if (cost < 0 || (cost > 0 && !requester->can_spend_gold(cost))) {
-        queue_packet(dispatch, requester->session_id(),
-                     make_user_repair_result_packet(requester->session_id(), false, 0, 0, 0));
+        fail_repair();
         break;
       }
       requester->spend_gold(cost);

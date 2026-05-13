@@ -130,7 +130,7 @@ std::int32_t compute_repair_cost(const LegacyUserItem& item,
     return 0;
   }
   const auto cost = static_cast<std::int32_t>(
-      std::lround((static_cast<double>(price / 3) / static_cast<double>(dura_max)) *
+      std::lround(((static_cast<double>(price) / 3.0) / static_cast<double>(dura_max)) *
                   static_cast<double>(dura_max - dura)));
   return repair_mode == LegacyRepairMode::special ? cost * 3 : cost;
 }
