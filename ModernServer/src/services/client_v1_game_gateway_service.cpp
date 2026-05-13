@@ -686,6 +686,7 @@ void ClientV1GameGatewayService::handle_disconnected(std::uint64_t session_id,
           trade_states.emplace_back(peer_id, client_v1::TradeState{});
         }
       }
+      clear_pending_trade_locked(session_id);
       const auto guild_name = it->second.character.guild_name;
       sessions_.erase(it);
       if (!guild_name.empty()) {
@@ -1252,6 +1253,21 @@ void ClientV1GameGatewayService::clear_trade_locked(SessionState& state) {
   state.trade_local_accept = false;
 }
 
+void ClientV1GameGatewayService::clear_pending_trade_locked(const std::uint64_t session_id) {
+  const auto it = sessions_.find(session_id);
+  if (it == sessions_.end()) {
+    return;
+  }
+  const auto peer_id = it->second.pending_trade_peer_session_id;
+  it->second.pending_trade_remote_name.clear();
+  it->second.pending_trade_peer_session_id = 0;
+  if (auto peer_it = sessions_.find(peer_id);
+      peer_it != sessions_.end() && peer_it->second.pending_trade_peer_session_id == session_id) {
+    peer_it->second.pending_trade_remote_name.clear();
+    peer_it->second.pending_trade_peer_session_id = 0;
+  }
+}
+
 std::optional<client_v1::ItemSlotState> ClientV1GameGatewayService::trade_item_from_bag_locked(
     const SessionState& state, const std::int32_t make_index, const std::string_view name) const {
   if (std::any_of(state.trade_local_items.begin(), state.trade_local_items.end(),
@@ -1506,8 +1522,8 @@ void ClientV1GameGatewayService::handle_trade_try_request(
   if (request.target_name.empty()) {
     return;
   }
-  std::vector<std::pair<std::uint64_t, client_v1::TradeState>> states;
   std::optional<client_v1::SysMessage> failure;
+  bool should_post = false;
   {
     std::scoped_lock lock(mutex_);
     auto it = sessions_.find(session_id);
@@ -1516,32 +1532,23 @@ void ClientV1GameGatewayService::handle_trade_try_request(
       return;
     }
     if (!target_id.has_value() || *target_id == session_id || it->second.trade_visible ||
-        sessions_[*target_id].trade_visible) {
+        !it->second.pending_trade_remote_name.empty() || sessions_[*target_id].trade_visible ||
+        !sessions_[*target_id].pending_trade_remote_name.empty()) {
       failure = client_v1::SysMessage{"Trade request failed.", 1};
     } else {
-      it->second.trade_visible = true;
-      it->second.trade_peer_session_id = *target_id;
-      it->second.trade_remote_name = sessions_[*target_id].character_name;
-      it->second.trade_local_items.clear();
-      it->second.trade_local_gold = 0;
-      it->second.trade_local_accept = false;
-      auto& peer = sessions_[*target_id];
-      peer.trade_visible = true;
-      peer.trade_peer_session_id = session_id;
-      peer.trade_remote_name = it->second.character_name;
-      peer.trade_local_items.clear();
-      peer.trade_local_gold = 0;
-      peer.trade_local_accept = false;
-      states = trade_pair_states_locked(session_id);
+      it->second.pending_trade_remote_name = sessions_[*target_id].character_name;
+      it->second.pending_trade_peer_session_id = *target_id;
+      sessions_[*target_id].pending_trade_remote_name = it->second.character_name;
+      sessions_[*target_id].pending_trade_peer_session_id = session_id;
+      should_post = true;
     }
-  }
-  for (const auto& [target_session_id, state] : states) {
-    send_message(target_session_id, state);
   }
   if (failure.has_value()) {
     send_message(session_id, *failure);
   }
-  post_canonical_command(decode_client_v1_trade_try_command(session_id, request));
+  if (should_post) {
+    post_canonical_command(decode_client_v1_trade_try_command(session_id, request));
+  }
 }
 
 void ClientV1GameGatewayService::handle_trade_cancel_request(
@@ -1553,6 +1560,7 @@ void ClientV1GameGatewayService::handle_trade_cancel_request(
     if (it == sessions_.end() || !it->second.in_game()) {
       return;
     }
+    clear_pending_trade_locked(session_id);
     const auto peer_id = it->second.trade_peer_session_id;
     clear_trade_locked(it->second);
     states.emplace_back(session_id, client_v1::TradeState{});
@@ -1581,10 +1589,10 @@ void ClientV1GameGatewayService::handle_trade_add_item_request(
     if (it == sessions_.end() || !it->second.in_game()) {
       return;
     }
-    should_post = true;
     if (!it->second.trade_visible) {
       states.clear();
     } else {
+      should_post = true;
       auto item = trade_item_from_bag_locked(it->second, request.item_make_index, request.name);
       if (!item.has_value()) {
         failure = client_v1::SysMessage{"Trade item failed.", 1};
@@ -1624,10 +1632,10 @@ void ClientV1GameGatewayService::handle_trade_remove_item_request(
     if (it == sessions_.end() || !it->second.in_game()) {
       return;
     }
-    should_post = true;
     if (!it->second.trade_visible) {
       states.clear();
     } else {
+      should_post = true;
       auto& items = it->second.trade_local_items;
       const auto item_it = std::find_if(items.begin(), items.end(),
                                         [&](const client_v1::ItemSlotState& entry) {
@@ -1668,6 +1676,7 @@ void ClientV1GameGatewayService::handle_trade_set_gold_request(
   }
   std::vector<std::pair<std::uint64_t, client_v1::TradeState>> states;
   std::int32_t gold = request.gold;
+  bool should_post = false;
   {
     std::scoped_lock lock(mutex_);
     auto it = sessions_.find(session_id);
@@ -1675,6 +1684,7 @@ void ClientV1GameGatewayService::handle_trade_set_gold_request(
       return;
     }
     if (it->second.trade_visible) {
+      should_post = true;
       gold = std::min<std::int32_t>(request.gold, it->second.character.gold);
       it->second.trade_local_gold = gold;
       it->second.trade_local_accept = false;
@@ -1688,12 +1698,15 @@ void ClientV1GameGatewayService::handle_trade_set_gold_request(
   for (const auto& [target_session_id, state] : states) {
     send_message(target_session_id, state);
   }
-  post_canonical_command(decode_client_v1_trade_set_gold_command(session_id, gold));
+  if (should_post) {
+    post_canonical_command(decode_client_v1_trade_set_gold_command(session_id, gold));
+  }
 }
 
 void ClientV1GameGatewayService::handle_trade_accept_request(
     std::uint64_t session_id, const client_v1::TradeAcceptRequest& /*request*/) {
   std::vector<std::pair<std::uint64_t, client_v1::TradeState>> states;
+  bool should_post = false;
   {
     std::scoped_lock lock(mutex_);
     auto it = sessions_.find(session_id);
@@ -1701,6 +1714,7 @@ void ClientV1GameGatewayService::handle_trade_accept_request(
       return;
     }
     if (it->second.trade_visible) {
+      should_post = true;
       it->second.trade_local_accept = true;
       states = trade_pair_states_locked(session_id);
     }
@@ -1708,7 +1722,9 @@ void ClientV1GameGatewayService::handle_trade_accept_request(
   for (const auto& [target_session_id, state] : states) {
     send_message(target_session_id, state);
   }
-  post_canonical_command(decode_client_v1_trade_accept_command(session_id));
+  if (should_post) {
+    post_canonical_command(decode_client_v1_trade_accept_command(session_id));
+  }
 }
 
 void ClientV1GameGatewayService::handle_guild_open_request(
@@ -2651,6 +2667,43 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       if (was_visible) {
         messages.push_back(client_v1::TradeState{});
       }
+      break;
+    }
+    case kSmDealMenu: {
+      const auto peer_name = legacy_decode_string(decoded->body);
+      bool wrong_target = false;
+      {
+        std::scoped_lock lock(mutex_);
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end()) {
+          if (it->second.pending_trade_remote_name != peer_name) {
+            wrong_target = true;
+            clear_pending_trade_locked(session_id);
+          } else {
+            it->second.trade_visible = true;
+            it->second.pending_trade_remote_name.clear();
+            it->second.trade_peer_session_id = it->second.pending_trade_peer_session_id;
+            it->second.pending_trade_peer_session_id = 0;
+            it->second.trade_remote_name = peer_name;
+            it->second.trade_local_items.clear();
+            it->second.trade_local_gold = 0;
+            it->second.trade_local_accept = false;
+            messages.push_back(trade_state_locked(session_id));
+          }
+        }
+      }
+      if (wrong_target) {
+        messages.push_back(client_v1::SysMessage{"Trade request failed.", 1});
+        post_canonical_command(decode_client_v1_trade_cancel_command(session_id));
+      }
+      break;
+    }
+    case kSmDealTryFail: {
+      {
+        std::scoped_lock lock(mutex_);
+        clear_pending_trade_locked(session_id);
+      }
+      messages.push_back(client_v1::SysMessage{"Trade request failed.", 1});
       break;
     }
     case kSmHear: {

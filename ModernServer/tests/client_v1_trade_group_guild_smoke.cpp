@@ -215,7 +215,7 @@ int main() {
     hero_b.account_id = "guest_b";
     hero_b.character_name = "HeroB";
     hero_b.x = 11;
-    hero_b.dir = 6;
+    hero_b.dir = 0;
     hero_b.gold = 50;
     hero_b.guild_name.clear();
     hero_b.guild_title.clear();
@@ -308,12 +308,46 @@ int main() {
   }
 
   send_message(*socket_a, mir2::client_v1::TradeTryRequest{"HeroB"}, seq_a);
+  if (!reader_a.wait_for_matching<mir2::client_v1::SysMessage>(
+          [](const auto& message) { return message.text == "Trade request failed."; }) ||
+      reader_a
+          .wait_for_matching<mir2::client_v1::TradeState>(
+              [](const auto& state) { return state.visible; }, std::chrono::milliseconds(300))
+          .has_value() ||
+      reader_b
+          .wait_for_matching<mir2::client_v1::TradeState>(
+              [](const auto& state) { return state.visible; }, std::chrono::milliseconds(300))
+          .has_value()) {
+    stop_services();
+    return fail("trade try fail remains closed");
+  }
+
+  send_message(*socket_b,
+               mir2::client_v1::ActionIntent{mir2::client_v1::WorldActionKind::turn, 11, 10,
+                                             6, 0, 0},
+               seq_b);
+  if (!reader_b.wait_for_matching<mir2::client_v1::ActionAck>(
+          [](const auto& ack) { return ack.ok; })) {
+    stop_services();
+    return fail("trade turn facing");
+  }
+
+  send_message(*socket_a, mir2::client_v1::TradeTryRequest{"HeroB"}, seq_a);
   if (!reader_a.wait_for_matching<mir2::client_v1::TradeState>(
           [](const auto& state) { return state.visible && state.remote_name == "HeroB"; }) ||
       !reader_b.wait_for_matching<mir2::client_v1::TradeState>(
           [](const auto& state) { return state.visible && state.remote_name == "HeroA"; })) {
     stop_services();
     return fail("trade open");
+  }
+  send_message(*socket_a, mir2::client_v1::TradeCancelRequest{}, seq_a);
+  send_message(*socket_a, mir2::client_v1::TradeTryRequest{"HeroB"}, seq_a);
+  if (!reader_a.wait_for_matching<mir2::client_v1::TradeState>(
+          [](const auto& state) { return state.visible && state.remote_name == "HeroB"; }) ||
+      !reader_b.wait_for_matching<mir2::client_v1::TradeState>(
+          [](const auto& state) { return state.visible && state.remote_name == "HeroA"; })) {
+    stop_services();
+    return fail("trade retry after cancel");
   }
   send_message(*socket_a, mir2::client_v1::TradeAddItemRequest{1001, "Ruby"}, seq_a);
   if (!reader_a.wait_for_matching<mir2::client_v1::TradeState>(
