@@ -13,6 +13,7 @@
 #include "assets/asset_manager.hpp"
 #include "assets/legacy_map_resources.hpp"
 #include "render/software_renderer.hpp"
+#include "shared/legacy/map_render_order.hpp"
 #include "shared/legacy/map_render_math.hpp"
 
 namespace {
@@ -178,11 +179,28 @@ int main() {
   assert(legacy_ground_item_draw_y(shifted, 200, 14) ==
          legacy_object_row_y(shifted, 200) + kLegacyHalfY - 7);
 
-  const std::vector<int> delphi_row_order{/*large object*/ 0, /*ground item*/ 1,
-                                          /*actor*/ 2, /*fly effect*/ 3};
-  assert(delphi_row_order[0] < delphi_row_order[1]);
-  assert(delphi_row_order[1] < delphi_row_order[2]);
-  assert(delphi_row_order[2] < delphi_row_order[3]);
+  static_assert(kLegacyMapRowDrawOrder[0] == LegacyMapDrawLayer::large_object);
+  static_assert(kLegacyMapRowDrawOrder[1] == LegacyMapDrawLayer::ground_item);
+  static_assert(kLegacyMapRowDrawOrder[2] == LegacyMapDrawLayer::actor);
+  static_assert(kLegacyMapRowDrawOrder[3] == LegacyMapDrawLayer::actor_overlay);
+  static_assert(kLegacyMapRowDrawOrder[4] == LegacyMapDrawLayer::fly_effect);
+  assert(legacy_map_draw_layer_name(LegacyMapDrawLayer::large_object) == "large_object");
+  assert(legacy_map_draw_layer_name(LegacyMapDrawLayer::background_tiles) ==
+         "background_tiles");
+  assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::background_tiles) <
+         legacy_map_draw_layer_rank(LegacyMapDrawLayer::middle_tiles));
+  assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::middle_tiles) <
+         legacy_map_draw_layer_rank(LegacyMapDrawLayer::small_objects));
+  assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::small_objects) <
+         legacy_map_draw_layer_rank(LegacyMapDrawLayer::ground_effects));
+  assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::large_object) <
+         legacy_map_draw_layer_rank(LegacyMapDrawLayer::ground_item));
+  assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::ground_item) <
+         legacy_map_draw_layer_rank(LegacyMapDrawLayer::actor));
+  assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::actor) <
+         legacy_map_draw_layer_rank(LegacyMapDrawLayer::actor_overlay));
+  assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::actor_overlay) <
+         legacy_map_draw_layer_rank(LegacyMapDrawLayer::fly_effect));
 
   SoftwareSurface blend_surface(2, 1);
   constexpr std::uint32_t kBlendDst = 0xFF204060U;
