@@ -51,6 +51,31 @@ std::string_view legacy_frame_stage_name(LegacyFrameStage stage) {
   return "Unknown";
 }
 
+// ── Delphi RunSocket.Run → C++ frame stage mapping ──────────────────
+//
+//  Delphi (RunSock.pas)              C++ (LegacyFrameDriver)
+//  ─────────────────────────────     ──────────────────────────
+//  1. Receive gate buffers          RunSocketRun
+//     + flush previous outbound       (run_legacy_socket_stage:
+//                                      flush last frame dispatch,
+//                                      drain pending gate events)
+//  2. DecodeIdSocket                DecodeIdSocket
+//     (parse TMsgHeader +             (process_ingress_batch:
+//      route to user engine)           accept ingress, dispatch
+//                                      to handlers)
+//  3. UserEngine.ExecuteRun          UserEngineExecuteRun
+//     (ProcessUserHumans →            (runtime_->tick:
+//      ProcessMonsters →              process ready users,
+//      ProcessMerchants →             monsters, merchants,
+//      ProcessNpcs)                    npcs)
+//  4. EventMan.Run                   EventManagerRun
+//     (timed events)                  (legacy event manager tick)
+//  5. ServerMessage.Run              ServerMessageRun
+//     (broadcast system msgs)         (reserved, currently empty)
+//
+//  Stage order is fixed and must not be rearranged — Delphi scripts
+//  and legacy client rendering depend on the processing sequence.
+// ──────────────────────────────────────────────────────────────────────
 RuntimeDispatch LegacyFrameDriver::run_frame(std::uint64_t now_ms, WorldIngressBatch ingress_batch,
                                              const LegacyFrameCallbacks& callbacks) {
   RuntimeDispatch combined;
