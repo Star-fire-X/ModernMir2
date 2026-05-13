@@ -177,6 +177,18 @@ if(BUILD_TESTING)
   add_test(NAME mir2_trade_interleaving_fuzz_smoke
     COMMAND mir2_trade_interleaving_fuzz_smoke)
 
+  add_executable(mir2_npc_shop_protocol_golden_smoke
+    tests/npc_shop_protocol_golden_smoke.cpp)
+  target_link_libraries(mir2_npc_shop_protocol_golden_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_npc_shop_protocol_golden_smoke
+    COMMAND mir2_npc_shop_protocol_golden_smoke)
+
+  add_executable(mir2_npc_shop_interleaving_fuzz_smoke
+    tests/npc_shop_interleaving_fuzz_smoke.cpp)
+  target_link_libraries(mir2_npc_shop_interleaving_fuzz_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_npc_shop_interleaving_fuzz_smoke
+    COMMAND mir2_npc_shop_interleaving_fuzz_smoke)
+
   add_executable(mir2_canonical_legacy_command_smoke
     tests/canonical_legacy_command_smoke.cpp)
   target_link_libraries(mir2_canonical_legacy_command_smoke PRIVATE mir2_hostlib)
@@ -880,6 +892,8 @@ if(BUILD_TESTING)
       mir2_legacy_protocol_command_golden_smoke
       mir2_trade_protocol_golden_smoke
       mir2_trade_interleaving_fuzz_smoke
+      mir2_npc_shop_protocol_golden_smoke
+      mir2_npc_shop_interleaving_fuzz_smoke
       mir2_canonical_legacy_command_smoke
       mir2_legacy_string_semantics_smoke
       mir2_canonical_login_state_smoke
@@ -906,6 +920,13 @@ if(BUILD_TESTING)
       mir2_item_phase2_ground_smoke
       mir2_item_phase2_use_smoke
       mir2_item_phase3_trade_smoke
+      mir2_repair_smoke
+      mir2_sell_smoke
+      mir2_buy_smoke
+      mir2_merchant_dialog_smoke
+      mir2_npc_instance_click_guard_smoke
+      mir2_scripted_merchant_smoke
+      mir2_scripted_npc_dialog_smoke
       mir2_special_consumables_legacy_smoke
       mir2_guild_manager_smoke
       mir2_castle_manager_smoke
