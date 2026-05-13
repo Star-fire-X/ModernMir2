@@ -256,5 +256,17 @@ int main() {
   const auto* close_door = std::get_if<mir2::client_v1::MapDoorState>(&messages.front());
   assert(close_door != nullptr);
   assert(close_door->x == 12 && close_door->y == 13 && !close_door->open);
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_clear_objects_packet(kSessionId),
+                                           messages);
+  service.translate_legacy_packet_for_test(kSessionId, make_change_map_packet(kSessionId),
+                                           messages);
+  service.translate_legacy_packet_for_test(
+      kSessionId, make_door_packet(kSessionId, mir2::kSmOpenDoorOk), messages);
+  assert(messages.size() == 3);
+  assert(std::holds_alternative<mir2::client_v1::WorldClearObjects>(messages[0]));
+  assert(std::holds_alternative<mir2::client_v1::MapChange>(messages[1]));
+  assert(std::holds_alternative<mir2::client_v1::MapDoorState>(messages[2]));
   return 0;
 }
