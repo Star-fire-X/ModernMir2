@@ -85,6 +85,17 @@ mir2::LegacyPacket make_actor_hide_packet(std::uint64_t session_id, std::uint16_
       session_id, 0, 0, mir2::make_default_message(ident, 77, 12, 13, 0));
 }
 
+mir2::LegacyPacket make_clear_objects_packet(std::uint64_t session_id) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmClearObjects, 0, 0, 0, 0));
+}
+
+mir2::LegacyPacket make_change_map_packet(std::uint64_t session_id) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmChangeMap, 0, 0, 0, 0),
+      mir2::legacy_encode_string("1"));
+}
+
 const mir2::client_v1::MagicList& only_magic_list(
     const std::vector<mir2::client_v1::Message>& messages) {
   assert(messages.size() == 1);
@@ -210,5 +221,19 @@ int main() {
   assert(remove != nullptr);
   assert(remove->actor_id == 77);
   assert(remove->legacy_ident == mir2::kSmSpaceMoveHide2);
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_clear_objects_packet(kSessionId),
+                                           messages);
+  assert(messages.size() == 1);
+  assert(std::holds_alternative<mir2::client_v1::WorldClearObjects>(messages.front()));
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_change_map_packet(kSessionId),
+                                           messages);
+  assert(messages.size() == 1);
+  const auto* map_change = std::get_if<mir2::client_v1::MapChange>(&messages.front());
+  assert(map_change != nullptr);
+  assert(map_change->map_id == "1");
   return 0;
 }

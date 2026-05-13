@@ -1247,16 +1247,20 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
     // 收到有效消息就取消网络等待定时器
     cancel_network_wait_timers();
 
-    const auto drop_world_runtime_if_inactive = [this](const std::string_view message_name) {
+    const auto drop_world_runtime_if_inactive = [this](const std::string_view message_name,
+                                                       const bool allow_map_transition = false) {
       if (state_.connection_phase == GameStateStore::ConnectionPhase::play &&
           scenes_.current_id() == SceneId::world) {
-        return false;
+        if (!state_.world.map_transition_pending || allow_map_transition) {
+          return false;
+        }
       }
       if (legacy_trace_enabled()) {
         std::ostringstream out;
         out << "drop_world_runtime message=" << message_name
             << " scene=" << static_cast<int>(scenes_.current_id())
-            << " phase=" << static_cast<int>(state_.connection_phase);
+            << " phase=" << static_cast<int>(state_.connection_phase)
+            << " map_transition=" << state_.world.map_transition_pending;
         legacy_trace(out.str());
       }
       return true;
@@ -1438,6 +1442,16 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             request_scene_change(SceneId::world);
 
           // ---- 以下为世界运行时的增量更新消息 ----
+          } else if constexpr (std::is_same_v<T, client_v1::WorldClearObjects>) {
+            if (drop_world_runtime_if_inactive("WorldClearObjects", true)) {
+              return;
+            }
+            state_.apply(value);
+          } else if constexpr (std::is_same_v<T, client_v1::MapChange>) {
+            if (drop_world_runtime_if_inactive("MapChange", true)) {
+              return;
+            }
+            state_.apply(value);
           } else if constexpr (std::is_same_v<T, client_v1::ActorStateDelta>) {
             if (drop_world_runtime_if_inactive("ActorStateDelta")) {
               return;
@@ -1751,6 +1765,12 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
         break;
       case client_v1::MessageId::world_snapshot:
         decoded = decode_and_dispatch.operator()<client_v1::WorldSnapshot>();
+        break;
+      case client_v1::MessageId::world_clear_objects:
+        decoded = decode_and_dispatch.operator()<client_v1::WorldClearObjects>();
+        break;
+      case client_v1::MessageId::map_change:
+        decoded = decode_and_dispatch.operator()<client_v1::MapChange>();
         break;
       case client_v1::MessageId::actor_state_delta:
         decoded = decode_and_dispatch.operator()<client_v1::ActorStateDelta>();
