@@ -1988,7 +1988,7 @@ void ClientApp::begin_login_replay(const bool enter_selected_character) {
     login_replay_character_name_ =
         state_.lobby.characters[static_cast<std::size_t>(state_.lobby.selected_index)].name;
   }
-  state_.world = WorldViewState{};  // 清空世界状态
+  state_.clear_play_scene_state();  // 清空世界状态
   state_.connection_phase = enter_selected_character
                                 ? GameStateStore::ConnectionPhase::login
                                 : GameStateStore::ConnectionPhase::reselect_character;

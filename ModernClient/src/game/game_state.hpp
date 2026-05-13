@@ -991,9 +991,35 @@ struct GameStateStore {
     world.pending_pickup_item_id = 0;
     world.action_locked = false;
     world.action_lock_started_ms = 0;
+    world.last_action_ack_ms = 0;
+    world.last_action_ack_ok = true;
+    world.action_fail_lock = false;
+    world.fail_action_ident = 0;
+    world.fail_dir = 0;
+    world.fail_action_time_ms = 0;
+    world.last_sent_action_ident = 0;
+    world.last_sent_action_dir = 0;
+    world.dizzy_delay_start_ms = 0;
+    world.dizzy_delay_time_ms = 0;
+    world.skip_tick = 0;
+    world.move_slow_level = 0;
+    world.move_slow = false;
+    world.attack_slow = false;
+    world.legacy_target_x = -1;
+    world.legacy_target_y = -1;
+    world.legacy_chr_action = LegacyChrAction::none;
+    world.action_key = -1;
+    world.run_ready_count = 0;
+    world.mouse_down_ms = 0;
+    world.last_pickup_ms = 0;
     world.eating_item_make_index = 0;
     world.eating_item_slot = -1;
     world.eat_time_ms = 0;
+    world.last_use_item_ok = true;
+  }
+
+  void clear_play_scene_state() {
+    world = WorldViewState{};
   }
 
   void clear_waiting_item() {
@@ -1069,6 +1095,7 @@ struct GameStateStore {
   /// 应用世界快照消息：重置整个世界状态
   /// 这是进入游戏时最重要的消息，包含地图信息和所有可见角色
   void apply(const client_v1::WorldSnapshot& message) {
+    clear_play_scene_state();
     world.map_id = message.map_id;
     world.width = message.width;
     world.height = message.height;

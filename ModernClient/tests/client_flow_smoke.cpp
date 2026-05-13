@@ -66,11 +66,17 @@ int main() {
   snapshot.actors.push_back(
       WorldActor{enter.self_actor_id, enter.character_name, enter.x, enter.y, 0, 0, 0,
                  ActorType::player});
+  state.world.action_locked = true;
+  state.world.legacy_target_x = 1;
+  state.world.legacy_chr_action = LegacyChrAction::walk;
   state.apply(snapshot);
   state.connection_phase = GameStateStore::ConnectionPhase::play;
 
   assert(state.world.self_actor_id == 1000);
   assert(state.world.actors.size() == 1);
+  assert(!state.world.action_locked);
+  assert(state.world.legacy_target_x == -1);
+  assert(state.world.legacy_chr_action == LegacyChrAction::none);
   assert(state.connection_phase == GameStateStore::ConnectionPhase::play);
 
   state.apply(ActorUpsert{
@@ -358,6 +364,31 @@ int main() {
   state.world.pending_pickup_item_id = 3000;
   state.world.action_locked = true;
   state.world.action_lock_started_ms = 456;
+  state.world.last_action_ack_ms = 789;
+  state.world.last_action_ack_ok = false;
+  state.world.action_fail_lock = true;
+  state.world.fail_action_ident = mir2::legacy::kSmWalk;
+  state.world.fail_dir = 3;
+  state.world.fail_action_time_ms = 999;
+  state.world.last_sent_action_ident = mir2::legacy::kSmRun;
+  state.world.last_sent_action_dir = 4;
+  state.world.dizzy_delay_start_ms = 1000;
+  state.world.dizzy_delay_time_ms = 2000;
+  state.world.skip_tick = 1;
+  state.world.move_slow_level = 2;
+  state.world.move_slow = true;
+  state.world.attack_slow = true;
+  state.world.legacy_target_x = 10;
+  state.world.legacy_target_y = 11;
+  state.world.legacy_chr_action = LegacyChrAction::run;
+  state.world.action_key = 3;
+  state.world.run_ready_count = 1;
+  state.world.mouse_down_ms = 321;
+  state.world.last_pickup_ms = 654;
+  state.world.eating_item_make_index = 777;
+  state.world.eating_item_slot = 6;
+  state.world.eat_time_ms = 888;
+  state.world.last_use_item_ok = false;
   state.clear_world_ui_state();
   assert(!state.world.npc_dialog.visible);
   assert(!state.world.merchant_shop.visible);
@@ -378,6 +409,50 @@ int main() {
   assert(state.world.target_actor_id == 0);
   assert(state.world.pending_pickup_item_id == 0);
   assert(!state.world.action_locked);
+  assert(state.world.action_lock_started_ms == 0);
+  assert(state.world.last_action_ack_ms == 0);
+  assert(state.world.last_action_ack_ok);
+  assert(!state.world.action_fail_lock);
+  assert(state.world.fail_action_ident == 0);
+  assert(state.world.fail_dir == 0);
+  assert(state.world.fail_action_time_ms == 0);
+  assert(state.world.last_sent_action_ident == 0);
+  assert(state.world.last_sent_action_dir == 0);
+  assert(state.world.dizzy_delay_start_ms == 0);
+  assert(state.world.dizzy_delay_time_ms == 0);
+  assert(state.world.skip_tick == 0);
+  assert(state.world.move_slow_level == 0);
+  assert(!state.world.move_slow);
+  assert(!state.world.attack_slow);
+  assert(state.world.legacy_target_x == -1);
+  assert(state.world.legacy_target_y == -1);
+  assert(state.world.legacy_chr_action == LegacyChrAction::none);
+  assert(state.world.action_key == -1);
+  assert(state.world.run_ready_count == 0);
+  assert(state.world.mouse_down_ms == 0);
+  assert(state.world.last_pickup_ms == 0);
+  assert(state.world.eating_item_make_index == 0);
+  assert(state.world.eating_item_slot == -1);
+  assert(state.world.eat_time_ms == 0);
+  assert(state.world.last_use_item_ok);
+
+  state.world.map_id = "3";
+  state.world.width = 400;
+  state.world.height = 300;
+  state.world.self_actor_id = 1000;
+  state.world.actors.emplace(1000, ActorState{});
+  state.world.ground_items.emplace(1, GroundItemState{});
+  state.world.actor_draw_order.push_back(1000);
+  state.world.ground_item_draw_order.push_back(1);
+  state.clear_play_scene_state();
+  assert(state.world.map_id == "0");
+  assert(state.world.width == 800);
+  assert(state.world.height == 600);
+  assert(state.world.self_actor_id == 0);
+  assert(state.world.actors.empty());
+  assert(state.world.ground_items.empty());
+  assert(state.world.actor_draw_order.empty());
+  assert(state.world.ground_item_draw_order.empty());
 
   state.world.action_locked = true;
   state.apply(ActionAck{true, 1234});

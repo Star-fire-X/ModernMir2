@@ -64,5 +64,34 @@ int main() {
 
   scenes.scene_run(context, 0.0F);
   assert(has_sound_id(audio, mir2::client::s_main_theme));
+
+  world.map_id = "3";
+  world.width = 400;
+  world.height = 300;
+  world.self_actor_id = 1;
+  world.ground_items.emplace(900, mir2::client_v1::GroundItemState{900, 51, 50, 1, "Gold"});
+  world.ground_item_draw_order.push_back(900);
+  world.focus_actor_id = 1;
+  world.target_actor_id = 1;
+  world.action_locked = true;
+  world.legacy_target_x = 52;
+  world.legacy_target_y = 50;
+  world.legacy_chr_action = mir2::client::LegacyChrAction::walk;
+
+  scenes.change_scene(mir2::client::SceneId::loading, context);
+  assert(world.map_id == "0");
+  assert(world.width == 800);
+  assert(world.height == 600);
+  assert(world.self_actor_id == 0);
+  assert(world.actors.empty());
+  assert(world.ground_items.empty());
+  assert(world.actor_draw_order.empty());
+  assert(world.ground_item_draw_order.empty());
+  assert(world.focus_actor_id == 0);
+  assert(world.target_actor_id == 0);
+  assert(!world.action_locked);
+  assert(world.legacy_target_x == -1);
+  assert(world.legacy_target_y == -1);
+  assert(world.legacy_chr_action == mir2::client::LegacyChrAction::none);
   return 0;
 }
