@@ -847,20 +847,6 @@ void ClientV1GameGatewayService::handle_action_intent(
     return;
   }
 
-  // Rate limit: at most one action (move/attack) in flight per session.
-  // This matches legacy client behavior where a new CM_ packet is not sent
-  // until the previous action completes.  The pending_action is cleared by
-  // the world service when it processes the action.
-  {
-    std::scoped_lock lock(mutex_);
-    auto it = sessions_.find(session_id);
-    if (it != sessions_.end()) {
-      if (it->second.pending_action.has_value()) {
-        return;
-      }
-    }
-  }
-
   auto effective = intent;
   if (effective.kind == client_v1::WorldActionKind::walk ||
       effective.kind == client_v1::WorldActionKind::run) {

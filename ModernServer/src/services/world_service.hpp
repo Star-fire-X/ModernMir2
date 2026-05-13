@@ -8,6 +8,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "core/module.hpp"
 #include "protocol/canonical_login_state.hpp"
@@ -83,6 +84,7 @@ class WorldService : public Module {
   std::unordered_map<std::string, std::uint64_t> active_accounts_{};
   std::unordered_map<std::uint64_t, std::string> session_gateways_{};
   std::unordered_map<std::uint64_t, std::uint64_t> session_sequence_watermarks_{};
+  std::unordered_set<std::uint64_t> session_actions_this_frame_{};
   std::uint64_t next_ingress_seq_{0};
   mutable std::mutex gate_events_mutex_{};
   std::deque<SessionEvent> pending_gate_events_{};
