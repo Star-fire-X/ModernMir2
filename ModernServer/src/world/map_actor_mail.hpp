@@ -167,6 +167,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (requester == nullptr || merchant == nullptr || !in_interaction_range(*requester, *target_it->second)) {
         break;
       }
+      if (trade_session_for(requester->id()) != nullptr) {
+        break;
+      }
       if (legacy_execute_npc_script(*requester, *merchant, "@main", dispatch, current_tick,
                                     now_ms)) {
         break;
