@@ -4699,6 +4699,7 @@ class LoginScene final : public Scene {
       set_login_controls_visible(true);
     }
     sync_native_edit_visibility(context.state->modal.visible);
+    set_login_controls_enabled(!context.state->login.request_pending);
   }
 
   void render(ClientContext& context) override {
@@ -4837,17 +4838,20 @@ class LoginScene final : public Scene {
     const auto new_account_visible = login_mode_ == LoginMode::new_account && !modal_visible;
     const auto change_password_visible =
         login_mode_ == LoginMode::change_password && !modal_visible;
+    const auto request_enabled = state_ == nullptr || !state_->login.request_pending;
 
     if (account_edit_ != nullptr) {
       account_edit_->set_native_visible(login_visible);
+      account_edit_->set_native_enabled(login_visible && request_enabled);
     }
     if (password_edit_ != nullptr) {
       password_edit_->set_native_visible(login_visible);
+      password_edit_->set_native_enabled(login_visible && request_enabled);
     }
     for (auto* field : new_account_fields()) {
       if (field != nullptr) {
         field->set_native_visible(new_account_visible);
-        field->set_native_enabled(new_account_visible);
+        field->set_native_enabled(new_account_visible && request_enabled);
       }
     }
     if (new_account_id_edit_ != nullptr && account_update_mode_) {
@@ -4855,19 +4859,19 @@ class LoginScene final : public Scene {
     }
     if (change_id_edit_ != nullptr) {
       change_id_edit_->set_native_visible(change_password_visible);
-      change_id_edit_->set_native_enabled(change_password_visible);
+      change_id_edit_->set_native_enabled(change_password_visible && request_enabled);
     }
     if (change_current_password_edit_ != nullptr) {
       change_current_password_edit_->set_native_visible(change_password_visible);
-      change_current_password_edit_->set_native_enabled(change_password_visible);
+      change_current_password_edit_->set_native_enabled(change_password_visible && request_enabled);
     }
     if (change_new_password_edit_ != nullptr) {
       change_new_password_edit_->set_native_visible(change_password_visible);
-      change_new_password_edit_->set_native_enabled(change_password_visible);
+      change_new_password_edit_->set_native_enabled(change_password_visible && request_enabled);
     }
     if (change_repeat_password_edit_ != nullptr) {
       change_repeat_password_edit_->set_native_visible(change_password_visible);
-      change_repeat_password_edit_->set_native_enabled(change_password_visible);
+      change_repeat_password_edit_->set_native_enabled(change_password_visible && request_enabled);
     }
   }
 
@@ -4929,6 +4933,24 @@ class LoginScene final : public Scene {
     }
     if (close_button_ != nullptr) {
       close_button_->visible = visible;
+    }
+  }
+
+  void set_login_controls_enabled(const bool enabled) {
+    if (account_edit_ != nullptr) {
+      account_edit_->enabled = enabled;
+    }
+    if (password_edit_ != nullptr) {
+      password_edit_->enabled = enabled;
+    }
+    if (change_password_button_ != nullptr) {
+      change_password_button_->enabled = enabled;
+    }
+    if (create_account_button_ != nullptr) {
+      create_account_button_->enabled = enabled;
+    }
+    if (login_button_ != nullptr) {
+      login_button_->enabled = enabled;
     }
   }
 
@@ -5514,6 +5536,12 @@ class ServerSelectScene final : public Scene {
       context.state->lobby.selected_server_index =
           static_cast<int>(context.state->lobby.servers.size() - 1);
     }
+    const auto enabled = !context.state->lobby.server_select_pending;
+    for (auto* button : server_buttons_) {
+      if (button != nullptr) {
+        button->enabled = enabled;
+      }
+    }
   }
 
   void render(ClientContext& context) override {
@@ -5707,11 +5735,15 @@ class CharacterSelectScene final : public Scene {
       create_name_edit_->sync_from_native();
       create_name_edit_->sync_native_bounds(context.renderer);
       create_name_edit_->set_native_visible(create_dialog_active_ && !context.state->modal.visible);
+      create_name_edit_->set_native_enabled(create_dialog_active_ &&
+                                            !context.state->modal.visible &&
+                                            !context.state->lobby.create_character_pending);
     }
     normalize_selected_index(*context.state);
     const auto now_ms = detail::monotonic_ms();
     sync_character_visuals(*context.state, now_ms);
     character_visuals_.update(now_ms);
+    sync_request_enabled_state(context.state->lobby);
   }
 
   void render(ClientContext& context) override {
@@ -5774,6 +5806,9 @@ class CharacterSelectScene final : public Scene {
     if (state_ == nullptr || app_ == nullptr) {
       return;
     }
+    if (state_->lobby.delete_character_pending) {
+      return;
+    }
     const auto selected = state_->lobby.selected_index;
     const auto count = visible_character_count(*state_);
     if (!character_visuals_.can_delete(selected, count)) {
@@ -5784,6 +5819,32 @@ class CharacterSelectScene final : public Scene {
       return;
     }
     app_->request_delete_selected_character();
+  }
+
+  void sync_request_enabled_state(const LobbyViewState& lobby) {
+    const auto busy = lobby.create_character_pending || lobby.delete_character_pending ||
+                      lobby.enter_character_pending || lobby.character_list_pending;
+    if (start_button_ != nullptr) {
+      start_button_->enabled = !busy && !create_dialog_active_;
+    }
+    if (new_button_ != nullptr) {
+      new_button_->enabled = !busy && !create_dialog_active_;
+    }
+    if (erase_button_ != nullptr) {
+      erase_button_->enabled = !busy && !create_dialog_active_;
+    }
+    if (select_left_button_ != nullptr) {
+      select_left_button_->enabled = !busy && !create_dialog_active_;
+    }
+    if (select_right_button_ != nullptr) {
+      select_right_button_->enabled = !busy && !create_dialog_active_;
+    }
+    if (create_ok_button_ != nullptr) {
+      create_ok_button_->enabled = create_dialog_active_ && !lobby.create_character_pending;
+    }
+    if (create_close_button_ != nullptr) {
+      create_close_button_->enabled = create_dialog_active_ && !lobby.create_character_pending;
+    }
   }
 
   static int visible_character_count(const GameStateStore& state) {

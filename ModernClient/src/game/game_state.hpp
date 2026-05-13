@@ -315,6 +315,7 @@ struct LoginViewState {
   bool needs_account_update{false};              ///< 是否需要补充/更新资料
   LoginState login_state{LoginState::lsLogin};
   std::wstring status{};  ///< 状态文本（显示在界面底部的提示信息）
+  bool request_pending{false};
 };
 
 /// 游戏大厅状态（选服/选角）
@@ -325,6 +326,11 @@ struct LobbyViewState {
   int selected_server_index{0};
   std::string selected_server_name{};
   int selected_index{0};  ///< 当前选中的角色索引
+  bool server_select_pending{false};
+  bool character_list_pending{false};
+  bool create_character_pending{false};
+  bool delete_character_pending{false};
+  bool enter_character_pending{false};
 };
 
 /// 世界视图状态：包含所有动态游戏数据
