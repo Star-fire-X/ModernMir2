@@ -8,9 +8,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace mir2::legacy {
@@ -32,6 +34,8 @@ struct MapCell {
 struct MapDocument {
   int width{0};                ///< 地图宽度（瓦片数）
   int height{0};               ///< 地图高度（瓦片数）
+  bool anti_hack{false};       ///< 是否使用 AntiHack 地图头
+  std::uint16_t check_key{0};  ///< AntiHack XOR key，普通地图为 0
   std::vector<MapCell> cells{};///< 单元格数组（行优先存储）
 
   /// 获取单元格指针，越界返回 nullptr
@@ -59,13 +63,23 @@ struct MapDocument {
 
 namespace detail {
 
-constexpr std::size_t kMapHeaderSize = 52;  ///< .map 文件头部大小
-constexpr std::size_t kMapCellSize = 12;    ///< 每个单元格字节数
+constexpr std::size_t kMapHeaderSize = 52;          ///< .map 文件头部大小
+constexpr std::size_t kAntiHackMapHeaderSize = 64;  ///< AntiHack .map 头部大小
+constexpr std::size_t kMapCellSize = 12;            ///< 每个单元格字节数
 
 /// 小端读取 uint16
 inline std::uint16_t read_u16(const std::vector<std::uint8_t>& buffer, std::size_t offset) {
   return static_cast<std::uint16_t>(buffer[offset]) |
          (static_cast<std::uint16_t>(buffer[offset + 1]) << 8U);
+}
+
+inline bool is_antihack_map_id(const std::filesystem::path& path) {
+  auto map_id = path.stem().string();
+  for (auto& ch : map_id) {
+    ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+  }
+  return map_id == "LABY01" || map_id == "LABY02" || map_id == "LABY03" ||
+         map_id == "LABY04" || map_id == "SNAKE";
 }
 
 /// 读取文件全部字节到 vector
@@ -95,18 +109,28 @@ inline std::shared_ptr<MapDocument> decode_map_file(const std::filesystem::path&
   }
 
   const auto bytes = detail::read_file_bytes(path);
-  if (bytes.size() < detail::kMapHeaderSize) {
+  const auto anti_hack = detail::is_antihack_map_id(path);
+  const auto header_size =
+      anti_hack ? detail::kAntiHackMapHeaderSize : detail::kMapHeaderSize;
+  if (bytes.size() < header_size) {
     return nullptr;
   }
 
   auto map = std::make_shared<MapDocument>();
-  map->width = static_cast<int>(detail::read_u16(bytes, 0));
-  map->height = static_cast<int>(detail::read_u16(bytes, 2));
+  map->anti_hack = anti_hack;
+  if (anti_hack) {
+    map->check_key = detail::read_u16(bytes, 33U);
+    map->width = static_cast<int>(detail::read_u16(bytes, 31U) ^ map->check_key);
+    map->height = static_cast<int>(detail::read_u16(bytes, 35U) ^ map->check_key);
+  } else {
+    map->width = static_cast<int>(detail::read_u16(bytes, 0));
+    map->height = static_cast<int>(detail::read_u16(bytes, 2));
+  }
   if (map->width <= 0 || map->height <= 0) {
     return nullptr;
   }
 
-  const auto expected_size = detail::kMapHeaderSize +
+  const auto expected_size = header_size +
       static_cast<std::size_t>(map->width) * static_cast<std::size_t>(map->height) *
           detail::kMapCellSize;
   if (bytes.size() < expected_size) {
@@ -116,15 +140,15 @@ inline std::shared_ptr<MapDocument> decode_map_file(const std::filesystem::path&
   map->cells.resize(static_cast<std::size_t>(map->width) * static_cast<std::size_t>(map->height));
   for (int x = 0; x < map->width; ++x) {
     for (int y = 0; y < map->height; ++y) {
-      const auto source = detail::kMapHeaderSize +
+      const auto source = header_size +
           (static_cast<std::size_t>(x) * static_cast<std::size_t>(map->height) +
            static_cast<std::size_t>(y)) * detail::kMapCellSize;
       auto& cell = map->cells[static_cast<std::size_t>(y) *
                                   static_cast<std::size_t>(map->width) +
                               static_cast<std::size_t>(x)];
-      cell.bk_img = detail::read_u16(bytes, source);
-      cell.mid_img = detail::read_u16(bytes, source + 2U);
-      cell.fr_img = detail::read_u16(bytes, source + 4U);
+      cell.bk_img = detail::read_u16(bytes, source) ^ map->check_key;
+      cell.mid_img = detail::read_u16(bytes, source + 2U) ^ map->check_key;
+      cell.fr_img = detail::read_u16(bytes, source + 4U) ^ map->check_key;
       cell.door_index = bytes[source + 6U];
       cell.door_offset = bytes[source + 7U];
       cell.ani_frame = bytes[source + 8U];

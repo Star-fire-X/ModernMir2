@@ -211,6 +211,10 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_legacy_environment_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_environment_smoke COMMAND mir2_legacy_environment_smoke)
 
+  add_executable(mir2_legacy_map_document_smoke tests/legacy_map_document_smoke.cpp)
+  target_link_libraries(mir2_legacy_map_document_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_map_document_smoke COMMAND mir2_legacy_map_document_smoke)
+
   add_executable(mir2_legacy_mapinfo_import_routes_smoke
     tests/legacy_mapinfo_import_routes_smoke.cpp)
   target_link_libraries(mir2_legacy_mapinfo_import_routes_smoke PRIVATE mir2_hostlib)
