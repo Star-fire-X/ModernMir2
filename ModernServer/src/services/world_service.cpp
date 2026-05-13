@@ -463,6 +463,12 @@ std::unordered_map<std::string, std::string> WorldService::snapshot() const {
            std::to_string(context_ != nullptr ? context_->config.runtime.castle_context_refresh_ms : 0)}};
 }
 
+// Legacy frame ordering guarantees:
+// 1. Socket receive order → Bus FIFO post → monotonic ingress_seq
+// 2. Same-session FIFO via session_seq watermark (accept_ingress_sequence)
+// 3. Same-frame batch matches Delphi RunSocket.Run drain-then-dispatch
+// 4. Per-player inbox FIFO via route_logic_command enqueue order
+// 5. Dispatch order preserved by flush_dispatch at frame end
 void WorldService::run() {
   auto next_tick = std::chrono::steady_clock::now();
   const auto tick_interval = std::chrono::milliseconds(context_->config.budgets.tick_ms);
