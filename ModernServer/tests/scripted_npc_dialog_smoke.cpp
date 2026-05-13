@@ -96,7 +96,7 @@ int main() {
   write_file(root / "npc_scripts" / "Npc_def" / "sage_1-0.txt",
              "#INCLUDE common.txt\n"
              "#DEFINE @GREETING Welcome\n"
-             "[@main]\n"
+             "[@HOME]\n"
              "@GREETING, <$USERNAME>\\\n"
              "<Ask about the ruins/@about>\\\n"
              "<Test call/@call>\\\n"
@@ -162,7 +162,7 @@ int main() {
     return 1;
   }
 
-  const auto about_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@about"));
+  const auto about_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@ABOUT"));
   const auto about_packet = find_packet(about_dispatch, mir2::kSmMerchantSay);
   if (!about_packet.has_value()) {
     std::filesystem::remove_all(root, ec);

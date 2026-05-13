@@ -440,8 +440,18 @@ LegacyNpcScriptParseResult parse_legacy_npc_script(const std::filesystem::path& 
 
   std::string current_action;
   std::vector<std::string> current_lines;
+  auto normalize_action = [](std::string action) {
+    action = util::lower_copy(util::trim(std::move(action)));
+    if (action == "@home") {
+      return std::string{"@main"};
+    }
+    if (action == "~@home") {
+      return std::string{"~@main"};
+    }
+    return action;
+  };
   auto flush = [&]() {
-    auto action = util::lower_copy(util::trim(current_action));
+    auto action = normalize_action(current_action);
     if (!action.empty() && (action.front() == '@' || util::starts_with(action, "~@"))) {
       const auto text = normalize_dialog_text(current_lines);
       if (!text.empty()) {
@@ -457,10 +467,10 @@ LegacyNpcScriptParseResult parse_legacy_npc_script(const std::filesystem::path& 
     const auto trimmed = util::trim(line);
     if (trimmed.size() >= 3 && trimmed.front() == '[' && trimmed.back() == ']') {
       flush();
-      current_action = trimmed.substr(1, trimmed.size() - 2);
+      current_action = normalize_action(trimmed.substr(1, trimmed.size() - 2));
       continue;
     }
-    const auto current_action_key = util::lower_copy(util::trim(current_action));
+    const auto current_action_key = normalize_action(current_action);
     if (current_action.empty()) {
       if (!trimmed.empty() && trimmed.front() == '%') {
         if (const auto rate = parse_first_int32(std::string_view(trimmed).substr(1));
