@@ -11,6 +11,7 @@
 
 #include "animation/legacy_animation.hpp"
 #include "assets/asset_manager.hpp"
+#include "assets/legacy_map_resources.hpp"
 #include "render/software_renderer.hpp"
 #include "shared/legacy/map_render_math.hpp"
 
@@ -76,20 +77,6 @@ std::filesystem::path write_alignment_map_root() {
   file.write(reinterpret_cast<const char*>(bytes.data()),
              static_cast<std::streamsize>(bytes.size()));
   return root;
-}
-
-mir2::client::ArchiveId delphi_object_archive_for_area(const int area) {
-  using mir2::client::ArchiveId;
-  switch (area) {
-    case 0: return ArchiveId::objects1;
-    case 1: return ArchiveId::objects2;
-    case 2: return ArchiveId::objects3;
-    case 3: return ArchiveId::objects4;
-    case 4: return ArchiveId::objects5;
-    case 5: return ArchiveId::objects6;
-    case 6: return ArchiveId::objects7;
-    default: return ArchiveId::objects1;
-  }
 }
 
 std::shared_ptr<const mir2::client::SpriteFrame> first_decodable_frame(
@@ -213,10 +200,27 @@ int main() {
   assert(legacy_small_tile_frame_index(3) == 2);
   assert(legacy_small_tile_frame_index(0) == -1);
 
-  assert(delphi_object_archive_for_area(0) == ArchiveId::objects1);
-  assert(delphi_object_archive_for_area(1) == ArchiveId::objects2);
-  assert(delphi_object_archive_for_area(6) == ArchiveId::objects7);
-  assert(delphi_object_archive_for_area(99) == ArchiveId::objects1);
+  const auto ground_resource = legacy_ground_tile_resource(2, 4, 0x8002U);
+  assert(ground_resource.has_value());
+  assert(ground_resource->archive == ArchiveId::tiles);
+  assert(ground_resource->index == 1);
+  assert(!legacy_ground_tile_resource(1, 4, 2).has_value());
+
+  const auto small_resource = legacy_small_tile_resource(3);
+  assert(small_resource.has_value());
+  assert(small_resource->archive == ArchiveId::sm_tiles);
+  assert(small_resource->index == 2);
+  assert(!legacy_small_tile_resource(0).has_value());
+
+  assert(legacy_object_archive_for_area(0) == ArchiveId::objects1);
+  assert(legacy_object_archive_for_area(1) == ArchiveId::objects2);
+  assert(legacy_object_archive_for_area(6) == ArchiveId::objects7);
+  assert(legacy_object_archive_for_area(99) == ArchiveId::objects1);
+  const auto object_resource = legacy_map_object_resource(6, 42);
+  assert(object_resource.has_value());
+  assert(object_resource->archive == ArchiveId::objects7);
+  assert(object_resource->index == 42);
+  assert(!legacy_map_object_resource(0, -1).has_value());
 
   AssetManager temp_assets;
   assert(temp_assets.initialize(write_alignment_map_root()));

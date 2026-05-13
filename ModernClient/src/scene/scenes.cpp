@@ -52,6 +52,7 @@
 
 #include "animation/legacy_animation.hpp"
 #include "app/client_app.hpp"
+#include "assets/legacy_map_resources.hpp"
 #include "audio/legacy_audio_cue_tracker.hpp"
 #include "audio/legacy_sound_rules.hpp"
 #include "audio/sound_constants.hpp"
@@ -416,29 +417,6 @@ class ResourceTextEdit final : public ui::TextEdit {
   bool replace_special_chars_{false};
   bool reject_space_{false};
 };
-
-/// 根据区域编号返回对应的物件精灵归档
-/// 区域 0-6 分别映射到 ArchiveId::objects1 到 objects7
-ArchiveId object_archive_for_area(const int area) {
-  switch (area) {
-    case 0:
-      return ArchiveId::objects1;
-    case 1:
-      return ArchiveId::objects2;
-    case 2:
-      return ArchiveId::objects3;
-    case 3:
-      return ArchiveId::objects4;
-    case 4:
-      return ArchiveId::objects5;
-    case 5:
-      return ArchiveId::objects6;
-    case 6:
-      return ArchiveId::objects7;
-    default:
-      return ArchiveId::objects1;
-  }
-}
 
 /// 绘制精灵帧到渲染器表面（带全局透明度）
 void draw_sprite(SoftwareRenderer& renderer, const std::shared_ptr<const SpriteFrame>& frame,
@@ -7156,15 +7134,17 @@ class WorldScene final : public Scene {
         }
 
         const auto draw_x = legacy::legacy_tile_draw_x(viewport, x);
-        const auto bk_index = legacy::legacy_ground_tile_frame_index(x, y, cell->bk_img);
-        if (bk_index >= 0) {
-          draw_sprite(*context.renderer, context.assets->get_frame(ArchiveId::tiles, bk_index),
+        if (const auto tile = legacy_ground_tile_resource(x, y, cell->bk_img);
+            tile.has_value()) {
+          draw_sprite(*context.renderer,
+                      context.assets->get_frame(tile->archive, tile->index),
                       draw_x, legacy::legacy_ground_back_y(viewport, y));
         }
 
-        const auto mid_index = legacy::legacy_small_tile_frame_index(cell->mid_img);
-        if (mid_index >= 0) {
-          draw_sprite(*context.renderer, context.assets->get_frame(ArchiveId::sm_tiles, mid_index),
+        if (const auto small_tile = legacy_small_tile_resource(cell->mid_img);
+            small_tile.has_value()) {
+          draw_sprite(*context.renderer,
+                      context.assets->get_frame(small_tile->archive, small_tile->index),
                       draw_x, legacy::legacy_ground_mid_y(viewport, y));
         }
       }
@@ -7178,12 +7158,12 @@ class WorldScene final : public Scene {
         if (cell == nullptr) {
           continue;
         }
-        const auto object_index = animation_.map_object_frame(*cell);
-        if (object_index < 0) {
+        const auto object =
+            legacy_map_object_resource(cell->area, animation_.map_object_frame(*cell));
+        if (!object.has_value()) {
           continue;
         }
-        const auto frame =
-            context.assets->get_frame(object_archive_for_area(cell->area), object_index);
+        const auto frame = context.assets->get_frame(object->archive, object->index);
         if (frame == nullptr || frame->width != 48 || frame->height != 32) {
           continue;
         }
@@ -7331,10 +7311,10 @@ class WorldScene final : public Scene {
         continue;
       }
 
-      const auto object_index = animation_.map_object_frame(*cell);
-      if (object_index >= 0) {
-        const auto frame =
-            context.assets->get_frame(object_archive_for_area(cell->area), object_index);
+      if (const auto object =
+              legacy_map_object_resource(cell->area, animation_.map_object_frame(*cell));
+          object.has_value()) {
+        const auto frame = context.assets->get_frame(object->archive, object->index);
         if (frame != nullptr && (frame->width != 48 || frame->height != 32)) {
           const auto draw_x = legacy::legacy_tile_draw_x(viewport, x);
           const auto base_y = legacy::legacy_object_row_y(viewport, y);
