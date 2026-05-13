@@ -653,6 +653,10 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_merchant_dialog_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_merchant_dialog_smoke COMMAND mir2_merchant_dialog_smoke)
 
+  add_executable(mir2_npc_instance_click_guard_smoke tests/npc_instance_click_guard_smoke.cpp)
+  target_link_libraries(mir2_npc_instance_click_guard_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_npc_instance_click_guard_smoke COMMAND mir2_npc_instance_click_guard_smoke)
+
   add_executable(mir2_scripted_merchant_smoke tests/scripted_merchant_smoke.cpp)
   target_link_libraries(mir2_scripted_merchant_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_scripted_merchant_smoke COMMAND mir2_scripted_merchant_smoke)
