@@ -6770,7 +6770,15 @@ class WorldScene final : public Scene {
 
   bool map_can_move(ClientContext& context, int x, int y) const {
     if (map_ != nullptr) {
-      if (!map_->can_move(x, y)) {
+      const auto* cell = map_->cell(x, y);
+      if (cell == nullptr) {
+        return false;
+      }
+      if ((cell->bk_img & 0x8000U) != 0U || (cell->fr_img & 0x8000U) != 0U) {
+        return false;
+      }
+      if ((cell->door_index & 0x80U) != 0U && (cell->door_offset & 0x80U) == 0U &&
+          !context.state->map_door_open(x, y)) {
         return false;
       }
     } else if (context.state->world.width > 0 && context.state->world.height > 0 &&
@@ -6778,6 +6786,15 @@ class WorldScene final : public Scene {
       return false;
     }
     return true;
+  }
+
+  MapCell map_cell_with_dynamic_door(ClientContext& context, const MapCell& cell,
+                                     int x, int y) const {
+    auto result = cell;
+    if ((result.door_index & 0x80U) != 0U && context.state->map_door_open(x, y)) {
+      result.door_offset |= 0x80U;
+    }
+    return result;
   }
 
   bool crash_man(ClientContext& context, const ActorState& self, int x, int y) const {
@@ -7191,8 +7208,9 @@ class WorldScene final : public Scene {
         if (cell == nullptr) {
           continue;
         }
+        const auto render_cell = map_cell_with_dynamic_door(context, *cell, x, y);
         const auto object =
-            legacy_map_object_resource(cell->area, animation_.map_object_frame(*cell));
+            legacy_map_object_resource(render_cell.area, animation_.map_object_frame(render_cell));
         if (!object.has_value()) {
           continue;
         }
@@ -7350,15 +7368,16 @@ class WorldScene final : public Scene {
         continue;
       }
 
+      const auto render_cell = map_cell_with_dynamic_door(context, *cell, x, y);
       if (const auto object =
-              legacy_map_object_resource(cell->area, animation_.map_object_frame(*cell));
+              legacy_map_object_resource(render_cell.area, animation_.map_object_frame(render_cell));
           object.has_value()) {
         const auto frame = context.assets->get_frame(object->archive, object->index);
         if (frame != nullptr && (frame->width != 48 || frame->height != 32)) {
           const auto draw_x = legacy::legacy_tile_draw_x(viewport, x);
           const auto base_y = legacy::legacy_object_row_y(viewport, y);
           legacy_trace_map_layer(legacy::LegacyMapDrawLayer::large_object, y);
-          if (animation_.map_object_blend(*cell)) {
+          if (animation_.map_object_blend(render_cell)) {
             draw_sprite_legacy_blend(*context.renderer, frame, draw_x + frame->hotspot_x - 2,
                                      base_y + frame->hotspot_y - 68);
           } else {

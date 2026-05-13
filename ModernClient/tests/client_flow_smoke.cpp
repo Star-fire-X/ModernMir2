@@ -345,11 +345,19 @@ int main() {
   assert(state.world.minimap.loaded);
   assert(state.world.minimap.pixels.size() == 4);
 
+  state.apply(MapDoorState{12, 13, true});
+  assert(state.map_door_open(12, 13));
+  state.apply(MapDoorState{12, 13, false});
+  assert(!state.map_door_open(12, 13));
+  state.apply(MapDoorState{12, 13, true});
+  assert(state.map_door_open(12, 13));
+
   state.apply(WorldClearObjects{});
   assert(state.world.map_transition_pending);
   assert(state.world.self_actor_id == 0);
   assert(state.world.actors.empty());
   assert(state.world.ground_items.empty());
+  assert(!state.map_door_open(12, 13));
   assert(state.world.bag_items[0].name == "Potion");
   assert(state.world.equipment[1].name == "Sword");
   assert(state.world.magics.size() == 1);

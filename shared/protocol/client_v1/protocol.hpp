@@ -71,6 +71,7 @@ enum class MessageId : std::uint16_t {
   actor_magic_fire_fail = 317,
   world_clear_objects = 318,
   map_change = 319,
+  map_door_state = 320,
   move_intent = 400,
   action_intent = 401,
   spell_intent = 402,
@@ -403,6 +404,13 @@ struct WorldClearObjects {};
 /// 地图切换通知：对应 Delphi SM_CHANGEMAP，完整 WorldSnapshot 会随后到达。
 struct MapChange {
   std::string map_id{};
+};
+
+/// 地图门开关状态：对应 Delphi SM_OPENDOOR_OK / SM_CLOSEDOOR。
+struct MapDoorState {
+  std::int32_t x{0};
+  std::int32_t y{0};
+  bool open{false};
 };
 
 /// 主角能力摘要：驱动底部 HUD 的等级、经验、负重、金币和饥饿图标
@@ -1026,6 +1034,7 @@ using Message = std::variant<ClientHello,
                              WorldSnapshot,
                              WorldClearObjects,
                              MapChange,
+                             MapDoorState,
                              ActorStateDelta,
                              LoginNotice,
                              LoginNoticeOk,
@@ -1285,6 +1294,7 @@ MIR2_CLIENT_V1_TRAIT(EnterWorldResult, enter_world_result);
 MIR2_CLIENT_V1_TRAIT(WorldSnapshot, world_snapshot);
 MIR2_CLIENT_V1_TRAIT(WorldClearObjects, world_clear_objects);
 MIR2_CLIENT_V1_TRAIT(MapChange, map_change);
+MIR2_CLIENT_V1_TRAIT(MapDoorState, map_door_state);
 MIR2_CLIENT_V1_TRAIT(ActorStateDelta, actor_state_delta);
 MIR2_CLIENT_V1_TRAIT(LoginNotice, login_notice);
 MIR2_CLIENT_V1_TRAIT(LoginNoticeOk, login_notice_ok);
@@ -1781,6 +1791,21 @@ inline void encode(ByteWriter& writer, const MapChange& value) {
 
 inline bool decode(ByteReader& reader, MapChange& value) {
   return reader.read_string(value.map_id);
+}
+
+inline void encode(ByteWriter& writer, const MapDoorState& value) {
+  writer.write_i32(value.x);
+  writer.write_i32(value.y);
+  writer.write_u8(value.open ? 1U : 0U);
+}
+
+inline bool decode(ByteReader& reader, MapDoorState& value) {
+  std::uint8_t open = 0;
+  if (!reader.read_i32(value.x) || !reader.read_i32(value.y) || !reader.read_u8(open)) {
+    return false;
+  }
+  value.open = open != 0U;
+  return true;
 }
 
 inline void encode(ByteWriter& writer, const SelfAbility& value) {
@@ -2993,6 +3018,9 @@ inline std::optional<Message> decode_any(const Frame& frame) {
       break;
     case MessageId::map_change:
       if (auto value = decode_message<MapChange>(frame); value.has_value()) return Message{*value};
+      break;
+    case MessageId::map_door_state:
+      if (auto value = decode_message<MapDoorState>(frame); value.has_value()) return Message{*value};
       break;
     case MessageId::actor_state_delta:
       if (auto value = decode_message<ActorStateDelta>(frame); value.has_value()) return Message{*value};
