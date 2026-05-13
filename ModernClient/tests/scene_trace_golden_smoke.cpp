@@ -1,4 +1,5 @@
 #include "app/legacy_frame_scheduler.hpp"
+#include "game/game_state.hpp"
 
 #include <cassert>
 #include <filesystem>
@@ -68,6 +69,54 @@ std::vector<std::string> run_trace(const bool force_render_due, const bool can_d
   return calls;
 }
 
+std::vector<std::string> run_map_transfer_trace() {
+  using namespace mir2::client_v1;
+
+  mir2::client::GameStateStore state;
+  state.apply(WorldSnapshot{"0", 700, 700, 1000,
+                            {WorldActor{1000, "Hero", 330, 270, 0, 0, 0,
+                                        ActorType::player},
+                             WorldActor{2000, "Guard", 331, 270, 0, 0, 0,
+                                        ActorType::npc}}});
+  state.apply(GroundItemAdd{GroundItemState{3000, 330, 271, 1, "Gold"}});
+  state.apply(MapDoorState{12, 13, true});
+
+  std::vector<std::string> calls;
+  push(calls, "recv_clear_objects");
+  state.apply(WorldClearObjects{});
+  assert(state.world.actors.empty());
+  assert(state.world.ground_items.empty());
+  assert(!state.map_door_open(12, 13));
+  push(calls, "clear_dynamic_map_objects");
+  assert(state.world.map_transition_pending);
+  push(calls, "enter_map_transition_pending");
+
+  push(calls, "recv_change_map");
+  state.apply(MapChange{"1"});
+  assert(state.world.map_id == "1");
+  push(calls, "set_pending_map_id");
+
+  const auto stale_actor = ActorUpsert{
+      WorldActor{2000, "Guard", 332, 270, 0, 0, 0, ActorType::npc}};
+  if (state.world.map_transition_pending) {
+    push(calls, "drop_stale_runtime_deltas");
+  } else {
+    state.apply(stale_actor);
+  }
+  assert(state.world.actors.find(stale_actor.actor.actor_id) == state.world.actors.end());
+
+  push(calls, "recv_world_snapshot");
+  state.apply(WorldSnapshot{"1", 500, 400, 1000,
+                            {WorldActor{1000, "Hero", 5, 5, 2, 0, 0,
+                                        ActorType::player}}});
+  assert(!state.world.map_transition_pending);
+  assert(state.world.map_id == "1");
+  assert(state.world.actors.size() == 1U);
+  push(calls, "apply_new_map_snapshot");
+  push(calls, "resume_runtime_deltas");
+  return calls;
+}
+
 }  // namespace
 
 int main() {
@@ -75,5 +124,6 @@ int main() {
   assert(run_trace(true, true) == golden.at("frame.render_due.can_draw"));
   assert(run_trace(false, true) == golden.at("frame.not_render_due"));
   assert(run_trace(true, false) == golden.at("frame.cannot_draw"));
+  assert(run_map_transfer_trace() == golden.at("play.map_transfer"));
   return 0;
 }

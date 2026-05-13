@@ -30,47 +30,69 @@ void assert_draw_orders_valid(const mir2::client::GameStateStore& state) {
     assert(state.world.ground_items.find(id) != state.world.ground_items.end());
     assert(seen_items.insert(id).second);
   }
+
+  if (state.world.map_transition_pending) {
+    assert(state.world.actors.empty());
+    assert(state.world.ground_items.empty());
+    assert(state.world.map_doors.empty());
+    assert(state.world.actor_draw_order.empty());
+    assert(state.world.ground_item_draw_order.empty());
+  }
+}
+
+void seed_visible_world(mir2::client::GameStateStore& state) {
+  mir2::client_v1::WorldSnapshot snapshot;
+  snapshot.map_id = "0";
+  snapshot.width = 700;
+  snapshot.height = 700;
+  snapshot.self_actor_id = 1;
+  snapshot.actors.push_back(actor(1, 330, 270));
+  state.apply(snapshot);
 }
 
 }  // namespace
 
 int main() {
   mir2::client::GameStateStore state;
+  seed_visible_world(state);
   std::mt19937 rng{0x4D495232U};
 
   for (int step = 0; step < 1000; ++step) {
-    switch (rng() % 9U) {
+    switch (rng() % 13U) {
       case 0: {
-        mir2::client_v1::WorldSnapshot snapshot;
-        snapshot.map_id = "0";
-        snapshot.width = 700;
-        snapshot.height = 700;
-        snapshot.self_actor_id = 1;
-        snapshot.actors.push_back(actor(1, 330, 270));
-        state.apply(snapshot);
+        seed_visible_world(state);
         break;
       }
       case 1: {
-        const auto id = 2U + (rng() % 32U);
-        state.apply(mir2::client_v1::ActorUpsert{actor(id, static_cast<std::int32_t>(rng() % 700U),
-                                                       static_cast<std::int32_t>(rng() % 700U))});
+        if (!state.world.map_transition_pending) {
+          const auto id = 2U + (rng() % 32U);
+          state.apply(mir2::client_v1::ActorUpsert{
+              actor(id, static_cast<std::int32_t>(rng() % 700U),
+                    static_cast<std::int32_t>(rng() % 700U))});
+        }
         break;
       }
       case 2: {
-        const auto id = 2U + (rng() % 32U);
-        state.apply(mir2::client_v1::ActorRemove{id});
+        if (!state.world.map_transition_pending) {
+          const auto id = 2U + (rng() % 32U);
+          state.apply(mir2::client_v1::ActorRemove{id});
+        }
         break;
       }
       case 3: {
-        const auto id = 100U + (rng() % 64U);
-        state.apply(mir2::client_v1::GroundItemAdd{
-            item(id, static_cast<std::int32_t>(rng() % 700U),
-                 static_cast<std::int32_t>(rng() % 700U))});
+        if (!state.world.map_transition_pending) {
+          const auto id = 100U + (rng() % 64U);
+          state.apply(mir2::client_v1::GroundItemAdd{
+              item(id, static_cast<std::int32_t>(rng() % 700U),
+                   static_cast<std::int32_t>(rng() % 700U))});
+        }
         break;
       }
       case 4: {
-        const auto id = 100U + (rng() % 64U);
-        state.apply(mir2::client_v1::GroundItemRemove{id, 0, 0});
+        if (!state.world.map_transition_pending) {
+          const auto id = 100U + (rng() % 64U);
+          state.apply(mir2::client_v1::GroundItemRemove{id, 0, 0});
+        }
         break;
       }
       case 5:
@@ -92,8 +114,29 @@ int main() {
       case 7:
         state.apply(mir2::client_v1::ActionAck{true, static_cast<std::uint32_t>(step)});
         break;
-      default:
+      case 8:
         state.apply(mir2::client_v1::SysMessage{"notice", 0});
+        break;
+      case 9:
+        if (!state.world.map_transition_pending) {
+          state.apply(mir2::client_v1::MapDoorState{static_cast<std::int32_t>(rng() % 700U),
+                                                    static_cast<std::int32_t>(rng() % 700U),
+                                                    (rng() % 2U) == 0U});
+        }
+        break;
+      case 10:
+        state.apply(mir2::client_v1::WorldClearObjects{});
+        break;
+      case 11:
+        state.apply(mir2::client_v1::MapChange{(rng() % 2U) == 0U ? "0" : "1"});
+        break;
+      default:
+        if (!state.world.map_transition_pending) {
+          const auto id = 2U + (rng() % 32U);
+          state.apply(mir2::client_v1::ActorStateDelta{
+              id, static_cast<std::int32_t>(rng() % 700U),
+              static_cast<std::int32_t>(rng() % 700U), static_cast<std::uint8_t>(rng() % 8U)});
+        }
         break;
     }
     assert_draw_orders_valid(state);
