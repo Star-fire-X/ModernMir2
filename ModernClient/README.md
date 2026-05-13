@@ -9,7 +9,8 @@ Modern C++20 Win32 client skeleton for the Mir2 rewrite.
 - CPU software renderer with D3D11 present-only output
 - Retained-mode custom UI tree
 - `client_v1` TCP protocol client
-- Explicit Delphi protocol migration map for all 56 `Send*` and 39 `ClientGet*` entries
+- Explicit Delphi protocol migration map for all 57 `Send*`, 39 `ClientGet*`,
+  87 `CM_*`, and 220 `SM_*` entries
 - Full `client_v1` account profile payloads for create-account and account-update flows
 - Real `Legend of Mir` `WIL + map` loading for tiles, objects, and player body frames
 - Explicit scene flow:
