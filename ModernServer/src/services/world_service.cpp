@@ -433,6 +433,11 @@ void WorldService::join() {
 #ifdef MIR2_ENABLE_TEST_HOOKS
 void WorldService::attach_context_for_test(HostContext& context) { context_ = &context; }
 
+void WorldService::initialize_runtime_for_test(const HostConfig& config) {
+  runtime_ = std::make_unique<LogicRuntime>(config);
+  runtime_->initialize();
+}
+
 void WorldService::enqueue_gate_event_for_test(SessionEvent event) {
   std::scoped_lock lock(gate_events_mutex_);
   pending_gate_events_.push_back(std::move(event));
@@ -441,6 +446,18 @@ void WorldService::enqueue_gate_event_for_test(SessionEvent event) {
 void WorldService::seed_session_sequence_for_test(std::uint64_t session_id,
                                                   std::uint64_t session_seq) {
   session_sequence_watermarks_[session_id] = session_seq;
+}
+
+void WorldService::clear_session_actions_for_test() {
+  session_actions_this_frame_.clear();
+}
+
+std::size_t WorldService::session_action_count_for_test() const {
+  return session_actions_this_frame_.size();
+}
+
+std::size_t WorldService::session_action_reject_count_for_test() const {
+  return session_action_reject_count_;
 }
 
 RuntimeDispatch WorldService::run_legacy_socket_stage_for_test(std::uint64_t now_ms) {
@@ -568,6 +585,8 @@ void WorldService::run() {
                                 legacy_frame_driver_.last_trace().last_frame_ms);
       }
       flush_dispatch(std::move(dispatch));
+      // PR-6 fairness guard: action rate limiting is frame-scoped and resets
+      // only after the frame dispatch has been queued for gateways.
       session_actions_this_frame_.clear();
       next_tick += tick_interval;
     } else {
@@ -943,6 +962,9 @@ RuntimeDispatch WorldService::handle_logic_command(const LogicCommand& command) 
     // per frame, matching legacy client action-lock behavior.
     if (is_gameplay_action(command.kind)) {
       if (session_actions_this_frame_.count(command.session_id) != 0u) {
+#ifdef MIR2_ENABLE_TEST_HOOKS
+        ++session_action_reject_count_;
+#endif
         return {};
       }
       session_actions_this_frame_.insert(command.session_id);

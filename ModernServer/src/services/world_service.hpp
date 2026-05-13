@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <atomic>
+#include <cstddef>
 #include <deque>
 #include <mutex>
 #include <memory>
@@ -33,8 +34,12 @@ class WorldService : public Module {
 
 #ifdef MIR2_ENABLE_TEST_HOOKS
   void attach_context_for_test(HostContext& context);
+  void initialize_runtime_for_test(const HostConfig& config);
   void enqueue_gate_event_for_test(SessionEvent event);
   void seed_session_sequence_for_test(std::uint64_t session_id, std::uint64_t session_seq);
+  void clear_session_actions_for_test();
+  [[nodiscard]] std::size_t session_action_count_for_test() const;
+  [[nodiscard]] std::size_t session_action_reject_count_for_test() const;
   [[nodiscard]] RuntimeDispatch run_legacy_socket_stage_for_test(std::uint64_t now_ms);
   [[nodiscard]] RuntimeDispatch process_ingress_batch_for_test(WorldIngressBatch& batch);
 #endif
@@ -85,6 +90,9 @@ class WorldService : public Module {
   std::unordered_map<std::uint64_t, std::string> session_gateways_{};
   std::unordered_map<std::uint64_t, std::uint64_t> session_sequence_watermarks_{};
   std::unordered_set<std::uint64_t> session_actions_this_frame_{};
+#ifdef MIR2_ENABLE_TEST_HOOKS
+  std::size_t session_action_reject_count_{0};
+#endif
   std::uint64_t next_ingress_seq_{0};
   mutable std::mutex gate_events_mutex_{};
   std::deque<SessionEvent> pending_gate_events_{};
