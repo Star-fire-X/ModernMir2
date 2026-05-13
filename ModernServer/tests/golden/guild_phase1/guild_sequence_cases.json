@@ -1,0 +1,573 @@
+{
+  "source": "Source/M2Server/Guild.pas, ObjBase.pas, ObjNpc.pas, Castle.pas and Source/Client/ClMain.pas",
+  "cases": [
+    {
+      "name": "open_guild_home_success",
+      "preconditions": [
+        "requester.MyGuild is not nil"
+      ],
+      "sequence": [
+        {
+          "seq": 1,
+          "direction": "client_to_server",
+          "actor": "requester",
+          "message": "CM_OPENGUILDDLG",
+          "ident": 1035,
+          "body": ""
+        },
+        {
+          "seq": 2,
+          "direction": "server_to_client",
+          "actor": "requester",
+          "message": "SM_OPENGUILDDLG",
+          "ident": 753,
+          "series": 1,
+          "body": "EncodeString(GuildName#13 + GuildFlag#13 + CommanderMode#13 + <Notice>#13 + notices + <KillGuilds>#13 + enemies + <AllyGuilds>#13 + allies)"
+        }
+      ]
+    },
+    {
+      "name": "open_guild_home_fail_not_member",
+      "preconditions": [
+        "requester.MyGuild is nil"
+      ],
+      "sequence": [
+        {
+          "seq": 1,
+          "direction": "client_to_server",
+          "actor": "requester",
+          "message": "CM_OPENGUILDDLG",
+          "ident": 1035,
+          "body": ""
+        },
+        {
+          "seq": 2,
+          "direction": "server_to_client",
+          "actor": "requester",
+          "message": "SM_OPENGUILDDLG_FAIL",
+          "ident": 754,
+          "body": ""
+        }
+      ]
+    },
+    {
+      "name": "member_list_success",
+      "preconditions": [
+        "requester.MyGuild is not nil"
+      ],
+      "sequence": [
+        {
+          "seq": 1,
+          "direction": "client_to_server",
+          "actor": "requester",
+          "message": "CM_GUILDMEMBERLIST",
+          "ident": 1037,
+          "body": ""
+        },
+        {
+          "seq": 2,
+          "direction": "server_to_client",
+          "actor": "requester",
+          "message": "SM_SENDGUILDMEMBERLIST",
+          "ident": 756,
+          "series": 1,
+          "body": "EncodeString(#rank/*rank_name/member/member/...)"
+        }
+      ]
+    },
+    {
+      "name": "add_member_success_then_client_refresh",
+      "preconditions": [
+        "requester is guild lord",
+        "target is online",
+        "target.GetFrontCret == requester",
+        "target.AllowEnterGuild is true",
+        "target.MyGuild is nil",
+        "target is not already in requester guild"
+      ],
+      "sequence": [
+        {
+          "seq": 1,
+          "direction": "client_to_server",
+          "actor": "requester",
+          "message": "CM_GUILDADDMEMBER",
+          "ident": 1038,
+          "body": "EncodeString(target_name)"
+        },
+        {
+          "seq": 2,
+          "direction": "server_internal",
+          "actor": "guild",
+          "message": "AddMember",
+          "effect": "target is added to DEFRANK 99 and guild is saved"
+        },
+        {
+          "seq": 3,
+          "direction": "server_internal",
+          "actor": "target",
+          "message": "MemberLogin",
+          "effect": "target.MyGuild and target.GuildRankName are updated"
+        },
+        {
+          "seq": 4,
+          "direction": "server_to_client",
+          "actor": "requester",
+          "message": "SM_GUILDADDMEMBER_OK",
+          "ident": 757,
+          "body": ""
+        },
+        {
+          "seq": 5,
+          "direction": "client_to_server",
+          "actor": "requester",
+          "message": "CM_GUILDMEMBERLIST",
+          "ident": 1037,
+          "body": "automatic Delphi client refresh"
+        },
+        {
+          "seq": 6,
+          "direction": "server_to_client",
+          "actor": "requester",
+          "message": "SM_SENDGUILDMEMBERLIST",
+          "ident": 756,
+          "series": 1,
+          "body": "updated member list"
+        }
+      ]
+    },
+    {
+      "name": "remove_member_success_then_client_refresh",
+      "preconditions": [
+        "requester is guild lord",
+        "target is a guild member",
+        "target_name != requester.UserName"
+      ],
+      "sequence": [
+        {
+          "seq": 1,
+          "direction": "client_to_server",
+          "actor": "requester",
+          "message": "CM_GUILDDELMEMBER",
+          "ident": 1039,
+          "body": "EncodeString(target_name)"
+        },
+        {
+          "seq": 2,
+          "direction": "server_internal",
+          "actor": "guild",
+          "message": "DelMember",
+          "effect": "target is removed and guild is saved"
+        },
+        {
+          "seq": 3,
+          "direction": "server_internal",
+          "actor": "target",
+          "message": "GuildRankChanged",
+          "effect": "online target membership is cleared"
+        },
+        {
+          "seq": 4,
+          "direction": "server_to_client",
+          "actor": "requester",
+          "message": "SM_GUILDDELMEMBER_OK",
+          "ident": 759,
+          "body": ""
+        },
+        {
+          "seq": 5,
+          "direction": "client_to_server",
+          "actor": "requester",
+          "message": "CM_GUILDMEMBERLIST",
+          "ident": 1037,
+          "body": "automatic Delphi client refresh"
+        },
+        {
+          "seq": 6,
+          "direction": "server_to_client",
+          "actor": "requester",
+          "message": "SM_SENDGUILDMEMBERLIST",
+          "ident": 756,
+          "series": 1,
+          "body": "updated member list"
+        }
+      ]
+    },
+    {
+      "name": "update_notice_success",
+      "preconditions": [
+        "requester.MyGuild is not nil",
+        "requester.GuildRank == 1"
+      ],
+      "sequence": [
+        {
+          "seq": 1,
+          "direction": "client_to_server",
+          "actor": "requester",
+          "message": "CM_GUILDUPDATENOTICE",
+          "ident": 1040,
+          "body": "EncodeString(lines joined by #13)"
+        },
+        {
+          "seq": 2,
+          "direction": "server_internal",
+          "actor": "guild",
+          "message": "NoticeList replaced and SaveGuild called"
+        },
+        {
+          "seq": 3,
+          "direction": "server_to_client",
+          "actor": "requester",
+          "message": "SM_OPENGUILDDLG",
+          "ident": 753,
+          "series": 1,
+          "body": "refreshed guild home payload"
+        }
+      ]
+    },
+    {
+      "name": "update_rank_success",
+      "preconditions": [
+        "requester.MyGuild is not nil",
+        "requester.GuildRank == 1",
+        "rank text preserves the exact old member set",
+        "first rank is 1",
+        "no duplicate ranks exist"
+      ],
+      "sequence": [
+        {
+          "seq": 1,
+          "direction": "client_to_server",
+          "actor": "requester",
+          "message": "CM_GUILDUPDATERANKINFO",
+          "ident": 1041,
+          "body": "EncodeString(rank editor text)"
+        },
+        {
+          "seq": 2,
+          "direction": "server_internal",
+          "actor": "guild",
+          "message": "UpdateGuildRankStr",
+          "effect": "MemberList is swapped after full validation"
+        },
+        {
+          "seq": 3,
+          "direction": "server_internal",
+          "actor": "online_members",
+          "message": "GuildRankChanged",
+          "effect": "online members receive updated rank and rank name"
+        },
+        {
+          "seq": 4,
+          "direction": "server_to_client",
+          "actor": "requester",
+          "message": "SM_SENDGUILDMEMBERLIST",
+          "ident": 756,
+          "series": 1,
+          "body": "updated member list"
+        }
+      ]
+    },
+    {
+      "name": "guild_chat",
+      "preconditions": [
+        "speaker.MyGuild is not nil",
+        "speaker says !~hello"
+      ],
+      "sequence": [
+        {
+          "seq": 1,
+          "direction": "client_to_server",
+          "actor": "speaker",
+          "message": "normal chat text",
+          "body": "!~hello"
+        },
+        {
+          "seq": 2,
+          "direction": "server_internal",
+          "actor": "guild",
+          "message": "GuildMsg",
+          "effect": "iterate rank groups and members in guild order"
+        },
+        {
+          "seq": 3,
+          "direction": "server_to_client",
+          "actor": "each_online_hearing_member",
+          "message": "SM_GUILDMESSAGE",
+          "ident": 104,
+          "body": "speaker:hello"
+        },
+        {
+          "seq": 4,
+          "direction": "server_internal",
+          "actor": "world",
+          "message": "ISM_GUILDMSG",
+          "body": "GuildName/speaker:hello"
+        }
+      ]
+    },
+    {
+      "name": "build_guild_success",
+      "preconditions": [
+        "guild official NPC selection is @@buildguildnow",
+        "player is not in a guild",
+        "player has BUILDGUILDFEE gold",
+        "player has __WomaHorn",
+        "guild name is non-empty",
+        "GuildMan.AddGuild succeeds"
+      ],
+      "sequence": [
+        {
+          "seq": 1,
+          "direction": "client_to_server",
+          "actor": "player",
+          "message": "NPC select",
+          "body": "@@buildguildnow + requested guild name"
+        },
+        {
+          "seq": 2,
+          "direction": "server_internal",
+          "actor": "guild",
+          "message": "GuildMan.AddGuild",
+          "effect": "guild and lord rank are created"
+        },
+        {
+          "seq": 3,
+          "direction": "server_internal",
+          "actor": "player",
+          "message": "SendDelItem/DelItem/DecGold/GoldChanged",
+          "effect": "Woma Horn and gold are consumed after guild creation"
+        },
+        {
+          "seq": 4,
+          "direction": "server_internal",
+          "actor": "player",
+          "message": "MemberLogin",
+          "effect": "player guild rank is set"
+        },
+        {
+          "seq": 5,
+          "direction": "server_to_client",
+          "actor": "player",
+          "message": "SM_BUILDGUILD_OK",
+          "ident": 762,
+          "body": ""
+        }
+      ]
+    },
+    {
+      "name": "make_ally_success",
+      "preconditions": [
+        "requester and target are facing each other",
+        "both are guild lords",
+        "target guild AllowAllyGuild is true",
+        "neither guild is at war with the other"
+      ],
+      "sequence": [
+        {
+          "seq": 1,
+          "direction": "client_to_server",
+          "actor": "requester",
+          "message": "CM_GUILDMAKEALLY",
+          "ident": 1044,
+          "body": ""
+        },
+        {
+          "seq": 2,
+          "direction": "server_internal",
+          "actor": "both_guilds",
+          "message": "MakeAllyGuild",
+          "effect": "ally relation is written in both directions"
+        },
+        {
+          "seq": 3,
+          "direction": "server_internal",
+          "actor": "both_guilds",
+          "message": "GuildMsg",
+          "effect": "guild messages are sent before requester OK"
+        },
+        {
+          "seq": 4,
+          "direction": "server_internal",
+          "actor": "both_guilds",
+          "message": "MemberNameChanged",
+          "effect": "name/color state is refreshed"
+        },
+        {
+          "seq": 5,
+          "direction": "server_to_client",
+          "actor": "requester",
+          "message": "SM_GUILDMAKEALLY_OK",
+          "ident": 768,
+          "body": ""
+        }
+      ]
+    },
+    {
+      "name": "declare_guild_war_success",
+      "preconditions": [
+        "guild official NPC selection is @@guildwar",
+        "requester is guild lord",
+        "target guild exists",
+        "requester has GUILDWARFEE gold"
+      ],
+      "sequence": [
+        {
+          "seq": 1,
+          "direction": "client_to_server",
+          "actor": "requester",
+          "message": "NPC select",
+          "body": "@@guildwar + target guild name"
+        },
+        {
+          "seq": 2,
+          "direction": "server_internal",
+          "actor": "requester",
+          "message": "DecGold/GoldChanged",
+          "effect": "war fee is consumed before declaration"
+        },
+        {
+          "seq": 3,
+          "direction": "server_internal",
+          "actor": "requester_guild",
+          "message": "DeclareGuildWar",
+          "effect": "target is added or war timer is refreshed for 3 hours"
+        },
+        {
+          "seq": 4,
+          "direction": "server_internal",
+          "actor": "target_guild",
+          "message": "DeclareGuildWar",
+          "effect": "requester guild is added or war timer is refreshed for 3 hours"
+        },
+        {
+          "seq": 5,
+          "direction": "server_internal",
+          "actor": "world",
+          "message": "ISM_RELOADGUILD",
+          "effect": "sent for both guilds when both declarations succeed"
+        }
+      ]
+    },
+    {
+      "name": "castle_war_start_at_20",
+      "preconditions": [
+        "TUserCastle.Run tick reaches hour 20",
+        "BoCastleWarChecked is false",
+        "BoCastleUnderAttack is false",
+        "attacker list contains entries for today"
+      ],
+      "sequence": [
+        {
+          "seq": 1,
+          "direction": "server_internal",
+          "actor": "castle",
+          "message": "Move attackers into RushGuildList"
+        },
+        {
+          "seq": 2,
+          "direction": "server_internal",
+          "actor": "castle",
+          "message": "Add OwnerGuild to RushGuildList"
+        },
+        {
+          "seq": 3,
+          "direction": "server_internal",
+          "actor": "castle_area_users",
+          "message": "StartCastleWar/UserNameChanged"
+        },
+        {
+          "seq": 4,
+          "direction": "server_internal",
+          "actor": "castle",
+          "message": "SaveAttackerList"
+        },
+        {
+          "seq": 5,
+          "direction": "server_internal",
+          "actor": "world",
+          "message": "ISM_RELOADCASTLEINFO"
+        },
+        {
+          "seq": 6,
+          "direction": "server_to_client",
+          "actor": "all_players",
+          "message": "SM_SYSMESSAGE",
+          "ident": 100,
+          "body": "Sabuk war start system message"
+        },
+        {
+          "seq": 7,
+          "direction": "server_internal",
+          "actor": "castle",
+          "message": "ActivateMainDoor(true)"
+        }
+      ]
+    },
+    {
+      "name": "castle_owner_change_from_player_run",
+      "preconditions": [
+        "BoCastleUnderAttack is true",
+        "player is in CorePEnvir",
+        "player.MyGuild is in RushGuildList",
+        "player.MyGuild is not OwnerGuild",
+        "CastleAttackStarted is more than 10 minutes ago",
+        "all live users in CorePEnvir belong to player.MyGuild"
+      ],
+      "sequence": [
+        {
+          "seq": 1,
+          "direction": "server_internal",
+          "actor": "player",
+          "message": "CheckCastleWarWinCondition"
+        },
+        {
+          "seq": 2,
+          "direction": "server_internal",
+          "actor": "castle",
+          "message": "ChangeCastleOwner",
+          "effect": "OwnerGuild and OwnerGuildName change immediately"
+        },
+        {
+          "seq": 3,
+          "direction": "server_internal",
+          "actor": "castle",
+          "message": "SaveToFile"
+        },
+        {
+          "seq": 4,
+          "direction": "server_internal",
+          "actor": "old_and_new_owner_guilds",
+          "message": "MemberNameChanged"
+        },
+        {
+          "seq": 5,
+          "direction": "server_to_client",
+          "actor": "all_players",
+          "message": "SM_SYSMESSAGE",
+          "ident": 100,
+          "body": "Sabuk occupation system message"
+        },
+        {
+          "seq": 6,
+          "direction": "server_internal",
+          "actor": "world",
+          "message": "ISM_CHANGECASTLEOWNER"
+        },
+        {
+          "seq": 7,
+          "direction": "server_internal",
+          "actor": "castle",
+          "message": "FinishCastleWar",
+          "condition": "RushGuildList.Count <= 1"
+        }
+      ]
+    }
+  ],
+  "compatibility_risks": [
+    "Do not batch guild state updates at frame end if that changes SM_* order.",
+    "Do not let client_v1 gateway mutate guild state outside WorldService authority.",
+    "Do not grant admin rights to every guild member; Delphi commander mode is rank 1 only.",
+    "Do not turn CM_GUILDADDMEMBER into an offline invite or application flow.",
+    "Do not move castle occupation from the player run path to a periodic castle tick."
+  ]
+}

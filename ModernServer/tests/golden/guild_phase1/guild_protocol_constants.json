@@ -1,0 +1,52 @@
+{
+  "legacy_client_to_server": {
+    "CM_OPENGUILDDLG": 1035,
+    "CM_GUILDHOME": 1036,
+    "CM_GUILDMEMBERLIST": 1037,
+    "CM_GUILDADDMEMBER": 1038,
+    "CM_GUILDDELMEMBER": 1039,
+    "CM_GUILDUPDATENOTICE": 1040,
+    "CM_GUILDUPDATERANKINFO": 1041,
+    "CM_GUILDMAKEALLY": 1044,
+    "CM_GUILDBREAKALLY": 1045
+  },
+  "legacy_server_to_client": {
+    "SM_GUILDMESSAGE": 104,
+    "SM_CHANGEGUILDNAME": 750,
+    "SM_OPENGUILDDLG": 753,
+    "SM_OPENGUILDDLG_FAIL": 754,
+    "SM_SENDGUILDMEMBERLIST": 756,
+    "SM_GUILDADDMEMBER_OK": 757,
+    "SM_GUILDADDMEMBER_FAIL": 758,
+    "SM_GUILDDELMEMBER_OK": 759,
+    "SM_GUILDDELMEMBER_FAIL": 760,
+    "SM_GUILDRANKUPDATE_FAIL": 761,
+    "SM_BUILDGUILD_OK": 762,
+    "SM_BUILDGUILD_FAIL": 763,
+    "SM_GUILDMAKEALLY_OK": 768,
+    "SM_GUILDMAKEALLY_FAIL": 769,
+    "SM_GUILDBREAKALLY_OK": 770,
+    "SM_GUILDBREAKALLY_FAIL": 771
+  },
+  "legacy_runtime_messages": {
+    "RM_GUILDMESSAGE": 10104,
+    "RM_CHANGEGUILDNAME": 10301,
+    "RM_BUILDGUILD_OK": 10303,
+    "RM_BUILDGUILD_FAIL": 10304
+  },
+  "client_v1": {
+    "guild_open_request": 547,
+    "guild_home_request": 548,
+    "guild_member_list_request": 549,
+    "guild_add_member_request": 550,
+    "guild_remove_member_request": 551,
+    "guild_update_notice_request": 552,
+    "guild_update_grade_request": 553,
+    "guild_state": 554
+  },
+  "notes": [
+    "CM_GUILDMAKEALLY has no body; it uses the front creature as the target guild lord.",
+    "Guild creation and guild-war declaration are NPC selection flows, not CM_GUILD* packets.",
+    "client_v1 guild_state is a typed UI projection and must not change the legacy order."
+  ]
+}
