@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "description": "Expected Delphi NPC and merchant traces derived from Source/M2Server/ObjNpc.pas, Source/M2Server/ObjBase.pas, Source/Client/ClMain.pas, and Source/Client/FState.pas.",
+  "actors": {
+    "P": "Hero",
+    "N": "Shopkeeper"
+  },
+  "notes": [
+    "System message text is intentionally omitted until byte-exact Delphi runtime traces are captured.",
+    "NPC ids are Delphi object-pointer values in the original server. C++ must expose stable legacy-compatible handles for these recog fields.",
+    "SM_ADDITEM is included as the visible client item-add packet sent by SendAddItem before SM_BUYITEM_SUCCESS.",
+    "Weight refresh packets are omitted from the minimum trace until their exact Delphi ordering is verified for each flow."
+  ],
+  "cases": [
+    {
+      "name": "click_npc_opens_main_dialog",
+      "preconditions": [
+        "P is on the same map as N",
+        "P is within the 15-tile rectangular interaction range",
+        "N has an @main script section"
+      ],
+      "trace": [
+        {"seq": 1, "direction": "client_to_server", "actor": "P", "message": "CM_CLICKNPC", "ident": 1010, "recog": "npc_id_N", "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 2, "direction": "server_to_client", "actor": "P", "message": "SM_MERCHANTSAY", "ident": 643, "recog": "npc_id_N", "param": "npc_face", "tag": 0, "series": 0, "body": "Shopkeeper/main dialog text"}
+      ]
+    },
+    {
+      "name": "select_buy_opens_goods_list",
+      "preconditions": [
+        "P has an open dialog with N",
+        "N script exposes @buy",
+        "N has at least one goods group"
+      ],
+      "trace": [
+        {"seq": 1, "direction": "client_to_server", "actor": "P", "message": "CM_MERCHANTDLGSELECT", "ident": 1011, "recog": "npc_id_N", "param": 0, "tag": 0, "series": 0, "body": "@buy"},
+        {"seq": 2, "direction": "server_to_client", "actor": "P", "message": "SM_MERCHANTSAY", "ident": 643, "recog": "npc_id_N", "param": "npc_face", "tag": 0, "series": 0, "body": "Shopkeeper/buy dialog text"},
+        {"seq": 3, "direction": "server_to_client", "actor": "P", "message": "SM_SENDGOODSLIST", "ident": 645, "recog": "npc_id_N", "param": 1, "tag": 0, "series": 0, "body": "Potion/0/100/12/"}
+      ]
+    },
+    {
+      "name": "buy_simple_item_success",
+      "preconditions": [
+        "N has a simple goods group named Potion",
+        "P has enough gold",
+        "P can carry and add the item"
+      ],
+      "trace": [
+        {"seq": 1, "direction": "client_to_server", "actor": "P", "message": "CM_USERBUYITEM", "ident": 1014, "recog": "npc_id_N", "param": "loword_item_server_index", "tag": "hiword_item_server_index", "series": 0, "body": "Potion"},
+        {"seq": 2, "direction": "server_to_client", "actor": "P", "message": "SM_ADDITEM", "ident": 200, "body": "TClientItem(Potion,MakeIndex=new_make_index)"},
+        {"seq": 3, "direction": "server_to_client", "actor": "P", "message": "SM_BUYITEM_SUCCESS", "ident": 650, "recog": "P.GoldAfterBuy", "param": "loword_item_server_index", "tag": "hiword_item_server_index", "series": 0, "body": ""}
+      ]
+    },
+    {
+      "name": "buy_simple_item_fail_not_enough_gold",
+      "preconditions": [
+        "N has a simple goods group named Potion",
+        "P does not have enough gold"
+      ],
+      "trace": [
+        {"seq": 1, "direction": "client_to_server", "actor": "P", "message": "CM_USERBUYITEM", "ident": 1014, "recog": "npc_id_N", "param": "loword_item_server_index", "tag": "hiword_item_server_index", "series": 0, "body": "Potion"},
+        {"seq": 2, "direction": "server_to_client", "actor": "P", "message": "SM_BUYITEM_FAIL", "ident": 651, "recog": 3, "param": 0, "tag": 0, "series": 0, "body": ""}
+      ]
+    },
+    {
+      "name": "open_sell_dialog_and_query_price",
+      "preconditions": [
+        "P has an open dialog with N",
+        "N script exposes @sell",
+        "N deals the submitted item std mode"
+      ],
+      "trace": [
+        {"seq": 1, "direction": "client_to_server", "actor": "P", "message": "CM_MERCHANTDLGSELECT", "ident": 1011, "recog": "npc_id_N", "param": 0, "tag": 0, "series": 0, "body": "@sell"},
+        {"seq": 2, "direction": "server_to_client", "actor": "P", "message": "SM_SENDUSERSELL", "ident": 646, "recog": "npc_id_N", "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 3, "direction": "client_to_server", "actor": "P", "message": "CM_MERCHANTQUERYSELLPRICE", "ident": 1012, "recog": "npc_id_N", "param": "loword_make_index", "tag": "hiword_make_index", "series": 0, "body": "Sword"},
+        {"seq": 4, "direction": "server_to_client", "actor": "P", "message": "SM_SENDBUYPRICE", "ident": 647, "recog": "computed_buy_price", "param": 0, "tag": 0, "series": 0, "body": ""}
+      ]
+    },
+    {
+      "name": "sell_item_success",
+      "preconditions": [
+        "P submitted a bag item matching make index and name",
+        "N can buy the item",
+        "P can receive the sale gold without exceeding the legacy cap"
+      ],
+      "trace": [
+        {"seq": 1, "direction": "client_to_server", "actor": "P", "message": "CM_USERSELLITEM", "ident": 1013, "recog": "npc_id_N", "param": "loword_make_index", "tag": "hiword_make_index", "series": 0, "body": "Sword"},
+        {"seq": 2, "direction": "server_to_client", "actor": "P", "message": "SM_USERSELLITEM_OK", "ident": 648, "recog": "P.GoldAfterSell", "param": 0, "tag": 0, "series": 0, "body": ""}
+      ],
+      "state_after_trace": [
+        "N received a merchant goods copy of Sword",
+        "P bag no longer contains the sold item",
+        "P weight was recalculated"
+      ]
+    },
+    {
+      "name": "open_repair_dialog_query_and_repair_success",
+      "preconditions": [
+        "P has an open dialog with N",
+        "N script exposes @repair",
+        "P submitted a damaged repairable item",
+        "P has enough gold for normal repair"
+      ],
+      "trace": [
+        {"seq": 1, "direction": "client_to_server", "actor": "P", "message": "CM_MERCHANTDLGSELECT", "ident": 1011, "recog": "npc_id_N", "param": 0, "tag": 0, "series": 0, "body": "@repair"},
+        {"seq": 2, "direction": "server_to_client", "actor": "P", "message": "SM_SENDUSERREPAIR", "ident": 668, "recog": "npc_id_N", "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 3, "direction": "client_to_server", "actor": "P", "message": "CM_MERCHANTQUERYREPAIRCOST", "ident": 1024, "recog": "npc_id_N", "param": "loword_make_index", "tag": "hiword_make_index", "series": 0, "body": "Sword"},
+        {"seq": 4, "direction": "server_to_client", "actor": "P", "message": "SM_SENDREPAIRCOST", "ident": 671, "recog": "computed_repair_cost", "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 5, "direction": "client_to_server", "actor": "P", "message": "CM_USERREPAIRITEM", "ident": 1023, "recog": "npc_id_N", "param": "loword_make_index", "tag": "hiword_make_index", "series": 0, "body": "Sword"},
+        {"seq": 6, "direction": "server_to_client", "actor": "P", "message": "SM_USERREPAIRITEM_OK", "ident": 669, "recog": "P.GoldAfterRepair", "param": "Item.DuraAfterRepair", "tag": "Item.DuraMaxAfterRepair", "series": 0, "body": ""}
+      ]
+    },
+    {
+      "name": "close_dialog_from_script",
+      "preconditions": [
+        "P selected a label whose action executes CLOSE"
+      ],
+      "trace": [
+        {"seq": 1, "direction": "client_to_server", "actor": "P", "message": "CM_MERCHANTDLGSELECT", "ident": 1011, "recog": "npc_id_N", "param": 0, "tag": 0, "series": 0, "body": "@exit"},
+        {"seq": 2, "direction": "server_to_client", "actor": "P", "message": "SM_MERCHANTDLGCLOSE", "ident": 644, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "description": "Delphi NPC and merchant protocol constants from Source/Common/Grobal2.pas.",
+  "client_messages": {
+    "CM_CLICKNPC": 1010,
+    "CM_MERCHANTDLGSELECT": 1011,
+    "CM_MERCHANTQUERYSELLPRICE": 1012,
+    "CM_USERSELLITEM": 1013,
+    "CM_USERBUYITEM": 1014,
+    "CM_USERGETDETAILITEM": 1015,
+    "CM_USERREPAIRITEM": 1023,
+    "CM_MERCHANTQUERYREPAIRCOST": 1024,
+    "CM_USERSTORAGEITEM": 1031,
+    "CM_USERTAKEBACKSTORAGEITEM": 1032,
+    "CM_USERMAKEDRUGITEM": 1034
+  },
+  "server_messages": {
+    "SM_MERCHANTSAY": 643,
+    "SM_MERCHANTDLGCLOSE": 644,
+    "SM_SENDGOODSLIST": 645,
+    "SM_SENDUSERSELL": 646,
+    "SM_SENDBUYPRICE": 647,
+    "SM_USERSELLITEM_OK": 648,
+    "SM_USERSELLITEM_FAIL": 649,
+    "SM_BUYITEM_SUCCESS": 650,
+    "SM_BUYITEM_FAIL": 651,
+    "SM_SENDDETAILGOODSLIST": 652,
+    "SM_GOLDCHANGED": 653,
+    "SM_SENDUSERREPAIR": 668,
+    "SM_USERREPAIRITEM_OK": 669,
+    "SM_USERREPAIRITEM_FAIL": 670,
+    "SM_SENDREPAIRCOST": 671
+  },
+  "limits": {
+    "npc_interaction_range_rect": 15
+  },
+  "buy_fail_reasons": {
+    "no_product": 1,
+    "cannot_carry_or_add_item": 2,
+    "not_enough_gold": 3
+  }
+}
