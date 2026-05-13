@@ -6167,6 +6167,7 @@ class WorldScene final : public Scene {
     audio_cues_.reset();
     legacy_hud_.reset();
     ui_.clear();
+    context.state->clear_play_scene_state();
     next_left_hold_ms_ = 0;
     next_right_hold_ms_ = 0;
     main_theme_due_ = true;
