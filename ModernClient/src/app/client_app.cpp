@@ -325,7 +325,7 @@ int ClientApp::run() {
         LegacyFrameScheduler::Hooks{
             [this, &context, delta] {
               protocol_.poll();
-              handle_protocol_events();
+              handle_protocol_events(context);
               flush_scene_change_if_pending(context);
               run_timers(delta);
             },
@@ -1146,7 +1146,7 @@ void ClientApp::handle_auto_character_list() {
 //   1. ConnectedEvent —— 连接建立后根据 pending_connect_ 发送对应的首个请求
 //   2. DisconnectedEvent —— 连接断开处理（游戏中断线弹出重连确认）
 //   3. ProtocolFrameEvent —— 协议帧，按 MessageId 解码后分发
-void ClientApp::handle_protocol_events() {
+void ClientApp::handle_protocol_events(ClientContext& context) {
   for (auto& event : protocol_.drain_events()) {
     // ---- 连接建立事件 ----
     if (std::holds_alternative<ConnectedEvent>(event)) {
@@ -1169,6 +1169,7 @@ void ClientApp::handle_protocol_events() {
         schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                                 [this] { wait_msg_timer_tick(L"Still waiting for world entry..."); });
       }
+      flush_scene_change_if_pending(context);
       continue;
     }
 
@@ -1187,6 +1188,7 @@ void ClientApp::handle_protocol_events() {
           show_modal(L"Disconnected", widen(disconnected->reason));
         }
       }
+      flush_scene_change_if_pending(context);
       continue;
     }
 
@@ -1770,6 +1772,7 @@ void ClientApp::handle_protocol_events() {
     if (!decoded) {
       protocol_.disconnect("protocol_decode_error");
     }
+    flush_scene_change_if_pending(context);
   }
 }
 

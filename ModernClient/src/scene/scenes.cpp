@@ -6113,10 +6113,6 @@ class WorldScene final : public Scene {
   }
 
   void update(ClientContext& context, float delta_seconds) override {
-    capture_ui_input(context);
-    process_key_messages(context);
-    process_action_messages(context, delta_seconds);
-    dwin_process(context);
     scene_run(context, delta_seconds);
   }
 

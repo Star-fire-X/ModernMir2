@@ -147,7 +147,7 @@ class ClientApp {
   bool load_config();
   void maybe_start_auto_play();
   void handle_auto_character_list();
-  void handle_protocol_events();
+  void handle_protocol_events(ClientContext& context);
   void flush_scene_change_if_pending(ClientContext& context);
   void capture_ui_input(ClientContext& context);
   void dwin_process(ClientContext& context);
