@@ -78,6 +78,62 @@ void assert_partial_and_planned_notes(
   }
 }
 
+template <std::size_t Size>
+const mir2::client::protocol_migration::LegacyMessageMappingEntry* find_legacy_entry(
+    const std::array<mir2::client::protocol_migration::LegacyMessageMappingEntry, Size>& entries,
+    const std::string_view name) {
+  const auto it = std::find_if(entries.begin(), entries.end(), [&](const auto& entry) {
+    return entry.delphi_symbol == name;
+  });
+  return it == entries.end() ? nullptr : &*it;
+}
+
+template <std::size_t Size>
+void assert_legacy_non_implemented_notes(
+    const std::array<mir2::client::protocol_migration::LegacyMessageMappingEntry, Size>& entries) {
+  using mir2::client::protocol_migration::LegacyProtocolMappingStatus;
+  for (const auto& entry : entries) {
+    if (entry.status != LegacyProtocolMappingStatus::implemented) {
+      assert(!entry.notes.empty());
+    }
+  }
+}
+
+template <std::size_t Size>
+void assert_legacy_sources(
+    const std::array<mir2::client::protocol_migration::LegacyMessageMappingEntry, Size>& entries) {
+  for (const auto& entry : entries) {
+    assert(entry.delphi_source == "Source/Common/Grobal2.pas");
+  }
+}
+
+template <std::size_t Size>
+void assert_unique_legacy_symbols(
+    const std::array<mir2::client::protocol_migration::LegacyMessageMappingEntry, Size>& entries) {
+  for (std::size_t left = 0; left < entries.size(); ++left) {
+    for (std::size_t right = left + 1; right < entries.size(); ++right) {
+      assert(entries[left].delphi_symbol != entries[right].delphi_symbol);
+    }
+  }
+}
+
+template <std::size_t Size>
+void assert_unique_legacy_idents(
+    const std::array<mir2::client::protocol_migration::LegacyMessageMappingEntry, Size>& entries) {
+  for (std::size_t left = 0; left < entries.size(); ++left) {
+    for (std::size_t right = left + 1; right < entries.size(); ++right) {
+      const auto same_ident = entries[left].delphi_ident == entries[right].delphi_ident;
+      const auto allowed_action_alias =
+          entries[left].delphi_ident == 5 &&
+          ((entries[left].delphi_symbol == "SM_ACTION_MIN" &&
+            entries[right].delphi_symbol == "SM_THROW") ||
+           (entries[left].delphi_symbol == "SM_THROW" &&
+            entries[right].delphi_symbol == "SM_ACTION_MIN"));
+      assert(!same_ident || allowed_action_alias);
+    }
+  }
+}
+
 void append_u8(Bytes& bytes, std::uint8_t value) {
   bytes.push_back(value);
 }
@@ -572,6 +628,8 @@ int main() {
   static_assert(kDelphiSendMappings.size() == 57);
   static_assert(kDelphiClientGetMappings.size() == 39);
   static_assert(kSceneTransitionMappings.size() == 13);
+  static_assert(kDelphiClientToServerMessageMappings.size() == 87);
+  static_assert(kDelphiServerToClientMessageMappings.size() == 220);
 
   assert_counts(count_statuses(kDelphiSendMappings), StatusCounts{11, 38, 6, 2});
   assert_counts(count_statuses(kDelphiClientGetMappings), StatusCounts{5, 30, 4, 0});
@@ -579,6 +637,14 @@ int main() {
   assert_partial_and_planned_notes(kDelphiSendMappings);
   assert_partial_and_planned_notes(kDelphiClientGetMappings);
   assert_partial_and_planned_notes(kSceneTransitionMappings);
+  assert_legacy_non_implemented_notes(kDelphiClientToServerMessageMappings);
+  assert_legacy_non_implemented_notes(kDelphiServerToClientMessageMappings);
+  assert_legacy_sources(kDelphiClientToServerMessageMappings);
+  assert_legacy_sources(kDelphiServerToClientMessageMappings);
+  assert_unique_legacy_symbols(kDelphiClientToServerMessageMappings);
+  assert_unique_legacy_symbols(kDelphiServerToClientMessageMappings);
+  assert_unique_legacy_idents(kDelphiClientToServerMessageMappings);
+  assert_unique_legacy_idents(kDelphiServerToClientMessageMappings);
 
   assert(has_entry(kDelphiSendMappings, "SendSelectServer"));
   assert(has_entry(kDelphiSendMappings, "SendRunLogin"));
@@ -612,6 +678,25 @@ int main() {
          MigrationStatus::planned);
   assert(find_entry(kSceneTransitionMappings, "ClientGetServerDown")->status ==
          MigrationStatus::partial);
+
+  const auto assert_legacy_status = [](const auto& entries, const std::string_view name,
+                                       const LegacyProtocolMappingStatus status) {
+    const auto* entry = find_legacy_entry(entries, name);
+    assert(entry != nullptr);
+    assert(entry->status == status);
+  };
+  assert_legacy_status(kDelphiClientToServerMessageMappings, "CM_OPENDOOR",
+                       LegacyProtocolMappingStatus::not_migrated);
+  assert_legacy_status(kDelphiClientToServerMessageMappings, "CM_QUERYUSERSTATE",
+                       LegacyProtocolMappingStatus::planned);
+  assert_legacy_status(kDelphiClientToServerMessageMappings, "CM_CLIENT_CHECKTIME",
+                       LegacyProtocolMappingStatus::internal);
+  assert_legacy_status(kDelphiServerToClientMessageMappings, "SM_GOLDCHANGED",
+                       LegacyProtocolMappingStatus::partial);
+  assert_legacy_status(kDelphiServerToClientMessageMappings, "SM_RECONNECT",
+                       LegacyProtocolMappingStatus::planned);
+  assert_legacy_status(kDelphiServerToClientMessageMappings, "SM_CHECK_CLIENTVALID",
+                       LegacyProtocolMappingStatus::internal);
 
   assert_p0_protocol_goldens();
   assert_p2_protocol_goldens();
