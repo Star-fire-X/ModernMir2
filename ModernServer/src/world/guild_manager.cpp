@@ -93,6 +93,20 @@ std::vector<std::uint64_t> Guild::online_member_actor_ids() const {
   return actor_ids;
 }
 
+bool Guild::is_ally_guild(std::string_view guild_name) const {
+  return std::any_of(ally_guilds_.begin(), ally_guilds_.end(),
+                     [&](const std::string& ally) {
+                       return equals_name(ally, guild_name);
+                     });
+}
+
+bool Guild::is_hostile_guild(std::string_view guild_name) const {
+  return std::any_of(hostile_guilds_.begin(), hostile_guilds_.end(),
+                     [&](const GuildWarState& war) {
+                       return equals_name(war.enemy_guild, guild_name);
+                     });
+}
+
 bool Guild::add_lord(std::string name, std::string rank_name, std::uint64_t online_actor_id) {
   name = normalize_name(std::move(name));
   rank_name = util::trim(std::move(rank_name));
@@ -159,6 +173,65 @@ bool Guild::set_member_hears_guild_chat(std::string_view name, bool hears_guild_
   }
   member->hears_guild_chat = hears_guild_chat;
   return true;
+}
+
+bool Guild::make_ally_guild(std::string guild_name) {
+  guild_name = normalize_name(std::move(guild_name));
+  if (guild_name.empty() || is_ally_guild(guild_name)) {
+    return false;
+  }
+  ally_guilds_.push_back(std::move(guild_name));
+  return true;
+}
+
+bool Guild::break_ally_guild(std::string_view guild_name) {
+  const auto old_size = ally_guilds_.size();
+  ally_guilds_.erase(std::remove_if(ally_guilds_.begin(), ally_guilds_.end(),
+                                    [&](const std::string& ally) {
+                                      return equals_name(ally, guild_name);
+                                    }),
+                     ally_guilds_.end());
+  return ally_guilds_.size() != old_size;
+}
+
+bool Guild::declare_guild_war(std::string guild_name, std::uint64_t now_ms,
+                              std::uint64_t remain_ms) {
+  guild_name = normalize_name(std::move(guild_name));
+  if (guild_name.empty() || is_ally_guild(guild_name)) {
+    return false;
+  }
+  for (auto& war : hostile_guilds_) {
+    if (equals_name(war.enemy_guild, guild_name)) {
+      war.start_ms = now_ms;
+      war.remain_ms = remain_ms;
+      return true;
+    }
+  }
+  hostile_guilds_.push_back(GuildWarState{std::move(guild_name), now_ms, remain_ms});
+  return true;
+}
+
+bool Guild::remove_hostile_guild(std::string_view guild_name) {
+  const auto old_size = hostile_guilds_.size();
+  hostile_guilds_.erase(std::remove_if(hostile_guilds_.begin(), hostile_guilds_.end(),
+                                       [&](const GuildWarState& war) {
+                                         return equals_name(war.enemy_guild, guild_name);
+                                       }),
+                        hostile_guilds_.end());
+  return hostile_guilds_.size() != old_size;
+}
+
+std::vector<std::string> Guild::expire_guild_wars(std::uint64_t now_ms) {
+  std::vector<std::string> expired;
+  for (auto it = hostile_guilds_.begin(); it != hostile_guilds_.end();) {
+    if (now_ms - it->start_ms > it->remain_ms) {
+      expired.push_back(it->enemy_guild);
+      it = hostile_guilds_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  return expired;
 }
 
 void Guild::set_notice_lines(std::vector<std::string> notice_lines) {
@@ -400,6 +473,109 @@ std::vector<GuildChatDelivery> GuildManager::guild_chat_deliveries(
     return {};
   }
   return guild->guild_chat_deliveries(speaker_name, text);
+}
+
+GuildRelationOpResult GuildManager::make_ally(std::string_view requester_guild,
+                                              std::string_view requester_name,
+                                              std::string_view target_guild,
+                                              std::string_view target_name) {
+  auto* requester = find_guild(requester_guild);
+  if (requester == nullptr) {
+    return GuildRelationOpResult::guild_not_found;
+  }
+  auto* target = find_guild(target_guild);
+  if (target == nullptr) {
+    return GuildRelationOpResult::target_guild_not_found;
+  }
+  if (equals_name(requester->name(), target->name())) {
+    return GuildRelationOpResult::same_guild;
+  }
+  if (!requester->is_lord(requester_name)) {
+    return GuildRelationOpResult::requester_not_lord;
+  }
+  if (!target->is_lord(target_name)) {
+    return GuildRelationOpResult::target_not_lord;
+  }
+  if (!target->allow_ally_guild()) {
+    return GuildRelationOpResult::target_rejects_ally;
+  }
+  if (requester->is_hostile_guild(target->name()) || target->is_hostile_guild(requester->name())) {
+    return GuildRelationOpResult::hostile_guild;
+  }
+  if (requester->is_ally_guild(target->name()) || target->is_ally_guild(requester->name())) {
+    return GuildRelationOpResult::already_allied;
+  }
+  requester->make_ally_guild(target->name());
+  target->make_ally_guild(requester->name());
+  return GuildRelationOpResult::ok;
+}
+
+GuildRelationOpResult GuildManager::break_ally(std::string_view requester_guild,
+                                               std::string_view requester_name,
+                                               std::string_view target_guild) {
+  auto* requester = find_guild(requester_guild);
+  if (requester == nullptr) {
+    return GuildRelationOpResult::guild_not_found;
+  }
+  auto* target = find_guild(target_guild);
+  if (target == nullptr) {
+    return GuildRelationOpResult::target_guild_not_found;
+  }
+  if (!requester->is_lord(requester_name)) {
+    return GuildRelationOpResult::requester_not_lord;
+  }
+  if (!requester->is_ally_guild(target->name())) {
+    return GuildRelationOpResult::not_allied;
+  }
+  requester->break_ally_guild(target->name());
+  target->break_ally_guild(requester->name());
+  return GuildRelationOpResult::ok;
+}
+
+GuildRelationOpResult GuildManager::declare_guild_war(std::string_view requester_guild,
+                                                      std::string_view requester_name,
+                                                      std::string_view target_guild,
+                                                      std::uint64_t now_ms,
+                                                      std::uint64_t remain_ms) {
+  auto* requester = find_guild(requester_guild);
+  if (requester == nullptr) {
+    return GuildRelationOpResult::guild_not_found;
+  }
+  auto* target = find_guild(target_guild);
+  if (target == nullptr) {
+    return GuildRelationOpResult::target_guild_not_found;
+  }
+  if (equals_name(requester->name(), target->name())) {
+    return GuildRelationOpResult::same_guild;
+  }
+  if (!requester->is_lord(requester_name)) {
+    return GuildRelationOpResult::requester_not_lord;
+  }
+  if (requester->is_ally_guild(target->name()) || target->is_ally_guild(requester->name())) {
+    return GuildRelationOpResult::already_allied;
+  }
+  if (!requester->declare_guild_war(target->name(), now_ms, remain_ms)) {
+    return GuildRelationOpResult::already_allied;
+  }
+  if (!target->declare_guild_war(requester->name(), now_ms, remain_ms)) {
+    requester->remove_hostile_guild(target->name());
+    return GuildRelationOpResult::already_allied;
+  }
+  return GuildRelationOpResult::ok;
+}
+
+std::vector<std::string> GuildManager::expire_guild_wars(std::uint64_t now_ms) {
+  std::vector<std::string> expired_pairs;
+  for (auto& guild : guilds_) {
+    const auto expired = guild.expire_guild_wars(now_ms);
+    for (const auto& enemy_name : expired) {
+      if (auto* enemy = find_guild(enemy_name); enemy != nullptr) {
+        enemy->remove_hostile_guild(guild.name());
+      }
+      expired_pairs.push_back(guild.name() + "/" + enemy_name);
+    }
+  }
+  return expired_pairs;
 }
 
 }  // namespace mir2

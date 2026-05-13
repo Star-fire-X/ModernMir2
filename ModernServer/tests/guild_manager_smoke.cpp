@@ -138,5 +138,53 @@ int main() {
   assert(manager.guild_chat_deliveries("Missing", "Leader", "hello").empty());
   assert(manager.guild_chat_deliveries("ChatGuild", "Leader", "").empty());
 
+  auto* red = manager.create_guild("RedGuild", "RedLord");
+  auto* blue = manager.create_guild("BlueGuild", "BlueLord");
+  auto* green = manager.create_guild("GreenGuild", "GreenLord");
+  assert(red != nullptr);
+  assert(blue != nullptr);
+  assert(green != nullptr);
+  blue = manager.find_guild("BlueGuild");
+  green = manager.find_guild("GreenGuild");
+  assert(blue != nullptr);
+  assert(green != nullptr);
+  blue->set_allow_ally_guild(true);
+
+  assert(manager.make_ally("RedGuild", "Member", "BlueGuild", "BlueLord") ==
+         mir2::GuildRelationOpResult::requester_not_lord);
+  assert(manager.make_ally("RedGuild", "RedLord", "GreenGuild", "GreenLord") ==
+         mir2::GuildRelationOpResult::target_rejects_ally);
+  assert(manager.make_ally("RedGuild", "RedLord", "BlueGuild", "BlueLord") ==
+         mir2::GuildRelationOpResult::ok);
+  assert(manager.find_guild("RedGuild")->is_ally_guild("BlueGuild"));
+  assert(manager.find_guild("BlueGuild")->is_ally_guild("RedGuild"));
+  assert(manager.make_ally("RedGuild", "RedLord", "BlueGuild", "BlueLord") ==
+         mir2::GuildRelationOpResult::already_allied);
+  assert(manager.declare_guild_war("RedGuild", "RedLord", "BlueGuild", 1000, 3000) ==
+         mir2::GuildRelationOpResult::already_allied);
+  assert(manager.break_ally("RedGuild", "Member", "BlueGuild") ==
+         mir2::GuildRelationOpResult::requester_not_lord);
+  assert(manager.break_ally("RedGuild", "RedLord", "BlueGuild") ==
+         mir2::GuildRelationOpResult::ok);
+  assert(!manager.find_guild("RedGuild")->is_ally_guild("BlueGuild"));
+  assert(!manager.find_guild("BlueGuild")->is_ally_guild("RedGuild"));
+
+  assert(manager.declare_guild_war("RedGuild", "Member", "BlueGuild", 1000, 3000) ==
+         mir2::GuildRelationOpResult::requester_not_lord);
+  assert(manager.declare_guild_war("RedGuild", "RedLord", "BlueGuild", 1000, 3000) ==
+         mir2::GuildRelationOpResult::ok);
+  assert(manager.find_guild("RedGuild")->is_hostile_guild("BlueGuild"));
+  assert(manager.find_guild("BlueGuild")->is_hostile_guild("RedGuild"));
+  assert(manager.find_guild("RedGuild")->hostile_guilds()[0].start_ms == 1000);
+  assert(manager.declare_guild_war("RedGuild", "RedLord", "BlueGuild", 2000, 3000) ==
+         mir2::GuildRelationOpResult::ok);
+  assert(manager.find_guild("RedGuild")->hostile_guilds()[0].start_ms == 2000);
+  assert(manager.expire_guild_wars(5000).empty());
+  const auto expired = manager.expire_guild_wars(5001);
+  assert(expired.size() == 1);
+  assert(expired[0] == "RedGuild/BlueGuild");
+  assert(!manager.find_guild("RedGuild")->is_hostile_guild("BlueGuild"));
+  assert(!manager.find_guild("BlueGuild")->is_hostile_guild("RedGuild"));
+
   return 0;
 }
