@@ -104,5 +104,39 @@ int main() {
          mir2::GuildMemberOpResult::ok);
   assert(manager.find_guild("PhoenixHall") == nullptr);
 
+  auto* chat_guild = manager.create_guild("ChatGuild", "Leader", "Master", 700);
+  assert(chat_guild != nullptr);
+  assert(manager.add_member_by_lord("ChatGuild", "Leader", "First") ==
+         mir2::GuildMemberOpResult::ok);
+  assert(manager.add_member_by_lord("ChatGuild", "Leader", "Second") ==
+         mir2::GuildMemberOpResult::ok);
+  assert(manager.add_member_by_lord("ChatGuild", "Leader", "Muted") ==
+         mir2::GuildMemberOpResult::ok);
+  chat_guild = manager.find_guild("ChatGuild");
+  assert(chat_guild != nullptr);
+  assert(chat_guild->set_member_online_actor("First", 701));
+  assert(chat_guild->set_member_online_actor("Second", 702));
+  assert(chat_guild->set_member_online_actor("Muted", 703));
+  assert(chat_guild->set_member_hears_guild_chat("Muted", false));
+
+  const auto online_ids = chat_guild->online_member_actor_ids();
+  assert(online_ids.size() == 4);
+  assert(online_ids[0] == 700);
+  assert(online_ids[1] == 701);
+  assert(online_ids[2] == 702);
+  assert(online_ids[3] == 703);
+
+  const auto deliveries = manager.guild_chat_deliveries("ChatGuild", "Leader", "hello");
+  assert(deliveries.size() == 3);
+  assert(deliveries[0].member_name == "Leader");
+  assert(deliveries[0].online_actor_id == 700);
+  assert(deliveries[0].text == "Leader:hello");
+  assert(deliveries[1].member_name == "First");
+  assert(deliveries[1].online_actor_id == 701);
+  assert(deliveries[2].member_name == "Second");
+  assert(deliveries[2].online_actor_id == 702);
+  assert(manager.guild_chat_deliveries("Missing", "Leader", "hello").empty());
+  assert(manager.guild_chat_deliveries("ChatGuild", "Leader", "").empty());
+
   return 0;
 }
