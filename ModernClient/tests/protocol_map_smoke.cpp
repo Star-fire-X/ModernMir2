@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -10,6 +11,13 @@
 namespace {
 
 using Bytes = std::vector<std::uint8_t>;
+
+struct StatusCounts {
+  std::size_t implemented{0};
+  std::size_t partial{0};
+  std::size_t planned{0};
+  std::size_t internal{0};
+};
 
 template <std::size_t Size>
 bool has_entry(const std::array<mir2::client::protocol_migration::MappingEntry, Size>& entries,
@@ -27,6 +35,47 @@ const mir2::client::protocol_migration::MappingEntry* find_entry(
     return entry.delphi_entry == name;
   });
   return it == entries.end() ? nullptr : &*it;
+}
+
+template <std::size_t Size>
+StatusCounts count_statuses(
+    const std::array<mir2::client::protocol_migration::MappingEntry, Size>& entries) {
+  StatusCounts counts;
+  for (const auto& entry : entries) {
+    switch (entry.status) {
+      case mir2::client::protocol_migration::MigrationStatus::implemented:
+        ++counts.implemented;
+        break;
+      case mir2::client::protocol_migration::MigrationStatus::partial:
+        ++counts.partial;
+        break;
+      case mir2::client::protocol_migration::MigrationStatus::planned:
+        ++counts.planned;
+        break;
+      case mir2::client::protocol_migration::MigrationStatus::internal:
+        ++counts.internal;
+        break;
+    }
+  }
+  return counts;
+}
+
+void assert_counts(const StatusCounts& actual, const StatusCounts& expected) {
+  assert(actual.implemented == expected.implemented);
+  assert(actual.partial == expected.partial);
+  assert(actual.planned == expected.planned);
+  assert(actual.internal == expected.internal);
+}
+
+template <std::size_t Size>
+void assert_partial_and_planned_notes(
+    const std::array<mir2::client::protocol_migration::MappingEntry, Size>& entries) {
+  using mir2::client::protocol_migration::MigrationStatus;
+  for (const auto& entry : entries) {
+    if (entry.status == MigrationStatus::partial || entry.status == MigrationStatus::planned) {
+      assert(!entry.notes.empty());
+    }
+  }
 }
 
 void append_u8(Bytes& bytes, std::uint8_t value) {
@@ -524,6 +573,13 @@ int main() {
   static_assert(kDelphiClientGetMappings.size() == 39);
   static_assert(kSceneTransitionMappings.size() == 13);
 
+  assert_counts(count_statuses(kDelphiSendMappings), StatusCounts{11, 38, 6, 2});
+  assert_counts(count_statuses(kDelphiClientGetMappings), StatusCounts{5, 30, 4, 0});
+  assert_counts(count_statuses(kSceneTransitionMappings), StatusCounts{11, 2, 0, 0});
+  assert_partial_and_planned_notes(kDelphiSendMappings);
+  assert_partial_and_planned_notes(kDelphiClientGetMappings);
+  assert_partial_and_planned_notes(kSceneTransitionMappings);
+
   assert(has_entry(kDelphiSendMappings, "SendSelectServer"));
   assert(has_entry(kDelphiSendMappings, "SendRunLogin"));
   assert(has_entry(kDelphiSendMappings, "SendUpdateAccount"));
@@ -535,6 +591,7 @@ int main() {
   assert(has_entry(kSceneTransitionMappings, "ClientGetPasswdSuccess"));
   assert(has_entry(kSceneTransitionMappings, "ClientGetStartPlay"));
   assert(has_entry(kSceneTransitionMappings, "ClientGetServerDown"));
+  assert(has_entry(kDelphiClientGetMappings, "ClientGetReconnect"));
 
   const auto assert_not_planned = [](const auto* entry) {
     assert(entry != nullptr);
@@ -551,6 +608,10 @@ int main() {
   assert_not_planned(find_entry(kDelphiClientGetMappings, "ClientGetSenduseItems"));
   assert_not_planned(find_entry(kDelphiClientGetMappings, "ClientGetDuraChange"));
   assert_not_planned(find_entry(kDelphiClientGetMappings, "ClientGetReadMiniMap"));
+  assert(find_entry(kDelphiClientGetMappings, "ClientGetReconnect")->status ==
+         MigrationStatus::planned);
+  assert(find_entry(kSceneTransitionMappings, "ClientGetServerDown")->status ==
+         MigrationStatus::partial);
 
   assert_p0_protocol_goldens();
   assert_p2_protocol_goldens();

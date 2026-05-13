@@ -53,9 +53,9 @@ inline constexpr std::string_view to_string(const MigrationStatus status) {
 
 // ====================================================================
 // Migration status summary (as of PR-8 protocol mapping audit):
-//   Send mappings:    6 implemented, 43 partial, 6 planned, 2 internal = 57
-//   Receive mappings:  2 implemented, 35 partial, 1 planned, 1 internal = 39
-//   Scene transitions: 7 implemented,  5 partial, 1 planned, 0 internal = 13
+//   Send mappings:    11 implemented, 38 partial, 6 planned, 2 internal = 57
+//   Receive mappings:  5 implemented, 30 partial, 4 planned, 0 internal = 39
+//   Scene transitions: 11 implemented, 2 partial, 0 planned, 0 internal = 13
 //
 // All legacy Delphi client messages are accounted for.  Partial entries
 // have core functionality working; details and edge cases are tracked.
@@ -94,7 +94,8 @@ inline constexpr std::array<MappingEntry, 57> kDelphiSendMappings{{
      "Turn/walk/run/attack now share the legacy action-lock path; sit and special idents are still partial."},
     {"SendSpellMsg", "SpellIntent", "combat", MigrationStatus::partial,
      "Shortcut spell intent and action-lock timing exist; detailed magic effects remain partial."},
-    {"SendQueryUserName", "QueryActorNameRequest", "actor", MigrationStatus::planned, ""},
+    {"SendQueryUserName", "QueryActorNameRequest", "actor", MigrationStatus::planned,
+     "Needs client query UI and server/client_v1 bridge coverage before implementation."},
     {"SendDropItem", "DropItemRequest", "inventory", MigrationStatus::partial,
      "Bag-item drop requests are wired with local pending rollback; equipment must be unequipped before dropping."},
     {"SendPickup", "PickupIntent", "inventory", MigrationStatus::partial,
@@ -105,7 +106,8 @@ inline constexpr std::array<MappingEntry, 57> kDelphiSendMappings{{
      "Equipment-to-bag requests are wired with pending rollback."},
     {"SendEat", "UseItemIntent", "inventory", MigrationStatus::partial,
      "Numeric slots can request consumable use; inventory mirror and rollback UI remain planned."},
-    {"SendButchAnimal", "ButchActorRequest", "world", MigrationStatus::planned, ""},
+    {"SendButchAnimal", "ButchActorRequest", "world", MigrationStatus::planned,
+     "Needs butch target selection UI and world loot authority before implementation."},
     {"SendMagicKeyChange", "MagicKeyChangeRequest", "magic", MigrationStatus::partial,
      "State window can send key rebinding requests; server authority still arrives through MagicList refreshes."},
     {"SendMerchantDlgSelect", "NpcDialogSelectRequest", "npc", MigrationStatus::partial,
@@ -120,12 +122,14 @@ inline constexpr std::array<MappingEntry, 57> kDelphiSendMappings{{
      "Repair confirmation is wired after a successful repair price result."},
     {"SendStorageItem", "StorageDepositRequest", "storage", MigrationStatus::partial,
      "Storage deposit from selected bag items is wired."},
-    {"SendGetDetailItem", "DetailItemRequest", "merchant", MigrationStatus::planned, ""},
+    {"SendGetDetailItem", "DetailItemRequest", "merchant", MigrationStatus::planned,
+     "Needs detail-goods panel request/response wiring before implementation."},
     {"SendBuyItem", "MerchantBuyRequest", "merchant", MigrationStatus::partial,
      "Merchant buy request is wired from the goods list."},
     {"SendTakeBackStorageItem", "StorageWithdrawRequest", "storage", MigrationStatus::partial,
      "Storage withdraw request is wired from the storage list."},
-    {"SendMakeDrugItem", "MakeDrugItemRequest", "merchant", MigrationStatus::planned, ""},
+    {"SendMakeDrugItem", "MakeDrugItemRequest", "merchant", MigrationStatus::planned,
+     "Needs make-drug merchant list, selection UI, and server command bridge."},
     {"SendDropGold", "DropGoldRequest", "inventory", MigrationStatus::partial,
      "client_v1 wire and gateway bridge are implemented; amount-entry UI remains minimal."},
     {"SendGroupMode", "GroupModeRequest", "group", MigrationStatus::partial,
@@ -164,8 +168,10 @@ inline constexpr std::array<MappingEntry, 57> kDelphiSendMappings{{
      "Protocol and gateway notice refresh exist; the guild panel still lacks full Delphi editing UX."},
     {"SendGuildUpdateGrade", "GuildUpdateGradeRequest", "guild", MigrationStatus::partial,
      "Protocol and gateway rank-list refresh exist; the guild panel still lacks full Delphi editing UX."},
-    {"SendSpeedHackUser", "SpeedHackReport", "security", MigrationStatus::planned, ""},
-    {"SendAdjustBonus", "AdjustBonusRequest", "character", MigrationStatus::planned, ""},
+    {"SendSpeedHackUser", "SpeedHackReport", "security", MigrationStatus::planned,
+     "Needs client-side detection cadence and server audit/rate-limit policy."},
+    {"SendAdjustBonus", "AdjustBonusRequest", "character", MigrationStatus::planned,
+     "Needs bonus allocation UI and authoritative character-stat update flow."},
     {"SendTimeTimerTimer", "Ping", "session", MigrationStatus::partial,
      "Ping/Pong exists, but the client has no scheduled heartbeat yet."},
 }};
@@ -185,10 +191,12 @@ inline constexpr std::array<MappingEntry, 39> kDelphiClientGetMappings{{
     {"ClientGetStartPlay", "SelectCharacterResult + LoginNotice + EnterWorldResult + WorldSnapshot",
      "world_entry", MigrationStatus::implemented,
      "World entry now waits on stLoginNotice/LoginNoticeOk before applying the snapshot."},
-    {"ClientGetReconnect", "ReconnectResult", "connection", MigrationStatus::planned, ""},
+    {"ClientGetReconnect", "ReconnectResult", "connection", MigrationStatus::planned,
+     "Needs a dedicated typed reconnect result once Delphi reconnect branches are ported."},
     {"ClientGetMapDescription", "WorldSnapshot.map_id", "map", MigrationStatus::partial,
      "Map id and size exist; legacy description text and reconnect branches are still planned."},
-    {"ClientGetAdjustBonus", "AdjustBonusState", "character", MigrationStatus::planned, ""},
+    {"ClientGetAdjustBonus", "AdjustBonusState", "character", MigrationStatus::planned,
+     "Needs bonus allocation state and UI before the legacy message can be represented."},
     {"ClientGetAddItem", "InventoryAdd", "inventory", MigrationStatus::partial,
      "Inventory add messages update the bag mirror and clear matching pending actions."},
     {"ClientGetUpdateItem", "InventoryUpdate", "inventory", MigrationStatus::partial,
@@ -221,7 +229,8 @@ inline constexpr std::array<MappingEntry, 39> kDelphiClientGetMappings{{
      "DMerchantDlg entry, text parser and link hit areas exist; shop lists and business panels are still planned."},
     {"ClientGetSendGoodsList", "MerchantGoodsList", "merchant", MigrationStatus::partial,
      "Merchant goods lists drive the buy window."},
-    {"ClientGetSendMakeDrugList", "MakeDrugList", "merchant", MigrationStatus::planned, ""},
+    {"ClientGetSendMakeDrugList", "MakeDrugList", "merchant", MigrationStatus::planned,
+     "Needs make-drug merchant panel state and gateway translation."},
     {"ClientGetSendUserSell", "MerchantPriceResult", "merchant", MigrationStatus::partial,
      "Sell selection and confirmation dialogs are represented by MerchantPriceResult state."},
     {"ClientGetSendUserRepair", "MerchantRepairPriceResult", "merchant", MigrationStatus::partial,
@@ -230,7 +239,8 @@ inline constexpr std::array<MappingEntry, 39> kDelphiClientGetMappings{{
      "Storage open state is represented by StorageList."},
     {"ClientGetSaveItemList", "StorageList", "storage", MigrationStatus::partial,
      "Storage item lists drive the storage window."},
-    {"ClientGetSendDetailGoodsList", "DetailGoodsList", "merchant", MigrationStatus::planned, ""},
+    {"ClientGetSendDetailGoodsList", "DetailGoodsList", "merchant", MigrationStatus::planned,
+     "Needs detail-goods panel state and gateway translation."},
     {"ClientGetSendNotice", "Notice", "notice", MigrationStatus::implemented, ""},
     {"ClientGetGroupMembers", "GroupState", "group", MigrationStatus::partial,
      "Group state drives the group panel."},

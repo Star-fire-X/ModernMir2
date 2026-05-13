@@ -230,6 +230,29 @@ int main() {
       stop_services();
       return fail("entered disconnect cleanup");
     }
+
+    auto reconnect_socket = connect_game(io_context);
+    if (!reconnect_socket.has_value()) {
+      stop_services();
+      return fail("connect reconnect");
+    }
+    mir2::tests::ClientV1SocketReader reconnect_reader(*reconnect_socket);
+    std::uint32_t reconnect_sequence = 1;
+    if (!enter_world(*reconnect_socket, reconnect_reader, *admissions, reconnect_sequence)) {
+      stop_services();
+      return fail("reconnect enter world");
+    }
+    if (!wait_snapshot_value(game_gateway, "sessions", "1") ||
+        !wait_snapshot_value(world_service, "sessions", "1")) {
+      stop_services();
+      return fail("reconnect single session");
+    }
+    reconnect_socket->close(ignored);
+    if (!wait_snapshot_value(game_gateway, "sessions", "0") ||
+        !wait_snapshot_value(world_service, "sessions", "0")) {
+      stop_services();
+      return fail("reconnect cleanup");
+    }
   }
 
   {

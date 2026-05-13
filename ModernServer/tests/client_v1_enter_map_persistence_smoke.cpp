@@ -250,11 +250,67 @@ int main() {
     return fail("disconnect save");
   }
 
+  lobby_socket->close(ignored);
+  login_socket->close(ignored);
+
+  auto relogin_socket = connect_login(io_context);
+  if (!relogin_socket.has_value()) {
+    stop_runtime();
+    return fail("relogin connect");
+  }
+  mir2::tests::ClientV1SocketReader relogin_reader(*relogin_socket);
+  std::uint32_t relogin_sequence = 1;
+  mir2::tests::send_client_v1_message(*relogin_socket, mir2::client_v1::ClientHello{},
+                                      relogin_sequence);
   mir2::tests::send_client_v1_message(
-      *lobby_socket, mir2::client_v1::SelectCharacterRequest{"PersistHero"},
-      lobby_sequence);
+      *relogin_socket, mir2::client_v1::LoginRequest{"stage4", "pass"}, relogin_sequence);
+  const auto relogin = relogin_reader.wait_for_message<mir2::client_v1::LoginResult>();
+  if (!relogin.has_value() || !relogin->success || relogin->account_id != "stage4") {
+    stop_runtime();
+    return fail("relogin");
+  }
+  if (!relogin_reader.wait_for_message<mir2::client_v1::ServerList>().has_value()) {
+    stop_runtime();
+    return fail("relogin server list");
+  }
+  mir2::tests::send_client_v1_message(
+      *relogin_socket, mir2::client_v1::SelectServerRequest{"ModernServer"},
+      relogin_sequence);
+  const auto reselect_server =
+      relogin_reader.wait_for_message<mir2::client_v1::SelectServerResult>();
+  if (!reselect_server.has_value() || !reselect_server->success ||
+      reselect_server->lobby_token.empty()) {
+    stop_runtime();
+    return fail("reselect server");
+  }
+
+  auto relobby_socket = mir2::tests::connect_socket(io_context, reselect_server->address,
+                                                    reselect_server->port);
+  if (!relobby_socket.has_value()) {
+    stop_runtime();
+    return fail("relobby connect");
+  }
+  mir2::tests::ClientV1SocketReader relobby_reader(*relobby_socket);
+  std::uint32_t relobby_sequence = 1;
+  mir2::tests::send_client_v1_message(*relobby_socket, mir2::client_v1::ClientHello{},
+                                      relobby_sequence);
+  mir2::tests::send_client_v1_message(
+      *relobby_socket,
+      mir2::client_v1::CharacterListRequest{reselect_server->lobby_token},
+      relobby_sequence);
+  const auto restored_characters =
+      relobby_reader.wait_for_message<mir2::client_v1::CharacterList>();
+  if (!restored_characters.has_value() || restored_characters->characters.size() != 1 ||
+      restored_characters->characters.front().name != "PersistHero") {
+    stop_runtime();
+    return fail("restored character list");
+  }
+
+  mir2::tests::send_client_v1_message(
+      *relobby_socket, mir2::client_v1::SelectCharacterRequest{"PersistHero"},
+      relobby_sequence);
   select_character =
-      lobby_reader.wait_for_message<mir2::client_v1::SelectCharacterResult>();
+      relobby_reader.wait_for_message<mir2::client_v1::SelectCharacterResult>();
   if (!select_character.has_value() || !select_character->success ||
       select_character->enter_world_token.empty()) {
     stop_runtime();
