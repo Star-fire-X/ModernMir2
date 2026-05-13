@@ -42,6 +42,7 @@
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -57,6 +58,7 @@
 #include "audio/legacy_sound_rules.hpp"
 #include "audio/sound_constants.hpp"
 #include "scene/character_select_state.hpp"
+#include "shared/legacy/map_render_order.hpp"
 #include "shared/legacy/map_render_math.hpp"
 #include "shared/legacy/movement_rules.hpp"
 #include "text/encoding.hpp"
@@ -106,6 +108,20 @@ void legacy_trace(const std::string_view text) {
     std::ofstream file(path, std::ios::app | std::ios::binary);
     file << line;
   }
+}
+
+void legacy_trace_map_layer(
+    const legacy::LegacyMapDrawLayer layer,
+    const int row = std::numeric_limits<int>::min()) {
+  if (!legacy_trace_enabled()) {
+    return;
+  }
+  std::ostringstream out;
+  out << "draw layer=" << legacy::legacy_map_draw_layer_name(layer);
+  if (row != std::numeric_limits<int>::min()) {
+    out << " row=" << row;
+  }
+  legacy_trace(out.str());
 }
 
 std::wstring trim_copy(const std::wstring& text) {
@@ -6336,16 +6352,22 @@ class WorldScene final : public Scene {
     const auto viewport = viewport_for_self(self_it->second);
 
     render_tiles(context, viewport);
+    legacy_trace_map_layer(legacy::LegacyMapDrawLayer::small_objects);
     render_small_objects(context, viewport);
     if (context.assets != nullptr) {
+      legacy_trace_map_layer(legacy::LegacyMapDrawLayer::ground_effects);
       animation_.effects().render_ground(*context.assets, *context.renderer, viewport);
     }
     render_world_rows(context, viewport);
+    legacy_trace_map_layer(legacy::LegacyMapDrawLayer::selection_blend);
     render_actor_selection_blend_pass(context, viewport);
+    legacy_trace_map_layer(legacy::LegacyMapDrawLayer::debug_overlay);
     render_map_debug_overlay(context, viewport);
     if (context.assets != nullptr) {
+      legacy_trace_map_layer(legacy::LegacyMapDrawLayer::overlay_effects);
       animation_.effects().render_overlay(*context.assets, *context.renderer, viewport);
     }
+    legacy_trace_map_layer(legacy::LegacyMapDrawLayer::actor_screen_overlay);
     render_actor_overlays_after_scene(context, viewport);
 
   }
@@ -7126,6 +7148,7 @@ class WorldScene final : public Scene {
 
   /// 渲染地图瓦片层：背景瓦片（偶数格）+ 中间层物件
   void render_tiles(ClientContext& context, const legacy::LegacyMapViewport& viewport) {
+    legacy_trace_map_layer(legacy::LegacyMapDrawLayer::background_tiles);
     for (int y = viewport.top - 1; y <= viewport.bottom + 1; ++y) {
       for (int x = viewport.left - 2; x <= viewport.right + 1; ++x) {
         const auto* cell = map_->cell(x, y);
@@ -7140,7 +7163,18 @@ class WorldScene final : public Scene {
                       context.assets->get_frame(tile->archive, tile->index),
                       draw_x, legacy::legacy_ground_back_y(viewport, y));
         }
+      }
+    }
 
+    legacy_trace_map_layer(legacy::LegacyMapDrawLayer::middle_tiles);
+    for (int y = viewport.top - 1; y <= viewport.bottom + 1; ++y) {
+      for (int x = viewport.left - 2; x <= viewport.right + 1; ++x) {
+        const auto* cell = map_->cell(x, y);
+        if (cell == nullptr) {
+          continue;
+        }
+
+        const auto draw_x = legacy::legacy_tile_draw_x(viewport, x);
         if (const auto small_tile = legacy_small_tile_resource(cell->mid_img);
             small_tile.has_value()) {
           draw_sprite(*context.renderer,
@@ -7233,8 +7267,10 @@ class WorldScene final : public Scene {
           if (it->actor == nullptr) {
             continue;
           }
+          legacy_trace_map_layer(legacy::LegacyMapDrawLayer::actor, y);
           render_actor(context, it->pose, viewport, it->actor_id == context.state->world.self_actor_id);
           if (context.assets != nullptr) {
+            legacy_trace_map_layer(legacy::LegacyMapDrawLayer::actor_overlay, y);
             animation_.effects().render_overlay_for_actor(it->actor_id, it->pose, *context.assets,
                                                           *context.renderer, viewport);
           }
@@ -7242,6 +7278,7 @@ class WorldScene final : public Scene {
       }
 
       if (context.assets != nullptr) {
+        legacy_trace_map_layer(legacy::LegacyMapDrawLayer::fly_effect, y);
         animation_.effects().render_fly(*context.assets, *context.renderer, viewport, y);
       }
     }
@@ -7318,6 +7355,7 @@ class WorldScene final : public Scene {
         if (frame != nullptr && (frame->width != 48 || frame->height != 32)) {
           const auto draw_x = legacy::legacy_tile_draw_x(viewport, x);
           const auto base_y = legacy::legacy_object_row_y(viewport, y);
+          legacy_trace_map_layer(legacy::LegacyMapDrawLayer::large_object, y);
           if (animation_.map_object_blend(*cell)) {
             draw_sprite_legacy_blend(*context.renderer, frame, draw_x + frame->hotspot_x - 2,
                                      base_y + frame->hotspot_y - 68);
@@ -7336,6 +7374,7 @@ class WorldScene final : public Scene {
     auto render_item = [&](const std::uint64_t item_id) {
       const auto item_it = world.ground_items.find(item_id);
       if (item_it != world.ground_items.end() && item_it->second.y == row) {
+        legacy_trace_map_layer(legacy::LegacyMapDrawLayer::ground_item, row);
         render_ground_item(context, viewport, item_id, item_it->second);
       }
     };
@@ -7346,6 +7385,7 @@ class WorldScene final : public Scene {
     } else {
       for (const auto& [item_id, item] : world.ground_items) {
         if (item.y == row) {
+          legacy_trace_map_layer(legacy::LegacyMapDrawLayer::ground_item, row);
           render_ground_item(context, viewport, item_id, item);
         }
       }
