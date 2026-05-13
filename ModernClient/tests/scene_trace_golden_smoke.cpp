@@ -117,6 +117,34 @@ std::vector<std::string> run_map_transfer_trace() {
   return calls;
 }
 
+std::vector<std::string> run_map_door_state_trace() {
+  using namespace mir2::client_v1;
+
+  mir2::client::GameStateStore state;
+  std::vector<std::string> calls;
+
+  push(calls, "recv_open_door");
+  state.apply(MapDoorState{12, 13, true});
+  assert(state.map_door_open(12, 13));
+  push(calls, "door_open_visible");
+
+  push(calls, "recv_close_door");
+  state.apply(MapDoorState{12, 13, false});
+  assert(!state.map_door_open(12, 13));
+  assert(state.world.map_doors.find(mir2::client::GameStateStore::map_door_key(12, 13)) !=
+         state.world.map_doors.end());
+  push(calls, "door_close_override_kept");
+
+  push(calls, "missed_close_expiry");
+  state.apply(MapDoorState{12, 13, true});
+  state.world.map_doors[mir2::client::GameStateStore::map_door_key(12, 13)].updated_ms = 1;
+  state.expire_map_door_states(1 + mir2::client::kLegacyMapDoorOpenExpireMs);
+  assert(!state.map_door_open(12, 13));
+  assert(state.world.map_doors.empty());
+  push(calls, "stale_open_removed");
+  return calls;
+}
+
 }  // namespace
 
 int main() {
@@ -125,5 +153,6 @@ int main() {
   assert(run_trace(false, true) == golden.at("frame.not_render_due"));
   assert(run_trace(true, false) == golden.at("frame.cannot_draw"));
   assert(run_map_transfer_trace() == golden.at("play.map_transfer"));
+  assert(run_map_door_state_trace() == golden.at("play.map_door_state"));
   return 0;
 }
