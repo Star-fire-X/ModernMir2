@@ -89,6 +89,15 @@ bool has_trace_label(const mir2::RuntimeDispatch& dispatch, std::string_view act
                      });
 }
 
+bool has_notice(const mir2::RuntimeDispatch& dispatch, std::string_view text) {
+  return std::any_of(dispatch.session_events.begin(), dispatch.session_events.end(),
+                     [&](const mir2::SessionEvent& event) {
+                       const auto decoded = mir2::decode_legacy_game_packet(event.packet);
+                       return decoded.has_value() && decoded->message.ident == mir2::kSmHear &&
+                              mir2::legacy_decode_string(decoded->body) == text;
+                     });
+}
+
 bool has_unsupported_script_trace(const mir2::RuntimeDispatch& dispatch) {
   return std::any_of(dispatch.legacy_traces.begin(), dispatch.legacy_traces.end(),
                      [](const mir2::LegacyRuntimeTrace& trace) {
@@ -191,6 +200,8 @@ TAKECHECKITEM Apple 1
 GIVE Apple 1
 TAKE Apple 1
 TAKEW Sword 1
+SENDMSG 6 System ready <$USERNAME>
+SYSMSG Direct notice <$NPCNAME>
 MAPMOVE 0 10 10
 MAP 0
 PARAM1 0
@@ -243,6 +254,10 @@ BREAK)"});
   assert(has_trace(script_dispatch, "RANDOMSETDAILYQUEST"));
   assert(has_trace(script_dispatch, "variable"));
   assert(has_trace(script_dispatch, "param"));
+  assert(has_trace_label(script_dispatch, "sendmsg", "System ready Hero"));
+  assert(has_trace_label(script_dispatch, "sysmsg", "Direct notice Rewarder"));
+  assert(has_notice(script_dispatch, "System ready Hero"));
+  assert(has_notice(script_dispatch, "Direct notice Rewarder"));
   assert(has_trace(script_dispatch, "takew"));
   assert(has_trace(script_dispatch, "mongen"));
   assert(has_trace(script_dispatch, "monclear"));
