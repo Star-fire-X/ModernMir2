@@ -1197,7 +1197,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       const auto price = compute_buy_price(*item, item_configs_, merchant->merchant_price(item->index));
-      if (price < 0) {
+      const auto new_gold = static_cast<std::int64_t>(requester->character().gold) + price;
+      if (price < 0 || new_gold > kLegacyBagGold) {
         static_cast<void>(requester->add_bag_item(*item));
         queue_packet(dispatch, requester->session_id(),
                      make_user_sell_result_packet(requester->session_id(), false, 0));
