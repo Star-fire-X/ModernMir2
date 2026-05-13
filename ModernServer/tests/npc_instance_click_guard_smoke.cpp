@@ -90,6 +90,16 @@ mir2::LogicCommand click_npc(std::uint64_t session_id, std::uint64_t npc_id) {
   return command;
 }
 
+mir2::LogicCommand merchant_select(std::uint64_t session_id, std::uint64_t npc_id,
+                                   std::string action) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::merchant_select;
+  command.session_id = session_id;
+  command.target_actor_id = npc_id;
+  command.text = std::move(action);
+  return command;
+}
+
 mir2::LogicCommand trade_try(std::uint64_t session_id, std::string target_name) {
   mir2::LogicCommand command;
   command.kind = mir2::LogicCommandKind::trade_try;
@@ -144,6 +154,13 @@ int main() {
   if (has_packet(trade_click, 7, mir2::kSmSendGoodsList) ||
       has_packet(trade_click, 7, mir2::kSmMerchantSay)) {
     return 5;
+  }
+
+  static_cast<void>(runtime.route_logic_command(merchant_select(7, 1, "@buy")));
+  const auto trade_menu_replay = tick_players(runtime);
+  if (has_packet(trade_menu_replay, 7, mir2::kSmSendGoodsList) ||
+      has_packet(trade_menu_replay, 7, mir2::kSmMerchantSay)) {
+    return 6;
   }
 
   return 0;
