@@ -93,6 +93,31 @@ int main() {
     return 1;
   }
 
+  {
+    const auto msg = mir2::make_default_message(mir2::kCmSay, 77, 8, 9, 10);
+    const auto body = mir2::legacy_encode_string("check-code path");
+    const auto pkt = mir2::make_legacy_game_packet(7, 0, 0, msg, body);
+    std::vector<std::uint8_t> uplink{'#', '5'};
+    uplink.insert(uplink.end(), pkt.body.begin(), pkt.body.end());
+    uplink.push_back(static_cast<std::uint8_t>('!'));
+
+    const auto drained = mir2::LegacyProtocolCodec::drain_packets(uplink);
+    if (!uplink.empty() || drained.size() != 1 || drained.front().body != pkt.body) {
+      std::cerr << "check_code_game_drain\n";
+      return 1;
+    }
+
+    const auto decoded_uplink = mir2::decode_legacy_game_packet(drained.front());
+    if (!decoded_uplink.has_value() || decoded_uplink->message.ident != mir2::kCmSay ||
+        decoded_uplink->message.recog != 77 || decoded_uplink->message.param != 8 ||
+        decoded_uplink->message.tag != 9 || decoded_uplink->message.series != 10 ||
+        decoded_uplink->body != body ||
+        mir2::legacy_decode_string(decoded_uplink->body) != "check-code path") {
+      std::cerr << "check_code_game_decode\n";
+      return 1;
+    }
+  }
+
   const auto raw_packet = mir2::make_legacy_raw_packet(7, "+GOOD/100");
   auto raw_encoded = mir2::LegacyProtocolCodec::encode(raw_packet);
   auto raw_decoded = mir2::LegacyProtocolCodec::drain_packets(raw_encoded);

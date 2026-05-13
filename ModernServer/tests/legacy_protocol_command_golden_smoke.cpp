@@ -253,6 +253,12 @@ mir2::LegacyPacket packet_for_case(const LegacyCommandCase& test_case) {
       body);
 }
 
+std::vector<std::uint8_t> checked_uplink_frame(const mir2::LegacyPacket& packet, char check_code) {
+  auto frame = mir2::LegacyProtocolCodec::encode(packet);
+  frame.insert(frame.begin() + 1, static_cast<std::uint8_t>(check_code));
+  return frame;
+}
+
 bool check_frame_boundaries(const std::vector<LegacyCommandCase>& cases) {
   if (cases.size() < 3) {
     return false;
@@ -292,6 +298,75 @@ bool check_frame_boundaries(const std::vector<LegacyCommandCase>& cases) {
   std::vector<std::uint8_t> empty_frame{'#', '!'};
   const auto skipped = mir2::LegacyProtocolCodec::drain_packets(empty_frame);
   return skipped.empty() && empty_frame.empty();
+}
+
+bool check_rungate_uplink_downstream_paths(const std::vector<LegacyCommandCase>& cases) {
+  if (cases.size() < 3) {
+    return false;
+  }
+
+  const auto first_packet = packet_for_case(cases[0]);
+  const auto first_uplink = checked_uplink_frame(first_packet, '7');
+  std::vector<std::uint8_t> single_buffer = first_uplink;
+  const auto single = mir2::LegacyProtocolCodec::drain_packets(single_buffer);
+  if (!single_buffer.empty() || single.size() != 1 || single.front().body != first_packet.body) {
+    return false;
+  }
+  const auto single_decoded = mir2::decode_legacy_game_packet(single.front());
+  if (!single_decoded.has_value() || single_decoded->message.ident != cases[0].ident ||
+      single_decoded->message.recog != cases[0].recog ||
+      single_decoded->message.param != cases[0].param ||
+      single_decoded->message.tag != cases[0].tag ||
+      single_decoded->message.series != cases[0].series) {
+    return false;
+  }
+
+  const auto downstream = mir2::LegacyProtocolCodec::encode(first_packet);
+  if (downstream.size() < 2 || downstream.front() != static_cast<std::uint8_t>('#') ||
+      downstream.back() != static_cast<std::uint8_t>('!') ||
+      std::isdigit(static_cast<unsigned char>(downstream[1])) != 0) {
+    return false;
+  }
+  const std::vector<std::uint8_t> downstream_payload(downstream.begin() + 1,
+                                                     downstream.end() - 1);
+  if (downstream_payload != first_packet.body) {
+    return false;
+  }
+
+  std::vector<std::uint8_t> combined{'n', 'o', 'i', 's', 'e'};
+  for (std::size_t index = 0; index < 3; ++index) {
+    const auto frame =
+        checked_uplink_frame(packet_for_case(cases[index]), static_cast<char>('1' + index));
+    combined.insert(combined.end(), frame.begin(), frame.end());
+  }
+  const auto packets = mir2::LegacyProtocolCodec::drain_packets(combined);
+  if (!combined.empty() || packets.size() != 3) {
+    return false;
+  }
+  for (std::size_t index = 0; index < packets.size(); ++index) {
+    const auto decoded = mir2::decode_legacy_game_packet(packets[index]);
+    if (!decoded.has_value() || decoded->message.ident != cases[index].ident ||
+        packets[index].body != packet_for_case(cases[index]).body) {
+      return false;
+    }
+  }
+
+  std::vector<std::uint8_t> partial(first_uplink.begin(),
+                                    first_uplink.begin() +
+                                        static_cast<std::ptrdiff_t>(first_uplink.size() / 2));
+  const auto empty = mir2::LegacyProtocolCodec::drain_packets(partial);
+  if (!empty.empty() || partial.size() != first_uplink.size() / 2) {
+    return false;
+  }
+  partial.insert(partial.end(),
+                 first_uplink.begin() + static_cast<std::ptrdiff_t>(first_uplink.size() / 2),
+                 first_uplink.end());
+  const auto completed = mir2::LegacyProtocolCodec::drain_packets(partial);
+  if (!partial.empty() || completed.size() != 1 || completed.front().body != first_packet.body) {
+    return false;
+  }
+
+  return true;
 }
 
 bool check_edcode_byte_semantics() {
@@ -340,6 +415,9 @@ int main() {
   }
   if (!check_frame_boundaries(cases)) {
     return fail("frame boundaries");
+  }
+  if (!check_rungate_uplink_downstream_paths(cases)) {
+    return fail("rungate uplink downstream paths");
   }
   if (!check_edcode_byte_semantics()) {
     return fail("edcode byte semantics");
