@@ -681,6 +681,10 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_castle_manager_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_castle_manager_smoke COMMAND mir2_castle_manager_smoke)
 
+  add_executable(mir2_guild_protocol_golden_smoke tests/guild_protocol_golden_smoke.cpp)
+  target_link_libraries(mir2_guild_protocol_golden_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_guild_protocol_golden_smoke COMMAND mir2_guild_protocol_golden_smoke)
+
   add_executable(mir2_world_castle_refresh_smoke tests/world_castle_refresh_smoke.cpp)
   target_link_libraries(mir2_world_castle_refresh_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_world_castle_refresh_smoke COMMAND mir2_world_castle_refresh_smoke)
@@ -897,6 +901,7 @@ if(BUILD_TESTING)
       mir2_special_consumables_legacy_smoke
       mir2_guild_manager_smoke
       mir2_castle_manager_smoke
+      mir2_guild_protocol_golden_smoke
       mir2_monster_legacy_drop_scatter_smoke
       mir2_client_v1_auth_boundary_smoke
       mir2_client_v1_login_to_world_flow_smoke
