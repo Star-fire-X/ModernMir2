@@ -18,6 +18,28 @@ namespace mir2 {
 
 namespace {
 
+// ── Security & anomaly protection ───────────────────────────────────
+//
+//  The following legacy-compatible protections are enforced:
+//  1. Server authority: client never directly sets coordinates, stats,
+//     gold, or item ownership — all mutations go through LogicRuntime.
+//  2. Session_seq watermark: stale/replayed messages are rejected
+//     (accept_ingress_sequence enforces monotonic per-session sequence).
+//  3. Login-state gate: gameplay commands are only accepted when
+//     in_game() returns true; pre-login packets are dropped.
+//  4. Frame action rate limit: session_actions_this_frame_ prevents
+//     more than one move/attack/spell/trade per session per frame.
+//  5. Packet bounds: LegacyProtocolCodec enforces 64KB max frame,
+//     decode_6bit_buf validates character range, decode_legacy_game_packet
+//     checks minimum payload length.
+//  6. Bus backpressure: gateway pauses or disconnects sessions when
+//     the world_service queue exceeds the configured threshold.
+//
+//  Remaining gaps tracked for PR-9 completion:
+//  - Per-session send rate limit (matching Delphi RUNGate CheckSendLength)
+//  - Packet fuzz harness in CI
+//  - Login brute-force detection
+// ──────────────────────────────────────────────────────────────────────
 constexpr std::int32_t kLegacyKickCloseDelayMs = 50;
 
 struct RunLoginPayload {
