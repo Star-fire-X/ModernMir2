@@ -324,21 +324,23 @@ bool check_session_fifo_ordering() {
   mir2::WorldService world;
   world.seed_session_sequence_for_test(88, 0);
 
+  // Use authenticate — it is handled entirely within WorldService without
+  // requiring an initialized LogicRuntime (returns early after admission).
   mir2::LogicCommand cmd1;
-  cmd1.kind = mir2::LogicCommandKind::say;
+  cmd1.kind = mir2::LogicCommandKind::authenticate;
   cmd1.session_id = 88;
   cmd1.session_seq = 1;
   cmd1.account_id = "s";
   cmd1.character_name = "Fifo";
-  cmd1.text = "one";
+  cmd1.certification = 10;
 
   mir2::LogicCommand cmd2 = cmd1;
   cmd2.session_seq = 2;
-  cmd2.text = "two";
+  cmd2.certification = 20;
 
   mir2::LogicCommand cmd3 = cmd1;
   cmd3.session_seq = 3;
-  cmd3.text = "three";
+  cmd3.certification = 30;
 
   mir2::WorldIngressBatch batch;
   batch.push(cmd1, 100);
