@@ -43,6 +43,7 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
  protected:
   PortBinding binding(const HostContext& context) const override;
   void handle_message(std::uint64_t session_id, const std::string& peer_address,
+                      std::uint32_t sequence,
                       const client_v1::Message& message) override;
   void handle_connected(std::uint64_t session_id, const std::string& peer_address) override;
   void handle_disconnected(std::uint64_t session_id, const std::string& peer_address,
@@ -88,7 +89,7 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
   };
 
   void handle_client_hello(std::uint64_t session_id, const client_v1::ClientHello& hello);
-  void handle_enter_world_request(std::uint64_t session_id,
+  void handle_enter_world_request(std::uint64_t session_id, std::uint32_t sequence,
                                   const client_v1::EnterWorldRequest& request);
   void handle_login_notice_ok(std::uint64_t session_id);
   void handle_move_intent(std::uint64_t session_id, const client_v1::MoveIntent& intent);
@@ -164,8 +165,9 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
   void handle_chat_send(std::uint64_t session_id, const client_v1::ChatSend& chat);
   void handle_ping(std::uint64_t session_id, const client_v1::Ping& ping);
   void post_enter_world(std::uint64_t session_id, const SessionState& state);
-  void post_canonical_command(CanonicalLegacyCommand command);
-  void post_logic_command(LogicCommand command);
+  void post_canonical_command(CanonicalLegacyCommand command,
+                              bool assign_session_sequence = true);
+  void post_logic_command(LogicCommand command, bool assign_session_sequence = true);
   void bus_loop();
   void handle_session_event(const SessionEvent& event);
   void translate_legacy_packet(std::uint64_t session_id, const LegacyPacket& packet,

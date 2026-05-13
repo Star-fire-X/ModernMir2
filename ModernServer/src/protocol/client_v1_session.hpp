@@ -19,6 +19,7 @@ class ClientV1SessionOwner {
   virtual void on_client_v1_disconnected(std::uint64_t session_id, const std::string& peer_address,
                                          const std::string& reason) = 0;
   virtual void on_client_v1_message(std::uint64_t session_id, const std::string& peer_address,
+                                    std::uint32_t sequence,
                                     const client_v1::Message& message) = 0;
 };
 

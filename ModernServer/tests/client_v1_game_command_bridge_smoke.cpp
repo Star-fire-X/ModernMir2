@@ -82,6 +82,13 @@ std::optional<asio::ip::tcp::socket> connect_game(asio::io_context& io_context) 
   return mir2::tests::connect_socket(io_context, "127.0.0.1", 7119);
 }
 
+template <typename T>
+void send_client_v1_message_with_sequence(asio::ip::tcp::socket& socket, const T& message,
+                                          std::uint32_t sequence) {
+  const auto bytes = mir2::client_v1::encode_frame(mir2::client_v1::make_frame(message, sequence));
+  asio::write(socket, asio::buffer(bytes));
+}
+
 std::optional<mir2::LogicCommand> wait_for_logic(
     const std::shared_ptr<mir2::LocalBus::Endpoint>& endpoint,
     std::chrono::milliseconds timeout = std::chrono::milliseconds(3000)) {
@@ -187,13 +194,15 @@ int main() {
   }
 
   const auto token = admissions->issue("bridge", "BridgeHero");
+  const auto enter_sequence = sequence;
   mir2::tests::send_client_v1_message(
       *socket, mir2::client_v1::EnterWorldRequest{token, 1, 1}, sequence);
   const auto enter_command =
       wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::enter_world);
   if (!enter_command.has_value() || enter_command->account_id != "bridge" ||
       enter_command->character_name != "BridgeHero" || enter_command->map_id != "0" ||
-      enter_command->x != 10 || enter_command->y != 10) {
+      enter_command->x != 10 || enter_command->y != 10 ||
+      enter_command->session_seq != enter_sequence) {
     stop_services();
     return fail("enter world command");
   }
@@ -349,70 +358,85 @@ int main() {
     return fail("revive command");
   }
 
-  mir2::tests::send_client_v1_message(
-      *socket, mir2::client_v1::NpcClickRequest{42}, sequence);
+  const auto replay_sequence = sequence;
+  send_client_v1_message_with_sequence(*socket, mir2::client_v1::NpcClickRequest{42},
+                                       replay_sequence);
+  send_client_v1_message_with_sequence(*socket, mir2::client_v1::NpcClickRequest{42},
+                                       replay_sequence);
+  sequence = replay_sequence + 1;
   command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::click_npc);
   if (!command.has_value() || command->session_id != session_id ||
-      command->target_actor_id != 42) {
+      command->target_actor_id != 42 || command->session_seq != replay_sequence) {
     stop_services();
     return fail("npc click command");
   }
+  if (!wait_for_no_logic(world_endpoint)) {
+    stop_services();
+    return fail("duplicate client frame sequence ignored");
+  }
 
+  const auto select_sequence = sequence;
   mir2::tests::send_client_v1_message(
       *socket, mir2::client_v1::NpcDialogSelectRequest{0, "@buy"}, sequence);
   command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::merchant_select);
   if (!command.has_value() || command->session_id != session_id ||
-      command->target_actor_id != 42 || command->text != "@buy") {
+      command->target_actor_id != 42 || command->text != "@buy" ||
+      command->session_seq != select_sequence) {
     stop_services();
     return fail("npc select command");
   }
 
+  const auto buy_sequence = sequence;
   mir2::tests::send_client_v1_message(
       *socket, mir2::client_v1::MerchantBuyRequest{0, 555, "Drug"}, sequence);
   command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::buy_item);
   if (!command.has_value() || command->session_id != session_id ||
       command->target_actor_id != 42 || command->item_make_index != 555 ||
-      command->text != "Drug") {
+      command->text != "Drug" || command->session_seq != buy_sequence) {
     stop_services();
     return fail("merchant buy command");
   }
 
+  const auto sell_sequence = sequence;
   mir2::tests::send_client_v1_message(
       *socket, mir2::client_v1::MerchantSellRequest{0, 1004, "Ruby"}, sequence);
   command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::sell_item);
   if (!command.has_value() || command->session_id != session_id ||
       command->target_actor_id != 42 || command->item_make_index != 1004 ||
-      command->text != "Ruby") {
+      command->text != "Ruby" || command->session_seq != sell_sequence) {
     stop_services();
     return fail("merchant sell command");
   }
 
+  const auto sell_price_sequence = sequence;
   mir2::tests::send_client_v1_message(
       *socket, mir2::client_v1::MerchantSellPriceRequest{0, 1004, "Ruby"}, sequence);
   command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::query_sell_price);
   if (!command.has_value() || command->session_id != session_id ||
       command->target_actor_id != 42 || command->item_make_index != 1004 ||
-      command->text != "Ruby") {
+      command->text != "Ruby" || command->session_seq != sell_price_sequence) {
     stop_services();
     return fail("merchant sell price command");
   }
 
+  const auto repair_price_sequence = sequence;
   mir2::tests::send_client_v1_message(
       *socket, mir2::client_v1::MerchantRepairPriceRequest{0, 1005, "Sword"}, sequence);
   command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::query_repair_cost);
   if (!command.has_value() || command->session_id != session_id ||
       command->target_actor_id != 42 || command->item_make_index != 1005 ||
-      command->text != "Sword") {
+      command->text != "Sword" || command->session_seq != repair_price_sequence) {
     stop_services();
     return fail("merchant repair price command");
   }
 
+  const auto repair_sequence = sequence;
   mir2::tests::send_client_v1_message(
       *socket, mir2::client_v1::MerchantRepairRequest{0, 1005, "Sword"}, sequence);
   command = wait_for_logic_kind(world_endpoint, mir2::LogicCommandKind::repair_item);
   if (!command.has_value() || command->session_id != session_id ||
       command->target_actor_id != 42 || command->item_make_index != 1005 ||
-      command->text != "Sword") {
+      command->text != "Sword" || command->session_seq != repair_sequence) {
     stop_services();
     return fail("merchant repair command");
   }

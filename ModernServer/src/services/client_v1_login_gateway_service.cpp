@@ -120,6 +120,7 @@ PortBinding ClientV1LoginGatewayService::binding(const HostContext& context) con
 
 void ClientV1LoginGatewayService::handle_message(std::uint64_t session_id,
                                                  const std::string& /*peer_address*/,
+                                                 std::uint32_t /*sequence*/,
                                                  const client_v1::Message& message) {
   std::visit(
       [&](const auto& value) {

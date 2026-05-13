@@ -78,6 +78,10 @@ std::unordered_map<std::string, std::string> ClientV1GatewayServiceBase::snapsho
 
 void ClientV1GatewayServiceBase::on_client_v1_connected(std::uint64_t session_id,
                                                         const std::string& peer_address) {
+  {
+    std::scoped_lock lock(mutex_);
+    client_frame_sequences_[session_id] = 0;
+  }
   if (context_ != nullptr) {
     context_->metrics->increment_counter(name() + ".connected");
   }
@@ -90,6 +94,7 @@ void ClientV1GatewayServiceBase::on_client_v1_disconnected(std::uint64_t session
   {
     std::scoped_lock lock(mutex_);
     sessions_.erase(session_id);
+    client_frame_sequences_.erase(session_id);
   }
   if (context_ != nullptr) {
     context_->metrics->increment_counter(name() + ".disconnected");
@@ -99,8 +104,20 @@ void ClientV1GatewayServiceBase::on_client_v1_disconnected(std::uint64_t session
 
 void ClientV1GatewayServiceBase::on_client_v1_message(std::uint64_t session_id,
                                                       const std::string& peer_address,
+                                                      std::uint32_t sequence,
                                                       const client_v1::Message& message) {
-  handle_message(session_id, peer_address, message);
+  {
+    std::scoped_lock lock(mutex_);
+    auto& last_sequence = client_frame_sequences_[session_id];
+    if (sequence <= last_sequence) {
+      if (context_ != nullptr) {
+        context_->metrics->increment_counter(name() + ".stale_client_sequence");
+      }
+      return;
+    }
+    last_sequence = sequence;
+  }
+  handle_message(session_id, peer_address, sequence, message);
 }
 
 void ClientV1GatewayServiceBase::send_message(std::uint64_t session_id,
