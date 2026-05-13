@@ -230,6 +230,7 @@ bool check_gate_fifo_zero_budget() {
 
   mir2::WorldService world;
   world.attach_context_for_test(context);
+  world.initialize_runtime_for_test(config);
   world.enqueue_gate_event_for_test(
       mir2::SessionEvent{mir2::SessionEventKind::send_packet, "game_gateway", 11});
   world.enqueue_gate_event_for_test(
@@ -256,9 +257,23 @@ bool check_gate_fifo_zero_budget() {
     }
   }
 
+  const auto flushed_snapshot = world.snapshot();
+  if (flushed_snapshot.at("pending_gate_events") != "0" ||
+      flushed_snapshot.at("run_socket_last_flushed") != "3" ||
+      flushed_snapshot.at("run_socket_last_remaining") != "0") {
+    std::cerr << "gate_fifo_snapshot\n";
+    return false;
+  }
+
   const auto empty = world.run_legacy_socket_stage_for_test(5001);
   if (!empty.legacy_traces.empty()) {
     std::cerr << "gate_fifo_not_drained\n";
+    return false;
+  }
+  const auto empty_snapshot = world.snapshot();
+  if (empty_snapshot.at("run_socket_last_flushed") != "0" ||
+      empty_snapshot.at("run_socket_last_remaining") != "0") {
+    std::cerr << "gate_fifo_empty_snapshot\n";
     return false;
   }
   return true;
@@ -360,6 +375,56 @@ bool check_session_fifo_ordering() {
   return true;
 }
 
+mir2::LogicCommand action_command(mir2::LogicCommandKind kind, std::uint64_t session_id,
+                                  std::uint64_t session_seq) {
+  mir2::LogicCommand command;
+  command.kind = kind;
+  command.gateway = "client_v1_game_gateway";
+  command.session_id = session_id;
+  command.session_seq = session_seq;
+  command.x = 1;
+  command.y = 1;
+  return command;
+}
+
+bool check_frame_action_gate() {
+  mir2::HostConfig config;
+  config.maps.push_back(mir2::MapConfig{"0", "ActionGateMap", {}, 0, 0, 10, 10});
+
+  mir2::WorldService world;
+  world.initialize_runtime_for_test(config);
+
+  mir2::WorldIngressBatch same_frame;
+  same_frame.push(action_command(mir2::LogicCommandKind::walk, 501, 1), 1);
+  same_frame.push(action_command(mir2::LogicCommandKind::attack, 501, 2), 2);
+  same_frame.push(action_command(mir2::LogicCommandKind::spell, 501, 3), 3);
+  same_frame.push(action_command(mir2::LogicCommandKind::trade_accept, 501, 4), 4);
+  same_frame.push(action_command(mir2::LogicCommandKind::walk, 502, 1), 5);
+  same_frame.mark_frame(10);
+
+  const auto first_dispatch = world.process_ingress_batch_for_test(same_frame);
+  if (!same_frame.empty() || !first_dispatch.audit_events.empty() ||
+      world.session_action_count_for_test() != 2 ||
+      world.session_action_reject_count_for_test() != 3) {
+    std::cerr << "frame_action_gate_same_frame\n";
+    return false;
+  }
+
+  world.clear_session_actions_for_test();
+  mir2::WorldIngressBatch next_frame;
+  next_frame.push(action_command(mir2::LogicCommandKind::run, 501, 5), 6);
+  next_frame.mark_frame(11);
+
+  const auto second_dispatch = world.process_ingress_batch_for_test(next_frame);
+  if (!next_frame.empty() || !second_dispatch.audit_events.empty() ||
+      world.session_action_count_for_test() != 1 ||
+      world.session_action_reject_count_for_test() != 3) {
+    std::cerr << "frame_action_gate_next_frame\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -379,6 +444,9 @@ int main() {
     return 1;
   }
   if (!check_session_fifo_ordering()) {
+    return 1;
+  }
+  if (!check_frame_action_gate()) {
     return 1;
   }
   return 0;
