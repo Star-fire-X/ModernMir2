@@ -25,6 +25,30 @@ struct GuildRankGroup {
   std::vector<GuildMember> members{};
 };
 
+enum class GuildMemberOpResult {
+  ok,
+  guild_not_found,
+  requester_not_lord,
+  target_not_found,
+  target_not_online,
+  target_not_facing_requester,
+  target_rejects_guild,
+  already_member,
+  target_in_other_guild,
+  member_limit_reached,
+  not_member,
+  lord_cannot_leave,
+  target_is_lord
+};
+
+struct GuildAddMemberContext {
+  bool target_online{true};
+  bool target_facing_requester{true};
+  bool target_allows_guild{true};
+  std::uint64_t target_actor_id{0};
+  std::size_t max_member_count{0};
+};
+
 class Guild {
  public:
   Guild() = default;
@@ -46,6 +70,9 @@ class Guild {
   bool add_member(std::string name, std::string rank_name = "Guild Member",
                   std::uint64_t online_actor_id = 0);
   bool remove_member(std::string_view name);
+  bool transfer_lord(std::string_view current_lord, std::string_view target_name,
+                     std::string old_lord_rank_name = "Guild Member",
+                     std::string new_lord_rank_name = "Guild Lord");
   bool set_member_online_actor(std::string_view name, std::uint64_t online_actor_id);
   bool clear_member_online_actor(std::string_view name, std::uint64_t online_actor_id);
   void set_notice_lines(std::vector<std::string> notice_lines);
@@ -70,6 +97,17 @@ class GuildManager {
                       std::string lord_rank_name = "Guild Lord",
                       std::uint64_t lord_actor_id = 0);
   bool erase_guild(std::string_view name);
+  GuildMemberOpResult add_member_by_lord(std::string_view guild_name,
+                                         std::string_view requester_name,
+                                         std::string target_name,
+                                         const GuildAddMemberContext& context = {});
+  GuildMemberOpResult remove_member_by_lord(std::string_view guild_name,
+                                            std::string_view requester_name,
+                                            std::string_view target_name);
+  GuildMemberOpResult leave_member(std::string_view member_name);
+  GuildMemberOpResult transfer_lord(std::string_view guild_name,
+                                    std::string_view requester_name,
+                                    std::string_view target_name);
 
  private:
   std::vector<Guild> guilds_{};
