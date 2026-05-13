@@ -58,7 +58,7 @@ int main() {
   std::mt19937 rng{0x4D495232U};
 
   for (int step = 0; step < 1000; ++step) {
-    switch (rng() % 13U) {
+    switch (rng() % 14U) {
       case 0: {
         seed_visible_world(state);
         break;
@@ -129,6 +129,9 @@ int main() {
         break;
       case 11:
         state.apply(mir2::client_v1::MapChange{(rng() % 2U) == 0U ? "0" : "1"});
+        break;
+      case 12:
+        state.expire_map_door_states(static_cast<std::uint64_t>(rng() % 20000U));
         break;
       default:
         if (!state.world.map_transition_pending) {
