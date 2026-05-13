@@ -340,6 +340,7 @@ struct WorldViewState {
   std::string map_id{"0"};
   int width{800};   ///< 地图宽度（瓦片数）
   int height{600};  ///< 地图高度（瓦片数）
+  bool map_transition_pending{false};
   std::uint64_t self_actor_id{0};                                 ///< 自己的 actor_id
   std::unordered_map<std::uint64_t, ActorState> actors{};         ///< 所有在线角色（key = actor_id）
   std::unordered_map<std::uint64_t, client_v1::GroundItemState> ground_items{};  ///< 地面物品
@@ -1022,6 +1023,40 @@ struct GameStateStore {
     world = WorldViewState{};
   }
 
+  void clear_map_objects_for_transition() {
+    world.self_actor_id = 0;
+    world.actors.clear();
+    world.ground_items.clear();
+    world.actor_draw_order.clear();
+    world.ground_item_draw_order.clear();
+    world.npc_dialog = NpcDialogState{};
+    world.merchant_shop = MerchantShopState{};
+    world.repair = RepairState{};
+    world.storage = StorageState{};
+    world.trade = TradeUiState{};
+    world.minimap = MiniMapViewState{};
+    world.moving_item = MovingItemState{};
+    clear_pending_item_action();
+    world.focus_actor_id = 0;
+    world.focus_ground_item_id = 0;
+    world.target_actor_id = 0;
+    world.pending_pickup_item_id = 0;
+    world.action_locked = false;
+    world.action_lock_started_ms = 0;
+    world.action_fail_lock = false;
+    world.fail_action_ident = 0;
+    world.fail_dir = 0;
+    world.fail_action_time_ms = 0;
+    world.last_sent_action_ident = 0;
+    world.last_sent_action_dir = 0;
+    world.legacy_target_x = -1;
+    world.legacy_target_y = -1;
+    world.legacy_chr_action = LegacyChrAction::none;
+    world.action_key = -1;
+    world.mouse_down_ms = 0;
+    world.map_transition_pending = true;
+  }
+
   void clear_waiting_item() {
     clear_pending_item_action();
   }
@@ -1095,6 +1130,18 @@ struct GameStateStore {
   /// 应用世界快照消息：重置整个世界状态
   /// 这是进入游戏时最重要的消息，包含地图信息和所有可见角色
   void apply(const client_v1::WorldSnapshot& message) {
+    const auto preserve_runtime = world.map_transition_pending;
+    const auto bag_items = world.bag_items;
+    const auto equipment = world.equipment;
+    const auto magics = world.magics;
+    const auto self_ability = world.self_ability;
+    const auto self_ability_detail = world.self_ability_detail;
+    const auto sys_messages = world.sys_messages;
+    const auto chat_lines = world.chat_lines;
+    const auto chat_board_top = world.chat_board_top;
+    const auto whisper_name = world.whisper_name;
+    const auto group = world.group;
+    const auto guild = world.guild;
     clear_play_scene_state();
     world.map_id = message.map_id;
     world.width = message.width;
@@ -1128,11 +1175,36 @@ struct GameStateStore {
     world.focus_ground_item_id = 0;
     world.target_actor_id = 0;
     world.pending_pickup_item_id = 0;
+    if (preserve_runtime) {
+      world.bag_items = bag_items;
+      world.equipment = equipment;
+      world.magics = magics;
+      world.self_ability = self_ability;
+      world.self_ability_detail = self_ability_detail;
+      world.sys_messages = sys_messages;
+      world.chat_lines = chat_lines;
+      world.chat_board_top = chat_board_top;
+      world.whisper_name = whisper_name;
+      world.group = group;
+      world.guild = guild;
+    }
+    world.map_transition_pending = false;
     for (const auto& actor : message.actors) {
       world.actors[actor.actor_id] = ActorState{actor.actor_id, actor.name, actor.x, actor.y,
                                                 actor.x, actor.y, actor.dir, actor.feature,
                                                 actor.status, actor.actor_type};
       world.actor_draw_order.push_back(actor.actor_id);
+    }
+  }
+
+  void apply(const client_v1::WorldClearObjects& /*message*/) {
+    clear_map_objects_for_transition();
+  }
+
+  void apply(const client_v1::MapChange& message) {
+    clear_map_objects_for_transition();
+    if (!message.map_id.empty()) {
+      world.map_id = message.map_id;
     }
   }
 

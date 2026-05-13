@@ -69,6 +69,8 @@ enum class MessageId : std::uint16_t {
   actor_magic_fire = 315,
   actor_remove = 316,
   actor_magic_fire_fail = 317,
+  world_clear_objects = 318,
+  map_change = 319,
   move_intent = 400,
   action_intent = 401,
   spell_intent = 402,
@@ -393,6 +395,14 @@ struct WorldSnapshot {
   std::int32_t height{600};
   std::uint64_t self_actor_id{0};
   std::vector<WorldActor> actors{};
+};
+
+/// 清空当前地图对象：对应 Delphi SM_CLEAROBJECTS，切图时先清 actor/item 列表。
+struct WorldClearObjects {};
+
+/// 地图切换通知：对应 Delphi SM_CHANGEMAP，完整 WorldSnapshot 会随后到达。
+struct MapChange {
+  std::string map_id{};
 };
 
 /// 主角能力摘要：驱动底部 HUD 的等级、经验、负重、金币和饥饿图标
@@ -1014,6 +1024,8 @@ using Message = std::variant<ClientHello,
                              EnterWorldRequest,
                              EnterWorldResult,
                              WorldSnapshot,
+                             WorldClearObjects,
+                             MapChange,
                              ActorStateDelta,
                              LoginNotice,
                              LoginNoticeOk,
@@ -1271,6 +1283,8 @@ MIR2_CLIENT_V1_TRAIT(SelectCharacterResult, select_character_result);
 MIR2_CLIENT_V1_TRAIT(EnterWorldRequest, enter_world_request);
 MIR2_CLIENT_V1_TRAIT(EnterWorldResult, enter_world_result);
 MIR2_CLIENT_V1_TRAIT(WorldSnapshot, world_snapshot);
+MIR2_CLIENT_V1_TRAIT(WorldClearObjects, world_clear_objects);
+MIR2_CLIENT_V1_TRAIT(MapChange, map_change);
 MIR2_CLIENT_V1_TRAIT(ActorStateDelta, actor_state_delta);
 MIR2_CLIENT_V1_TRAIT(LoginNotice, login_notice);
 MIR2_CLIENT_V1_TRAIT(LoginNoticeOk, login_notice_ok);
@@ -1753,6 +1767,20 @@ inline bool decode(ByteReader& reader, WorldSnapshot& value) {
     value.actors.push_back(std::move(actor));
     return true;
   });
+}
+
+inline void encode(ByteWriter& /*writer*/, const WorldClearObjects& /*value*/) {}
+
+inline bool decode(ByteReader& /*reader*/, WorldClearObjects& /*value*/) {
+  return true;
+}
+
+inline void encode(ByteWriter& writer, const MapChange& value) {
+  writer.write_string(value.map_id);
+}
+
+inline bool decode(ByteReader& reader, MapChange& value) {
+  return reader.read_string(value.map_id);
 }
 
 inline void encode(ByteWriter& writer, const SelfAbility& value) {
@@ -2959,6 +2987,12 @@ inline std::optional<Message> decode_any(const Frame& frame) {
       break;
     case MessageId::world_snapshot:
       if (auto value = decode_message<WorldSnapshot>(frame); value.has_value()) return Message{*value};
+      break;
+    case MessageId::world_clear_objects:
+      if (auto value = decode_message<WorldClearObjects>(frame); value.has_value()) return Message{*value};
+      break;
+    case MessageId::map_change:
+      if (auto value = decode_message<MapChange>(frame); value.has_value()) return Message{*value};
       break;
     case MessageId::actor_state_delta:
       if (auto value = decode_message<ActorStateDelta>(frame); value.has_value()) return Message{*value};

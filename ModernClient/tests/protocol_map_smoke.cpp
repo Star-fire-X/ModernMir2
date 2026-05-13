@@ -255,6 +255,13 @@ void assert_p0_protocol_goldens() {
   assert_golden(snapshot, 302, 13, payload);
 
   payload.clear();
+  assert_golden(WorldClearObjects{}, 318, 142, payload);
+
+  payload.clear();
+  append_string(payload, "1");
+  assert_golden(MapChange{"1"}, 319, 143, payload);
+
+  payload.clear();
   append_world_actor(payload, 2000, "Hen", 332, 271, 4, 0, 0, 2);
   assert_golden(ActorUpsert{hen}, 306, 14, payload);
 
@@ -708,6 +715,22 @@ int main() {
   const auto decoded_actor_remove = decode_message<ActorRemove>(frames.front());
   assert(decoded_actor_remove.has_value());
   assert(decoded_actor_remove->actor_id == 2000);
+
+  frame_bytes = encode_frame(make_frame(WorldClearObjects{}, 212));
+  buffer = frame_bytes;
+  frames = drain_frames(buffer);
+  assert(frames.size() == 1);
+  assert(frames.front().message_id == MessageId::world_clear_objects);
+  assert(decode_message<WorldClearObjects>(frames.front()).has_value());
+
+  frame_bytes = encode_frame(make_frame(MapChange{"1"}, 213));
+  buffer = frame_bytes;
+  frames = drain_frames(buffer);
+  assert(frames.size() == 1);
+  assert(frames.front().message_id == MessageId::map_change);
+  const auto decoded_map_change = decode_message<MapChange>(frames.front());
+  assert(decoded_map_change.has_value());
+  assert(decoded_map_change->map_id == "1");
 
   frame_bytes = encode_frame(make_frame(UseItemResult{true}, 22));
   buffer = frame_bytes;

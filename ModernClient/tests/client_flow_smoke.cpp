@@ -345,6 +345,41 @@ int main() {
   assert(state.world.minimap.loaded);
   assert(state.world.minimap.pixels.size() == 4);
 
+  state.apply(WorldClearObjects{});
+  assert(state.world.map_transition_pending);
+  assert(state.world.self_actor_id == 0);
+  assert(state.world.actors.empty());
+  assert(state.world.ground_items.empty());
+  assert(state.world.bag_items[0].name == "Potion");
+  assert(state.world.equipment[1].name == "Sword");
+  assert(state.world.magics.size() == 1);
+  assert(!state.world.minimap.visible);
+  assert(!state.world.trade.visible);
+  assert(state.world.group.visible);
+  assert(state.world.guild.visible);
+
+  state.apply(MapChange{"1"});
+  assert(state.world.map_id == "1");
+  assert(state.world.map_transition_pending);
+  WorldSnapshot changed_snapshot;
+  changed_snapshot.map_id = "1";
+  changed_snapshot.width = 500;
+  changed_snapshot.height = 400;
+  changed_snapshot.self_actor_id = 1000;
+  changed_snapshot.actors.push_back(
+      WorldActor{1000, "Hero", 5, 5, 2, 0, 0, ActorType::player});
+  state.apply(changed_snapshot);
+  assert(!state.world.map_transition_pending);
+  assert(state.world.map_id == "1");
+  assert(state.world.width == 500);
+  assert(state.world.actors.size() == 1);
+  assert(state.world.bag_items[0].name == "Potion");
+  assert(state.world.equipment[1].name == "Sword");
+  assert(state.world.magics.size() == 1);
+  assert(!state.world.minimap.visible);
+  assert(state.world.group.visible);
+  assert(state.world.guild.visible);
+
   state.world.npc_dialog.visible = true;
   state.world.merchant_shop.visible = true;
   state.world.repair.dialog_visible = true;

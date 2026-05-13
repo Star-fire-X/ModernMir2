@@ -2122,6 +2122,12 @@ void ClientV1GameGatewayService::translate_legacy_packet(
   bool request_storage_items = false;
 
   switch (decoded->message.ident) {
+    case kSmClearObjects:
+      messages.push_back(client_v1::WorldClearObjects{});
+      break;
+    case kSmChangeMap:
+      messages.push_back(client_v1::MapChange{legacy_decode_string(decoded->body)});
+      break;
     case kSmNewMap: {
       const auto map_id = legacy_decode_string(decoded->body);
       std::scoped_lock lock(mutex_);
