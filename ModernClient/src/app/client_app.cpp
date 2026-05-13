@@ -1223,7 +1223,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
       state_.lobby.create_character_pending = false;
       state_.lobby.delete_character_pending = false;
       state_.lobby.enter_character_pending = false;
-      state_.clear_world_ui_state();
+      state_.clear_play_scene_state();
       // 客户端主动发起的断开（reason="client_disconnect"）不弹提示
       if (!disconnected->reason.empty() && disconnected->reason != "client_disconnect") {
         // 游戏中意外掉线：弹出重连确认框
@@ -1246,6 +1246,21 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
     }
     // 收到有效消息就取消网络等待定时器
     cancel_network_wait_timers();
+
+    const auto drop_world_runtime_if_inactive = [this](const std::string_view message_name) {
+      if (state_.connection_phase == GameStateStore::ConnectionPhase::play &&
+          scenes_.current_id() == SceneId::world) {
+        return false;
+      }
+      if (legacy_trace_enabled()) {
+        std::ostringstream out;
+        out << "drop_world_runtime message=" << message_name
+            << " scene=" << static_cast<int>(scenes_.current_id())
+            << " phase=" << static_cast<int>(state_.connection_phase);
+        legacy_trace(out.str());
+      }
+      return true;
+    };
 
     auto dispatch = [&](const auto& value) {
           using T = std::decay_t<decltype(value)>;
@@ -1424,8 +1439,14 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
 
           // ---- 以下为世界运行时的增量更新消息 ----
           } else if constexpr (std::is_same_v<T, client_v1::ActorStateDelta>) {
+            if (drop_world_runtime_if_inactive("ActorStateDelta")) {
+              return;
+            }
             state_.apply(value);                    // 角色属性增量更新
           } else if constexpr (std::is_same_v<T, client_v1::ActorUpsert>) {
+            if (drop_world_runtime_if_inactive("ActorUpsert")) {
+              return;
+            }
             if (legacy_trace_enabled()) {
               std::ostringstream out;
               out << "recv_actor_upsert now=" << detail::monotonic_ms()
@@ -1436,6 +1457,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             state_.apply(value);                    // 新增或更新角色
           } else if constexpr (std::is_same_v<T, client_v1::ActorRemove>) {
+            if (drop_world_runtime_if_inactive("ActorRemove")) {
+              return;
+            }
             if (legacy_trace_enabled()) {
               std::ostringstream out;
               out << "recv_actor_remove now=" << detail::monotonic_ms()
@@ -1444,6 +1468,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             state_.apply(value);                    // 删除离开视野的角色
           } else if constexpr (std::is_same_v<T, client_v1::ActorAction>) {
+            if (drop_world_runtime_if_inactive("ActorAction")) {
+              return;
+            }
             if (legacy_trace_enabled()) {
               std::ostringstream out;
               out << "recv_actor_action now=" << detail::monotonic_ms()
@@ -1455,6 +1482,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             state_.apply(value);                    // 其他角色动作同步
           } else if constexpr (std::is_same_v<T, client_v1::ActorMagicFire>) {
+            if (drop_world_runtime_if_inactive("ActorMagicFire")) {
+              return;
+            }
             if (legacy_trace_enabled()) {
               std::ostringstream out;
               out << "recv_actor_magic_fire now=" << detail::monotonic_ms()
@@ -1466,6 +1496,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             state_.apply(value);
           } else if constexpr (std::is_same_v<T, client_v1::ActorMagicFireFail>) {
+            if (drop_world_runtime_if_inactive("ActorMagicFireFail")) {
+              return;
+            }
             if (legacy_trace_enabled()) {
               std::ostringstream out;
               out << "recv_actor_magic_fire_fail now=" << detail::monotonic_ms()
@@ -1474,6 +1507,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             state_.apply(value);
           } else if constexpr (std::is_same_v<T, client_v1::ActorVitals>) {
+            if (drop_world_runtime_if_inactive("ActorVitals")) {
+              return;
+            }
             if (legacy_trace_enabled()) {
               std::ostringstream out;
               out << "recv_actor_vitals now=" << detail::monotonic_ms()
@@ -1484,6 +1520,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             state_.apply(value);                    // 角色血量/蓝量更新
           } else if constexpr (std::is_same_v<T, client_v1::ActorDeath>) {
+            if (drop_world_runtime_if_inactive("ActorDeath")) {
+              return;
+            }
             state_.apply(value);                    // 角色死亡状态
           } else if constexpr (std::is_same_v<T, client_v1::MagicList>) {
             state_.apply(value);                    // 已习得魔法列表
@@ -1529,6 +1568,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             state_.apply(value);                    // 服务端动作确认（解锁 action_locked）
           } else if constexpr (std::is_same_v<T, client_v1::GroundItemAdd>) {
+            if (drop_world_runtime_if_inactive("GroundItemAdd")) {
+              return;
+            }
             if (legacy_trace_enabled()) {
               std::ostringstream out;
               out << "recv_ground_item_add now=" << detail::monotonic_ms()
@@ -1538,6 +1580,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             state_.apply(value);                    // 地面新增物品
           } else if constexpr (std::is_same_v<T, client_v1::GroundItemRemove>) {
+            if (drop_world_runtime_if_inactive("GroundItemRemove")) {
+              return;
+            }
             if (legacy_trace_enabled()) {
               std::ostringstream out;
               out << "recv_ground_item_remove now=" << detail::monotonic_ms()
@@ -1587,6 +1632,15 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           } else if constexpr (std::is_same_v<T, client_v1::Notice>) {
             show_modal(widen(value.title), widen(value.text));  // 弹出公告对话框
           } else if constexpr (std::is_same_v<T, client_v1::DisconnectReason>) {
+            state_.login.request_pending = false;
+            state_.lobby.server_select_pending = false;
+            state_.lobby.character_list_pending = false;
+            state_.lobby.create_character_pending = false;
+            state_.lobby.delete_character_pending = false;
+            state_.lobby.enter_character_pending = false;
+            state_.clear_play_scene_state();
+            state_.connection_phase = GameStateStore::ConnectionPhase::login;
+            request_scene_change(SceneId::login);
             show_modal(L"Disconnected", widen(value.text));     // 服务端发起的断开原因
 
           // ---- 心跳应答 ----
