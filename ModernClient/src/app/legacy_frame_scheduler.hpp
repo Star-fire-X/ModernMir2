@@ -14,10 +14,12 @@ class LegacyFrameScheduler {
     std::function<void()> process_action_messages;
     std::function<void()> dwin_process;
     std::function<void()> scene_run;
-    std::function<void()> render_scene;
-    std::function<void()> paint_ui;
-    std::function<void()> render_modal;
-    std::function<void()> present;
+    std::function<void()> draw_screen;
+    std::function<void()> dwin_direct_paint;
+    std::function<void()> draw_screen_top;
+    std::function<void()> draw_hint;
+    std::function<void()> draw_moving_item;
+    std::function<void()> flip;
     std::function<bool()> can_draw;
   };
 
@@ -33,10 +35,12 @@ class LegacyFrameScheduler {
     const auto can_draw = hooks.can_draw == nullptr || hooks.can_draw();
     if (render_due && can_draw) {
       render_elapsed_ms_ = 0.0F;
-      call(hooks.render_scene);
-      call(hooks.paint_ui);
-      call(hooks.render_modal);
-      call(hooks.present);
+      call(hooks.draw_screen);
+      call(hooks.dwin_direct_paint);
+      call(hooks.draw_screen_top);
+      call(hooks.draw_hint);
+      call(hooks.draw_moving_item);
+      call(hooks.flip);
       return;
     }
 

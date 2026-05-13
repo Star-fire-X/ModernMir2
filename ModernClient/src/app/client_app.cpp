@@ -9,7 +9,7 @@
 //   4. 协议事件分发（handle_protocol_events，std::visit 分发所有消息）
 //   5. 定时器更新（心跳、外挂检测、鼠标轮询、动作锁定超时）
 //   6. 场景更新（输入处理 → 动画推进 → UI 交互）
-//   7. 场景渲染（清屏 → 场景绘制 → 模态对话框覆盖 → D3D11 present）
+//   7. 场景渲染（DrawScreen → DirectPaint → DrawScreenTop/Hint → Flip）
 //   8. sleep(1ms) 让渡 CPU
 //
 // 三网关架构（对应 Delphi 客户端的三级认证流程）：
@@ -351,6 +351,8 @@ int ClientApp::run() {
             },
             [this, &context] { scenes_.paint_ui(context); },
             [this] { render_modal(); },
+            [] {},
+            [] {},
             [this] { renderer_.present(); },
             [this] { return can_draw_frame(); }});
     std::this_thread::sleep_for(std::chrono::milliseconds(1));  // 让渡 CPU，降低功耗

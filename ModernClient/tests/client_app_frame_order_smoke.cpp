@@ -22,16 +22,18 @@ void test_render_due_order() {
           [&] { push(calls, "process_action_messages"); },
           [&] { push(calls, "dwin_process"); },
           [&] { push(calls, "scene_run"); },
-          [&] { push(calls, "render_scene"); },
-          [&] { push(calls, "paint_ui"); },
-          [&] { push(calls, "render_modal"); },
-          [&] { push(calls, "present"); },
+          [&] { push(calls, "draw_screen"); },
+          [&] { push(calls, "dwin_direct_paint"); },
+          [&] { push(calls, "draw_screen_top"); },
+          [&] { push(calls, "draw_hint"); },
+          [&] { push(calls, "draw_moving_item"); },
+          [&] { push(calls, "flip"); },
           [] { return true; }});
 
   const std::vector<std::string> expected{
       "timer1_network_drain", "capture_ui_input", "process_key_messages",
-      "process_action_messages", "dwin_process", "render_scene",
-      "paint_ui", "render_modal", "present"};
+      "process_action_messages", "dwin_process", "draw_screen",
+      "dwin_direct_paint", "draw_screen_top", "draw_hint", "draw_moving_item", "flip"};
   assert(calls == expected);
 }
 
@@ -48,10 +50,12 @@ void test_non_render_runs_scene() {
           [&] { push(calls, "process_action_messages"); },
           [&] { push(calls, "dwin_process"); },
           [&] { push(calls, "scene_run"); },
-          [&] { push(calls, "render_scene"); },
-          [&] { push(calls, "paint_ui"); },
-          [&] { push(calls, "render_modal"); },
-          [&] { push(calls, "present"); },
+          [&] { push(calls, "draw_screen"); },
+          [&] { push(calls, "dwin_direct_paint"); },
+          [&] { push(calls, "draw_screen_top"); },
+          [&] { push(calls, "draw_hint"); },
+          [&] { push(calls, "draw_moving_item"); },
+          [&] { push(calls, "flip"); },
           [] { return true; }});
 
   const std::vector<std::string> expected{
@@ -74,10 +78,12 @@ void test_can_draw_false_runs_scene() {
           [&] { push(calls, "process_action_messages"); },
           [&] { push(calls, "dwin_process"); },
           [&] { push(calls, "scene_run"); },
-          [&] { push(calls, "render_scene"); },
-          [&] { push(calls, "paint_ui"); },
-          [&] { push(calls, "render_modal"); },
-          [&] { push(calls, "present"); },
+          [&] { push(calls, "draw_screen"); },
+          [&] { push(calls, "dwin_direct_paint"); },
+          [&] { push(calls, "draw_screen_top"); },
+          [&] { push(calls, "draw_hint"); },
+          [&] { push(calls, "draw_moving_item"); },
+          [&] { push(calls, "flip"); },
           [] { return false; }});
 
   const std::vector<std::string> expected{

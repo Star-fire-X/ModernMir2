@@ -70,7 +70,7 @@ enum class SceneId {
 ///   1. enter()  — 场景创建后立即调用，初始化 UI 树和注册回调
 ///   2. capture_ui_input() → process_key_messages() → process_action_messages()
 ///      → dwin_process() → scene_run()
-///   3. render_scene() → paint_ui()
+///   3. DrawScreen(render_scene) → DirectPaint(paint_ui) → DrawScreenTop/DrawHint → Flip
 ///   4. exit()   — 切换场景前调用，释放场景持有的资源
 ///
 /// 场景切换是同步的：exit(old) → enter(new) 在同一帧内完成。
