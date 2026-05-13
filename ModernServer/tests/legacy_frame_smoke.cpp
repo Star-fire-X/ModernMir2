@@ -320,6 +320,46 @@ bool check_ingress_sequence_guard() {
   return true;
 }
 
+bool check_session_fifo_ordering() {
+  mir2::WorldService world;
+  world.seed_session_sequence_for_test(88, 0);
+
+  // Use authenticate — it is handled entirely within WorldService without
+  // requiring an initialized LogicRuntime (returns early after admission).
+  mir2::LogicCommand cmd1;
+  cmd1.kind = mir2::LogicCommandKind::authenticate;
+  cmd1.session_id = 88;
+  cmd1.session_seq = 1;
+  cmd1.account_id = "s";
+  cmd1.character_name = "Fifo";
+  cmd1.certification = 10;
+
+  mir2::LogicCommand cmd2 = cmd1;
+  cmd2.session_seq = 2;
+  cmd2.certification = 20;
+
+  mir2::LogicCommand cmd3 = cmd1;
+  cmd3.session_seq = 3;
+  cmd3.certification = 30;
+
+  mir2::WorldIngressBatch batch;
+  batch.push(cmd1, 100);
+  batch.push(cmd2, 101);
+  batch.push(cmd3, 102);
+  batch.mark_frame(4);
+
+  const auto dispatch = world.process_ingress_batch_for_test(batch);
+  if (!batch.empty()) {
+    std::cerr << "fifo_ordering_batch_not_cleared\n";
+    return false;
+  }
+  if (!dispatch.audit_events.empty() || !dispatch.legacy_traces.empty()) {
+    std::cerr << "fifo_ordering_unexpected_rejection\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -336,6 +376,9 @@ int main() {
     return 1;
   }
   if (!check_ingress_sequence_guard()) {
+    return 1;
+  }
+  if (!check_session_fifo_ordering()) {
     return 1;
   }
   return 0;
