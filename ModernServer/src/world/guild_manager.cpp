@@ -64,6 +64,35 @@ bool Guild::is_lord(std::string_view name) const {
   return lord.has_value() && equals_name(*lord, name);
 }
 
+std::vector<GuildChatDelivery> Guild::guild_chat_deliveries(std::string_view speaker_name,
+                                                            std::string_view text) const {
+  std::vector<GuildChatDelivery> deliveries;
+  if (text.empty()) {
+    return deliveries;
+  }
+  const auto message = std::string(speaker_name) + ":" + std::string(text);
+  for (const auto& rank : ranks_) {
+    for (const auto& member : rank.members) {
+      if (member.online_actor_id != 0 && member.hears_guild_chat) {
+        deliveries.push_back(GuildChatDelivery{member.name, member.online_actor_id, message});
+      }
+    }
+  }
+  return deliveries;
+}
+
+std::vector<std::uint64_t> Guild::online_member_actor_ids() const {
+  std::vector<std::uint64_t> actor_ids;
+  for (const auto& rank : ranks_) {
+    for (const auto& member : rank.members) {
+      if (member.online_actor_id != 0) {
+        actor_ids.push_back(member.online_actor_id);
+      }
+    }
+  }
+  return actor_ids;
+}
+
 bool Guild::add_lord(std::string name, std::string rank_name, std::uint64_t online_actor_id) {
   name = normalize_name(std::move(name));
   rank_name = util::trim(std::move(rank_name));
@@ -71,7 +100,7 @@ bool Guild::add_lord(std::string name, std::string rank_name, std::uint64_t onli
     return false;
   }
   auto& rank = ensure_rank(kGuildLordRank, std::move(rank_name));
-  rank.members.push_back(GuildMember{name, rank.rank, rank.rank_name, online_actor_id});
+  rank.members.push_back(GuildMember{name, rank.rank, rank.rank_name, online_actor_id, true});
   return true;
 }
 
@@ -82,7 +111,7 @@ bool Guild::add_member(std::string name, std::string rank_name, std::uint64_t on
     return false;
   }
   auto& rank = ensure_rank(kGuildDefaultRank, std::move(rank_name));
-  rank.members.push_back(GuildMember{name, rank.rank, rank.rank_name, online_actor_id});
+  rank.members.push_back(GuildMember{name, rank.rank, rank.rank_name, online_actor_id, true});
   return true;
 }
 
@@ -120,6 +149,15 @@ bool Guild::clear_member_online_actor(std::string_view name, std::uint64_t onlin
     return false;
   }
   member->online_actor_id = 0;
+  return true;
+}
+
+bool Guild::set_member_hears_guild_chat(std::string_view name, bool hears_guild_chat) {
+  auto* member = find_member(name);
+  if (member == nullptr) {
+    return false;
+  }
+  member->hears_guild_chat = hears_guild_chat;
   return true;
 }
 
@@ -161,6 +199,7 @@ bool Guild::transfer_lord(std::string_view current_lord, std::string_view target
 
   std::string target_copy;
   std::uint64_t target_actor_id = 0;
+  bool target_hears_guild_chat = true;
   for (auto rank_it = ranks_.begin(); rank_it != ranks_.end(); ++rank_it) {
     auto& members = rank_it->members;
     const auto member_it = std::find_if(members.begin(), members.end(),
@@ -172,6 +211,7 @@ bool Guild::transfer_lord(std::string_view current_lord, std::string_view target
     }
     target_copy = member_it->name;
     target_actor_id = member_it->online_actor_id;
+    target_hears_guild_chat = member_it->hears_guild_chat;
     members.erase(member_it);
     if (members.empty()) {
       ranks_.erase(rank_it);
@@ -185,13 +225,16 @@ bool Guild::transfer_lord(std::string_view current_lord, std::string_view target
   }
   const auto old_lord_name = old_lord->name;
   const auto old_lord_actor_id = old_lord->online_actor_id;
+  const auto old_lord_hears_guild_chat = old_lord->hears_guild_chat;
   remove_member(current_lord);
 
   auto& lord_rank = ensure_rank(kGuildLordRank, std::move(new_lord_rank_name));
   lord_rank.members.insert(lord_rank.members.begin(),
                            GuildMember{target_copy, kGuildLordRank, lord_rank.rank_name,
-                                       target_actor_id});
-  add_member(old_lord_name, std::move(old_lord_rank_name), old_lord_actor_id);
+                                       target_actor_id, target_hears_guild_chat});
+  if (add_member(old_lord_name, std::move(old_lord_rank_name), old_lord_actor_id)) {
+    set_member_hears_guild_chat(old_lord_name, old_lord_hears_guild_chat);
+  }
   return true;
 }
 
@@ -348,6 +391,15 @@ GuildMemberOpResult GuildManager::transfer_lord(std::string_view guild_name,
   }
   return guild->transfer_lord(requester_name, target_name) ? GuildMemberOpResult::ok
                                                            : GuildMemberOpResult::not_member;
+}
+
+std::vector<GuildChatDelivery> GuildManager::guild_chat_deliveries(
+    std::string_view guild_name, std::string_view speaker_name, std::string_view text) const {
+  const auto* guild = find_guild(guild_name);
+  if (guild == nullptr) {
+    return {};
+  }
+  return guild->guild_chat_deliveries(speaker_name, text);
 }
 
 }  // namespace mir2

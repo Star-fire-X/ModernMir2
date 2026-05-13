@@ -17,6 +17,13 @@ struct GuildMember {
   std::uint8_t rank{kGuildDefaultRank};
   std::string rank_name{};
   std::uint64_t online_actor_id{0};
+  bool hears_guild_chat{true};
+};
+
+struct GuildChatDelivery {
+  std::string member_name{};
+  std::uint64_t online_actor_id{0};
+  std::string text{};
 };
 
 struct GuildRankGroup {
@@ -64,6 +71,9 @@ class Guild {
   [[nodiscard]] GuildMember* find_member(std::string_view name);
   [[nodiscard]] bool has_member(std::string_view name) const { return find_member(name) != nullptr; }
   [[nodiscard]] bool is_lord(std::string_view name) const;
+  [[nodiscard]] std::vector<GuildChatDelivery> guild_chat_deliveries(
+      std::string_view speaker_name, std::string_view text) const;
+  [[nodiscard]] std::vector<std::uint64_t> online_member_actor_ids() const;
 
   bool add_lord(std::string name, std::string rank_name = "Guild Lord",
                 std::uint64_t online_actor_id = 0);
@@ -75,6 +85,7 @@ class Guild {
                      std::string new_lord_rank_name = "Guild Lord");
   bool set_member_online_actor(std::string_view name, std::uint64_t online_actor_id);
   bool clear_member_online_actor(std::string_view name, std::uint64_t online_actor_id);
+  bool set_member_hears_guild_chat(std::string_view name, bool hears_guild_chat);
   void set_notice_lines(std::vector<std::string> notice_lines);
 
  private:
@@ -108,6 +119,8 @@ class GuildManager {
   GuildMemberOpResult transfer_lord(std::string_view guild_name,
                                     std::string_view requester_name,
                                     std::string_view target_name);
+  [[nodiscard]] std::vector<GuildChatDelivery> guild_chat_deliveries(
+      std::string_view guild_name, std::string_view speaker_name, std::string_view text) const;
 
  private:
   std::vector<Guild> guilds_{};
