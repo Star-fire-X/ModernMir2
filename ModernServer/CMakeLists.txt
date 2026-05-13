@@ -100,6 +100,7 @@ set(MIR2_HOST_SOURCES
   src/services/world_service.cpp
   src/storage/repository.cpp
   src/world/game_object.cpp
+  src/world/guild_manager.cpp
   src/world/legacy_event_manager.cpp
   src/world/legacy_frame_driver.cpp
   src/world/legacy_item_rules.cpp
@@ -671,6 +672,10 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_guild_castle_business_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_guild_castle_business_smoke COMMAND mir2_guild_castle_business_smoke)
 
+  add_executable(mir2_guild_manager_smoke tests/guild_manager_smoke.cpp)
+  target_link_libraries(mir2_guild_manager_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_guild_manager_smoke COMMAND mir2_guild_manager_smoke)
+
   add_executable(mir2_world_castle_refresh_smoke tests/world_castle_refresh_smoke.cpp)
   target_link_libraries(mir2_world_castle_refresh_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_world_castle_refresh_smoke COMMAND mir2_world_castle_refresh_smoke)
@@ -885,6 +890,7 @@ if(BUILD_TESTING)
       mir2_item_phase2_use_smoke
       mir2_item_phase3_trade_smoke
       mir2_special_consumables_legacy_smoke
+      mir2_guild_manager_smoke
       mir2_monster_legacy_drop_scatter_smoke
       mir2_client_v1_auth_boundary_smoke
       mir2_client_v1_login_to_world_flow_smoke
