@@ -65,6 +65,35 @@ int main() {
   scenes.scene_run(context, 0.0F);
   assert(has_sound_id(audio, mir2::client::s_main_theme));
 
+  input = mir2::client::InputState{};
+  input.key_pressed[VK_F1] = true;
+  context.ui_input = mir2::client::ui::UiInputResult{true, false, false};
+  world.action_key = -1;
+  scenes.process_key_messages(context);
+  assert(world.action_key == -1);
+
+  input = mir2::client::InputState{};
+  input.left_pressed = true;
+  input.left_down = true;
+  context.ui_input = mir2::client::ui::UiInputResult{true, false, false};
+  world.focus_actor_id = 1;
+  world.focus_ground_item_id = 900;
+  world.legacy_target_x = 52;
+  world.legacy_target_y = 50;
+  world.legacy_chr_action = mir2::client::LegacyChrAction::walk;
+  world.pending_pickup_item_id = 900;
+  world.action_key = 0;
+  world.mouse_down_ms = 123;
+  scenes.process_action_messages(context, 0.016F);
+  assert(world.focus_actor_id == 0);
+  assert(world.focus_ground_item_id == 0);
+  assert(world.legacy_target_x == -1);
+  assert(world.legacy_target_y == -1);
+  assert(world.legacy_chr_action == mir2::client::LegacyChrAction::none);
+  assert(world.pending_pickup_item_id == 0);
+  assert(world.action_key == -1);
+  assert(world.mouse_down_ms == 0);
+
   world.map_id = "3";
   world.width = 400;
   world.height = 300;

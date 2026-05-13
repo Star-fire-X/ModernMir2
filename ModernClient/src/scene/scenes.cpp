@@ -6222,6 +6222,22 @@ class WorldScene final : public Scene {
     update_legacy_weight_slow(world);
     server_accept_next_action(world, now_ms);
 
+    const auto input_guard =
+        context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging;
+    if (input_guard) {
+      world.focus_actor_id = 0;
+      world.focus_ground_item_id = 0;
+      world.legacy_target_x = -1;
+      world.legacy_target_y = -1;
+      world.legacy_chr_action = LegacyChrAction::none;
+      world.pending_pickup_item_id = 0;
+      world.action_key = -1;
+      world.mouse_down_ms = 0;
+      next_left_hold_ms_ = 0;
+      next_right_hold_ms_ = 0;
+      return;
+    }
+
     const auto legacy_input = make_legacy_input(context, it->second, now_ms);
     world.focus_actor_id = focused_actor_at(context, legacy_input);
     world.focus_ground_item_id = focused_ground_item_at(context, legacy_input.map_x,
@@ -6254,13 +6270,11 @@ class WorldScene final : public Scene {
       return;
     }
 
-    const auto input_guard =
-        context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging;
-    if (!input_guard && input.key_pressed['R']) {
+    if (input.key_pressed['R']) {
       context.app->request_reselect_character();
       return;
     }
-    if (!input_guard && input.key_pressed[VK_ESCAPE]) {
+    if (input.key_pressed[VK_ESCAPE]) {
       world.legacy_target_x = -1;
       world.legacy_target_y = -1;
       world.legacy_chr_action = LegacyChrAction::none;
@@ -6269,12 +6283,10 @@ class WorldScene final : public Scene {
       return;
     }
 
-    if (!input_guard) {
-      collect_keyboard_ops(context, legacy_input, it->second);
-      collect_mouse_ops(context, legacy_input, it->second);
-    }
+    collect_keyboard_ops(context, legacy_input, it->second);
+    collect_mouse_ops(context, legacy_input, it->second);
 
-    if (debug_arrow_move_enabled() && !input_guard) {
+    if (debug_arrow_move_enabled()) {
       if (handle_debug_arrow_move(context, it->second)) {
         return;
       }
