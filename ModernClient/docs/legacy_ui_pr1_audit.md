@@ -147,4 +147,3 @@
    - modal 与 active_menu 边界行为与窗口树清理。
    - `draw_hint` 与 `draw_screen_top` 对应 UI 数据源绑定。
    - 世界场景输入闸门和键序在关键窗口弹出/关闭时的一致性。
-
