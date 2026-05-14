@@ -116,9 +116,9 @@
 ## 五、PR-1 技术差距（直接可执行项）
 
 ### 立即可判定为差距
-1. `draw_hint` 在 `ClientApp` 渲染链目前未接入 `Scene` 的系统消息/hover 提示链路（scheduler 里保留了阶段，实际实现为空）。  
+1. `draw_hint` 在 `ClientApp` 渲染链目前未接入 `Scene` 的系统消息/hover 提示链路（scheduler 里保留了阶段，实际实现为空）。
    - 文件：`ModernClient/src/app/client_app.cpp:323`（hook 为空）
-2. `draw_screen_top`/`draw_hint` 的当前 UI 来源不是统一 trace 对齐来源（缺 trace 节点与现有 `golden` 对应验证）。  
+2. `draw_screen_top`/`draw_hint` 的当前 UI 来源不是统一 trace 对齐来源（缺 trace 节点与现有 `golden` 对应验证）。
    - 文件：`ModernClient/tests/scene_trace_golden_smoke.cpp`
 
 ### 与 Delphi 对齐需继续补录的关键点
@@ -147,3 +147,4 @@
    - modal 与 active_menu 边界行为与窗口树清理。
    - `draw_hint` 与 `draw_screen_top` 对应 UI 数据源绑定。
    - 世界场景输入闸门和键序在关键窗口弹出/关闭时的一致性。
+
