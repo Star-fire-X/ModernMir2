@@ -27,6 +27,7 @@
 #include "app/client_app.hpp"
 
 #include "scene/legacy_auth_ui.hpp"
+#include "scene/legacy_inventory_ui.hpp"
 #include "scene/legacy_play_ui.hpp"
 #include "ui/legacy_ui.hpp"
 
@@ -141,6 +142,10 @@ void legacy_auth_trace(const legacy_auth_ui::LegacyAuthUiTraceLabel label) {
 
 void legacy_play_trace(const legacy_play_ui::LegacyPlayUiTraceLabel label) {
   legacy_trace(legacy_play_ui::legacy_play_ui_trace_label(label));
+}
+
+void legacy_inventory_trace(const legacy_inventory_ui::LegacyInventoryUiTraceLabel label) {
+  legacy_trace(legacy_inventory_ui::legacy_inventory_ui_trace_label(label));
 }
 
 /// 在软件渲染器上绘制精灵帧
@@ -831,6 +836,7 @@ void ClientApp::request_use_item(const client_v1::UseItemIntent& intent) {
         << " slot=" << intent.item_slot << " name=" << intent.name;
     legacy_trace(out.str());
   }
+  legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::send_use_item);
   auto legacy_intent = intent;
   legacy_intent.name = legacy_byte_payload(std::move(legacy_intent.name));
   protocol_.send(legacy_intent);
@@ -845,6 +851,7 @@ void ClientApp::request_equip_item(const client_v1::EquipItemRequest& request) {
         << " make_index=" << request.item_make_index << " name=" << request.name;
     legacy_trace(out.str());
   }
+  legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::send_takeon_item);
   auto legacy_request = request;
   legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
   protocol_.send(legacy_request);
@@ -859,6 +866,7 @@ void ClientApp::request_unequip_item(const client_v1::UnequipItemRequest& reques
         << " make_index=" << request.item_make_index << " name=" << request.name;
     legacy_trace(out.str());
   }
+  legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::send_takeoff_item);
   auto legacy_request = request;
   legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
   protocol_.send(legacy_request);
@@ -1612,12 +1620,20 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.apply(value);                    // 已习得魔法列表
           } else if constexpr (std::is_same_v<T, client_v1::SelfAbility>) {
             state_.apply(value);                    // 主角 HUD 能力摘要
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_gold_or_attributes);
           } else if constexpr (std::is_same_v<T, client_v1::SelfAbilityDetail>) {
             state_.apply(value);                    // 主角完整能力摘要
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_gold_or_attributes);
           } else if constexpr (std::is_same_v<T, client_v1::MiniMapData>) {
             state_.apply(value);                    // 小地图数据
           } else if constexpr (std::is_same_v<T, client_v1::BagSnapshot>) {
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::recv_inventory_message_fifo);
             state_.apply(value);                    // 完整背包镜像
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_bag_or_equipment);
           } else if constexpr (std::is_same_v<T, client_v1::InventoryAdd>) {
             if (legacy_trace_enabled()) {
               std::ostringstream out;
@@ -1626,9 +1642,17 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
                   << " name=" << value.entry.item.name;
               legacy_trace(out.str());
             }
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::recv_inventory_message_fifo);
             state_.apply(value);                    // 背包新增
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_bag_or_equipment);
           } else if constexpr (std::is_same_v<T, client_v1::InventoryUpdate>) {
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::recv_inventory_message_fifo);
             state_.apply(value);                    // 背包更新
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_bag_or_equipment);
           } else if constexpr (std::is_same_v<T, client_v1::InventoryRemove>) {
             if (legacy_trace_enabled()) {
               std::ostringstream out;
@@ -1636,13 +1660,29 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
                   << " slot=" << value.slot;
               legacy_trace(out.str());
             }
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::recv_inventory_message_fifo);
             state_.apply(value);                    // 背包移除
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_bag_or_equipment);
           } else if constexpr (std::is_same_v<T, client_v1::InventoryClearRange>) {
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::recv_inventory_message_fifo);
             state_.apply(value);                    // 背包范围清理
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_bag_or_equipment);
           } else if constexpr (std::is_same_v<T, client_v1::EquipmentSnapshot>) {
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::server_equipment_message_fifo);
             state_.apply(value);                    // 装备栏镜像
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_bag_or_equipment);
           } else if constexpr (std::is_same_v<T, client_v1::DurabilityChange>) {
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::recv_inventory_message_fifo);
             state_.apply(value);                    // 耐久变化
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_bag_or_equipment);
           } else if constexpr (std::is_same_v<T, client_v1::ActionAck>) {
             if (legacy_trace_enabled()) {
               std::ostringstream out;
@@ -1681,7 +1721,11 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
                   << " ok=" << value.ok;
               legacy_trace(out.str());
             }
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::recv_use_item_result_fifo);
             state_.apply(value);                    // 使用物品结果
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::clear_or_restore_pending_item);
           } else if constexpr (std::is_same_v<T, client_v1::ChatLine>) {
             legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::recv_chat_line_fifo);
             state_.apply(value);                    // 底部聊天板行
@@ -1720,6 +1764,8 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.apply(value);                    // 系统信息（顶部短提示 + 聊天板）
             legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::append_chat_board_line);
             legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::append_top_sys_message);
+            legacy_inventory_trace(
+                legacy_inventory_ui::LegacyInventoryUiTraceLabel::append_system_message);
           } else if constexpr (std::is_same_v<T, client_v1::Notice>) {
             show_modal(widen(value.title), widen(value.text));  // 弹出公告对话框
           } else if constexpr (std::is_same_v<T, client_v1::DisconnectReason>) {

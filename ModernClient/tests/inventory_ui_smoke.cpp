@@ -1,4 +1,5 @@
 #include "game/game_state.hpp"
+#include "scene/legacy_inventory_ui.hpp"
 #include "ui/ui.hpp"
 
 #include <cassert>
@@ -184,6 +185,21 @@ void test_invalid_drop_timeout_restores_original_slot() {
   assert(state.world.bag_items[6].make_index == 3001);
 }
 
+void test_legacy_item_hint_and_moving_overlay_geometry() {
+  const auto potion = make_item("Potion", 2001, 0);
+  const auto hint = mir2::client::legacy_inventory_ui::legacy_item_hint_text(potion);
+  assert(hint == L"Potion\\药品\\持久 0/1");
+  assert(mir2::client::legacy_inventory_ui::legacy_hint_to_render_text(hint) ==
+         L"Potion\n药品\n持久 0/1");
+
+  const auto rect =
+      mir2::client::legacy_inventory_ui::legacy_moving_item_overlay_rect(100, 120, 32, 28);
+  assert(rect.x == 84);
+  assert(rect.y == 106);
+  assert(rect.w == 32);
+  assert(rect.h == 28);
+}
+
 }  // namespace
 
 int main() {
@@ -191,5 +207,6 @@ int main() {
   test_right_click_menu_drop_and_pending_clear();
   test_equip_unequip_belt_and_durability_state();
   test_invalid_drop_timeout_restores_original_slot();
+  test_legacy_item_hint_and_moving_overlay_geometry();
   return 0;
 }
