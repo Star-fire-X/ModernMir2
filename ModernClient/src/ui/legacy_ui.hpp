@@ -63,12 +63,17 @@ class LegacyUiManager {
 
   void show_modal(Window& window);
   void close_modal(UiNode& window);
+  void show_active_menu(UiNode& menu);
+  void close_active_menu(UiNode* menu = nullptr);
 
   void set_focus(UiNode* node);
   void release_focus();
   void set_capture(UiNode* node);
   void release_capture(UiNode* node = nullptr);
 
+  UiInputResult capture_input(const InputState& input);
+  void process_queued_events(const InputState& input);
+  void trace_legacy_shortcut_fallback();
   void direct_paint(SoftwareRenderer& renderer);
   void clear_for_scene_exit();
   void clear_for_disconnect();

@@ -145,6 +145,19 @@ void test_legacy_control_aliases_compile_and_join_tree() {
   assert(tooltip != nullptr);
   assert(edit->accepts_text_input());
   assert(window->children().size() == 6U);
+
+  manager.show_active_menu(*button);
+  assert(manager.tree().active_menu() == button);
+  manager.close_active_menu(button);
+  assert(manager.tree().active_menu() == nullptr);
+
+  InputState input{};
+  input.key_pressed[VK_RETURN] = true;
+  input.enter_pressed = true;
+  manager.trace().clear();
+  manager.capture_input(input);
+  manager.trace_legacy_shortcut_fallback();
+  assert(manager.trace().events().back() == "legacy_shortcut_fallback");
 }
 
 void test_direct_paint_trace_is_window_layer_only(

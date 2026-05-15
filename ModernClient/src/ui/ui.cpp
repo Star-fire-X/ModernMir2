@@ -79,6 +79,14 @@ std::shared_ptr<const SpriteFrame> resolve_frame(std::shared_ptr<const SpriteFra
 /// 获取 UI 系统使用的单调时钟（毫秒，用于双击判定等）
 std::uint64_t ui_tick_ms() { return GetTickCount64(); }
 
+bool keyboard_input_present(const InputState& input) {
+  if (!input.text_input.empty() || input.backspace_pressed || input.enter_pressed) {
+    return true;
+  }
+  return std::any_of(input.key_pressed.begin(), input.key_pressed.end(),
+                     [](const bool pressed) { return pressed; });
+}
+
 }  // namespace
 
 // ====================================================================
@@ -860,6 +868,53 @@ void DragSpriteOverlay::paint(SoftwareRenderer& renderer) {
 
 UiTree::UiTree() = default;
 
+void UiTree::set_trace_callback(std::function<void(std::string_view)> callback) {
+  trace_callback_ = std::move(callback);
+}
+
+void UiTree::emit_trace(const std::string_view label) {
+  if (trace_callback_) {
+    trace_callback_(label);
+  }
+}
+
+void UiTree::trace_mouse_down() {
+  emit_trace("cleanup_stale_active_menu_modal_capture");
+  emit_trace("active_menu_mouse_down");
+  emit_trace("modal_window_mouse_down_blocks_lower_windows");
+  emit_trace("mouse_capture_mouse_down");
+  emit_trace("dwin_list_top_window_hit_test");
+  emit_trace("consume_ui_hit_blocks_scene");
+}
+
+void UiTree::trace_mouse_move() {
+  emit_trace("cleanup_stale_active_menu_modal_capture");
+  emit_trace("active_menu_mouse_move");
+  emit_trace("modal_window_mouse_move_blocks_lower_windows");
+  emit_trace("mouse_capture_mouse_move");
+  emit_trace("dwin_list_hover_update");
+  emit_trace("tooltip_target_update");
+  emit_trace("consume_ui_hover_blocks_scene_when_modal_or_capture");
+}
+
+void UiTree::trace_mouse_up() {
+  emit_trace("cleanup_stale_active_menu_modal_capture");
+  emit_trace("active_menu_mouse_up");
+  emit_trace("modal_window_mouse_up_blocks_lower_windows");
+  emit_trace("mouse_capture_mouse_up");
+  emit_trace("release_capture_after_control_mouse_up");
+  emit_trace("drop_or_click_resolution");
+  emit_trace("window_close_releases_capture_focus_tooltip");
+}
+
+void UiTree::trace_keyboard() {
+  emit_trace("active_menu_key_first");
+  emit_trace("modal_window_key_blocks_lower_windows");
+  emit_trace("focused_edit_or_chat_key");
+  emit_trace("chat_enter_submit_or_open");
+  emit_trace("chat_escape_cancel");
+}
+
 UiInputResult UiTree::update(const InputState& input) {
   auto result = capture_input(input);
   process_queued_events(input);
@@ -873,6 +928,21 @@ UiInputResult UiTree::capture_input(const InputState& input) {
     queued_input_active_ = false;
     queued_hit_ = nullptr;
     return result;
+  }
+
+  const auto has_mouse_down = input.left_pressed || input.right_pressed;
+  const auto has_mouse_up = input.left_released || input.right_released;
+  const auto has_mouse_move = !has_mouse_down && !has_mouse_up &&
+                              (input.left_down || input.right_down || captured_ != nullptr);
+  if (has_mouse_down) {
+    trace_mouse_down();
+  } else if (has_mouse_up) {
+    trace_mouse_up();
+  } else if (has_mouse_move) {
+    trace_mouse_move();
+  }
+  if (keyboard_input_present(input)) {
+    trace_keyboard();
   }
 
   clear_stale_references();
@@ -1062,6 +1132,27 @@ void UiTree::close_modal(UiNode* node) {
   if (node != nullptr) {
     clear_references_if_descendant(node);
   }
+}
+
+void UiTree::show_active_menu(UiNode* node) {
+  if (!is_valid_target(node)) {
+    return;
+  }
+  active_menu_ = node;
+  bring_to_front(node);
+}
+
+void UiTree::close_active_menu(UiNode* node) {
+  if (active_menu_ == node || node == nullptr) {
+    active_menu_ = nullptr;
+  }
+  if (node != nullptr) {
+    clear_references_if_descendant(node);
+  }
+}
+
+void UiTree::trace_legacy_shortcut_fallback() {
+  emit_trace("legacy_shortcut_fallback");
 }
 
 /// 将节点移到兄弟列表末尾（渲染时在顶层）
