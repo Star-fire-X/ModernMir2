@@ -135,6 +135,35 @@ void test_durability_change_updates_matching_bag_and_equipment_items() {
   assert(state.world.bag_items[7].dura_max == 1000);
 }
 
+void test_inventory_fifo_refresh_clears_pending_before_followup_messages() {
+  GameStateStore state;
+  const auto sword = make_item("Wooden Sword", 1001, 5);
+  state.world.bag_items[6] = sword;
+  state.begin_pending_item_action(PendingItemActionKind::equip, MovingItemSource::bag, 6, 1,
+                                  sword, 100);
+  state.world.bag_items[6] = ItemState{};
+
+  state.apply(InventoryRemove{6});
+  assert(!state.world.pending_item_action.active);
+  assert(!state.world.waiting_item.active);
+
+  EquipmentSnapshot equipment;
+  equipment.items.push_back(ItemSlotState{1, sword});
+  state.apply(equipment);
+  assert(state.world.equipment[1].make_index == sword.make_index);
+
+  SelfAbility ability;
+  ability.gold = 123;
+  ability.weight = 10;
+  ability.max_weight = 100;
+  state.apply(ability);
+  assert(state.world.self_ability.gold == 123);
+
+  state.apply(SysMessage{"equipped", 0});
+  assert(!state.world.chat_lines.empty());
+  assert(!state.world.sys_messages.empty());
+}
+
 }  // namespace
 
 int main() {
@@ -144,5 +173,6 @@ int main() {
   test_drop_pending_ignores_unrelated_updates();
   test_magic_key_rebinds_clear_previous_owner();
   test_durability_change_updates_matching_bag_and_equipment_items();
+  test_inventory_fifo_refresh_clears_pending_before_followup_messages();
   return 0;
 }

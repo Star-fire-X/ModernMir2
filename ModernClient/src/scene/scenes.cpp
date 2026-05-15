@@ -59,6 +59,7 @@
 #include "audio/sound_constants.hpp"
 #include "scene/character_select_state.hpp"
 #include "scene/legacy_auth_ui.hpp"
+#include "scene/legacy_inventory_ui.hpp"
 #include "scene/legacy_play_ui.hpp"
 #include "shared/legacy/map_render_order.hpp"
 #include "shared/legacy/map_render_math.hpp"
@@ -118,6 +119,10 @@ void legacy_auth_trace(const legacy_auth_ui::LegacyAuthUiTraceLabel label) {
 
 void legacy_play_trace(const legacy_play_ui::LegacyPlayUiTraceLabel label) {
   legacy_trace(legacy_play_ui::legacy_play_ui_trace_label(label));
+}
+
+void legacy_inventory_trace(const legacy_inventory_ui::LegacyInventoryUiTraceLabel label) {
+  legacy_trace(legacy_inventory_ui::legacy_inventory_ui_trace_label(label));
 }
 
 void legacy_trace_map_layer(
@@ -1043,55 +1048,6 @@ void draw_equipment_item_icon(SoftwareRenderer& renderer,
   renderer.surface().blit_rgba(x, y, frame->width, frame->height, frame->pixels.data(), 255U);
 }
 
-const wchar_t* std_mode_name(const std::uint8_t std_mode) {
-  switch (std_mode) {
-    case 0:  return L"药品";
-    case 1:  return L"食物";
-    case 2:  return L"食物";
-    case 3:  return L"食物";
-    case 4:  return L"技能书";
-    case 5:
-    case 6:  return L"武器";
-    case 10:
-    case 11: return L"衣服";
-    case 15: return L"头盔";
-    case 19:
-    case 20:
-    case 21: return L"项链";
-    case 22:
-    case 23: return L"戒指";
-    case 24:
-    case 26: return L"手镯";
-    case 25: return L"毒药";
-    case 30: return L"蜡烛";
-    case 31: return L"特殊";
-    case 40: return L"肉类";
-    case 42: return L"酒";
-    case 43: return L"矿石";
-    default: return L"物品";
-  }
-}
-
-std::uint32_t item_name_color(const std::uint8_t std_mode) {
-  if (std_mode >= 25)  return 0xFFFACC15U;
-  if (std_mode >= 19)  return 0xFF60A5FAU;
-  if (std_mode >= 10)  return 0xFF4ADE80U;
-  return 0xFFF5F7FAU;
-}
-
-std::wstring item_tooltip_text(const client_v1::ItemState& item) {
-  auto text = widen(item.name);
-  text.append(L"\n");
-  text.append(std_mode_name(item.std_mode));
-  if (item.dura_max != 0) {
-    text.append(L"\n持久 ");
-    text.append(std::to_wstring(item.dura / 1000));
-    text.push_back(L'/');
-    text.append(std::to_wstring(item.dura_max / 1000));
-  }
-  return text;
-}
-
 int proportional_width(const std::int64_t value, const std::int64_t max_value,
                        const int full_width) {
   if (value <= 0 || max_value <= 0 || full_width <= 0) {
@@ -1786,38 +1742,47 @@ class LegacyHud final {
     auto* root = tree.set_root<ui::UiNode>(RectI{0, 0, 800, 600});
     root->background = true;
     legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::legacy_hud_root_created);
+    legacy_inventory_trace(
+        legacy_inventory_ui::LegacyInventoryUiTraceLabel::legacy_inventory_windows_created);
 
-    item_bag_ = add_sprite_window(root, context, ArchiveId::prguse, kItemBagDialogIndex, 0, 0,
-                                  329, 227);
+    bag_layout_ = legacy_inventory_ui::legacy_bag_layout();
+    item_hint_layout_ = legacy_inventory_ui::legacy_item_hint_layout();
+    item_bag_ = add_sprite_window(root, context, ArchiveId::prguse,
+                                  bag_layout_.resource_index, bag_layout_.window.x,
+                                  bag_layout_.window.y, bag_layout_.window.w,
+                                  bag_layout_.window.h);
     item_bag_->visible = false;
-    item_grid_ = item_bag_->emplace_child<ui::Grid>(RectI{20, 13, 286, 162});
-    item_grid_->col_count = kBagGridColumns;
-    item_grid_->row_count = kBagGridRows;
-    item_grid_->col_width = kBagCellWidth;
-    item_grid_->row_height = kBagCellHeight;
+    legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::item_bag_window_created);
+    item_grid_ = item_bag_->emplace_child<ui::Grid>(bag_layout_.grid);
+    item_grid_->col_count = bag_layout_.columns;
+    item_grid_->row_count = bag_layout_.rows;
+    item_grid_->col_width = bag_layout_.cell_width;
+    item_grid_->row_height = bag_layout_.cell_height;
+    legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::item_grid_created);
     item_grid_->on_cell_select = [this](ui::Grid&, const int col, const int row) {
-      pending_bag_click_slot_ = col + row * kBagGridColumns + kBagGridFirstSlot;
+      pending_bag_click_slot_ = bag_layout_.slot_for_cell(col, row);
     };
     item_grid_->on_cell_hover = [this](ui::Grid&, const int col, const int row) {
-      hovered_bag_slot_ = col + row * kBagGridColumns + kBagGridFirstSlot;
+      hovered_bag_slot_ = bag_layout_.slot_for_cell(col, row);
       if (state_ != nullptr) {
         state_->world.hovered_bag_slot = hovered_bag_slot_;
       }
     };
     item_grid_->on_cell_double_click = [this](ui::Grid&, const int col, const int row) {
-      pending_bag_double_click_slot_ = col + row * kBagGridColumns + kBagGridFirstSlot;
+      pending_bag_double_click_slot_ = bag_layout_.slot_for_cell(col, row);
     };
     item_grid_->on_cell_paint = [this](ui::Grid&, const int col, const int row,
                                        const RectI& rect, const bool selected,
                                        SoftwareRenderer& renderer) {
-      const auto slot = col + row * kBagGridColumns + kBagGridFirstSlot;
+      const auto slot = bag_layout_.slot_for_cell(col, row);
       if (state_ != nullptr && valid_bag_slot(slot)) {
         const auto& item = state_->world.bag_items[static_cast<std::size_t>(slot)];
         if (!item_empty(item)) {
           draw_bag_item_icon(renderer, item_icon_frame(assets_, item, ArchiveId::items), rect,
                              item_low_dura(item));
           if (const auto count = item_stack_count(item); count > 0) {
-            draw_legacy_text(renderer, rect.x + 22, rect.y + 20,
+            draw_legacy_text(renderer, rect.x + bag_layout_.icon_count_offset_x,
+                             rect.y + bag_layout_.icon_count_offset_y,
                              std::to_wstring(count));
           }
         }
@@ -1826,22 +1791,33 @@ class LegacyHud final {
         renderer.stroke_rect(rect, 0x99FACC15U);
       }
     };
-    auto* bag_close =
-        add_sprite_button(item_bag_, context, ArchiveId::prguse, kBagCloseButtonIndex, 309, 203,
-                          14, 20);
+    auto* bag_close = add_sprite_button(item_bag_, context, ArchiveId::prguse,
+                                        bag_layout_.close_resource_index,
+                                        bag_layout_.close_button.x,
+                                        bag_layout_.close_button.y,
+                                        bag_layout_.close_button.w,
+                                        bag_layout_.close_button.h);
     bind_audio_click(bag_close, context.audio, LegacyClickSound::normal, [this] {
       if (item_bag_ != nullptr && tree_ != nullptr) {
+        cancel_moving_item_from_ui();
+        legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::hide_item_bag);
         item_bag_->hide(*tree_);
       }
     });
-    auto* repair_button =
-        add_sprite_button(item_bag_, context, ArchiveId::prguse, kBagRepairButtonIndex, 242,
-                          203, 30, 20);
+    auto* repair_button = add_sprite_button(item_bag_, context, ArchiveId::prguse,
+                                            bag_layout_.repair_resource_index,
+                                            bag_layout_.repair_button.x,
+                                            bag_layout_.repair_button.y,
+                                            bag_layout_.repair_button.w,
+                                            bag_layout_.repair_button.h);
     bind_audio_click(repair_button, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] { open_repair_selecting(app); });
-    auto* gold_button =
-        add_sprite_button(item_bag_, context, ArchiveId::prguse, kBagGoldButtonIndex, 274, 203,
-                          30, 20);
+    auto* gold_button = add_sprite_button(item_bag_, context, ArchiveId::prguse,
+                                          bag_layout_.gold_resource_index,
+                                          bag_layout_.gold_button.x,
+                                          bag_layout_.gold_button.y,
+                                          bag_layout_.gold_button.w,
+                                          bag_layout_.gold_button.h);
     bind_audio_click(gold_button, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] {
       if (app == nullptr || state_ == nullptr) {
@@ -1856,42 +1832,64 @@ class LegacyHud final {
 
     const auto state_frame = get_frame(context, ArchiveId::prguse, kStateDialogIndex);
     const auto state_width = state_frame != nullptr ? state_frame->width : 252;
-    state_window_ =
-        add_sprite_window(root, context, ArchiveId::prguse, kStateDialogIndex,
-                          800 - state_width, 0, 252, 308);
+    equipment_layout_ = legacy_inventory_ui::legacy_equipment_layout(state_width);
+    state_window_ = add_sprite_window(root, context, ArchiveId::prguse,
+                                      equipment_layout_.resource_index,
+                                      equipment_layout_.window.x,
+                                      equipment_layout_.window.y,
+                                      equipment_layout_.window.w,
+                                      equipment_layout_.window.h);
     state_window_->visible = false;
+    legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::state_window_created);
     state_content_ = state_window_->emplace_child<LegacyStateContentNode>(
         RectI{0, 0, state_width, 308});
     state_content_->state = state_;
     state_content_->assets = assets_;
     state_content_->state_page = &state_page_;
     state_content_->magic_page = &magic_page_;
-    auto* state_close =
-        add_sprite_button(state_window_, context, ArchiveId::prguse, kStateCloseButtonIndex, 8,
-                          39, 14, 20);
+    auto* state_close = add_sprite_button(state_window_, context, ArchiveId::prguse,
+                                          equipment_layout_.close_resource_index,
+                                          equipment_layout_.close_button.x,
+                                          equipment_layout_.close_button.y,
+                                          equipment_layout_.close_button.w,
+                                          equipment_layout_.close_button.h);
     bind_audio_click(state_close, context.audio, LegacyClickSound::glass, [this] {
       if (state_window_ != nullptr && tree_ != nullptr) {
+        cancel_moving_item_from_ui();
+        legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::hide_state_window);
         state_window_->hide(*tree_);
       }
     });
-    state_prev_button_ =
-        add_sprite_button(state_window_, context, ArchiveId::prguse, kStatePrevButtonIndex, 7,
-                          127, 22, 24);
+    state_prev_button_ = add_sprite_button(state_window_, context, ArchiveId::prguse,
+                                           equipment_layout_.prev_resource_index,
+                                           equipment_layout_.prev_button.x,
+                                           equipment_layout_.prev_button.y,
+                                           equipment_layout_.prev_button.w,
+                                           equipment_layout_.prev_button.h);
     bind_audio_click(state_prev_button_, context.audio, LegacyClickSound::stone,
                      [this] { change_state_page(-1); });
-    state_next_button_ =
-        add_sprite_button(state_window_, context, ArchiveId::prguse, kStateNextButtonIndex, 7,
-                          187, 22, 24);
+    state_next_button_ = add_sprite_button(state_window_, context, ArchiveId::prguse,
+                                           equipment_layout_.next_resource_index,
+                                           equipment_layout_.next_button.x,
+                                           equipment_layout_.next_button.y,
+                                           equipment_layout_.next_button.w,
+                                           equipment_layout_.next_button.h);
     bind_audio_click(state_next_button_, context.audio, LegacyClickSound::stone,
                      [this] { change_state_page(1); });
-    magic_up_button_ =
-        add_sprite_button(state_window_, context, ArchiveId::prguse, kStateMagicPageUpIndex, 211,
-                          112, 22, 24);
+    magic_up_button_ = add_sprite_button(state_window_, context, ArchiveId::prguse,
+                                         equipment_layout_.magic_page_up_resource_index,
+                                         equipment_layout_.magic_page_up_button.x,
+                                         equipment_layout_.magic_page_up_button.y,
+                                         equipment_layout_.magic_page_up_button.w,
+                                         equipment_layout_.magic_page_up_button.h);
     bind_audio_click(magic_up_button_, context.audio, LegacyClickSound::stone,
                      [this] { change_magic_page(-1); });
-    magic_down_button_ =
-        add_sprite_button(state_window_, context, ArchiveId::prguse, kStateMagicPageDownIndex,
-                          211, 143, 22, 24);
+    magic_down_button_ = add_sprite_button(state_window_, context, ArchiveId::prguse,
+                                           equipment_layout_.magic_page_down_resource_index,
+                                           equipment_layout_.magic_page_down_button.x,
+                                           equipment_layout_.magic_page_down_button.y,
+                                           equipment_layout_.magic_page_down_button.w,
+                                           equipment_layout_.magic_page_down_button.h);
     bind_audio_click(magic_down_button_, context.audio, LegacyClickSound::stone,
                      [this] { change_magic_page(1); });
     for (int row = 0; row < 5; ++row) {
@@ -1901,15 +1899,16 @@ class LegacyHud final {
                        [this, row] { select_magic_row(row); });
       magic_row_buttons_[static_cast<std::size_t>(row)] = row_button;
     }
-    add_equipment_button(kEquipWeapon, RectI{47, 80, 47, 87});
-    add_equipment_button(kEquipDress, RectI{96, 122, 53, 112});
-    add_equipment_button(kEquipHelmet, RectI{115, 93, 18, 18});
-    add_equipment_button(kEquipNecklace, RectI{168, 87, 34, 31});
-    add_equipment_button(kEquipRightHand, RectI{168, 125, 34, 31});
-    add_equipment_button(kEquipArmRingRight, RectI{42, 176, 34, 31});
-    add_equipment_button(kEquipArmRingLeft, RectI{168, 176, 34, 31});
-    add_equipment_button(kEquipRingRight, RectI{42, 215, 34, 31});
-    add_equipment_button(kEquipRingLeft, RectI{168, 215, 34, 31});
+    add_equipment_button(kEquipWeapon, equipment_layout_.visible_slots[0]);
+    add_equipment_button(kEquipDress, equipment_layout_.visible_slots[1]);
+    add_equipment_button(kEquipHelmet, equipment_layout_.visible_slots[2]);
+    add_equipment_button(kEquipNecklace, equipment_layout_.visible_slots[3]);
+    add_equipment_button(kEquipRightHand, equipment_layout_.visible_slots[4]);
+    add_equipment_button(kEquipArmRingRight, equipment_layout_.visible_slots[5]);
+    add_equipment_button(kEquipArmRingLeft, equipment_layout_.visible_slots[6]);
+    add_equipment_button(kEquipRingRight, equipment_layout_.visible_slots[7]);
+    add_equipment_button(kEquipRingLeft, equipment_layout_.visible_slots[8]);
+    legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::equipment_slots_created);
 
     key_select_dialog_ =
         add_sprite_window(root, context, ArchiveId::prguse, kMagicKeyDialogIndex, 289, 185,
@@ -2314,7 +2313,10 @@ class LegacyHud final {
     });
 
     tooltip_ = root->emplace_child<ui::Tooltip>(RectI{0, 0, 160, 24});
+    legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::item_hint_created);
     drag_overlay_ = root->emplace_child<ui::DragSpriteOverlay>(RectI{0, 0, 0, 0});
+    legacy_inventory_trace(
+        legacy_inventory_ui::LegacyInventoryUiTraceLabel::moving_item_overlay_created);
     initialized_ = true;
   }
 
@@ -2579,7 +2581,26 @@ class LegacyHud final {
       return;
     }
     auto& world = context.state->world;
+    if (world.moving_item.active) {
+      legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::cancel_moving_item);
+    }
     restore_moving_item(world);
+  }
+
+  void cancel_moving_item_from_ui() {
+    if (state_ == nullptr) {
+      return;
+    }
+    auto& world = state_->world;
+    if (world.moving_item.active) {
+      legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::cancel_moving_item);
+    }
+    restore_moving_item(world);
+    if (tooltip_ != nullptr) {
+      tooltip_->hide();
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::hide_hint_when_item_missing_or_moving);
+    }
   }
 
   bool handle_shortcuts(ClientContext& context, ui::UiTree& tree) {
@@ -3606,8 +3627,8 @@ class LegacyHud final {
 
   void restore_bag_origin() {
     if (item_bag_ != nullptr) {
-      item_bag_->bounds.x = 0;
-      item_bag_->bounds.y = 0;
+      item_bag_->bounds.x = bag_layout_.window.x;
+      item_bag_->bounds.y = bag_layout_.window.y;
     }
   }
 
@@ -3618,7 +3639,7 @@ class LegacyHud final {
     if (item_bag_ != nullptr && item_bag_->visible && item_grid_ != nullptr) {
       const auto cell = item_grid_->cell_at(input.mouse_x, input.mouse_y);
       if (cell.has_value()) {
-        const auto slot = cell->first + cell->second * kBagGridColumns + kBagGridFirstSlot;
+        const auto slot = bag_layout_.slot_for_cell(cell->first, cell->second);
         if (state_ != nullptr && valid_bag_slot(slot)) {
           const auto& item = state_->world.bag_items[static_cast<std::size_t>(slot)];
           if (!item_empty(item)) {
@@ -3794,6 +3815,8 @@ class LegacyHud final {
     if (app_ != nullptr) {
       state_->begin_pending_item_action(PendingItemActionKind::use, MovingItemSource::bag, slot,
                                         -1, item, GetTickCount64());
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::begin_pending_use_item);
       app_->request_use_item(client_v1::UseItemIntent{item.make_index, slot});
     }
   }
@@ -3810,6 +3833,8 @@ class LegacyHud final {
     if (app_ != nullptr) {
       state_->begin_pending_item_action(PendingItemActionKind::equip, MovingItemSource::bag, slot,
                                         equip_slot, item, GetTickCount64());
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::begin_pending_equip_item);
       app_->request_equip_item(
           client_v1::EquipItemRequest{equip_slot, item.make_index, item.name});
     }
@@ -3824,6 +3849,8 @@ class LegacyHud final {
       state_->begin_pending_item_action(PendingItemActionKind::unequip,
                                         MovingItemSource::equipment, slot, -1, item,
                                         GetTickCount64());
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::drop_equipment_item_on_bag_cell);
       app_->request_unequip_item(
           client_v1::UnequipItemRequest{slot, item.make_index, item.name});
     }
@@ -3897,8 +3924,7 @@ class LegacyHud final {
     if (item_bag_ != nullptr && item_bag_->visible && item_grid_ != nullptr) {
       const auto cell = item_grid_->cell_at(input.mouse_x, input.mouse_y);
       if (cell.has_value()) {
-        hovered_bag_slot_ =
-            cell->first + cell->second * kBagGridColumns + kBagGridFirstSlot;
+        hovered_bag_slot_ = bag_layout_.slot_for_cell(cell->first, cell->second);
       }
     }
     if (hovered_bag_slot_ < 0) {
@@ -3922,8 +3948,15 @@ class LegacyHud final {
       drag_overlay_->clear();
       return;
     }
-    drag_overlay_->set_sprite(item_icon_frame(assets_, world.moving_item.item, ArchiveId::items));
-    drag_overlay_->set_position(input.mouse_x, input.mouse_y);
+    auto frame = item_icon_frame(assets_, world.moving_item.item, ArchiveId::items);
+    drag_overlay_->set_sprite(frame);
+    if (frame != nullptr && !frame->empty()) {
+      const auto rect = legacy_inventory_ui::legacy_moving_item_overlay_rect(
+          input.mouse_x, input.mouse_y, frame->width, frame->height);
+      drag_overlay_->set_position(rect.x, rect.y);
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::draw_moving_item_overlay);
+    }
   }
 
   void update_tooltip(const InputState& input, const WorldViewState& world) {
@@ -3932,13 +3965,22 @@ class LegacyHud final {
     }
     tooltip_->hide();
     if (world.moving_item.active) {
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::hide_hint_when_item_missing_or_moving);
       return;
     }
     if (valid_bag_slot(hovered_bag_slot_)) {
       const auto& item = world.bag_items[static_cast<std::size_t>(hovered_bag_slot_)];
       if (!item_empty(item)) {
-        tooltip_->show_at(input.mouse_x + 12, input.mouse_y + 16, item_tooltip_text(item),
-                          item_name_color(item.std_mode));
+        legacy_inventory_trace(
+            legacy_inventory_ui::LegacyInventoryUiTraceLabel::hover_bag_or_equipment_item);
+        legacy_inventory_trace(
+            legacy_inventory_ui::LegacyInventoryUiTraceLabel::format_item_hint_backslash_lines);
+        tooltip_->show_at(input.mouse_x + item_hint_layout_.mouse_offset_x,
+                          input.mouse_y + item_hint_layout_.mouse_offset_y,
+                          legacy_inventory_ui::legacy_item_hint_text(item),
+                          legacy_inventory_ui::legacy_item_hint_color(item.std_mode));
+        legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::show_hint_layer);
         return;
       }
     }
@@ -3946,20 +3988,29 @@ class LegacyHud final {
       const auto& item =
           world.equipment[static_cast<std::size_t>(hovered_equipment_slot_)];
       if (!item_empty(item)) {
-        tooltip_->show_at(input.mouse_x + 12, input.mouse_y + 16, item_tooltip_text(item),
-                          item_name_color(item.std_mode));
+        legacy_inventory_trace(
+            legacy_inventory_ui::LegacyInventoryUiTraceLabel::hover_bag_or_equipment_item);
+        legacy_inventory_trace(
+            legacy_inventory_ui::LegacyInventoryUiTraceLabel::format_item_hint_backslash_lines);
+        tooltip_->show_at(input.mouse_x + item_hint_layout_.mouse_offset_x,
+                          input.mouse_y + item_hint_layout_.mouse_offset_y,
+                          legacy_inventory_ui::legacy_item_hint_text(item),
+                          legacy_inventory_ui::legacy_item_hint_color(item.std_mode));
+        legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::show_hint_layer);
         return;
       }
     }
+    legacy_inventory_trace(
+        legacy_inventory_ui::LegacyInventoryUiTraceLabel::hide_hint_when_item_missing_or_moving);
     if (item_bag_ != nullptr && item_bag_->visible) {
       const auto rect = item_bag_->resolved_bounds();
       const auto lx = input.mouse_x - rect.x;
       const auto ly = input.mouse_y - rect.y;
-      if (RectI{242, 203, 30, 20}.contains(lx, ly)) {
+      if (bag_layout_.repair_button.contains(lx, ly)) {
         tooltip_->show_at(input.mouse_x + 12, input.mouse_y + 16, L"Repair", 0xFFFFFF66U);
         return;
       }
-      if (RectI{274, 203, 30, 20}.contains(lx, ly)) {
+      if (bag_layout_.gold_button.contains(lx, ly)) {
         tooltip_->show_at(input.mouse_x + 12, input.mouse_y + 16,
                           L"Gold " + std::to_wstring(world.self_ability.gold),
                           0xFFFFFF66U);
@@ -4049,6 +4100,7 @@ class LegacyHud final {
     if (context.state == nullptr || !valid_bag_slot(slot)) {
       return;
     }
+    legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::mouse_down_bag_cell);
     auto& world = context.state->world;
     if (world.pending_item_action.active) {
       return;
@@ -4109,7 +4161,11 @@ class LegacyHud final {
       world.moving_item.source = MovingItemSource::bag;
       world.moving_item.source_slot = slot;
       world.moving_item.item = item;
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::start_item_moving_from_bag);
       item = client_v1::ItemState{};
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::clear_source_bag_slot);
       return;
     }
 
@@ -4124,6 +4180,8 @@ class LegacyHud final {
           !item_empty(item)) {
         return;
       }
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::drop_equipment_item_on_bag_cell);
       context.state->begin_pending_item_action(PendingItemActionKind::unequip,
                                                MovingItemSource::equipment, moving_source_slot,
                                                slot, moving_item, detail::monotonic_ms());
@@ -4154,6 +4212,7 @@ class LegacyHud final {
     if (context.state == nullptr || context.app == nullptr || !valid_bag_slot(slot)) {
       return;
     }
+    legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::double_click_bag_cell);
     auto& world = context.state->world;
     auto item = world.bag_items[static_cast<std::size_t>(slot)];
     const auto using_moving_item =
@@ -4173,6 +4232,8 @@ class LegacyHud final {
       context.state->begin_pending_item_action(PendingItemActionKind::equip,
                                                MovingItemSource::bag, slot, equip_slot, item,
                                                detail::monotonic_ms());
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::begin_pending_equip_item);
       context.app->request_equip_item(
           client_v1::EquipItemRequest{equip_slot, item.make_index, item.name});
       play_item_click(audio_, item);
@@ -4194,11 +4255,15 @@ class LegacyHud final {
                                                world.moving_item.source,
                                                world.moving_item.source_slot, slot, item,
                                                world.eat_time_ms);
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::begin_pending_use_item);
       world.moving_item = MovingItemState{};
     } else {
       context.state->begin_pending_item_action(PendingItemActionKind::use,
                                                MovingItemSource::bag, slot, slot, item,
                                                world.eat_time_ms);
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::begin_pending_use_item);
       world.bag_items[static_cast<std::size_t>(slot)] = client_v1::ItemState{};
     }
     context.app->request_use_item(intent);
@@ -4208,6 +4273,8 @@ class LegacyHud final {
     if (context.state == nullptr || !valid_equipment_slot(slot)) {
       return;
     }
+    legacy_inventory_trace(
+        legacy_inventory_ui::LegacyInventoryUiTraceLabel::mouse_down_equipment_slot);
     auto& world = context.state->world;
     if (world.pending_item_action.active) {
       return;
@@ -4223,11 +4290,19 @@ class LegacyHud final {
       world.moving_item.source = MovingItemSource::equipment;
       world.moving_item.source_slot = slot;
       world.moving_item.item = equipped;
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::start_item_moving_from_equipment);
       equipped = client_v1::ItemState{};
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::clear_source_equipment_slot);
       return;
     }
 
     const auto moving_item = world.moving_item.item;
+    legacy_inventory_trace(
+        legacy_inventory_ui::LegacyInventoryUiTraceLabel::drop_bag_item_on_equipment_slot);
+    legacy_inventory_trace(
+        legacy_inventory_ui::LegacyInventoryUiTraceLabel::validate_equipment_slot);
     if (!equipment_slot_accepts_std_mode(slot, moving_item.std_mode,
                                          world.self_ability_detail.sex)) {
       return;
@@ -4249,6 +4324,8 @@ class LegacyHud final {
                                                MovingItemSource::bag,
                                                world.moving_item.source_slot, slot, moving_item,
                                                detail::monotonic_ms());
+      legacy_inventory_trace(
+          legacy_inventory_ui::LegacyInventoryUiTraceLabel::begin_pending_equip_item);
       context.app->request_equip_item(
           client_v1::EquipItemRequest{slot, moving_item.make_index, moving_item.name});
       play_item_click(audio_, moving_item);
@@ -4267,6 +4344,8 @@ class LegacyHud final {
       if (item_empty(item)) {
         item = moving.item;
         world.moving_item = MovingItemState{};
+        legacy_inventory_trace(
+            legacy_inventory_ui::LegacyInventoryUiTraceLabel::restore_item_to_source_slot);
         return;
       }
     }
@@ -4275,6 +4354,8 @@ class LegacyHud final {
       if (item_empty(item)) {
         item = moving.item;
         world.moving_item = MovingItemState{};
+        legacy_inventory_trace(
+            legacy_inventory_ui::LegacyInventoryUiTraceLabel::restore_item_to_source_slot);
         return;
       }
     }
@@ -4282,6 +4363,8 @@ class LegacyHud final {
       if (item_empty(item)) {
         item = moving.item;
         world.moving_item = MovingItemState{};
+        legacy_inventory_trace(
+            legacy_inventory_ui::LegacyInventoryUiTraceLabel::restore_item_to_source_slot);
         return;
       }
     }
@@ -4291,12 +4374,20 @@ class LegacyHud final {
     if (item_bag_ == nullptr) {
       return;
     }
-    item_bag_->set_visible(tree, !item_bag_->visible);
+    const auto show = !item_bag_->visible;
+    if (!show) {
+      cancel_moving_item_from_ui();
+      legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::hide_item_bag);
+    }
+    item_bag_->set_visible(tree, show);
     if (item_bag_->visible) {
+      legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::show_item_bag);
       if (npc_dialog_visible()) {
         move_bag_for_npc_dialog();
       } else {
         restore_bag_origin();
+        legacy_inventory_trace(
+            legacy_inventory_ui::LegacyInventoryUiTraceLabel::arrange_item_bag_origin);
       }
       tree.bring_to_front(item_bag_);
     }
@@ -4310,9 +4401,13 @@ class LegacyHud final {
     if (show) {
       state_page_ = 0;
       magic_page_ = 0;
+    } else {
+      cancel_moving_item_from_ui();
+      legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::hide_state_window);
     }
     state_window_->set_visible(tree, show);
     if (state_window_->visible) {
+      legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::show_state_window);
       tree.bring_to_front(state_window_);
     }
     sync_state_window();
@@ -4373,6 +4468,9 @@ class LegacyHud final {
   legacy_play_ui::LegacyHudLayout hud_layout_{};
   legacy_play_ui::LegacyChatLayout chat_layout_{};
   legacy_play_ui::LegacySystemMessageLayout system_message_layout_{};
+  legacy_inventory_ui::LegacyBagLayout bag_layout_{};
+  legacy_inventory_ui::LegacyEquipmentLayout equipment_layout_{};
+  legacy_inventory_ui::LegacyItemHintLayout item_hint_layout_{};
 
   // 右键快捷菜单状态
   struct ItemContextMenu {

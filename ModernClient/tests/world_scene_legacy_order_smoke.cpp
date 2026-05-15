@@ -122,6 +122,24 @@ int main() {
   scenes.capture_ui_input(context);
   assert(!context.ui_input.text_focus);
 
+  scenes.process_key_messages(context);
+  mir2::client_v1::ItemState potion;
+  potion.name = "Potion";
+  potion.make_index = 2001;
+  potion.looks = 1;
+  potion.std_mode = 0;
+  world.bag_items[6] = potion;
+  world.moving_item = mir2::client::MovingItemState{
+      true, mir2::client::MovingItemSource::bag, 6, potion};
+  world.bag_items[6] = mir2::client_v1::ItemState{};
+  input = mir2::client::InputState{};
+  context.ui_input = mir2::client::ui::UiInputResult{};
+  input.key_pressed[VK_F9] = true;
+  scenes.capture_ui_input(context);
+  scenes.process_key_messages(context);
+  assert(!world.moving_item.active);
+  assert(world.bag_items[6].make_index == potion.make_index);
+
   scenes.scene_run(context, 0.0F);
   assert(has_sound_id(audio, mir2::client::s_main_theme));
 

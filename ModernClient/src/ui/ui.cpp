@@ -755,6 +755,7 @@ Tooltip::Tooltip(RectI bounds) : UiNode(bounds) {
 /// 在指定位置显示工具提示
 /// 自动计算文本宽度，限制在屏幕范围内
 void Tooltip::show_at(int x, int y, std::wstring text_in, const std::uint32_t color_in) {
+  std::replace(text_in.begin(), text_in.end(), L'\\', L'\n');
   text = std::move(text_in);
   color = color_in;
   anchor_x_ = x;
