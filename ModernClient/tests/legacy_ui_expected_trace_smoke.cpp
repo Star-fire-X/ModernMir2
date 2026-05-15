@@ -22,6 +22,9 @@ std::map<std::string, std::vector<std::string>> read_trace_sections(
   std::string current;
   std::string line;
   while (std::getline(input, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
     if (line.empty() || line.front() == '#') {
       continue;
     }
@@ -36,9 +39,23 @@ std::map<std::string, std::vector<std::string>> read_trace_sections(
   return sections;
 }
 
+void test_crlf_trace_sections_are_normalized() {
+  const auto path = std::filesystem::temp_directory_path() / "legacy_ui_expected_trace_crlf.txt";
+  {
+    std::ofstream output(path, std::ios::binary);
+    output << "[ui.frame.legacy_order]\r\nnetwork_drain\r\npresent\r\n";
+  }
+  const auto sections = read_trace_sections(path);
+  std::filesystem::remove(path);
+  assert(sections.at("ui.frame.legacy_order").front() == "network_drain");
+  assert(sections.at("ui.frame.legacy_order").back() == "present");
+}
+
 }  // namespace
 
 int main() {
+  test_crlf_trace_sections_are_normalized();
+
   const auto source_dir = std::filesystem::path{MIR2_CLIENT_SOURCE_DIR};
   const auto golden_dir = source_dir / "tests" / "golden";
   const auto trace_path = golden_dir / "legacy_ui_expected_trace.txt";

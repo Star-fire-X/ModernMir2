@@ -392,11 +392,15 @@ int ClientApp::run() {
             },
             [this, &context] {
               legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::hint_tooltip_draw_hint);
-              scenes_.paint_ui_hint(context);
+              if (!state_.modal.visible) {
+                scenes_.paint_ui_hint(context);
+              }
             },
             [this, &context] {
               legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::moving_item_cursor);
-              scenes_.paint_ui_moving_item(context);
+              if (!state_.modal.visible) {
+                scenes_.paint_ui_moving_item(context);
+              }
               legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::mouse_cursor);
             },
             [this] {
@@ -436,6 +440,9 @@ void ClientApp::flush_scene_change_if_pending(ClientContext& context) {
 
 void ClientApp::capture_ui_input(ClientContext& context) {
   if (!state_.modal.visible) {
+    if (auto* tree = scenes_.current_ui_tree()) {
+      tree->set_trace_callback([](const std::string_view label) { legacy_trace(label); });
+    }
     scenes_.capture_ui_input(context);
     return;
   }
