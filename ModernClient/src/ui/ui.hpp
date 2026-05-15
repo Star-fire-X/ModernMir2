@@ -45,6 +45,13 @@ enum class Anchor {
   center     ///< 居中定位（bounds 的偏移量相对于父级中心）
 };
 
+/// Legacy 绘制层：DirectPaint 只绘制 windows，DrawHint/拖拽物品走独立阶段
+enum class UiPaintLayer {
+  windows,
+  hint,
+  moving_item
+};
+
 class UiTree;
 
 /// 旧版精灵引用：ArchiveId + 帧索引
@@ -124,6 +131,10 @@ class UiNode {
   [[nodiscard]] bool pixel_hit(int local_x, int local_y, AssetManager* assets) const;
   /// 实际区域包含检测（先矩形再可选精灵像素检测）
   [[nodiscard]] bool real_area_contains(int x, int y, AssetManager* assets) const;
+  /// 当前节点所属 legacy 绘制层
+  [[nodiscard]] UiPaintLayer paint_layer() const { return paint_layer_; }
+  /// 设置 legacy 绘制层；不影响输入、焦点、capture 或 z-order
+  void set_paint_layer(UiPaintLayer layer) { paint_layer_ = layer; }
   /// 设置可见性并自动清理 UiTree 中的引用
   void set_visible(UiTree& tree, bool is_visible);
   /// 焦点获得回调
@@ -172,6 +183,9 @@ class UiNode {
  protected:
   UiNode* parent_{nullptr};                         ///< 父节点指针
   std::vector<std::unique_ptr<UiNode>> children_{};  ///< 子节点列表
+
+ private:
+  UiPaintLayer paint_layer_{UiPaintLayer::windows};
 };
 
 /// 面板节点：带填充色和边框色的矩形面板
@@ -404,6 +418,8 @@ class UiTree {
   void process_queued_events(const InputState& input);
   /// 渲染 UI 树
   void paint(SoftwareRenderer& renderer);
+  /// 渲染指定 legacy 绘制层
+  void paint_layer(SoftwareRenderer& renderer, UiPaintLayer layer);
   /// 清除整个 UI 树
   void clear();
   /// 设置资源管理器（用于精灵加载）

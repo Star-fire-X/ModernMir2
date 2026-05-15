@@ -7742,6 +7742,18 @@ void Scene::paint_ui(ClientContext& context) {
   }
 }
 
+void Scene::paint_ui_hint(ClientContext& context) {
+  if (context.renderer != nullptr) {
+    ui_tree().paint_layer(*context.renderer, ui::UiPaintLayer::hint);
+  }
+}
+
+void Scene::paint_ui_moving_item(ClientContext& context) {
+  if (context.renderer != nullptr) {
+    ui_tree().paint_layer(*context.renderer, ui::UiPaintLayer::moving_item);
+  }
+}
+
 void SceneManager::initialize(ClientContext& context) { change_scene(SceneId::boot, context); }
 
 /// 切换场景：退出当前场景 → 创建新场景 → 进入新场景
@@ -7804,6 +7816,18 @@ void SceneManager::render_scene(ClientContext& context) {
 void SceneManager::paint_ui(ClientContext& context) {
   if (current_scene_ != nullptr) {
     current_scene_->paint_ui(context);
+  }
+}
+
+void SceneManager::paint_ui_hint(ClientContext& context) {
+  if (current_scene_ != nullptr) {
+    current_scene_->paint_ui_hint(context);
+  }
+}
+
+void SceneManager::paint_ui_moving_item(ClientContext& context) {
+  if (current_scene_ != nullptr) {
+    current_scene_->paint_ui_moving_item(context);
   }
 }
 
