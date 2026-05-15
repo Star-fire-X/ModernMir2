@@ -88,6 +88,7 @@ class Scene {
   virtual void scene_run(ClientContext& context, float delta_seconds);
   virtual void render_scene(ClientContext& context);
   virtual void paint_ui(ClientContext& context);
+  virtual void paint_ui_top(ClientContext& context);
   virtual void paint_ui_hint(ClientContext& context);
   virtual void paint_ui_moving_item(ClientContext& context);
   [[nodiscard]] virtual ui::UiTree& ui_tree() = 0; ///< 获取场景的 UI 树（用于输入分发和精灵缓存）
@@ -113,6 +114,7 @@ class SceneManager {
   void scene_run(ClientContext& context, float delta_seconds);
   void render_scene(ClientContext& context);
   void paint_ui(ClientContext& context);
+  void paint_ui_top(ClientContext& context);
   void paint_ui_hint(ClientContext& context);
   void paint_ui_moving_item(ClientContext& context);
   /// 兼容入口：渲染当前场景和 UI

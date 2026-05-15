@@ -206,6 +206,14 @@ struct ChatLineState {
   std::uint32_t back_color{0x00000000U};
 };
 
+constexpr std::size_t kLegacyTopSysMessageCount = 10;
+constexpr std::uint64_t kLegacySysMessageExpireMs = 3000;
+
+struct SysMessageState {
+  std::string text{};
+  std::uint64_t started_ms{0};
+};
+
 /// NPC 对话状态：对应 Delphi DMerchantDlg / CurMerchant / MDlgX / MDlgY
 struct NpcDialogState {
   bool visible{false};
@@ -352,7 +360,7 @@ struct WorldViewState {
   std::unordered_map<std::uint64_t, MapDoorRuntimeState> map_doors{};  ///< 动态门状态（key = x/y）
   std::vector<std::uint64_t> actor_draw_order{};       ///< Delphi ActorList-equivalent draw order
   std::vector<std::uint64_t> ground_item_draw_order{}; ///< Delphi DropedItemList-equivalent draw order
-  std::vector<std::string> sys_messages{};    ///< 系统消息队列（黄色文字，显示在聊天框）
+  std::vector<SysMessageState> sys_messages{}; ///< DrawScreenTop 系统消息短提示
   std::vector<ChatLineState> chat_lines{};     ///< 底部聊天板，最多 200 行
   int chat_board_top{0};                       ///< 聊天板顶部可见行
   std::string whisper_name{};                  ///< 最近私聊对象
@@ -1811,11 +1819,21 @@ struct GameStateStore {
     }
   }
 
-  /// 推送系统消息（聊天框黄色文字），最多保留 8 条
+  void expire_sys_messages(const std::uint64_t now_ms) {
+    world.sys_messages.erase(
+        std::remove_if(world.sys_messages.begin(), world.sys_messages.end(),
+                       [now_ms](const SysMessageState& message) {
+          return now_ms >= message.started_ms &&
+                 now_ms - message.started_ms >= kLegacySysMessageExpireMs;
+        }),
+        world.sys_messages.end());
+  }
+
+  /// 推送系统消息：聊天板黄色文字 + DrawScreenTop 短提示
   void push_sys_message(std::string text) {
     push_chat_line(text, 0xFFFFFF00U, 0x00000000U);
-    world.sys_messages.push_back(std::move(text));
-    if (world.sys_messages.size() > 8) {
+    world.sys_messages.push_back(SysMessageState{std::move(text), detail::monotonic_ms()});
+    if (world.sys_messages.size() > kLegacyTopSysMessageCount) {
       world.sys_messages.erase(world.sys_messages.begin());
     }
   }

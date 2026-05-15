@@ -74,6 +74,26 @@ void test_chat_board_wrap_scroll_and_color() {
          static_cast<int>(state.world.chat_lines.size()) - 9);
 }
 
+void test_sys_message_updates_chat_and_top_messages() {
+  GameStateStore state;
+  state.apply(SysMessage{"sys0", 0});
+  assert(!state.world.chat_lines.empty());
+  assert(state.world.chat_lines.back().text == "sys0");
+  assert(state.world.chat_lines.back().fore_color == 0xFFFFFF00U);
+  assert(state.world.sys_messages.size() == 1U);
+  assert(state.world.sys_messages.back().text == "sys0");
+
+  for (int index = 1; index <= 12; ++index) {
+    state.apply(SysMessage{"sys" + std::to_string(index), 0});
+  }
+  assert(state.world.sys_messages.size() == kLegacyTopSysMessageCount);
+  assert(state.world.sys_messages.front().text == "sys3");
+
+  const auto expire_at = state.world.sys_messages.back().started_ms + kLegacySysMessageExpireMs;
+  state.expire_sys_messages(expire_at);
+  assert(state.world.sys_messages.empty());
+}
+
 void test_magic_list_binding_rebind_and_spell_intent() {
   GameStateStore state;
   MagicList list;
@@ -138,6 +158,7 @@ void test_hud_and_state_pages_refresh_from_ability_messages() {
 int main() {
   test_chat_input_preserves_legacy_prefixes();
   test_chat_board_wrap_scroll_and_color();
+  test_sys_message_updates_chat_and_top_messages();
   test_magic_list_binding_rebind_and_spell_intent();
   test_hud_and_state_pages_refresh_from_ability_messages();
   return 0;

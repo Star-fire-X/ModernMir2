@@ -48,6 +48,7 @@ enum class Anchor {
 /// Legacy 绘制层：DirectPaint 只绘制 windows，DrawHint/拖拽物品走独立阶段
 enum class UiPaintLayer {
   windows,
+  top,
   hint,
   moving_item
 };
