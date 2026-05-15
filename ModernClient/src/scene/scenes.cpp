@@ -60,6 +60,7 @@
 #include "scene/character_select_state.hpp"
 #include "scene/legacy_auth_ui.hpp"
 #include "scene/legacy_inventory_ui.hpp"
+#include "scene/legacy_magic_npc_ui.hpp"
 #include "scene/legacy_play_ui.hpp"
 #include "shared/legacy/map_render_order.hpp"
 #include "shared/legacy/map_render_math.hpp"
@@ -123,6 +124,10 @@ void legacy_play_trace(const legacy_play_ui::LegacyPlayUiTraceLabel label) {
 
 void legacy_inventory_trace(const legacy_inventory_ui::LegacyInventoryUiTraceLabel label) {
   legacy_trace(legacy_inventory_ui::legacy_inventory_ui_trace_label(label));
+}
+
+void legacy_magic_npc_trace(const legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel label) {
+  legacy_trace(legacy_magic_npc_ui::legacy_magic_npc_ui_trace_label(label));
 }
 
 void legacy_trace_map_layer(
@@ -651,10 +656,15 @@ class NpcDialogNode final : public ui::Window {
   explicit NpcDialogNode(const RectI bounds) : ui::Window(bounds) {}
 
   void set_dialog(const NpcDialogState& dialog) {
+    const auto changed = merchant_id != dialog.merchant_id || face_index != dialog.face ||
+                         npc_name != dialog.npc_name || dialog_text != dialog.text;
     merchant_id = dialog.merchant_id;
     face_index = dialog.face;
     npc_name = dialog.npc_name;
     dialog_text = dialog.text;
+    if (changed && contains_link_markup(dialog_text)) {
+      legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::parse_npc_links);
+    }
   }
 
   void clear_dialog() {
@@ -671,10 +681,10 @@ class NpcDialogNode final : public ui::Window {
     click_points_.clear();
     const auto rect = resolved_bounds();
     if (!npc_name.empty()) {
-      renderer.draw_text(rect.x + kNpcDialogTextX, rect.y + 4, widen(npc_name), 0xFFFFFF66U);
+      renderer.draw_text(rect.x + layout.text_x, rect.y + 4, widen(npc_name), 0xFFFFFF66U);
     }
 
-    auto y = rect.y + kNpcDialogTextY;
+    auto y = rect.y + layout.text_y;
     auto center = false;
     std::wstring line;
     const auto text = widen(dialog_text);
@@ -685,7 +695,7 @@ class NpcDialogNode final : public ui::Window {
       if (ch == L'\n') {
         draw_dialog_line(renderer, line, y, center);
         line.clear();
-        y += kNpcDialogLineHeight;
+        y += layout.line_height;
         continue;
       }
       line.push_back(ch);
@@ -720,7 +730,9 @@ class NpcDialogNode final : public ui::Window {
     if (tree.captured() == this && !selected_command_.empty()) {
       const auto command = command_at(input.mouse_x, input.mouse_y);
       if (command == selected_command_ && on_select != nullptr) {
+        legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::click_npc_link);
         on_select(merchant_id, command);
+        legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::wait_server_refresh);
         cooldown_until_ms_ = GetTickCount64() + 5000U;
       }
       selected_command_.clear();
@@ -735,6 +747,7 @@ class NpcDialogNode final : public ui::Window {
   std::string npc_name{};
   std::string dialog_text{};
   std::function<void(std::uint64_t, std::string)> on_select{};
+  legacy_magic_npc_ui::LegacyNpcDialogLayout layout{};
 
  private:
   struct LinkRun {
@@ -781,6 +794,25 @@ class NpcDialogNode final : public ui::Window {
     return runs;
   }
 
+  static bool contains_link_markup(const std::string& text) {
+    for (std::size_t index = 0; index < text.size();) {
+      const auto open = text.find('<', index);
+      if (open == std::string::npos) {
+        return false;
+      }
+      const auto close = text.find('>', open + 1U);
+      if (close == std::string::npos) {
+        return false;
+      }
+      const auto tag = text.substr(open + 1U, close - open - 1U);
+      if (tag != "C" && tag != "c" && tag != "/C" && tag != "/c") {
+        return true;
+      }
+      index = close + 1U;
+    }
+    return false;
+  }
+
   void draw_dialog_line(SoftwareRenderer& renderer, const std::wstring& line, const int y,
                         bool& center) {
     auto runs = parse_dialog_line(line);
@@ -793,12 +825,12 @@ class NpcDialogNode final : public ui::Window {
     }
     const auto rect = resolved_bounds();
     auto x = center ? rect.x + std::max(0, (rect.w - total_width) / 2)
-                    : rect.x + kNpcDialogTextX;
+                    : rect.x + layout.text_x;
     for (const auto& run : runs) {
       if (run.center_toggle) {
         center = run.center_value;
         x = center ? rect.x + std::max(0, (rect.w - total_width) / 2)
-                   : rect.x + kNpcDialogTextX;
+                   : rect.x + layout.text_x;
         continue;
       }
       const auto width = renderer.measure_text_width(run.display);
@@ -808,7 +840,7 @@ class NpcDialogNode final : public ui::Window {
         renderer.draw_text(x, y, run.display, color);
         if (width > 0) {
           renderer.fill_rect(RectI{x, y + 13, width, 1}, color);
-          click_points_.push_back(ClickPoint{RectI{x, y, width, kNpcDialogLineHeight},
+          click_points_.push_back(ClickPoint{RectI{x, y, width, layout.link_hit_height},
                                              run.command});
         }
       } else {
@@ -1280,6 +1312,7 @@ class LegacyStateContentNode final : public ui::UiNode {
   AssetManager* assets{nullptr};
   int* state_page{nullptr};
   int* magic_page{nullptr};
+  legacy_magic_npc_ui::LegacyMagicPageLayout magic_layout{};
 
  private:
   void draw_equip_page(SoftwareRenderer& renderer) const {
@@ -1338,8 +1371,8 @@ class LegacyStateContentNode final : public ui::UiNode {
 
   void draw_magic_page(SoftwareRenderer& renderer) const {
     const auto rect = resolved_bounds();
-    draw_sprite(renderer, assets->get_frame(ArchiveId::prguse, kStateMagicPageIndex),
-                rect.x + 38, rect.y + 52);
+    draw_sprite(renderer, assets->get_frame(ArchiveId::prguse, magic_layout.resource_index),
+                rect.x + magic_layout.background.x, rect.y + magic_layout.background.y);
     const auto& magics = state->world.magics;
     const auto max_page =
         std::max(0, (static_cast<int>(magics.size()) + 4) / 5 - 1);
@@ -1350,26 +1383,32 @@ class LegacyStateContentNode final : public ui::UiNode {
         continue;
       }
       const auto& magic = magics[static_cast<std::size_t>(index)];
-      const auto y = 59 + row * 37;
+      const auto y = magic_layout.first_row_y + row * magic_layout.row_height;
       auto icon = assets->get_frame(ArchiveId::mag_icon, magic.effect * 2);
-      draw_sprite(renderer, icon, rect.x + 46, rect.y + y);
-      draw_legacy_text(renderer, rect.x + 84, rect.y + y, widen(magic.name), 0xFFFFFF66U);
+      draw_sprite(renderer, icon, rect.x + magic_layout.icon_x, rect.y + y);
+      draw_legacy_text(renderer, rect.x + magic_layout.name_x, rect.y + y,
+                       widen(magic.name), 0xFFFFFF66U);
       draw_sprite(renderer,
-                  assets->get_frame(ArchiveId::prguse, kStateMagicLevelIconIndex),
-                  rect.x + 84, rect.y + y + 13);
+                  assets->get_frame(ArchiveId::prguse,
+                                    magic_layout.level_icon_resource_index),
+                  rect.x + magic_layout.level_icon_x, rect.y + y + 13);
       draw_sprite(renderer,
-                  assets->get_frame(ArchiveId::prguse, kStateMagicExpIconIndex),
-                  rect.x + 84 + 26, rect.y + y + 13);
-      draw_legacy_text(renderer, rect.x + 84 + 13, rect.y + y + 13,
+                  assets->get_frame(ArchiveId::prguse,
+                                    magic_layout.exp_icon_resource_index),
+                  rect.x + magic_layout.exp_icon_x, rect.y + y + 13);
+      draw_legacy_text(renderer, rect.x + magic_layout.level_icon_x + 13,
+                       rect.y + y + 13,
                        std::to_wstring(magic.level),
                        0xFFE5E7EBU);
-      draw_legacy_text(renderer, rect.x + 84 + 26 + 13, rect.y + y + 13,
+      draw_legacy_text(renderer, rect.x + magic_layout.exp_icon_x + 13,
+                       rect.y + y + 13,
                        std::to_wstring(magic.train) + L"/" +
                            std::to_wstring(std::max(0, magic.max_train)),
                        0xFFE5E7EBU);
-      if (const auto key_index = magic_key_icon_index(magic.key); key_index >= 0) {
+      if (const auto key_index = magic_layout.key_icon_resource_index(magic.key);
+          key_index >= 0) {
         draw_sprite(renderer, assets->get_frame(ArchiveId::prguse, key_index),
-                    rect.x + 183, rect.y + y + 1);
+                    rect.x + magic_layout.key_icon_x, rect.y + y);
       }
     }
   }
@@ -1412,7 +1451,9 @@ class MerchantGoodsNode final : public ui::UiNode {
       if (index >= static_cast<int>(shop.goods.size())) {
         continue;
       }
-      const RectI row_rect{rect.x + 27, rect.y + 28 + row * 28, 244, 25};
+      const auto row_template = layout.row_button(row);
+      const RectI row_rect{rect.x + row_template.x, rect.y + row_template.y,
+                           row_template.w, row_template.h};
       if (index == *selected_index) {
         renderer.fill_rect(row_rect, 0x66475569U);
       }
@@ -1432,6 +1473,7 @@ class MerchantGoodsNode final : public ui::UiNode {
   GameStateStore* state{nullptr};
   AssetManager* assets{nullptr};
   int* selected_index{nullptr};
+  legacy_magic_npc_ui::LegacyMerchantMenuLayout layout{};
 };
 
 class MerchantSellNode final : public ui::UiNode {
@@ -1450,7 +1492,8 @@ class MerchantSellNode final : public ui::UiNode {
     const auto* item = pending_item();
     if (item != nullptr) {
       draw_bag_item_icon(renderer, item_icon_frame(assets, *item, ArchiveId::items),
-                         RectI{rect.x + 27, rect.y + 67, 61, 52},
+                         RectI{rect.x + layout.spot.x, rect.y + layout.spot.y,
+                               layout.spot.w, layout.spot.h},
                          item_low_dura(*item));
       draw_legacy_text(renderer, rect.x + 101, rect.y + 73, widen(item->name),
                        0xFFFFFF66U);
@@ -1462,6 +1505,7 @@ class MerchantSellNode final : public ui::UiNode {
 
   GameStateStore* state{nullptr};
   AssetManager* assets{nullptr};
+  legacy_magic_npc_ui::LegacySellDialogLayout layout{};
 
  private:
   [[nodiscard]] const client_v1::ItemState* pending_item() const {
@@ -1494,7 +1538,8 @@ class RepairDialogNode final : public ui::UiNode {
     const auto* item = pending_item();
     if (item != nullptr) {
       draw_bag_item_icon(renderer, item_icon_frame(assets, *item, ArchiveId::items),
-                         RectI{rect.x + 27, rect.y + 67, 61, 52},
+                         RectI{rect.x + layout.spot.x, rect.y + layout.spot.y,
+                               layout.spot.w, layout.spot.h},
                          item_low_dura(*item));
       draw_legacy_text(renderer, rect.x + 101, rect.y + 73, widen(item->name),
                        0xFFFFFF66U);
@@ -1509,6 +1554,7 @@ class RepairDialogNode final : public ui::UiNode {
 
   GameStateStore* state{nullptr};
   AssetManager* assets{nullptr};
+  legacy_magic_npc_ui::LegacySellDialogLayout layout{};
 
  private:
   [[nodiscard]] const client_v1::ItemState* pending_item() const {
@@ -1544,7 +1590,9 @@ class StorageListNode final : public ui::UiNode {
       if (index >= static_cast<int>(storage.items.size())) {
         continue;
       }
-      const RectI row_rect{rect.x + 27, rect.y + 28 + row * 28, 244, 25};
+      const auto row_template = layout.row_button(row);
+      const RectI row_rect{rect.x + row_template.x, rect.y + row_template.y,
+                           row_template.w, row_template.h};
       if (index == storage.selected_index) {
         renderer.fill_rect(row_rect, 0x66475569U);
       }
@@ -1562,6 +1610,7 @@ class StorageListNode final : public ui::UiNode {
   GameStateStore* state{nullptr};
   AssetManager* assets{nullptr};
   int storage_page{0};
+  legacy_magic_npc_ui::LegacyMerchantMenuLayout layout{};
 };
 
 class GroupPanelNode final : public ui::UiNode {
@@ -1833,6 +1882,11 @@ class LegacyHud final {
     const auto state_frame = get_frame(context, ArchiveId::prguse, kStateDialogIndex);
     const auto state_width = state_frame != nullptr ? state_frame->width : 252;
     equipment_layout_ = legacy_inventory_ui::legacy_equipment_layout(state_width);
+    magic_page_layout_ = legacy_magic_npc_ui::legacy_magic_page_layout();
+    magic_key_layout_ = legacy_magic_npc_ui::legacy_magic_key_layout();
+    npc_dialog_layout_ = legacy_magic_npc_ui::legacy_npc_dialog_layout();
+    merchant_menu_layout_ = legacy_magic_npc_ui::legacy_merchant_menu_layout();
+    sell_dialog_layout_ = legacy_magic_npc_ui::legacy_sell_dialog_layout();
     state_window_ = add_sprite_window(root, context, ArchiveId::prguse,
                                       equipment_layout_.resource_index,
                                       equipment_layout_.window.x,
@@ -1847,6 +1901,7 @@ class LegacyHud final {
     state_content_->assets = assets_;
     state_content_->state_page = &state_page_;
     state_content_->magic_page = &magic_page_;
+    state_content_->magic_layout = magic_page_layout_;
     auto* state_close = add_sprite_button(state_window_, context, ArchiveId::prguse,
                                           equipment_layout_.close_resource_index,
                                           equipment_layout_.close_button.x,
@@ -1893,12 +1948,14 @@ class LegacyHud final {
     bind_audio_click(magic_down_button_, context.audio, LegacyClickSound::stone,
                      [this] { change_magic_page(1); });
     for (int row = 0; row < 5; ++row) {
-      auto* row_button = add_hotspot_button(state_window_, RectI{38, 55 + row * 37, 168, 35});
+      auto* row_button = add_hotspot_button(state_window_, magic_page_layout_.row_hit_rect(row));
       row_button->draw_fallback = false;
       bind_audio_click(row_button, context.audio, LegacyClickSound::stone,
                        [this, row] { select_magic_row(row); });
       magic_row_buttons_[static_cast<std::size_t>(row)] = row_button;
     }
+    legacy_magic_npc_trace(
+        legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::magic_page_controls_created);
     add_equipment_button(kEquipWeapon, equipment_layout_.visible_slots[0]);
     add_equipment_button(kEquipDress, equipment_layout_.visible_slots[1]);
     add_equipment_button(kEquipHelmet, equipment_layout_.visible_slots[2]);
@@ -1910,21 +1967,35 @@ class LegacyHud final {
     add_equipment_button(kEquipRingLeft, equipment_layout_.visible_slots[8]);
     legacy_inventory_trace(legacy_inventory_ui::LegacyInventoryUiTraceLabel::equipment_slots_created);
 
-    key_select_dialog_ =
-        add_sprite_window(root, context, ArchiveId::prguse, kMagicKeyDialogIndex, 289, 185,
-                          222, 132);
+    key_select_dialog_ = add_sprite_window(root, context, ArchiveId::prguse,
+                                           magic_key_layout_.resource_index,
+                                           magic_key_layout_.window.x,
+                                           magic_key_layout_.window.y,
+                                           magic_key_layout_.window.w,
+                                           magic_key_layout_.window.h);
     key_select_dialog_->visible = false;
-    add_magic_key_button(context, 0, kMagicKeyNoneButtonIndex, 15, 42);
+    legacy_magic_npc_trace(
+        legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::magic_key_dialog_created);
+    add_magic_key_button(context, 0, magic_key_layout_.none_resource_index,
+                         magic_key_layout_.none_button.x, magic_key_layout_.none_button.y);
     for (int key = 1; key <= 8; ++key) {
-      const auto row = (key - 1) / 4;
-      const auto col = (key - 1) % 4;
-      add_magic_key_button(context, key, 230 + key * 2, 58 + col * 38, 42 + row * 28);
+      const auto button = magic_key_layout_.key_button(key);
+      add_magic_key_button(context, key, magic_key_layout_.key_resource_index(key),
+                           button.x, button.y);
     }
+    legacy_magic_npc_trace(
+        legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::magic_key_buttons_created);
     auto* key_ok = add_sprite_button(key_select_dialog_, context, ArchiveId::prguse,
-                                     kMagicKeyOkButtonIndex, 78, 103, 70, 24);
+                                     magic_key_layout_.ok_resource_index,
+                                     magic_key_layout_.ok_button.x,
+                                     magic_key_layout_.ok_button.y,
+                                     magic_key_layout_.ok_button.w,
+                                     magic_key_layout_.ok_button.h);
     key_ok->on_click = [this] {
       if (key_select_dialog_ != nullptr && tree_ != nullptr) {
         key_select_dialog_->hide(*tree_);
+        legacy_magic_npc_trace(
+            legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::hide_magic_key_modal);
       }
     };
 
@@ -2086,9 +2157,14 @@ class LegacyHud final {
     system_messages_->layout = system_message_layout_;
 
     npc_dialog_ = root->emplace_child<NpcDialogNode>(
-        sprite_rect(get_frame(context, ArchiveId::prguse, kMerchantDialogIndex), 0, 0, 420, 180));
-    npc_dialog_->background_sprite = ui::LegacySpriteRef{ArchiveId::prguse, kMerchantDialogIndex};
-    npc_dialog_->background_frame = get_frame(context, ArchiveId::prguse, kMerchantDialogIndex);
+        sprite_rect(get_frame(context, ArchiveId::prguse, npc_dialog_layout_.resource_index),
+                    npc_dialog_layout_.window.x, npc_dialog_layout_.window.y,
+                    npc_dialog_layout_.window.w, npc_dialog_layout_.window.h));
+    npc_dialog_->layout = npc_dialog_layout_;
+    npc_dialog_->background_sprite =
+        ui::LegacySpriteRef{ArchiveId::prguse, npc_dialog_layout_.resource_index};
+    npc_dialog_->background_frame =
+        get_frame(context, ArchiveId::prguse, npc_dialog_layout_.resource_index);
     npc_dialog_->face = npc_dialog_->background_sprite;
     npc_dialog_->hit_frame = npc_dialog_->background_frame;
     npc_dialog_->real_hit_test_enabled = npc_dialog_->hit_frame != nullptr &&
@@ -2099,119 +2175,193 @@ class LegacyHud final {
       pending_npc_select_ = std::move(selection);
     };
     auto* npc_close = add_sprite_button(npc_dialog_, context, ArchiveId::prguse,
-                                        kMerchantCloseButtonIndex, 399, 1, 16, 16);
+                                        npc_dialog_layout_.close_resource_index,
+                                        npc_dialog_layout_.close_button.x,
+                                        npc_dialog_layout_.close_button.y,
+                                        npc_dialog_layout_.close_button.w,
+                                        npc_dialog_layout_.close_button.h);
     bind_audio_click(npc_close, context.audio, LegacyClickSound::normal,
                      [this] { close_npc_dialog_local(); });
 
-    merchant_menu_ =
-        add_sprite_window(root, context, ArchiveId::prguse, kMerchantBuyDialogIndex, 138, 163,
-                          320, 210);
+    merchant_menu_ = add_sprite_window(root, context, ArchiveId::prguse,
+                                       merchant_menu_layout_.resource_index,
+                                       merchant_menu_layout_.normal_window.x,
+                                       merchant_menu_layout_.normal_window.y,
+                                       merchant_menu_layout_.normal_window.w,
+                                       merchant_menu_layout_.normal_window.h);
     merchant_menu_->visible = false;
     merchant_goods_content_ = merchant_menu_->emplace_child<MerchantGoodsNode>(
         RectI{0, 0, merchant_menu_->bounds.w, merchant_menu_->bounds.h});
     merchant_goods_content_->state = state_;
     merchant_goods_content_->assets = assets_;
     merchant_goods_content_->selected_index = &merchant_selected_index_;
+    merchant_goods_content_->layout = merchant_menu_layout_;
     for (int row = 0; row < 5; ++row) {
-      auto* row_button = add_hotspot_button(merchant_menu_, RectI{27, 28 + row * 28, 244, 25});
+      auto* row_button = add_hotspot_button(merchant_menu_,
+                                            merchant_menu_layout_.row_button(row));
       row_button->draw_fallback = false;
       bind_audio_click(row_button, context.audio, LegacyClickSound::normal,
                        [this, row] { select_merchant_row(row); });
       merchant_row_buttons_[static_cast<std::size_t>(row)] = row_button;
     }
     auto* merchant_prev =
-        add_sprite_button(merchant_menu_, context, ArchiveId::prguse, kMerchantPrevButtonIndex,
-                          43, 175, 40, 24);
+        add_sprite_button(merchant_menu_, context, ArchiveId::prguse,
+                          merchant_menu_layout_.prev_resource_index,
+                          merchant_menu_layout_.prev_button.x,
+                          merchant_menu_layout_.prev_button.y,
+                          merchant_menu_layout_.prev_button.w,
+                          merchant_menu_layout_.prev_button.h);
     bind_audio_click(merchant_prev, context.audio, LegacyClickSound::glass,
                      [this] { change_merchant_page(-1); });
     auto* merchant_next =
-        add_sprite_button(merchant_menu_, context, ArchiveId::prguse, kMerchantNextButtonIndex,
-                          90, 175, 40, 24);
+        add_sprite_button(merchant_menu_, context, ArchiveId::prguse,
+                          merchant_menu_layout_.next_resource_index,
+                          merchant_menu_layout_.next_button.x,
+                          merchant_menu_layout_.next_button.y,
+                          merchant_menu_layout_.next_button.w,
+                          merchant_menu_layout_.next_button.h);
     bind_audio_click(merchant_next, context.audio, LegacyClickSound::glass,
                      [this] { change_merchant_page(1); });
     auto* merchant_buy =
-        add_sprite_button(merchant_menu_, context, ArchiveId::prguse, kMerchantBuyButtonIndex,
-                          215, 171, 50, 28);
+        add_sprite_button(merchant_menu_, context, ArchiveId::prguse,
+                          merchant_menu_layout_.buy_resource_index,
+                          merchant_menu_layout_.buy_button.x,
+                          merchant_menu_layout_.buy_button.y,
+                          merchant_menu_layout_.buy_button.w,
+                          merchant_menu_layout_.buy_button.h);
     bind_audio_click(merchant_buy, context.audio, LegacyClickSound::glass,
                      [this, app = context.app] { buy_selected_merchant_item(app); });
     auto* merchant_close =
-        add_sprite_button(merchant_menu_, context, ArchiveId::prguse, kMerchantCloseButtonIndex,
-                          291, 0, 16, 16);
+        add_sprite_button(merchant_menu_, context, ArchiveId::prguse,
+                          merchant_menu_layout_.close_resource_index,
+                          merchant_menu_layout_.close_button.x,
+                          merchant_menu_layout_.close_button.y,
+                          merchant_menu_layout_.close_button.w,
+                          merchant_menu_layout_.close_button.h);
     bind_audio_click(merchant_close, context.audio, LegacyClickSound::normal,
                      [this] { close_merchant_menu(); });
 
-    merchant_sell_dialog_ =
-        add_sprite_window(root, context, ArchiveId::prguse, kMerchantSellDialogIndex, 328, 163,
-                          250, 160);
+    merchant_sell_dialog_ = add_sprite_window(root, context, ArchiveId::prguse,
+                                              sell_dialog_layout_.resource_index,
+                                              sell_dialog_layout_.normal_window.x,
+                                              sell_dialog_layout_.normal_window.y,
+                                              sell_dialog_layout_.normal_window.w,
+                                              sell_dialog_layout_.normal_window.h);
     merchant_sell_dialog_->visible = false;
     merchant_sell_content_ = merchant_sell_dialog_->emplace_child<MerchantSellNode>(
         RectI{0, 0, merchant_sell_dialog_->bounds.w, merchant_sell_dialog_->bounds.h});
     merchant_sell_content_->state = state_;
     merchant_sell_content_->assets = assets_;
+    merchant_sell_content_->layout = sell_dialog_layout_;
     auto* sell_ok = add_sprite_button(merchant_sell_dialog_, context, ArchiveId::prguse,
-                                      kMerchantSellOkButtonIndex, 102, 124, 60, 24);
+                                      sell_dialog_layout_.ok_resource_index,
+                                      sell_dialog_layout_.ok_button.x,
+                                      sell_dialog_layout_.ok_button.y,
+                                      sell_dialog_layout_.ok_button.w,
+                                      sell_dialog_layout_.ok_button.h);
     bind_audio_click(sell_ok, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] { confirm_sell_item(app); });
     auto* sell_close = add_sprite_button(merchant_sell_dialog_, context, ArchiveId::prguse,
-                                         kMerchantCloseButtonIndex, 225, 2, 16, 16);
+                                         sell_dialog_layout_.close_resource_index,
+                                         sell_dialog_layout_.close_button.x,
+                                         sell_dialog_layout_.close_button.y,
+                                         sell_dialog_layout_.close_button.w,
+                                         sell_dialog_layout_.close_button.h);
     bind_audio_click(sell_close, context.audio, LegacyClickSound::normal,
                      [this] { clear_sell_dialog(); });
 
-    storage_window_ =
-        add_sprite_window(root, context, ArchiveId::prguse, kMerchantBuyDialogIndex, 138, 163,
-                          320, 210);
+    storage_window_ = add_sprite_window(root, context, ArchiveId::prguse,
+                                        merchant_menu_layout_.resource_index,
+                                        merchant_menu_layout_.normal_window.x,
+                                        merchant_menu_layout_.normal_window.y,
+                                        merchant_menu_layout_.normal_window.w,
+                                        merchant_menu_layout_.normal_window.h);
     storage_window_->visible = false;
     storage_content_ = storage_window_->emplace_child<StorageListNode>(
         RectI{0, 0, storage_window_->bounds.w, storage_window_->bounds.h});
     storage_content_->state = state_;
     storage_content_->assets = assets_;
+    storage_content_->layout = merchant_menu_layout_;
     for (int row = 0; row < 5; ++row) {
-      auto* row_button = add_hotspot_button(storage_window_, RectI{27, 28 + row * 28, 244, 25});
+      auto* row_button = add_hotspot_button(storage_window_,
+                                            merchant_menu_layout_.row_button(row));
       row_button->draw_fallback = false;
       bind_audio_click(row_button, context.audio, LegacyClickSound::normal,
                        [this, row] { select_storage_row(row); });
       storage_row_buttons_[static_cast<std::size_t>(row)] = row_button;
     }
     auto* storage_prev =
-        add_sprite_button(storage_window_, context, ArchiveId::prguse, kMerchantPrevButtonIndex,
-                          43, 175, 40, 24);
+        add_sprite_button(storage_window_, context, ArchiveId::prguse,
+                          merchant_menu_layout_.prev_resource_index,
+                          merchant_menu_layout_.prev_button.x,
+                          merchant_menu_layout_.prev_button.y,
+                          merchant_menu_layout_.prev_button.w,
+                          merchant_menu_layout_.prev_button.h);
     bind_audio_click(storage_prev, context.audio, LegacyClickSound::glass,
                      [this] { change_storage_page(-1); });
     auto* storage_next =
-        add_sprite_button(storage_window_, context, ArchiveId::prguse, kMerchantNextButtonIndex,
-                          90, 175, 40, 24);
+        add_sprite_button(storage_window_, context, ArchiveId::prguse,
+                          merchant_menu_layout_.next_resource_index,
+                          merchant_menu_layout_.next_button.x,
+                          merchant_menu_layout_.next_button.y,
+                          merchant_menu_layout_.next_button.w,
+                          merchant_menu_layout_.next_button.h);
     bind_audio_click(storage_next, context.audio, LegacyClickSound::glass,
                      [this] { change_storage_page(1); });
     auto* storage_take =
-        add_sprite_button(storage_window_, context, ArchiveId::prguse, kMerchantBuyButtonIndex,
-                          174, 171, 50, 28);
+        add_sprite_button(storage_window_, context, ArchiveId::prguse,
+                          merchant_menu_layout_.buy_resource_index,
+                          merchant_menu_layout_.storage_take_button.x,
+                          merchant_menu_layout_.storage_take_button.y,
+                          merchant_menu_layout_.storage_take_button.w,
+                          merchant_menu_layout_.storage_take_button.h);
     bind_audio_click(storage_take, context.audio, LegacyClickSound::glass,
                      [this, app = context.app] { withdraw_selected_storage_item(app); });
     auto* storage_deposit =
-        add_sprite_button(storage_window_, context, ArchiveId::prguse, kMerchantSellOkButtonIndex,
-                          224, 171, 50, 28);
+        add_sprite_button(storage_window_, context, ArchiveId::prguse,
+                          sell_dialog_layout_.ok_resource_index,
+                          merchant_menu_layout_.storage_deposit_button.x,
+                          merchant_menu_layout_.storage_deposit_button.y,
+                          merchant_menu_layout_.storage_deposit_button.w,
+                          merchant_menu_layout_.storage_deposit_button.h);
     bind_audio_click(storage_deposit, context.audio, LegacyClickSound::glass,
                      [this] { open_storage_deposit_selecting(); });
     auto* storage_close =
-        add_sprite_button(storage_window_, context, ArchiveId::prguse, kMerchantCloseButtonIndex,
-                          291, 0, 16, 16);
+        add_sprite_button(storage_window_, context, ArchiveId::prguse,
+                          merchant_menu_layout_.close_resource_index,
+                          merchant_menu_layout_.close_button.x,
+                          merchant_menu_layout_.close_button.y,
+                          merchant_menu_layout_.close_button.w,
+                          merchant_menu_layout_.close_button.h);
     bind_audio_click(storage_close, context.audio, LegacyClickSound::normal,
                      [this] { close_storage_window(); });
 
-    repair_dialog_ =
-        add_sprite_window(root, context, ArchiveId::prguse, kMerchantSellDialogIndex, 328, 163,
-                          250, 160);
+    repair_dialog_ = add_sprite_window(root, context, ArchiveId::prguse,
+                                       sell_dialog_layout_.resource_index,
+                                       sell_dialog_layout_.normal_window.x,
+                                       sell_dialog_layout_.normal_window.y,
+                                       sell_dialog_layout_.normal_window.w,
+                                       sell_dialog_layout_.normal_window.h);
     repair_dialog_->visible = false;
     repair_content_ = repair_dialog_->emplace_child<RepairDialogNode>(
         RectI{0, 0, repair_dialog_->bounds.w, repair_dialog_->bounds.h});
     repair_content_->state = state_;
     repair_content_->assets = assets_;
+    repair_content_->layout = sell_dialog_layout_;
     auto* repair_ok = add_sprite_button(repair_dialog_, context, ArchiveId::prguse,
-                                        kMerchantSellOkButtonIndex, 102, 124, 60, 24);
+                                        sell_dialog_layout_.ok_resource_index,
+                                        sell_dialog_layout_.ok_button.x,
+                                        sell_dialog_layout_.ok_button.y,
+                                        sell_dialog_layout_.ok_button.w,
+                                        sell_dialog_layout_.ok_button.h);
     bind_audio_click(repair_ok, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] { confirm_repair_item(app); });
     auto* repair_close = add_sprite_button(repair_dialog_, context, ArchiveId::prguse,
-                                           kMerchantCloseButtonIndex, 225, 2, 16, 16);
+                                           sell_dialog_layout_.close_resource_index,
+                                           sell_dialog_layout_.close_button.x,
+                                           sell_dialog_layout_.close_button.y,
+                                           sell_dialog_layout_.close_button.w,
+                                           sell_dialog_layout_.close_button.h);
     bind_audio_click(repair_close, context.audio, LegacyClickSound::normal,
                      [this] { clear_repair_dialog(); });
 
@@ -2621,7 +2771,15 @@ class LegacyHud final {
     if (!shortcut_candidate) {
       return false;
     }
-    if (context.ui_input.text_focus || tree.modal() != nullptr) {
+    if (context.ui_input.text_focus) {
+      return false;
+    }
+    if (tree.modal() != nullptr && context.input->key_pressed[VK_ESCAPE] &&
+        key_select_dialog_ != nullptr && key_select_dialog_->visible) {
+      tree.trace_legacy_shortcut_fallback();
+      return handle_escape(context, tree);
+    }
+    if (tree.modal() != nullptr) {
       return false;
     }
     if (context.input->key_pressed[VK_ESCAPE]) {
@@ -2681,6 +2839,8 @@ class LegacyHud final {
     if (context.input->key_pressed[VK_F11] || context.input->key_pressed['S']) {
       legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::legacy_shortcut_fallback);
       legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::shortcut_open_magic_page);
+      legacy_magic_npc_trace(
+          legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::shortcut_open_magic_page);
       open_state_page(tree, 3);
       return true;
     }
@@ -2720,6 +2880,8 @@ class LegacyHud final {
     }
     if (key_select_dialog_ != nullptr && key_select_dialog_->visible) {
       key_select_dialog_->hide(tree);
+      legacy_magic_npc_trace(
+          legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::hide_magic_key_modal);
       handled = true;
     }
     if (state_ != nullptr && state_->world.moving_item.active) {
@@ -2837,6 +2999,9 @@ class LegacyHud final {
     }
     state_page_ = std::clamp(state_page_, 0, 3);
     const auto magic_controls_visible = state_page_ == 3;
+    const auto magic_controls_were_visible =
+        !magic_row_buttons_.empty() && magic_row_buttons_.front() != nullptr &&
+        magic_row_buttons_.front()->visible;
     if (magic_up_button_ != nullptr) {
       magic_up_button_->set_visible(*tree_, magic_controls_visible);
     }
@@ -2847,6 +3012,12 @@ class LegacyHud final {
       if (button != nullptr) {
         button->set_visible(*tree_, magic_controls_visible);
       }
+    }
+    if (magic_controls_visible && !magic_controls_were_visible) {
+      legacy_magic_npc_trace(
+          legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::magic_page_controls_visible);
+      legacy_magic_npc_trace(
+          legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::draw_magic_page_rows);
     }
     for (auto* button : equipment_buttons_) {
       if (button != nullptr) {
@@ -2862,26 +3033,43 @@ class LegacyHud final {
     auto& shop = state_->world.merchant_shop;
     if (merchant_menu_ != nullptr) {
       const auto show = shop.visible && !shop.goods.empty();
+      const auto was_visible = merchant_menu_->visible;
+      if (show) {
+        merchant_menu_->bounds = merchant_menu_layout_.shop_window;
+      }
       merchant_menu_->set_visible(*tree_, show);
       if (show) {
         if (merchant_selected_index_ < 0 ||
             merchant_selected_index_ >= static_cast<int>(shop.goods.size())) {
           merchant_selected_index_ = 0;
         }
+        if (!was_visible) {
+          legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::show_shop_menu);
+        }
+        move_bag_for_npc_dialog();
         tree_->bring_to_front(merchant_menu_);
       } else if (!shop.visible) {
         merchant_selected_index_ = -1;
       }
     }
     if (shop.sell_selecting && item_bag_ != nullptr && !item_bag_->visible) {
+      legacy_magic_npc_trace(
+          legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::open_sell_or_repair_selecting);
       item_bag_->set_visible(*tree_, true);
       move_bag_for_npc_dialog();
       tree_->bring_to_front(item_bag_);
     }
     if (merchant_sell_dialog_ != nullptr) {
       const auto show = shop.pending_sell_make_index != 0 && shop.pending_sell_price > 0;
+      const auto was_visible = merchant_sell_dialog_->visible;
+      if (show) {
+        merchant_sell_dialog_->bounds = sell_dialog_layout_.shop_sell_window;
+      }
       merchant_sell_dialog_->set_visible(*tree_, show);
       if (show) {
+        if (!was_visible) {
+          legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::show_sell_dialog);
+        }
         tree_->bring_to_front(merchant_sell_dialog_);
       }
     }
@@ -2896,8 +3084,16 @@ class LegacyHud final {
       storage_content_->storage_page = storage_page_;
     }
     if (storage_window_ != nullptr) {
+      const auto was_visible = storage_window_->visible;
+      if (world.storage.visible) {
+        storage_window_->bounds = merchant_menu_layout_.normal_window;
+      }
       storage_window_->set_visible(*tree_, world.storage.visible);
       if (world.storage.visible) {
+        if (!was_visible) {
+          legacy_magic_npc_trace(
+              legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::show_storage_menu);
+        }
         const auto max_page =
             std::max(0, (static_cast<int>(world.storage.items.size()) + 4) / 5 - 1);
         storage_page_ = std::clamp(storage_page_, 0, max_page);
@@ -2997,7 +3193,12 @@ class LegacyHud final {
 
     npc_dialog_->set_dialog(dialog);
     if (tree_ != nullptr) {
+      const auto was_visible = npc_dialog_->visible;
       npc_dialog_->set_visible(*tree_, true);
+      if (!was_visible) {
+        legacy_magic_npc_trace(
+            legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::show_merchant_dialog);
+      }
       tree_->bring_to_front(npc_dialog_);
     } else {
       npc_dialog_->visible = true;
@@ -3092,6 +3293,10 @@ class LegacyHud final {
       return;
     }
     state_window_->set_visible(tree, true);
+    if (state_page_ == 3) {
+      legacy_magic_npc_trace(
+          legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::show_state_window_magic_page);
+    }
     tree.bring_to_front(state_window_);
     sync_state_window();
   }
@@ -3123,14 +3328,17 @@ class LegacyHud final {
       return;
     }
     selected_magic_id_ = state_->world.magics[static_cast<std::size_t>(index)].magic_id;
-    key_select_dialog_->set_visible(*tree_, true);
-    tree_->bring_to_front(key_select_dialog_);
+    legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::click_magic_row);
+    key_select_dialog_->show_modal(*tree_);
+    legacy_magic_npc_trace(
+        legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::show_magic_key_modal);
   }
 
   void assign_magic_key(ClientApp* app, const int key) {
     if (selected_magic_id_ == 0) {
       return;
     }
+    legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::select_magic_key);
     const auto clamped_key =
         static_cast<std::uint8_t>(std::clamp(key, 0, 8));
     if (app != nullptr) {
@@ -3161,6 +3369,8 @@ class LegacyHud final {
       assign_magic_key(app, key);
       if (key_select_dialog_ != nullptr && tree_ != nullptr) {
         key_select_dialog_->hide(*tree_);
+        legacy_magic_npc_trace(
+            legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::hide_magic_key_modal);
       }
     });
   }
@@ -3173,6 +3383,7 @@ class LegacyHud final {
     const auto index = shop.page * 5 + row;
     if (index >= 0 && index < static_cast<int>(shop.goods.size())) {
       merchant_selected_index_ = index;
+      legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::select_shop_row);
       const auto& item = shop.goods[static_cast<std::size_t>(index)];
       if (audio_ != nullptr) {
         audio_->play_sound(item_click_sound_id(item.std_mode, item.name));
@@ -3238,6 +3449,7 @@ class LegacyHud final {
     if (shop.pending_sell_make_index == 0 || shop.pending_sell_name.empty()) {
       return;
     }
+    legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::confirm_sell_or_repair);
     app->request_merchant_sell(client_v1::MerchantSellRequest{
         shop.merchant_id, shop.pending_sell_make_index, shop.pending_sell_name});
     shop.sell_selecting = false;
@@ -3270,6 +3482,8 @@ class LegacyHud final {
     repair.pending_name.clear();
     repair.pending_price = 0;
     if (tree_ != nullptr && item_bag_ != nullptr) {
+      legacy_magic_npc_trace(
+          legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::open_sell_or_repair_selecting);
       item_bag_->set_visible(*tree_, true);
       move_bag_for_npc_dialog();
       tree_->bring_to_front(item_bag_);
@@ -3295,6 +3509,7 @@ class LegacyHud final {
         repair.pending_name.empty()) {
       return;
     }
+    legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::confirm_sell_or_repair);
     app->request_repair_item(client_v1::MerchantRepairRequest{
         repair.merchant_id, repair.pending_make_index, repair.pending_name});
     repair.dialog_visible = false;
@@ -3315,6 +3530,7 @@ class LegacyHud final {
     const auto index = storage_page_ * 5 + row;
     if (index >= 0 && index < static_cast<int>(storage.items.size())) {
       storage.selected_index = index;
+      legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::select_storage_row);
       const auto& item = storage.items[static_cast<std::size_t>(index)];
       if (audio_ != nullptr) {
         audio_->play_sound(item_click_sound_id(item.std_mode, item.name));
@@ -3344,6 +3560,8 @@ class LegacyHud final {
     if (storage.merchant_id == 0) {
       return;
     }
+    legacy_magic_npc_trace(
+        legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::open_storage_deposit_selecting);
     storage.deposit_selecting = true;
     if (tree_ != nullptr && item_bag_ != nullptr) {
       item_bag_->set_visible(*tree_, true);
@@ -3602,10 +3820,16 @@ class LegacyHud final {
   }
 
   void close_npc_dialog_local() {
+    legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::close_npc_dialog_local);
     if (npc_dialog_ != nullptr) {
+      const auto was_visible = npc_dialog_->visible;
       npc_dialog_->clear_dialog();
       if (tree_ != nullptr) {
         npc_dialog_->set_visible(*tree_, false);
+        if (was_visible) {
+          legacy_magic_npc_trace(
+              legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::hide_merchant_dialog);
+        }
       } else {
         npc_dialog_->visible = false;
       }
@@ -3620,15 +3844,26 @@ class LegacyHud final {
 
   void move_bag_for_npc_dialog() {
     if (item_bag_ != nullptr) {
+      const auto already_moved = item_bag_->bounds.x == 475 && item_bag_->bounds.y == 0;
       item_bag_->bounds.x = 475;
       item_bag_->bounds.y = 0;
+      if (!already_moved) {
+        legacy_magic_npc_trace(
+            legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::move_item_bag_for_shop);
+      }
     }
   }
 
   void restore_bag_origin() {
     if (item_bag_ != nullptr) {
+      const auto already_origin = item_bag_->bounds.x == bag_layout_.window.x &&
+                                  item_bag_->bounds.y == bag_layout_.window.y;
       item_bag_->bounds.x = bag_layout_.window.x;
       item_bag_->bounds.y = bag_layout_.window.y;
+      if (!already_origin) {
+        legacy_magic_npc_trace(
+            legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::restore_item_bag_origin);
+      }
     }
   }
 
@@ -4117,6 +4352,8 @@ class LegacyHud final {
       world.repair.pending_make_index = item.make_index;
       world.repair.pending_name = item.name;
       world.repair.pending_price = 0;
+      legacy_magic_npc_trace(
+          legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::select_bag_item_for_price);
       context.app->request_repair_price(client_v1::MerchantRepairPriceRequest{
           world.repair.merchant_id, item.make_index, item.name});
       return;
@@ -4128,6 +4365,8 @@ class LegacyHud final {
       }
       play_item_click(audio_, item);
       world.storage.deposit_selecting = false;
+      legacy_magic_npc_trace(
+          legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::select_bag_item_for_storage);
       context.app->request_storage_deposit(client_v1::StorageDepositRequest{
           world.storage.merchant_id, item.make_index, item.name});
       return;
@@ -4140,6 +4379,8 @@ class LegacyHud final {
       play_item_click(audio_, item);
       world.merchant_shop.pending_sell_make_index = item.make_index;
       world.merchant_shop.pending_sell_name = item.name;
+      legacy_magic_npc_trace(
+          legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::select_bag_item_for_price);
       context.app->request_merchant_sell_price(client_v1::MerchantSellPriceRequest{
           world.merchant_shop.merchant_id, item.make_index, item.name});
       return;
@@ -4471,6 +4712,11 @@ class LegacyHud final {
   legacy_inventory_ui::LegacyBagLayout bag_layout_{};
   legacy_inventory_ui::LegacyEquipmentLayout equipment_layout_{};
   legacy_inventory_ui::LegacyItemHintLayout item_hint_layout_{};
+  legacy_magic_npc_ui::LegacyMagicPageLayout magic_page_layout_{};
+  legacy_magic_npc_ui::LegacyMagicKeyLayout magic_key_layout_{};
+  legacy_magic_npc_ui::LegacyNpcDialogLayout npc_dialog_layout_{};
+  legacy_magic_npc_ui::LegacyMerchantMenuLayout merchant_menu_layout_{};
+  legacy_magic_npc_ui::LegacySellDialogLayout sell_dialog_layout_{};
 
   // 右键快捷菜单状态
   struct ItemContextMenu {
@@ -6933,6 +7179,9 @@ class WorldScene final : public Scene {
         if (target_it != world.actors.end() &&
             target_it->second.actor_type == client_v1::ActorType::npc) {
           if (context.app != nullptr) {
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::
+                    click_npc_from_scene_when_ui_not_consumed);
             context.app->request_npc_click(world.focus_actor_id);
           }
           world.target_actor_id = 0;

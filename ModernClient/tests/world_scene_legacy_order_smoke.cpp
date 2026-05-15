@@ -140,6 +140,38 @@ int main() {
   assert(!world.moving_item.active);
   assert(world.bag_items[6].make_index == potion.make_index);
 
+  input = mir2::client::InputState{};
+  context.ui_input = mir2::client::ui::UiInputResult{};
+  input.key_pressed[VK_F11] = true;
+  scenes.capture_ui_input(context);
+  scenes.process_key_messages(context);
+  assert(ui_tree->modal() == nullptr);
+
+  input = mir2::client::InputState{};
+  context.ui_input = mir2::client::ui::UiInputResult{};
+  input.mouse_x = 590;
+  input.mouse_y = 60;
+  input.left_pressed = true;
+  input.left_down = true;
+  scenes.capture_ui_input(context);
+  scenes.dwin_process(context);
+
+  input = mir2::client::InputState{};
+  context.ui_input = mir2::client::ui::UiInputResult{};
+  input.mouse_x = 590;
+  input.mouse_y = 60;
+  input.left_released = true;
+  scenes.capture_ui_input(context);
+  scenes.dwin_process(context);
+  assert(ui_tree->modal() != nullptr);
+
+  input = mir2::client::InputState{};
+  context.ui_input = mir2::client::ui::UiInputResult{};
+  input.key_pressed[VK_ESCAPE] = true;
+  scenes.capture_ui_input(context);
+  scenes.process_key_messages(context);
+  assert(ui_tree->modal() == nullptr);
+
   scenes.scene_run(context, 0.0F);
   assert(has_sound_id(audio, mir2::client::s_main_theme));
 
