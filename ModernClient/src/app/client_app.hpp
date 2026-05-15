@@ -207,6 +207,12 @@ class ClientApp {
   PendingConnect pending_connect_{PendingConnect::none};
   client_v1::CreateAccountRequest pending_create_account_{};
   client_v1::ChangePasswordRequest pending_change_password_{};
+  enum class PendingCharacterRefreshTrace {
+    none,
+    create,
+    delete_character
+  };
+  PendingCharacterRefreshTrace pending_character_refresh_trace_{PendingCharacterRefreshTrace::none};
 
   // ---- 自动播放（测试/演示模式）状态 ----
   // 自动播放是专为测试环境设计的功能，当 client.ini 中配置了

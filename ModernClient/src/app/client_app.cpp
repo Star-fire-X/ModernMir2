@@ -26,6 +26,7 @@
 
 #include "app/client_app.hpp"
 
+#include "scene/legacy_auth_ui.hpp"
 #include "ui/legacy_ui.hpp"
 
 #include <algorithm>
@@ -131,6 +132,10 @@ void legacy_trace(const std::string_view text) {
 
 void legacy_ui_paint_trace(const ui::LegacyUiPaintTraceLabel label) {
   legacy_trace(ui::legacy_ui_paint_layer_label(label));
+}
+
+void legacy_auth_trace(const legacy_auth_ui::LegacyAuthUiTraceLabel label) {
+  legacy_trace(legacy_auth_ui::legacy_auth_ui_trace_label(label));
 }
 
 /// 在软件渲染器上绘制精灵帧
@@ -573,6 +578,7 @@ void ClientApp::request_select_server(const std::string& server_name) {
   state_.lobby.server_select_pending = true;
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for server selection..."); });
+  legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_select_server);
   protocol_.send(client_v1::SelectServerRequest{server_name});
 }
 
@@ -586,6 +592,7 @@ void ClientApp::request_character_list() {
   state_.login.status = L"Requesting character list...";
   schedule_one_shot_timer(sel_chr_wait_timer_, 5.0f,
                           [this] { sel_chr_wait_timer_tick(L"Still waiting for character list..."); });
+  legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_query_character);
   protocol_.send(client_v1::CharacterListRequest{state_.pending_lobby_token});
 }
 
@@ -601,6 +608,7 @@ void ClientApp::request_create_character(const std::string& name, const std::uin
   state_.lobby.create_character_pending = true;
   schedule_one_shot_timer(cmd_timer_, 3.0f,
                           [this] { cmd_timer_tick(L"Still waiting for character creation..."); });
+  legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_new_character);
   protocol_.send(client_v1::CreateCharacterRequest{legacy_byte_payload(name), job, sex, hair});
 }
 
@@ -621,10 +629,12 @@ void ClientApp::request_delete_selected_character() {
       L"Delete \"" + character_name +
           L"\"?\\Deleted characters cannot be restored.\\You may be unable to reuse this name for a while.",
       [this, name] {
+        legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::confirm_delete_character);
         state_.lobby.delete_character_pending = true;
         schedule_one_shot_timer(
             cmd_timer_, 3.0f,
             [this] { cmd_timer_tick(L"Still waiting for character deletion..."); });
+        legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_delete_character);
         protocol_.send(client_v1::DeleteCharacterRequest{legacy_byte_payload(name)});
       });
 }
@@ -643,6 +653,7 @@ void ClientApp::request_selected_character_enter() {
   state_.lobby.enter_character_pending = true;
   schedule_one_shot_timer(sel_chr_wait_timer_, 5.0f,
                           [this] { sel_chr_wait_timer_tick(L"Still waiting for character entry..."); });
+  legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_select_character);
   protocol_.send(client_v1::SelectCharacterRequest{state_.selected_character});
 }
 
@@ -1225,6 +1236,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
                                             config_.resource_revision, 0});
       // 根据连接类型发送对应的首个业务请求
       if (pending_connect_ == PendingConnect::login) {
+        legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_login);
         protocol_.send(client_v1::LoginRequest{state_.login.account_id, state_.login.password});
       } else if (pending_connect_ == PendingConnect::create_account) {
         protocol_.send(pending_create_account_);
@@ -1301,6 +1313,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           // 登录结果：成功则等待服务器列表，失败时自动模式尝试自动注册
           if constexpr (std::is_same_v<T, client_v1::LoginResult>) {
             if (value.success) {
+              legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_login_success);
               state_.display_name = value.display_name;
               state_.login.login_state = LoginState::lsLogin;
               state_.login.needs_account_update = false;
@@ -1345,6 +1358,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           } else if constexpr (std::is_same_v<T, client_v1::ServerList>) {
             state_.login.request_pending = false;
             state_.login.needs_account_update = false;
+            legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_server_list);
             state_.apply(value);
             if (state_.lobby.servers.empty()) {
               show_modal(L"Server List", L"No game servers are available.");
@@ -1371,6 +1385,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             state_.login.status = L"Select a server.";
             request_scene_change(SceneId::server_select);
+            legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::show_server_select);
 
           // 选服结果：保存角色网关地址并发起连接
           } else if constexpr (std::is_same_v<T, client_v1::SelectServerResult>) {
@@ -1379,6 +1394,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
               show_modal(L"Select Server Failed", widen(value.error_message));
               return;
             }
+            legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_select_server_ok);
             state_.apply(value);
             if (state_.pending_lobby_token.empty() || state_.pending_character_host.empty() ||
                 state_.pending_character_port == 0) {
@@ -1390,6 +1406,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             state_.login.status = L"Connecting character gateway...";
             pending_connect_ = PendingConnect::select_character;
+            legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::connect_character_gateway);
             if (!protocol_.connect(value.address, value.port)) {
               state_.lobby.server_select_pending = false;
               state_.lobby.character_list_pending = false;
@@ -1404,10 +1421,19 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             pending_connect_ = PendingConnect::none;
             state_.lobby.server_select_pending = false;
             state_.lobby.character_list_pending = false;
+            legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_query_character);
             state_.apply(value);
             state_.connection_phase = GameStateStore::ConnectionPhase::select_character;
             state_.login.status = L"Character list received.";
+            const auto character_refresh_trace_pending =
+                pending_character_refresh_trace_ != PendingCharacterRefreshTrace::none;
             request_scene_change(SceneId::character_select);
+            if (character_refresh_trace_pending) {
+              legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::refresh_character_slots);
+              pending_character_refresh_trace_ = PendingCharacterRefreshTrace::none;
+            } else {
+              legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::show_character_select);
+            }
             if (login_replay_active_) {
               for (std::size_t index = 0; index < state_.lobby.characters.size(); ++index) {
                 if (state_.lobby.characters[index].name == login_replay_character_name_) {
@@ -1434,6 +1460,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
               show_modal(L"Character Select Failed", widen(value.error_message));
               return;
             }
+            legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_start_play);
             state_.enter_world_token = value.enter_world_token;
             state_.pending_game_host = value.address;
             state_.pending_game_port = value.port;
@@ -1441,6 +1468,8 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.connection_phase = GameStateStore::ConnectionPhase::play;
             state_.login.status = L"Connecting game gateway...";
             pending_connect_ = PendingConnect::game;
+            legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::connect_game_gateway);
+            legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::show_login_notice_or_loading);
             if (!protocol_.connect(value.address, value.port)) {
               state_.lobby.enter_character_pending = false;
               pending_connect_ = PendingConnect::none;
@@ -1747,19 +1776,25 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           } else if constexpr (std::is_same_v<T, client_v1::CreateCharacterResult>) {
             state_.lobby.create_character_pending = false;
             if (!value.success) {
+              pending_character_refresh_trace_ = PendingCharacterRefreshTrace::none;
               state_.login.status = L"Character creation failed. Please retry.";
               show_modal(L"Create Character Failed", widen(value.error_message));
               return;
             }
+            legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_new_character_success);
+            pending_character_refresh_trace_ = PendingCharacterRefreshTrace::create;
             state_.login.status = L"Character created. Refreshing lobby...";
             request_character_list();
 
           } else if constexpr (std::is_same_v<T, client_v1::DeleteCharacterResult>) {
             state_.lobby.delete_character_pending = false;
             if (!value.success) {
+              pending_character_refresh_trace_ = PendingCharacterRefreshTrace::none;
               show_modal(L"Delete Character Failed", widen(value.error_message));
               return;
             }
+            legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_delete_character_success);
+            pending_character_refresh_trace_ = PendingCharacterRefreshTrace::delete_character;
             state_.login.status = L"Character deleted. Refreshing lobby...";
             request_character_list();
           }
