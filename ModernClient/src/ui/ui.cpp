@@ -87,6 +87,19 @@ bool keyboard_input_present(const InputState& input) {
                      [](const bool pressed) { return pressed; });
 }
 
+void paint_node_layer(UiNode& node, SoftwareRenderer& renderer, const UiPaintLayer layer) {
+  if (!node.visible) {
+    return;
+  }
+  if (node.paint_layer() == layer) {
+    node.paint(renderer);
+    return;
+  }
+  for (auto& child : node.children()) {
+    paint_node_layer(*child, renderer, layer);
+  }
+}
+
 }  // namespace
 
 // ====================================================================
@@ -736,6 +749,7 @@ void Window::show_modal(UiTree& tree) {
 Tooltip::Tooltip(RectI bounds) : UiNode(bounds) {
   visible = false;
   enabled = false;
+  set_paint_layer(UiPaintLayer::hint);
 }
 
 /// 在指定位置显示工具提示
@@ -834,6 +848,7 @@ void Tooltip::paint(SoftwareRenderer& renderer) {
 DragSpriteOverlay::DragSpriteOverlay(RectI bounds) : UiNode(bounds) {
   visible = false;
   enabled = false;
+  set_paint_layer(UiPaintLayer::moving_item);
 }
 
 void DragSpriteOverlay::set_sprite(std::shared_ptr<const SpriteFrame> frame_in) {
@@ -1064,10 +1079,16 @@ void UiTree::process_queued_events(const InputState& input) {
 
 /// 渲染 UI 树：设置全局 assets 指针后递归渲染
 void UiTree::paint(SoftwareRenderer& renderer) {
+  paint_layer(renderer, UiPaintLayer::windows);
+}
+
+void UiTree::paint_layer(SoftwareRenderer& renderer, const UiPaintLayer layer) {
   if (root_ != nullptr) {
     auto* const previous_assets = g_paint_assets;
     g_paint_assets = assets_;
-    root_->paint(renderer);
+    for (auto& child : root_->children()) {
+      paint_node_layer(*child, renderer, layer);
+    }
     g_paint_assets = previous_assets;
   }
 }

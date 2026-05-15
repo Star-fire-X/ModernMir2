@@ -5,6 +5,34 @@
 
 namespace mir2::client::ui {
 
+std::string_view legacy_ui_paint_layer_label(const LegacyUiPaintTraceLabel label) {
+  switch (label) {
+    case LegacyUiPaintTraceLabel::map_tiles:
+      return "map_tiles";
+    case LegacyUiPaintTraceLabel::map_objects:
+      return "map_objects";
+    case LegacyUiPaintTraceLabel::actors_monsters_npcs:
+      return "actors_monsters_npcs";
+    case LegacyUiPaintTraceLabel::skill_effects:
+      return "skill_effects";
+    case LegacyUiPaintTraceLabel::scene_top_effects:
+      return "scene_top_effects";
+    case LegacyUiPaintTraceLabel::ui_windows_dwin_direct_paint:
+      return "ui_windows_dwin_direct_paint";
+    case LegacyUiPaintTraceLabel::top_system_messages_draw_screen_top:
+      return "top_system_messages_draw_screen_top";
+    case LegacyUiPaintTraceLabel::hint_tooltip_draw_hint:
+      return "hint_tooltip_draw_hint";
+    case LegacyUiPaintTraceLabel::moving_item_cursor:
+      return "moving_item_cursor";
+    case LegacyUiPaintTraceLabel::mouse_cursor:
+      return "mouse_cursor";
+    case LegacyUiPaintTraceLabel::present:
+      return "present";
+  }
+  return "";
+}
+
 void LegacyUiTrace::emit(const std::string_view label) { events_.emplace_back(label); }
 
 void LegacyUiTrace::clear() { events_.clear(); }
@@ -103,8 +131,23 @@ void LegacyUiManager::trace_legacy_shortcut_fallback() {
 }
 
 void LegacyUiManager::direct_paint(SoftwareRenderer& renderer) {
-  trace_.emit("ui_windows_dwin_direct_paint");
+  trace_.emit(legacy_ui_paint_layer_label(
+      LegacyUiPaintTraceLabel::ui_windows_dwin_direct_paint));
   tree_.paint(renderer);
+}
+
+void LegacyUiManager::draw_hint(SoftwareRenderer& renderer) {
+  trace_.emit(legacy_ui_paint_layer_label(LegacyUiPaintTraceLabel::hint_tooltip_draw_hint));
+  tree_.paint_layer(renderer, UiPaintLayer::hint);
+}
+
+void LegacyUiManager::draw_moving_item(SoftwareRenderer& renderer) {
+  trace_.emit(legacy_ui_paint_layer_label(LegacyUiPaintTraceLabel::moving_item_cursor));
+  tree_.paint_layer(renderer, UiPaintLayer::moving_item);
+}
+
+void LegacyUiManager::trace_mouse_cursor() {
+  trace_.emit(legacy_ui_paint_layer_label(LegacyUiPaintTraceLabel::mouse_cursor));
 }
 
 void LegacyUiManager::clear_for_scene_exit() {

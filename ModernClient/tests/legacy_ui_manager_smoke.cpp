@@ -178,6 +178,14 @@ void test_direct_paint_trace_is_window_layer_only(
     assert(event.find("moving_item") == std::string::npos);
     assert(event.find("mouse") == std::string::npos);
   }
+
+  manager.trace().clear();
+  manager.draw_hint(renderer);
+  manager.draw_moving_item(renderer);
+  manager.trace_mouse_cursor();
+  assert((manager.trace().events() ==
+          std::vector<std::string>{"hint_tooltip_draw_hint", "moving_item_cursor",
+                                   "mouse_cursor"}));
 }
 
 }  // namespace

@@ -26,6 +26,8 @@
 
 #include "app/client_app.hpp"
 
+#include "ui/legacy_ui.hpp"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -125,6 +127,10 @@ void legacy_trace(const std::string_view text) {
     std::ofstream file(path, std::ios::app | std::ios::binary);
     file << line;
   }
+}
+
+void legacy_ui_paint_trace(const ui::LegacyUiPaintTraceLabel label) {
+  legacy_trace(ui::legacy_ui_paint_layer_label(label));
 }
 
 /// 在软件渲染器上绘制精灵帧
@@ -347,13 +353,35 @@ int ClientApp::run() {
             },
             [this, &context] {
               renderer_.begin_frame(0xFF0B1016U);
+              legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::map_tiles);
+              legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::map_objects);
+              legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::actors_monsters_npcs);
+              legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::skill_effects);
+              legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::scene_top_effects);
               scenes_.render_scene(context);
             },
-            [this, &context] { scenes_.paint_ui(context); },
-            [this] { render_modal(); },
-            [] {},
-            [] {},
-            [this] { renderer_.present(); },
+            [this, &context] {
+              legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::ui_windows_dwin_direct_paint);
+              scenes_.paint_ui(context);
+            },
+            [this] {
+              legacy_ui_paint_trace(
+                  ui::LegacyUiPaintTraceLabel::top_system_messages_draw_screen_top);
+              render_modal();
+            },
+            [this, &context] {
+              legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::hint_tooltip_draw_hint);
+              scenes_.paint_ui_hint(context);
+            },
+            [this, &context] {
+              legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::moving_item_cursor);
+              scenes_.paint_ui_moving_item(context);
+              legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::mouse_cursor);
+            },
+            [this] {
+              legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::present);
+              renderer_.present();
+            },
             [this] { return can_draw_frame(); }});
     std::this_thread::sleep_for(std::chrono::milliseconds(1));  // 让渡 CPU，降低功耗
   }

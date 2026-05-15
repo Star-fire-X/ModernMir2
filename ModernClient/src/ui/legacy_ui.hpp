@@ -13,6 +13,22 @@ namespace mir2::client::ui {
 inline constexpr int kLegacyUiScreenWidth = 800;
 inline constexpr int kLegacyUiScreenHeight = 600;
 
+enum class LegacyUiPaintTraceLabel {
+  map_tiles,
+  map_objects,
+  actors_monsters_npcs,
+  skill_effects,
+  scene_top_effects,
+  ui_windows_dwin_direct_paint,
+  top_system_messages_draw_screen_top,
+  hint_tooltip_draw_hint,
+  moving_item_cursor,
+  mouse_cursor,
+  present
+};
+
+[[nodiscard]] std::string_view legacy_ui_paint_layer_label(LegacyUiPaintTraceLabel label);
+
 class LegacyUiTrace {
  public:
   void emit(std::string_view label);
@@ -75,6 +91,9 @@ class LegacyUiManager {
   void process_queued_events(const InputState& input);
   void trace_legacy_shortcut_fallback();
   void direct_paint(SoftwareRenderer& renderer);
+  void draw_hint(SoftwareRenderer& renderer);
+  void draw_moving_item(SoftwareRenderer& renderer);
+  void trace_mouse_cursor();
   void clear_for_scene_exit();
   void clear_for_disconnect();
 
