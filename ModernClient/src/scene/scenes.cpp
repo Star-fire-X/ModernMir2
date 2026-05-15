@@ -58,6 +58,7 @@
 #include "audio/legacy_sound_rules.hpp"
 #include "audio/sound_constants.hpp"
 #include "scene/character_select_state.hpp"
+#include "scene/legacy_auth_ui.hpp"
 #include "shared/legacy/map_render_order.hpp"
 #include "shared/legacy/map_render_math.hpp"
 #include "shared/legacy/movement_rules.hpp"
@@ -108,6 +109,10 @@ void legacy_trace(const std::string_view text) {
     std::ofstream file(path, std::ios::app | std::ios::binary);
     file << line;
   }
+}
+
+void legacy_auth_trace(const legacy_auth_ui::LegacyAuthUiTraceLabel label) {
+  legacy_trace(legacy_auth_ui::legacy_auth_ui_trace_label(label));
 }
 
 void legacy_trace_map_layer(
@@ -4491,42 +4496,45 @@ class LoginScene final : public Scene {
     state_ = context.state;
     ui_.clear();
     create_edit_font();
-    login_rect_ =
-        centered_rect(get_frame(context, ArchiveId::prguse, kLoginDialogIndex), 800, 600, 360, 280);
+    login_layout_ = legacy_auth_ui::legacy_login_layout(
+        sprite_rect(get_frame(context, ArchiveId::prguse, kLoginDialogIndex), 0, 0, 360, 280));
+    login_rect_ = login_layout_.dialog;
     auto* root = ui_.set_root<ui::UiNode>(RectI{0, 0, 800, 600});
     new_account_rect_ =
         centered_rect(get_frame(context, ArchiveId::prguse, kNewAccountDialogIndex), 800, 600, 642, 472);
     change_password_rect_ =
         centered_rect(get_frame(context, ArchiveId::prguse, kChangePasswordDialogIndex), 800, 600, 416, 320);
 
-    account_edit_ = root->emplace_child<ResourceTextEdit>(RectI{350, 259, 137, 16});
+    account_edit_ = root->emplace_child<ResourceTextEdit>(login_layout_.account_edit);
     account_edit_->placeholder = L"";
     account_edit_->on_submit = [this] { focus_password_edit(); };
 
-    password_edit_ = root->emplace_child<ResourceTextEdit>(RectI{350, 291, 137, 16});
+    password_edit_ = root->emplace_child<ResourceTextEdit>(login_layout_.password_edit);
     password_edit_->password_mode = true;
     password_edit_->placeholder = L"";
     password_edit_->on_submit = [this] { submit(); };
 
     change_password_button_ =
         add_sprite_button(root, context, ArchiveId::prguse, kLoginChangePasswordButtonIndex,
-                          login_rect_.x + 111, login_rect_.y + 207);
+                          login_layout_.change_password_button.x,
+                          login_layout_.change_password_button.y);
     bind_audio_click(change_password_button_, context.audio, LegacyClickSound::normal,
                      [this] { open_change_password_dialog(); });
 
     create_account_button_ =
         add_sprite_button(root, context, ArchiveId::prguse, kLoginCreateButtonIndex,
-                          login_rect_.x + 24, login_rect_.y + 207);
+                          login_layout_.create_account_button.x,
+                          login_layout_.create_account_button.y);
     bind_audio_click(create_account_button_, context.audio, LegacyClickSound::stone,
                      [this] { open_create_account_dialog(); });
 
     login_button_ = add_sprite_button(root, context, ArchiveId::prguse, kLoginSubmitButtonIndex,
-                                      login_rect_.x + 171, login_rect_.y + 165);
+                                      login_layout_.login_button.x, login_layout_.login_button.y);
     bind_audio_click(login_button_, context.audio, LegacyClickSound::stone,
                      [this] { submit(); });
 
     close_button_ = add_sprite_button(root, context, ArchiveId::prguse, kLoginCloseButtonIndex,
-                                      login_rect_.x + 252, login_rect_.y + 28);
+                                      login_layout_.close_button.x, login_layout_.close_button.y);
     bind_audio_click(close_button_, context.audio, LegacyClickSound::stone, [this] {
       if (app_ != nullptr) {
         app_->request_close();
@@ -4701,6 +4709,7 @@ class LoginScene final : public Scene {
 
   void update(ClientContext& context, float /*delta_seconds*/) override {
     sync_native_edit_values();
+    sync_native_edit_bounds(context.renderer);
     if (context.state->login.needs_account_update &&
         (login_mode_ != LoginMode::new_account || !account_update_mode_)) {
       open_update_account_dialog(context.state->login.account_profile);
@@ -4840,6 +4849,32 @@ class LoginScene final : public Scene {
     }
     if (change_repeat_password_edit_ != nullptr) {
       change_repeat_password_edit_->sync_from_native();
+    }
+  }
+
+  void sync_native_edit_bounds(const SoftwareRenderer* renderer) {
+    if (account_edit_ != nullptr) {
+      account_edit_->sync_native_bounds(renderer);
+    }
+    if (password_edit_ != nullptr) {
+      password_edit_->sync_native_bounds(renderer);
+    }
+    for (auto* field : new_account_fields()) {
+      if (field != nullptr) {
+        field->sync_native_bounds(renderer);
+      }
+    }
+    if (change_id_edit_ != nullptr) {
+      change_id_edit_->sync_native_bounds(renderer);
+    }
+    if (change_current_password_edit_ != nullptr) {
+      change_current_password_edit_->sync_native_bounds(renderer);
+    }
+    if (change_new_password_edit_ != nullptr) {
+      change_new_password_edit_->sync_native_bounds(renderer);
+    }
+    if (change_repeat_password_edit_ != nullptr) {
+      change_repeat_password_edit_->sync_native_bounds(renderer);
     }
   }
 
@@ -5026,6 +5061,7 @@ class LoginScene final : public Scene {
     account_edit_->value = lower_copy(trim_copy(account_edit_->value));
     account_edit_->sync_to_native();
     if (!account_edit_->value.empty()) {
+      legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::account_enter_focus_password);
       ui_.focus(password_edit_);
     }
   }
@@ -5219,6 +5255,7 @@ class LoginScene final : public Scene {
     }
     state_->login.account_id = narrow(account_edit_->value);
     state_->login.password = narrow(password_edit_->value);
+    legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::password_enter_send_login);
     app_->request_login(state_->login.account_id, state_->login.password);
   }
 
@@ -5458,6 +5495,7 @@ class LoginScene final : public Scene {
   HotspotButton* login_button_{nullptr};
   HotspotButton* close_button_{nullptr};
   LoginMode login_mode_{LoginMode::login};
+  legacy_auth_ui::LegacyLoginLayout login_layout_{};
   RectI login_rect_{};
   RectI new_account_rect_{};
   RectI change_password_rect_{};
@@ -5498,27 +5536,28 @@ class ServerSelectScene final : public Scene {
     server_buttons_.clear();
 
     auto* root = ui_.set_root<ui::UiNode>(RectI{0, 0, 800, 600});
-    dialog_rect_ = centered_rect(get_frame(context, ArchiveId::prguse, kServerSelectDialogIndex),
-                                 800, 600, 300, 360);
+    const auto count = context.state->lobby.servers.size();
+    const auto visible_count = std::min<std::size_t>(count, kMaxServerButtons);
+    server_layout_ = legacy_auth_ui::legacy_server_select_layout(
+        sprite_rect(get_frame(context, ArchiveId::prguse, kServerSelectDialogIndex), 0, 0, 300,
+                    360),
+        visible_count);
+    dialog_rect_ = server_layout_.dialog;
 
     server_close_button_ = add_sprite_button(root, context, ArchiveId::prguse,
-                                             kLoginCloseButtonIndex, dialog_rect_.x + 244,
-                                             dialog_rect_.y + 30, 24, 24);
+                                             kLoginCloseButtonIndex,
+                                             server_layout_.close_button.x,
+                                             server_layout_.close_button.y,
+                                             server_layout_.close_button.w,
+                                             server_layout_.close_button.h);
     bind_audio_click(server_close_button_, context.audio, LegacyClickSound::stone, [this] {
       if (app_ != nullptr) {
         app_->request_close();
       }
     });
 
-    const auto count = context.state->lobby.servers.size();
-    const auto visible_count = std::min<std::size_t>(count, kMaxServerButtons);
-    const auto server_top = 235 - static_cast<int>(42 * visible_count) / 2;
     for (std::size_t index = 0; index < visible_count; ++index) {
-      auto* button =
-          add_hotspot_button(root, RectI{dialog_rect_.x + 63,
-                                         dialog_rect_.y + server_top +
-                                             static_cast<int>(index) * 42,
-                                         180, 34});
+      auto* button = add_hotspot_button(root, server_layout_.server_button(index));
       bind_audio_click(button, context.audio, LegacyClickSound::stone,
                        [this, index] { select_server(index); });
       server_buttons_.push_back(button);
@@ -5563,10 +5602,8 @@ class ServerSelectScene final : public Scene {
     for (std::size_t index = 0; index < visible_count; ++index) {
       const auto* server = &context.state->lobby.servers[index];
       const auto selected = static_cast<int>(index) == context.state->lobby.selected_server_index;
-      context.renderer->draw_text(dialog_rect_.x + 83,
-                                  dialog_rect_.y + server_top(visible_count) +
-                                      static_cast<int>(index) * 42 + 9,
-                                  widen(server->name),
+      const auto row = server_layout_.server_button(index);
+      context.renderer->draw_text(row.x + 20, row.y + 9, widen(server->name),
                                   selected ? 0xFFFFFF66U : 0xFFF5F7FAU);
     }
   }
@@ -5580,11 +5617,8 @@ class ServerSelectScene final : public Scene {
     }
     state_->lobby.selected_server_index = static_cast<int>(index);
     state_->lobby.selected_server_name = state_->lobby.servers[index].name;
+    legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::click_server_select);
     app_->request_select_server(state_->lobby.servers[index].name);
-  }
-
-  static int server_top(const std::size_t visible_count) {
-    return 235 - static_cast<int>(42 * visible_count) / 2;
   }
 
   static constexpr std::size_t kMaxServerButtons = 8;
@@ -5592,6 +5626,7 @@ class ServerSelectScene final : public Scene {
   ClientApp* app_{nullptr};
   GameStateStore* state_{nullptr};
   ui::UiTree ui_{};
+  legacy_auth_ui::LegacyServerSelectLayout server_layout_{};
   RectI dialog_rect_{};
   HotspotButton* server_close_button_{nullptr};
   std::vector<HotspotButton*> server_buttons_{};
@@ -5617,32 +5652,39 @@ class CharacterSelectScene final : public Scene {
     ui_.clear();
     create_edit_font();
     auto* root = ui_.set_root<ui::UiNode>(RectI{0, 0, 800, 600});
+    character_layout_ = legacy_auth_ui::legacy_character_select_layout();
 
     select_left_button_ =
-        add_sprite_button(root, context, ArchiveId::prguse, kSelectLeftButtonIndex, 133, 453);
+        add_sprite_button(root, context, ArchiveId::prguse, kSelectLeftButtonIndex,
+                          character_layout_.left_button.x, character_layout_.left_button.y);
     bind_audio_click(select_left_button_, context.audio, LegacyClickSound::normal,
                      [this] { select_slot(0); });
 
     select_right_button_ =
-        add_sprite_button(root, context, ArchiveId::prguse, kSelectRightButtonIndex, 685, 454);
+        add_sprite_button(root, context, ArchiveId::prguse, kSelectRightButtonIndex,
+                          character_layout_.right_button.x, character_layout_.right_button.y);
     bind_audio_click(select_right_button_, context.audio, LegacyClickSound::normal,
                      [this] { select_slot(1); });
 
     start_button_ =
-        add_sprite_button(root, context, ArchiveId::prguse, kSelectStartButtonIndex, 385, 456);
+        add_sprite_button(root, context, ArchiveId::prguse, kSelectStartButtonIndex,
+                          character_layout_.start_button.x, character_layout_.start_button.y);
     bind_audio_click(start_button_, context.audio, LegacyClickSound::stone, [this] {
       if (app_ != nullptr) {
+        legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::click_start_character);
         app_->request_selected_character_enter();
       }
     });
 
     new_button_ =
-        add_sprite_button(root, context, ArchiveId::prguse, kSelectNewButtonIndex, 348, 486);
+        add_sprite_button(root, context, ArchiveId::prguse, kSelectNewButtonIndex,
+                          character_layout_.new_button.x, character_layout_.new_button.y);
     bind_audio_click(new_button_, context.audio, LegacyClickSound::normal,
                      [this] { open_create_dialog(); });
 
     erase_button_ =
-        add_sprite_button(root, context, ArchiveId::prguse, kSelectEraseButtonIndex, 347, 506);
+        add_sprite_button(root, context, ArchiveId::prguse, kSelectEraseButtonIndex,
+                          character_layout_.erase_button.x, character_layout_.erase_button.y);
     bind_audio_click(erase_button_, context.audio, LegacyClickSound::normal,
                      [this] { request_delete_selected_if_ready(); });
 
@@ -5714,7 +5756,11 @@ class CharacterSelectScene final : public Scene {
     create_ok_button_template_ =
         select_button_bounds(context, 0, 0, kLoginSubmitButtonIndex);
     create_close_button_template_ =
-        select_button_bounds(context, 0, 0, 64);
+        sprite_rect(get_frame(context, ArchiveId::prguse, kLoginCloseButtonIndex), 0, 0, 16, 16);
+    create_layout_ = legacy_auth_ui::legacy_create_character_layout(
+        create_dialog_template_, create_job_button_template_, create_sex_button_template_,
+        create_prev_hair_button_template_, create_next_hair_button_template_,
+        create_ok_button_template_, create_close_button_template_);
     if (app_ != nullptr && app_->window_handle() != nullptr && edit_font_ != nullptr) {
       create_name_edit_->attach_native(app_->window_handle(), edit_font_, 14, false, false, true);
       create_name_edit_->set_native_visible(false);
@@ -5808,6 +5854,9 @@ class CharacterSelectScene final : public Scene {
     if (selected_changed && changed && audio_ != nullptr) {
       audio_->play_sound(s_meltstone);
     }
+    if (selected_changed) {
+      legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::select_character_slot);
+    }
     visual_selected_index_ = index;
     state_->lobby.selected_index = index;
   }
@@ -5828,6 +5877,7 @@ class CharacterSelectScene final : public Scene {
         state_->lobby.characters[static_cast<std::size_t>(selected)].name.empty()) {
       return;
     }
+    legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::click_delete_character);
     app_->request_delete_selected_character();
   }
 
@@ -5919,10 +5969,10 @@ class CharacterSelectScene final : public Scene {
     if (!state_->lobby.characters.empty() && state_->lobby.characters.front().name != "") {
       create_slot_index_ = 1;
     }
-    create_popup_rect_ = RectI{create_slot_index_ == 0 ? 415 : 75, 15,
-                               create_dialog_template_.w, create_dialog_template_.h};
+    create_popup_rect_ = create_layout_.dialog;
     layout_create_dialog();
     create_dialog_active_ = true;
+    legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::open_create_character_dialog);
     dialog_hint_.clear();
     create_job_ = config_ != nullptr ? static_cast<std::uint8_t>(config_->auto_play.job % 3) : 0;
     create_sex_ = config_ != nullptr ? static_cast<std::uint8_t>(config_->auto_play.sex % 2) : 0;
@@ -5934,6 +5984,7 @@ class CharacterSelectScene final : public Scene {
     create_name_edit_->sync_native_bounds(renderer_);
     create_name_edit_->set_native_visible(true);
     ui_.focus(create_name_edit_);
+    legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::focus_create_character_name);
   }
 
   void close_create_dialog() {
@@ -5975,29 +6026,17 @@ class CharacterSelectScene final : public Scene {
       return;
     }
 
-    const auto popup = create_popup_rect_;
-    create_name_edit_->bounds = RectI{popup.x + 71, popup.y + 107, 137, 20};
+    create_name_edit_->bounds = create_layout_.name_edit;
     create_name_edit_->sync_native_bounds(renderer_);
-    create_job_buttons_[0]->bounds = RectI{popup.x + 48, popup.y + 157,
-                                           create_job_button_template_.w, create_job_button_template_.h};
-    create_job_buttons_[1]->bounds = RectI{popup.x + 93, popup.y + 157,
-                                           create_job_button_template_.w, create_job_button_template_.h};
-    create_job_buttons_[2]->bounds = RectI{popup.x + 138, popup.y + 157,
-                                           create_job_button_template_.w, create_job_button_template_.h};
-    create_sex_buttons_[0]->bounds = RectI{popup.x + 93, popup.y + 231,
-                                           create_sex_button_template_.w, create_sex_button_template_.h};
-    create_sex_buttons_[1]->bounds = RectI{popup.x + 138, popup.y + 231,
-                                           create_sex_button_template_.w, create_sex_button_template_.h};
-    create_prev_hair_button_->bounds = RectI{popup.x + 76, popup.y + 308,
-                                             create_prev_hair_button_template_.w,
-                                             create_prev_hair_button_template_.h};
-    create_next_hair_button_->bounds = RectI{popup.x + 170, popup.y + 308,
-                                             create_next_hair_button_template_.w,
-                                             create_next_hair_button_template_.h};
-    create_ok_button_->bounds = RectI{popup.x + 102, popup.y + 359,
-                                      create_ok_button_template_.w, create_ok_button_template_.h};
-    create_close_button_->bounds = RectI{popup.x + 248, popup.y + 31,
-                                         create_close_button_template_.w, create_close_button_template_.h};
+    create_job_buttons_[0]->bounds = create_layout_.warrior_button;
+    create_job_buttons_[1]->bounds = create_layout_.wizard_button;
+    create_job_buttons_[2]->bounds = create_layout_.taoist_button;
+    create_sex_buttons_[0]->bounds = create_layout_.male_button;
+    create_sex_buttons_[1]->bounds = create_layout_.female_button;
+    create_prev_hair_button_->bounds = create_layout_.prev_hair_button;
+    create_next_hair_button_->bounds = create_layout_.next_hair_button;
+    create_ok_button_->bounds = create_layout_.ok_button;
+    create_close_button_->bounds = create_layout_.close_button;
   }
 
   void render_create_dialog(ClientContext& context) {
@@ -6044,6 +6083,7 @@ class CharacterSelectScene final : public Scene {
   AudioService* audio_{nullptr};
   SoftwareRenderer* renderer_{nullptr};
   ui::UiTree ui_{};
+  legacy_auth_ui::LegacyCharacterSelectLayout character_layout_{};
   HotspotButton* select_left_button_{nullptr};
   HotspotButton* select_right_button_{nullptr};
   HotspotButton* start_button_{nullptr};
@@ -6062,6 +6102,7 @@ class CharacterSelectScene final : public Scene {
   HotspotButton* create_ok_button_{nullptr};
   HotspotButton* create_close_button_{nullptr};
   RectI create_popup_rect_{};
+  legacy_auth_ui::LegacyCreateCharacterLayout create_layout_{};
   RectI create_dialog_template_{0, 0, 310, 400};
   RectI create_job_button_template_{0, 0, 40, 24};
   RectI create_sex_button_template_{0, 0, 40, 24};

@@ -39,6 +39,7 @@ add_library(modern_client_core STATIC
   src/protocol/protocol_client.cpp
   src/ui/ui.cpp
   src/ui/legacy_ui.cpp
+  src/scene/legacy_auth_ui.cpp
   src/scene/scenes.cpp
 )
 
@@ -104,6 +105,10 @@ target_compile_definitions(modern_client_legacy_ui_paint_layers_smoke
 add_modern_client_core_smoke(modern_client_legacy_ui_input_trace_smoke tests/legacy_ui_input_trace_smoke.cpp)
 target_compile_definitions(modern_client_legacy_ui_input_trace_smoke
   PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_core_smoke(modern_client_legacy_auth_ui_trace_smoke tests/legacy_auth_ui_trace_smoke.cpp)
+target_compile_definitions(modern_client_legacy_auth_ui_trace_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_core_smoke(modern_client_legacy_auth_ui_layout_smoke tests/legacy_auth_ui_layout_smoke.cpp)
 add_modern_client_header_smoke(modern_client_scene_state_fuzz_smoke tests/scene_state_fuzz_smoke.cpp)
 add_modern_client_core_smoke(modern_client_ui_capture_process_order_smoke tests/ui_capture_process_order_smoke.cpp)
 add_modern_client_core_smoke(modern_client_world_scene_legacy_order_smoke tests/world_scene_legacy_order_smoke.cpp)
@@ -137,6 +142,8 @@ add_custom_target(modern_client_ci_phase2_fast
     modern_client_legacy_ui_manager_smoke
     modern_client_legacy_ui_paint_layers_smoke
     modern_client_legacy_ui_input_trace_smoke
+    modern_client_legacy_auth_ui_trace_smoke
+    modern_client_legacy_auth_ui_layout_smoke
     modern_client_scene_state_fuzz_smoke
     modern_client_ui_capture_process_order_smoke
     modern_client_world_scene_legacy_order_smoke
