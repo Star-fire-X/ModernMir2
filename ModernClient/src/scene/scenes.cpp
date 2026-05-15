@@ -59,6 +59,7 @@
 #include "audio/sound_constants.hpp"
 #include "scene/character_select_state.hpp"
 #include "scene/legacy_auth_ui.hpp"
+#include "scene/legacy_play_ui.hpp"
 #include "shared/legacy/map_render_order.hpp"
 #include "shared/legacy/map_render_math.hpp"
 #include "shared/legacy/movement_rules.hpp"
@@ -113,6 +114,10 @@ void legacy_trace(const std::string_view text) {
 
 void legacy_auth_trace(const legacy_auth_ui::LegacyAuthUiTraceLabel label) {
   legacy_trace(legacy_auth_ui::legacy_auth_ui_trace_label(label));
+}
+
+void legacy_play_trace(const legacy_play_ui::LegacyPlayUiTraceLabel label) {
+  legacy_trace(legacy_play_ui::legacy_play_ui_trace_label(label));
 }
 
 void legacy_trace_map_layer(
@@ -382,6 +387,15 @@ class ResourceTextEdit final : public ui::TextEdit {
     }
   }
   void on_focus_lost() override { show_caret = false; }
+  bool on_key_down(const int virtual_key) override {
+    if (virtual_key != VK_ESCAPE) {
+      return false;
+    }
+    if (on_cancel) {
+      on_cancel();
+    }
+    return true;
+  }
 
   std::function<void()> on_cancel{};
 
@@ -575,14 +589,15 @@ class ChatBoardNode final : public ui::UiNode {
     if (state == nullptr) {
       return;
     }
+    legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::paint_chat_board);
     const auto rect = resolved_bounds();
     auto& world = state->world;
     const auto count = static_cast<int>(world.chat_lines.size());
-    const auto max_top = std::max(0, count - kChatBoardVisibleLines);
+    const auto max_top = std::max(0, count - visible_lines);
     const auto top_index = std::clamp(world.chat_board_top, 0, max_top);
 
-    int visual_row = 0;
-    for (int logical = top_index; logical < count && visual_row < kChatBoardVisibleLines; ++logical) {
+    for (int logical = top_index, visual_row = 0;
+         logical < count && visual_row < visible_lines; ++logical, ++visual_row) {
       const auto& line = world.chat_lines[static_cast<std::size_t>(logical)];
       const auto back = legacy_color_to_argb(line.back_color);
       const auto fore = legacy_color_to_argb(line.fore_color);
@@ -590,39 +605,11 @@ class ChatBoardNode final : public ui::UiNode {
       if (text.empty()) {
         text = L" ";
       }
-      int line_start = 0;
-      while (line_start < static_cast<int>(text.size()) && visual_row < kChatBoardVisibleLines) {
-        int line_end = line_start;
-        int cur_width = 0;
-        while (line_end < static_cast<int>(text.size())) {
-          const auto ch = text[static_cast<std::size_t>(line_end)];
-          const auto ch_width =
-              renderer.measure_text_width(text.substr(static_cast<std::size_t>(line_start),
-                                                       static_cast<std::size_t>(line_end - line_start + 1)));
-          if (ch_width > rect.w && line_end > line_start) {
-            break;
-          }
-          cur_width = ch_width;
-          ++line_end;
-          if (cur_width >= rect.w) {
-            break;
-          }
-        }
-        if (line_end == line_start) {
-          ++line_end;
-        }
-        const auto sub =
-            text.substr(static_cast<std::size_t>(line_start),
-                        static_cast<std::size_t>(line_end - line_start));
-        const RectI line_rect{rect.x, rect.y + visual_row * kChatBoardLineHeight, rect.w,
-                              kChatBoardLineHeight};
-        if ((back >> 24U) != 0U) {
-          renderer.fill_rect(line_rect, back);
-        }
-        renderer.draw_text(line_rect.x, line_rect.y, sub, fore);
-        ++visual_row;
-        line_start = line_end;
+      const RectI line_rect{rect.x, rect.y + visual_row * line_height, rect.w, line_height};
+      if ((back >> 24U) != 0U) {
+        renderer.fill_rect(line_rect, back);
       }
+      renderer.draw_text(line_rect.x, line_rect.y, text, fore);
     }
     UiNode::paint(renderer);
   }
@@ -634,13 +621,13 @@ class ChatBoardNode final : public ui::UiNode {
       return false;
     }
     const auto rect = resolved_bounds();
-    const auto row = (input.mouse_y - rect.y) / kChatBoardLineHeight;
-    if (row < 0 || row >= kChatBoardVisibleLines) {
+    const auto row = (input.mouse_y - rect.y) / line_height;
+    if (row < 0 || row >= visible_lines) {
       return false;
     }
     const auto& lines = state->world.chat_lines;
     const auto count = static_cast<int>(lines.size());
-    const auto max_top = std::max(0, count - kChatBoardVisibleLines);
+    const auto max_top = std::max(0, count - visible_lines);
     const auto index = std::clamp(state->world.chat_board_top, 0, max_top) + row;
     if (index >= 0 && index < count && on_whisper != nullptr) {
       on_whisper(lines[static_cast<std::size_t>(index)].text);
@@ -650,6 +637,8 @@ class ChatBoardNode final : public ui::UiNode {
 
   GameStateStore* state{nullptr};
   std::function<void(const std::string&)> on_whisper{};
+  int visible_lines{kChatBoardVisibleLines};
+  int line_height{kChatBoardLineHeight};
 };
 
 class NpcDialogNode final : public ui::Window {
@@ -1133,6 +1122,34 @@ void draw_legacy_text(SoftwareRenderer& renderer, const int x, const int y,
   renderer.draw_text(x, y, text, color);
 }
 
+class SystemMessageTopNode final : public ui::UiNode {
+ public:
+  explicit SystemMessageTopNode(const RectI bounds) : ui::UiNode(bounds) {
+    enabled = false;
+    set_paint_layer(ui::UiPaintLayer::top);
+  }
+
+  void paint(SoftwareRenderer& renderer) override {
+    if (state == nullptr) {
+      return;
+    }
+    legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::draw_top_system_messages);
+    state->expire_sys_messages(detail::monotonic_ms());
+    legacy_play_trace(
+        legacy_play_ui::LegacyPlayUiTraceLabel::expire_top_system_messages_after_3000ms);
+    const auto rect = resolved_bounds();
+    for (std::size_t index = 0; index < state->world.sys_messages.size(); ++index) {
+      const auto& message = state->world.sys_messages[index];
+      draw_legacy_text(renderer, rect.x + layout.bounds.x,
+                       rect.y + layout.bounds.y + static_cast<int>(index) * layout.line_height,
+                       widen(message.text), layout.color);
+    }
+  }
+
+  GameStateStore* state{nullptr};
+  legacy_play_ui::LegacySystemMessageLayout layout{};
+};
+
 class LegacyBottomStatusNode final : public ui::UiNode {
  public:
   explicit LegacyBottomStatusNode(const RectI bounds) : ui::UiNode(bounds) {
@@ -1145,6 +1162,7 @@ class LegacyBottomStatusNode final : public ui::UiNode {
       ui::UiNode::paint(renderer);
       return;
     }
+    legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::paint_bottom_board);
 
     const auto rect = resolved_bounds();
     const auto& world = state->world;
@@ -1164,10 +1182,12 @@ class LegacyBottomStatusNode final : public ui::UiNode {
 
   GameStateStore* state{nullptr};
   AssetManager* assets{nullptr};
+  legacy_play_ui::LegacyHudLayout layout{};
 
  private:
   void draw_hp_mp(SoftwareRenderer& renderer, const RectI& rect,
                   const client_v1::SelfAbility& ability, const ActorState* self) const {
+    legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::paint_hp_mp);
     if (self == nullptr || self->max_hp <= 0 || self->max_mp <= 0) {
       return;
     }
@@ -1211,6 +1231,7 @@ class LegacyBottomStatusNode final : public ui::UiNode {
 
   void draw_exp_weight(SoftwareRenderer& renderer,
                        const client_v1::SelfAbility& ability) const {
+    legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::paint_exp_weight_gold);
     draw_legacy_text(renderer, 660, 496, std::to_wstring(ability.level));
     const auto bar = assets->get_frame(ArchiveId::prguse, kBottomExpWeightIndex);
     if (bar == nullptr || bar->empty()) {
@@ -1243,9 +1264,11 @@ class LegacyBottomStatusNode final : public ui::UiNode {
 
   void draw_belt(SoftwareRenderer& renderer, const RectI& rect,
                  const WorldViewState& world) const {
+    legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::paint_quick_belt);
     for (int slot = 0; slot < 6; ++slot) {
-      const RectI cell{rect.x + kBeltButtonX[static_cast<std::size_t>(slot)], rect.y + 59, 32,
-                       29};
+      const auto cell_template = layout.quick_belt[static_cast<std::size_t>(slot)];
+      const RectI cell{rect.x + cell_template.x, rect.y + cell_template.y, cell_template.w,
+                       cell_template.h};
       const auto& item = world.bag_items[static_cast<std::size_t>(slot)];
       if (!item_empty(item)) {
         draw_bag_item_icon(renderer, item_icon_frame(assets, item, ArchiveId::items), cell,
@@ -1762,6 +1785,7 @@ class LegacyHud final {
     tree.set_asset_manager(context.assets);
     auto* root = tree.set_root<ui::UiNode>(RectI{0, 0, 800, 600});
     root->background = true;
+    legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::legacy_hud_root_created);
 
     item_bag_ = add_sprite_window(root, context, ArchiveId::prguse, kItemBagDialogIndex, 0, 0,
                                   329, 227);
@@ -1907,19 +1931,25 @@ class LegacyHud final {
 
     const auto bottom_frame = get_frame(context, ArchiveId::prguse, kBottomBoardIndex);
     const auto bottom_height = bottom_frame != nullptr ? bottom_frame->height : 132;
-    bottom_ = add_sprite_window(root, context, ArchiveId::prguse, kBottomBoardIndex, 0,
-                                600 - bottom_height, 800, 132);
+    hud_layout_ = legacy_play_ui::legacy_hud_layout(bottom_height);
+    chat_layout_ = legacy_play_ui::legacy_chat_layout();
+    system_message_layout_ = legacy_play_ui::legacy_system_message_layout();
+    bottom_ = add_sprite_window(root, context, ArchiveId::prguse, kBottomBoardIndex,
+                                hud_layout_.bottom_board.x, hud_layout_.bottom_board.y,
+                                hud_layout_.bottom_board.w, hud_layout_.bottom_board.h);
     bottom_->real_hit_test_enabled = true;
     bottom_->fallback_fill_color = 0x88202A36U;
+    legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::bottom_board_show);
 
     bottom_status_ = bottom_->emplace_child<LegacyBottomStatusNode>(
         RectI{0, 0, 800, bottom_height});
     bottom_status_->state = state_;
     bottom_status_->assets = assets_;
+    bottom_status_->layout = hud_layout_;
 
     for (int slot = 0; slot < 6; ++slot) {
       auto* belt_button = add_hotspot_button(
-          bottom_, RectI{kBeltButtonX[static_cast<std::size_t>(slot)], 59, 32, 29});
+          bottom_, hud_layout_.quick_belt[static_cast<std::size_t>(slot)]);
       belt_button->draw_fallback = false;
       belt_button->real_hit_test_enabled = false;
       bind_audio_click(belt_button, context.audio, LegacyClickSound::glass, [this, slot] {
@@ -1937,30 +1967,35 @@ class LegacyHud final {
     }
 
     auto* mini_map_button =
-        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomMiniMapButtonIndex, 219,
-                          104, 28, 18);
+        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomMiniMapButtonIndex,
+                          hud_layout_.minimap_button.x, hud_layout_.minimap_button.y,
+                          hud_layout_.minimap_button.w, hud_layout_.minimap_button.h);
     bind_audio_click(mini_map_button, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] {
       request_minimap(app);
     });
     auto* trade_button =
-        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomTradeButtonIndex, 249, 104,
-                          28, 18);
+        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomTradeButtonIndex,
+                          hud_layout_.trade_button.x, hud_layout_.trade_button.y,
+                          hud_layout_.trade_button.w, hud_layout_.trade_button.h);
     bind_audio_click(trade_button, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] { open_trade(app); });
     auto* guild_button =
-        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomGuildButtonIndex, 279, 104,
-                          28, 18);
+        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomGuildButtonIndex,
+                          hud_layout_.guild_button.x, hud_layout_.guild_button.y,
+                          hud_layout_.guild_button.w, hud_layout_.guild_button.h);
     bind_audio_click(guild_button, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] { open_guild(app); });
     auto* group_button =
-        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomGroupButtonIndex, 309, 104,
-                          28, 18);
+        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomGroupButtonIndex,
+                          hud_layout_.group_button.x, hud_layout_.group_button.y,
+                          hud_layout_.group_button.w, hud_layout_.group_button.h);
     bind_audio_click(group_button, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] { open_group(app); });
     auto* plus_button =
-        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomPlusAbilityButtonIndex, 339,
-                          104, 28, 18);
+        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomPlusAbilityButtonIndex,
+                          hud_layout_.plus_button.x, hud_layout_.plus_button.y,
+                          hud_layout_.plus_button.w, hud_layout_.plus_button.h);
     bind_audio_click(plus_button, context.audio, LegacyClickSound::normal,
                      [app = context.app] {
       if (app != nullptr) {
@@ -1968,8 +2003,9 @@ class LegacyHud final {
       }
     });
     auto* logout_button =
-        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomLogoutButtonIndex, 530, 104,
-                          28, 18);
+        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomLogoutButtonIndex,
+                          hud_layout_.logout_button.x, hud_layout_.logout_button.y,
+                          hud_layout_.logout_button.w, hud_layout_.logout_button.h);
     bind_audio_click(logout_button, context.audio, LegacyClickSound::normal,
                      [app = context.app] {
       if (app != nullptr) {
@@ -1977,8 +2013,9 @@ class LegacyHud final {
       }
     });
     auto* exit_button =
-        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomExitButtonIndex, 560, 104,
-                          28, 18);
+        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomExitButtonIndex,
+                          hud_layout_.exit_button.x, hud_layout_.exit_button.y,
+                          hud_layout_.exit_button.w, hud_layout_.exit_button.h);
     bind_audio_click(exit_button, context.audio, LegacyClickSound::normal,
                      [app = context.app] {
       if (app != nullptr) {
@@ -1987,32 +2024,36 @@ class LegacyHud final {
     });
 
     auto* state_button =
-        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomStateButtonIndex, 643, 61,
-                          38, 38);
+        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomStateButtonIndex,
+                          hud_layout_.state_button.x, hud_layout_.state_button.y,
+                          hud_layout_.state_button.w, hud_layout_.state_button.h);
     bind_audio_click(state_button, context.audio, LegacyClickSound::normal, [this] {
       if (tree_ != nullptr) {
         toggle_state(*tree_);
       }
     });
     auto* bag_button =
-        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomBagButtonIndex, 682, 41,
-                          38, 38);
+        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomBagButtonIndex,
+                          hud_layout_.bag_button.x, hud_layout_.bag_button.y,
+                          hud_layout_.bag_button.w, hud_layout_.bag_button.h);
     bind_audio_click(bag_button, context.audio, LegacyClickSound::glass, [this] {
       if (tree_ != nullptr) {
         toggle_bag(*tree_);
       }
     });
     auto* magic_button =
-        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomMagicButtonIndex, 722, 21,
-                          38, 38);
+        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomMagicButtonIndex,
+                          hud_layout_.magic_button.x, hud_layout_.magic_button.y,
+                          hud_layout_.magic_button.w, hud_layout_.magic_button.h);
     bind_audio_click(magic_button, context.audio, LegacyClickSound::glass, [this] {
       if (tree_ != nullptr) {
         open_state_page(*tree_, 3);
       }
     });
     auto* option_button =
-        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomOptionButtonIndex, 764, 11,
-                          36, 36);
+        add_sprite_button(bottom_, context, ArchiveId::prguse, kBottomOptionButtonIndex,
+                          hud_layout_.option_button.x, hud_layout_.option_button.y,
+                          hud_layout_.option_button.w, hud_layout_.option_button.h);
     bind_audio_click(option_button, context.audio, LegacyClickSound::glass,
                      [app = context.app] {
       if (app != nullptr) {
@@ -2021,22 +2062,29 @@ class LegacyHud final {
     });
 
     chat_board_ = root->emplace_child<ChatBoardNode>(
-        RectI{kChatBoardX, kChatBoardY, kChatBoardWidth,
-              kChatBoardLineHeight * kChatBoardVisibleLines});
+        chat_layout_.board);
     chat_board_->state = state_;
+    chat_board_->visible_lines = chat_layout_.visible_lines;
+    chat_board_->line_height = chat_layout_.line_height;
     chat_board_->on_whisper = [this](const std::string& line) { open_chat_with_whisper(line); };
+    legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::chat_board_show);
 
-    chat_edit_ = root->emplace_child<ResourceTextEdit>(RectI{208, 581, 387, 12});
+    chat_edit_ = root->emplace_child<ResourceTextEdit>(chat_layout_.edit);
     chat_edit_->visible = false;
     chat_edit_->on_submit = [this] { submit_chat(); };
-    chat_edit_->on_cancel = [this] { close_chat(true); };
+    chat_edit_->on_cancel = [this] { close_chat(true, true); };
     create_chat_edit_font(context);
     if (context.app != nullptr && context.app->window_handle() != nullptr &&
         chat_edit_font_ != nullptr) {
-      chat_edit_->attach_native(context.app->window_handle(), chat_edit_font_, 70, false, false,
-                                false);
+      chat_edit_->attach_native(context.app->window_handle(), chat_edit_font_,
+                                chat_layout_.max_length, false, false, false);
       chat_edit_->set_native_visible(false);
     }
+    legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::chat_edit_created);
+
+    system_messages_ = root->emplace_child<SystemMessageTopNode>(RectI{0, 0, 800, 600});
+    system_messages_->state = state_;
+    system_messages_->layout = system_message_layout_;
 
     npc_dialog_ = root->emplace_child<NpcDialogNode>(
         sprite_rect(get_frame(context, ArchiveId::prguse, kMerchantDialogIndex), 0, 0, 420, 180));
@@ -2282,6 +2330,7 @@ class LegacyHud final {
     audio_ = nullptr;
     bottom_ = nullptr;
     bottom_status_ = nullptr;
+    system_messages_ = nullptr;
     item_bag_ = nullptr;
     item_grid_ = nullptr;
     state_window_ = nullptr;
@@ -2347,6 +2396,10 @@ class LegacyHud final {
     if (bottom_status_ != nullptr) {
       bottom_status_->state = state_;
       bottom_status_->assets = assets_;
+      bottom_status_->layout = hud_layout_;
+    }
+    if (system_messages_ != nullptr) {
+      system_messages_->state = state_;
     }
     if (state_content_ != nullptr) {
       state_content_->state = state_;
@@ -2559,17 +2612,22 @@ class LegacyHud final {
     }
     tree.trace_legacy_shortcut_fallback();
     if (context.input->key_pressed[VK_RETURN] || context.input->key_pressed[VK_SPACE]) {
-      open_chat(L"");
+      legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::chat_enter_or_space_open);
+      open_chat(L"", true);
       return true;
     }
     if (!context.input->text_input.empty()) {
       for (const auto ch : context.input->text_input) {
         if (ch == L'@' || ch == L'!') {
+          legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::chat_prefix_open);
           open_chat(std::wstring{ch});
           return true;
         }
         if (ch == L'/') {
-          if (state_ != nullptr && !state_->world.whisper_name.empty()) {
+          legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::chat_prefix_open);
+          legacy_play_trace(
+              legacy_play_ui::LegacyPlayUiTraceLabel::chat_slash_uses_whisper_or_literal);
+          if (state_ != nullptr && state_->world.whisper_name.size() > 2U) {
             open_chat(L"/" + widen(state_->world.whisper_name) + L" ");
           } else {
             open_chat(L"/");
@@ -2588,18 +2646,26 @@ class LegacyHud final {
       return false;
     }
     if (context.input->key_pressed[VK_F9] || context.input->key_pressed['I']) {
+      legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::legacy_shortcut_fallback);
+      legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::shortcut_toggle_bag);
       toggle_bag(tree);
       return true;
     }
     if (context.input->key_pressed[VK_F10] || context.input->key_pressed['C']) {
+      legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::legacy_shortcut_fallback);
+      legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::shortcut_toggle_state);
       toggle_state(tree);
       return true;
     }
     if (context.input->key_pressed[VK_F11] || context.input->key_pressed['S']) {
+      legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::legacy_shortcut_fallback);
+      legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::shortcut_open_magic_page);
       open_state_page(tree, 3);
       return true;
     }
     if (context.input->key_pressed['V']) {
+      legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::legacy_shortcut_fallback);
+      legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::shortcut_open_minimap);
       request_minimap(context.app);
       return true;
     }
@@ -2918,7 +2984,7 @@ class LegacyHud final {
     move_bag_for_npc_dialog();
   }
 
-  void open_chat(const std::wstring& initial) {
+  void open_chat(const std::wstring& initial, const bool trace_focus = false) {
     if (chat_edit_ == nullptr) {
       return;
     }
@@ -2932,6 +2998,9 @@ class LegacyHud final {
     }
     chat_edit_->set_native_visible(true);
     chat_edit_->select_all_to_end();
+    if (trace_focus) {
+      legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::chat_native_edit_focus);
+    }
   }
 
   void open_chat_with_whisper(const std::string& line) {
@@ -2950,6 +3019,7 @@ class LegacyHud final {
     if (chat_edit_ == nullptr) {
       return;
     }
+    legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::chat_enter_submit);
     chat_edit_->sync_from_native();
     auto text = trim_copy(chat_edit_->value);
     if (text.empty()) {
@@ -2970,13 +3040,17 @@ class LegacyHud final {
         state_->world.whisper_name = narrow(name);
       }
     }
+    legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::queue_chat_send);
     pending_chat_send_ = narrow(text);
     close_chat(false);
   }
 
-  void close_chat(const bool clear) {
+  void close_chat(const bool clear, const bool trace_escape = false) {
     if (chat_edit_ == nullptr) {
       return;
+    }
+    if (trace_escape) {
+      legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::chat_escape_cancel);
     }
     if (clear) {
       chat_edit_->value.clear();
@@ -2988,6 +3062,7 @@ class LegacyHud final {
       chat_edit_->visible = false;
     }
     chat_edit_->set_native_visible(false);
+    legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::chat_close_hide_edit);
   }
 
   void open_state_page(ui::UiTree& tree, const int page) {
@@ -4250,6 +4325,7 @@ class LegacyHud final {
   AudioService* audio_{nullptr};
   ui::Window* bottom_{nullptr};
   LegacyBottomStatusNode* bottom_status_{nullptr};
+  SystemMessageTopNode* system_messages_{nullptr};
   ui::Window* item_bag_{nullptr};
   ui::Grid* item_grid_{nullptr};
   ui::Window* state_window_{nullptr};
@@ -4294,6 +4370,9 @@ class LegacyHud final {
   int pending_bag_click_slot_{-1};
   int pending_bag_double_click_slot_{-1};
   int pending_equipment_click_slot_{-1};
+  legacy_play_ui::LegacyHudLayout hud_layout_{};
+  legacy_play_ui::LegacyChatLayout chat_layout_{};
+  legacy_play_ui::LegacySystemMessageLayout system_message_layout_{};
 
   // 右键快捷菜单状态
   struct ItemContextMenu {
@@ -6196,6 +6275,7 @@ class LoginNoticeScene final : public Scene {
 class WorldScene final : public Scene {
  public:
   void enter(ClientContext& context) override {
+    legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::world_scene_enter);
     if (context.audio != nullptr) {
       context.audio->silence();
     }
@@ -7783,6 +7863,12 @@ void Scene::paint_ui(ClientContext& context) {
   }
 }
 
+void Scene::paint_ui_top(ClientContext& context) {
+  if (context.renderer != nullptr) {
+    ui_tree().paint_layer(*context.renderer, ui::UiPaintLayer::top);
+  }
+}
+
 void Scene::paint_ui_hint(ClientContext& context) {
   if (context.renderer != nullptr) {
     ui_tree().paint_layer(*context.renderer, ui::UiPaintLayer::hint);
@@ -7857,6 +7943,12 @@ void SceneManager::render_scene(ClientContext& context) {
 void SceneManager::paint_ui(ClientContext& context) {
   if (current_scene_ != nullptr) {
     current_scene_->paint_ui(context);
+  }
+}
+
+void SceneManager::paint_ui_top(ClientContext& context) {
+  if (current_scene_ != nullptr) {
+    current_scene_->paint_ui_top(context);
   }
 }
 

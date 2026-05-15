@@ -27,6 +27,7 @@
 #include "app/client_app.hpp"
 
 #include "scene/legacy_auth_ui.hpp"
+#include "scene/legacy_play_ui.hpp"
 #include "ui/legacy_ui.hpp"
 
 #include <algorithm>
@@ -136,6 +137,10 @@ void legacy_ui_paint_trace(const ui::LegacyUiPaintTraceLabel label) {
 
 void legacy_auth_trace(const legacy_auth_ui::LegacyAuthUiTraceLabel label) {
   legacy_trace(legacy_auth_ui::legacy_auth_ui_trace_label(label));
+}
+
+void legacy_play_trace(const legacy_play_ui::LegacyPlayUiTraceLabel label) {
+  legacy_trace(legacy_play_ui::legacy_play_ui_trace_label(label));
 }
 
 /// 在软件渲染器上绘制精灵帧
@@ -369,9 +374,10 @@ int ClientApp::run() {
               legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::ui_windows_dwin_direct_paint);
               scenes_.paint_ui(context);
             },
-            [this] {
+            [this, &context] {
               legacy_ui_paint_trace(
                   ui::LegacyUiPaintTraceLabel::top_system_messages_draw_screen_top);
+              scenes_.paint_ui_top(context);
               render_modal();
             },
             [this, &context] {
@@ -902,6 +908,7 @@ void ClientApp::request_chat_send(std::string text) {
     out << "request_chat_send now=" << detail::monotonic_ms() << " text=" << text;
     legacy_trace(out.str());
   }
+  legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::send_chat);
   protocol_.send(client_v1::ChatSend{legacy_byte_payload(std::move(text))});
 }
 
@@ -1676,9 +1683,13 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             state_.apply(value);                    // 使用物品结果
           } else if constexpr (std::is_same_v<T, client_v1::ChatLine>) {
+            legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::recv_chat_line_fifo);
             state_.apply(value);                    // 底部聊天板行
+            legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::append_chat_board_line);
           } else if constexpr (std::is_same_v<T, client_v1::ActorSay>) {
+            legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::recv_actor_say_fifo);
             state_.apply(value);                    // 角色头顶说话
+            legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::append_chat_board_line);
           } else if constexpr (std::is_same_v<T, client_v1::NpcDialog>) {
             state_.apply(value);                    // NPC/商人对话
           } else if constexpr (std::is_same_v<T, client_v1::NpcDialogClose>) {
@@ -1705,7 +1716,10 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.login.status = L"Login notice received.";
             request_scene_change(SceneId::login_notice);
           } else if constexpr (std::is_same_v<T, client_v1::SysMessage>) {
+            legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::recv_sys_message_fifo);
             state_.apply(value);                    // 系统信息（顶部短提示 + 聊天板）
+            legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::append_chat_board_line);
+            legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::append_top_sys_message);
           } else if constexpr (std::is_same_v<T, client_v1::Notice>) {
             show_modal(widen(value.title), widen(value.text));  // 弹出公告对话框
           } else if constexpr (std::is_same_v<T, client_v1::DisconnectReason>) {

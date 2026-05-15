@@ -90,6 +90,8 @@ void test_direct_hint_and_moving_item_passes_are_split() {
   root->emplace_child<PaintProbe>(RectI{0, 0, 10, 10}, events, "window");
   auto* hint = root->emplace_child<PaintProbe>(RectI{0, 0, 10, 10}, events, "hint");
   hint->set_paint_layer(ui::UiPaintLayer::hint);
+  auto* top = root->emplace_child<PaintProbe>(RectI{0, 0, 10, 10}, events, "top");
+  top->set_paint_layer(ui::UiPaintLayer::top);
   auto* moving =
       root->emplace_child<PaintProbe>(RectI{0, 0, 10, 10}, events, "moving_item");
   moving->set_paint_layer(ui::UiPaintLayer::moving_item);
@@ -97,6 +99,10 @@ void test_direct_hint_and_moving_item_passes_are_split() {
   mir2::client::SoftwareRenderer renderer;
   tree.paint(renderer);
   assert((events == std::vector<std::string>{"window"}));
+
+  events.clear();
+  tree.paint_layer(renderer, ui::UiPaintLayer::top);
+  assert((events == std::vector<std::string>{"top"}));
 
   events.clear();
   tree.paint_layer(renderer, ui::UiPaintLayer::hint);

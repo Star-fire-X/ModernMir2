@@ -77,6 +77,51 @@ int main() {
   scenes.process_action_messages(context, 0.016F);
   assert(audio.trace_events().empty());
 
+  input = mir2::client::InputState{};
+  context.ui_input = mir2::client::ui::UiInputResult{};
+  input.key_pressed[VK_RETURN] = true;
+  input.enter_pressed = true;
+  scenes.capture_ui_input(context);
+  scenes.process_key_messages(context);
+
+  input = mir2::client::InputState{};
+  context.ui_input = mir2::client::ui::UiInputResult{};
+  input.key_pressed[VK_F9] = true;
+  scenes.capture_ui_input(context);
+  assert(context.ui_input.text_focus);
+  world.action_key = -1;
+  scenes.process_key_messages(context);
+  assert(world.action_key == -1);
+
+  input = mir2::client::InputState{};
+  context.ui_input = mir2::client::ui::UiInputResult{};
+  input.text_input = L"hello";
+  scenes.capture_ui_input(context);
+  input = mir2::client::InputState{};
+  context.ui_input = mir2::client::ui::UiInputResult{};
+  input.key_pressed[VK_RETURN] = true;
+  input.enter_pressed = true;
+  scenes.capture_ui_input(context);
+  scenes.dwin_process(context);
+
+  world.whisper_name = "Al";
+  input = mir2::client::InputState{};
+  context.ui_input = mir2::client::ui::UiInputResult{};
+  input.text_input = L"/";
+  scenes.capture_ui_input(context);
+  scenes.process_key_messages(context);
+  input = mir2::client::InputState{};
+  context.ui_input = mir2::client::ui::UiInputResult{};
+  input.key_pressed[VK_ESCAPE] = true;
+  scenes.capture_ui_input(context);
+  assert(context.ui_input.text_focus);
+  scenes.dwin_process(context);
+  input = mir2::client::InputState{};
+  context.ui_input = mir2::client::ui::UiInputResult{};
+  input.key_pressed[VK_F9] = true;
+  scenes.capture_ui_input(context);
+  assert(!context.ui_input.text_focus);
+
   scenes.scene_run(context, 0.0F);
   assert(has_sound_id(audio, mir2::client::s_main_theme));
 
