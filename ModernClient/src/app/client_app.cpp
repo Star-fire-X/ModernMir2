@@ -28,6 +28,7 @@
 
 #include "scene/legacy_auth_ui.hpp"
 #include "scene/legacy_inventory_ui.hpp"
+#include "scene/legacy_magic_npc_ui.hpp"
 #include "scene/legacy_play_ui.hpp"
 #include "ui/legacy_ui.hpp"
 
@@ -146,6 +147,10 @@ void legacy_play_trace(const legacy_play_ui::LegacyPlayUiTraceLabel label) {
 
 void legacy_inventory_trace(const legacy_inventory_ui::LegacyInventoryUiTraceLabel label) {
   legacy_trace(legacy_inventory_ui::legacy_inventory_ui_trace_label(label));
+}
+
+void legacy_magic_npc_trace(const legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel label) {
+  legacy_trace(legacy_magic_npc_ui::legacy_magic_npc_ui_trace_label(label));
 }
 
 /// 在软件渲染器上绘制精灵帧
@@ -903,6 +908,11 @@ void ClientApp::request_magic_key_change(const client_v1::MagicKeyChangeRequest&
   if (request.magic_id == 0) {
     return;
   }
+  legacy_magic_npc_trace(request.key == 0
+                             ? legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::
+                                   send_clear_conflicting_magic_key
+                             : legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::
+                                   send_assign_magic_key);
   protocol_.send(request);
 }
 
@@ -930,6 +940,7 @@ void ClientApp::request_npc_click(const std::uint64_t actor_id) {
     out << "request_npc_click now=" << detail::monotonic_ms() << " actor_id=" << actor_id;
     legacy_trace(out.str());
   }
+  legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::send_npc_click_request);
   protocol_.send(client_v1::NpcClickRequest{actor_id});
 }
 
@@ -945,6 +956,8 @@ void ClientApp::request_npc_dialog_select(
         << " merchant_id=" << request.merchant_id << " selection=" << request.selection;
     legacy_trace(out.str());
   }
+  legacy_magic_npc_trace(
+      legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::send_npc_dialog_select);
   auto legacy_request = request;
   legacy_request.selection = legacy_byte_payload(std::move(legacy_request.selection));
   protocol_.send(legacy_request);
@@ -955,6 +968,7 @@ void ClientApp::request_merchant_buy(const client_v1::MerchantBuyRequest& reques
   if (request.merchant_id == 0 || request.item_server_index == 0 || request.name.empty()) {
     return;
   }
+  legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::send_merchant_buy);
   auto legacy_request = request;
   legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
   protocol_.send(legacy_request);
@@ -965,6 +979,7 @@ void ClientApp::request_merchant_sell(const client_v1::MerchantSellRequest& requ
   if (request.merchant_id == 0 || request.item_make_index == 0 || request.name.empty()) {
     return;
   }
+  legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::send_sell_or_repair);
   auto legacy_request = request;
   legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
   protocol_.send(legacy_request);
@@ -976,6 +991,7 @@ void ClientApp::request_merchant_sell_price(
   if (request.merchant_id == 0 || request.item_make_index == 0 || request.name.empty()) {
     return;
   }
+  legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::send_price_request);
   auto legacy_request = request;
   legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
   protocol_.send(legacy_request);
@@ -985,6 +1001,7 @@ void ClientApp::request_repair_price(const client_v1::MerchantRepairPriceRequest
   if (request.merchant_id == 0 || request.item_make_index == 0 || request.name.empty()) {
     return;
   }
+  legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::send_price_request);
   auto legacy_request = request;
   legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
   protocol_.send(legacy_request);
@@ -994,6 +1011,7 @@ void ClientApp::request_repair_item(const client_v1::MerchantRepairRequest& requ
   if (request.merchant_id == 0 || request.item_make_index == 0 || request.name.empty()) {
     return;
   }
+  legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::send_sell_or_repair);
   auto legacy_request = request;
   legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
   protocol_.send(legacy_request);
@@ -1003,6 +1021,7 @@ void ClientApp::request_storage_deposit(const client_v1::StorageDepositRequest& 
   if (request.merchant_id == 0 || request.item_make_index == 0 || request.name.empty()) {
     return;
   }
+  legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::send_storage_deposit);
   auto legacy_request = request;
   legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
   protocol_.send(legacy_request);
@@ -1012,6 +1031,7 @@ void ClientApp::request_storage_withdraw(const client_v1::StorageWithdrawRequest
   if (request.merchant_id == 0 || request.item_make_index == 0 || request.name.empty()) {
     return;
   }
+  legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::send_storage_withdraw);
   auto legacy_request = request;
   legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
   protocol_.send(legacy_request);
@@ -1617,23 +1637,41 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             state_.apply(value);                    // 角色死亡状态
           } else if constexpr (std::is_same_v<T, client_v1::MagicList>) {
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_magic_list_fifo);
             state_.apply(value);                    // 已习得魔法列表
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_magic_page);
           } else if constexpr (std::is_same_v<T, client_v1::SelfAbility>) {
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_inventory_or_gold_fifo);
             state_.apply(value);                    // 主角 HUD 能力摘要
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_gold_or_attributes);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_bag_or_gold_fifo);
           } else if constexpr (std::is_same_v<T, client_v1::SelfAbilityDetail>) {
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_inventory_or_gold_fifo);
             state_.apply(value);                    // 主角完整能力摘要
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_gold_or_attributes);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_bag_or_gold_fifo);
           } else if constexpr (std::is_same_v<T, client_v1::MiniMapData>) {
             state_.apply(value);                    // 小地图数据
           } else if constexpr (std::is_same_v<T, client_v1::BagSnapshot>) {
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::recv_inventory_message_fifo);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_inventory_or_gold_fifo);
             state_.apply(value);                    // 完整背包镜像
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_bag_or_equipment);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_shop_or_bag);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_storage_or_bag);
           } else if constexpr (std::is_same_v<T, client_v1::InventoryAdd>) {
             if (legacy_trace_enabled()) {
               std::ostringstream out;
@@ -1644,15 +1682,27 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::recv_inventory_message_fifo);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_inventory_or_gold_fifo);
             state_.apply(value);                    // 背包新增
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_bag_or_equipment);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_shop_or_bag);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_storage_or_bag);
           } else if constexpr (std::is_same_v<T, client_v1::InventoryUpdate>) {
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::recv_inventory_message_fifo);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_inventory_or_gold_fifo);
             state_.apply(value);                    // 背包更新
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_bag_or_equipment);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_shop_or_bag);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_storage_or_bag);
           } else if constexpr (std::is_same_v<T, client_v1::InventoryRemove>) {
             if (legacy_trace_enabled()) {
               std::ostringstream out;
@@ -1662,27 +1712,47 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             }
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::recv_inventory_message_fifo);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_inventory_or_gold_fifo);
             state_.apply(value);                    // 背包移除
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_bag_or_equipment);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_shop_or_bag);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_storage_or_bag);
           } else if constexpr (std::is_same_v<T, client_v1::InventoryClearRange>) {
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::recv_inventory_message_fifo);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_inventory_or_gold_fifo);
             state_.apply(value);                    // 背包范围清理
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_bag_or_equipment);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_shop_or_bag);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_storage_or_bag);
           } else if constexpr (std::is_same_v<T, client_v1::EquipmentSnapshot>) {
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::server_equipment_message_fifo);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_inventory_or_gold_fifo);
             state_.apply(value);                    // 装备栏镜像
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_bag_or_equipment);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_shop_or_bag);
           } else if constexpr (std::is_same_v<T, client_v1::DurabilityChange>) {
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::recv_inventory_message_fifo);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_inventory_or_gold_fifo);
             state_.apply(value);                    // 耐久变化
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::refresh_bag_or_equipment);
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_shop_or_bag);
           } else if constexpr (std::is_same_v<T, client_v1::ActionAck>) {
             if (legacy_trace_enabled()) {
               std::ostringstream out;
@@ -1735,17 +1805,31 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.apply(value);                    // 角色头顶说话
             legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::append_chat_board_line);
           } else if constexpr (std::is_same_v<T, client_v1::NpcDialog>) {
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_npc_dialog_fifo);
             state_.apply(value);                    // NPC/商人对话
           } else if constexpr (std::is_same_v<T, client_v1::NpcDialogClose>) {
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_npc_close_fifo);
             state_.apply(value);                    // NPC/商人对话关闭
           } else if constexpr (std::is_same_v<T, client_v1::MerchantGoodsList>) {
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_merchant_goods_fifo);
             state_.apply(value);                    // 商店商品列表
           } else if constexpr (std::is_same_v<T, client_v1::MerchantPriceResult>) {
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_price_result_fifo);
             state_.apply(value);                    // 商人询价结果
           } else if constexpr (std::is_same_v<T, client_v1::MerchantRepairPriceResult>) {
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_price_result_fifo);
             state_.apply(value);                    // 修理询价结果
           } else if constexpr (std::is_same_v<T, client_v1::StorageList>) {
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_storage_list_fifo);
             state_.apply(value);                    // 仓库列表
+            legacy_magic_npc_trace(
+                legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_storage_or_bag);
           } else if constexpr (std::is_same_v<T, client_v1::GroupState>) {
             state_.apply(value);                    // 组队窗口状态
           } else if constexpr (std::is_same_v<T, client_v1::TradeState>) {
