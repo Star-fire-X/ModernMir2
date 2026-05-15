@@ -2528,15 +2528,31 @@ class LegacyHud final {
     if (!initialized_ || context.input == nullptr) {
       return false;
     }
+    const auto& input = *context.input;
+    const auto shortcut_candidate =
+        input.key_pressed[VK_ESCAPE] || input.key_pressed[VK_RETURN] ||
+        input.key_pressed[VK_SPACE] || input.key_pressed[VK_UP] ||
+        input.key_pressed[VK_PRIOR] || input.key_pressed[VK_DOWN] ||
+        input.key_pressed[VK_NEXT] || input.key_pressed[VK_F9] ||
+        input.key_pressed[VK_F10] || input.key_pressed[VK_F11] ||
+        input.key_pressed['I'] || input.key_pressed['C'] || input.key_pressed['S'] ||
+        input.key_pressed['V'] || input.key_pressed['P'] || input.key_pressed['T'] ||
+        input.key_pressed['G'] || !input.text_input.empty() ||
+        (input.key_down[VK_MENU] && (input.key_pressed['X'] || input.key_pressed['Q']));
+    if (!shortcut_candidate) {
+      return false;
+    }
     if (context.ui_input.text_focus || tree.modal() != nullptr) {
       return false;
     }
     if (context.input->key_pressed[VK_ESCAPE]) {
+      tree.trace_legacy_shortcut_fallback();
       return handle_escape(context, tree);
     }
     if (tree.captured() != nullptr) {
       return false;
     }
+    tree.trace_legacy_shortcut_fallback();
     if (context.input->key_pressed[VK_RETURN] || context.input->key_pressed[VK_SPACE]) {
       open_chat(L"");
       return true;
@@ -6188,6 +6204,14 @@ class WorldScene final : public Scene {
     }
     if (input_guard || legacy_hud_.blocks_world_input()) {
       return;
+    }
+    auto magic_shortcut_candidate = false;
+    for (int index = 0; index < 8; ++index) {
+      magic_shortcut_candidate =
+          magic_shortcut_candidate || context.input->key_pressed[VK_F1 + index];
+    }
+    if (magic_shortcut_candidate) {
+      ui_.trace_legacy_shortcut_fallback();
     }
     for (int index = 0; index < 8; ++index) {
       if (context.input->key_pressed[VK_F1 + index] && magic_for_slot(world, index) != 0) {

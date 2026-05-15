@@ -29,6 +29,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -407,6 +408,8 @@ class UiTree {
   void clear();
   /// 设置资源管理器（用于精灵加载）
   void set_asset_manager(AssetManager* assets) { assets_ = assets; }
+  /// 设置 legacy 输入 trace 回调；为空时不记录
+  void set_trace_callback(std::function<void(std::string_view)> callback);
   /// 设置焦点到指定节点
   void focus(UiNode* node);
   /// 捕获鼠标输入到指定节点
@@ -417,6 +420,12 @@ class UiTree {
   void show_modal(UiNode* node);
   /// 关闭模态
   void close_modal(UiNode* node);
+  /// 设置活动菜单（ActiveMenu 优先于 modal 和普通窗口命中）
+  void show_active_menu(UiNode* node);
+  /// 关闭活动菜单；node 为 nullptr 时无条件清理
+  void close_active_menu(UiNode* node = nullptr);
+  /// 记录 scene 快捷键 fallback 阶段
+  void trace_legacy_shortcut_fallback();
   /// 将节点移到兄弟列表末尾（渲染在最上层）
   void bring_to_front(UiNode* node);
   /// 如果焦点节点是 node 的后代则清除焦点
@@ -429,9 +438,15 @@ class UiTree {
   [[nodiscard]] UiNode* captured() const { return captured_; }
   [[nodiscard]] UiNode* hovered() const { return hovered_; }
   [[nodiscard]] UiNode* modal() const { return modal_; }
+  [[nodiscard]] UiNode* active_menu() const { return active_menu_; }
   [[nodiscard]] AssetManager* asset_manager() const { return assets_; }
 
  private:
+  void emit_trace(std::string_view label);
+  void trace_mouse_down();
+  void trace_mouse_move();
+  void trace_mouse_up();
+  void trace_keyboard();
   /// 优先级命中测试：先检测活动菜单和模态节点
   [[nodiscard]] UiNode* priority_hit_test(int x, int y) const;
   /// 验证节点是否有效（属于树中且可见）
@@ -462,6 +477,7 @@ class UiTree {
   InputState queued_input_{};       ///< capture_input 记录的输入快照
   UiNode* queued_hit_{nullptr};     ///< capture_input 时的命中节点
   bool queued_input_active_{false}; ///< 是否有待处理的输入事件
+  std::function<void(std::string_view)> trace_callback_{};
 
   friend class Button;  ///< Button 需要访问 select_radio_button
 };

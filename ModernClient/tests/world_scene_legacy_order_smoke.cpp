@@ -6,6 +6,9 @@
 #include <cassert>
 #include <filesystem>
 #include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace {
 
@@ -51,12 +54,24 @@ int main() {
   mir2::client::ClientContext context{nullptr, &config, &state, nullptr, &audio, nullptr, &input};
   scenes.initialize(context);
   scenes.change_scene(mir2::client::SceneId::world, context);
+  auto* ui_tree = scenes.current_ui_tree();
+  assert(ui_tree != nullptr);
+  std::vector<std::string> ui_trace;
+  ui_tree->set_trace_callback(
+      [&ui_trace](const std::string_view label) { ui_trace.emplace_back(label); });
   audio.clear_trace_events();
 
   input.key_pressed[VK_F1] = true;
   scenes.capture_ui_input(context);
   scenes.process_key_messages(context);
   assert(world.action_key == 0);
+  assert((ui_trace == std::vector<std::string>{
+                          "active_menu_key_first",
+                          "modal_window_key_blocks_lower_windows",
+                          "focused_edit_or_chat_key",
+                          "chat_enter_submit_or_open",
+                          "chat_escape_cancel",
+                          "legacy_shortcut_fallback"}));
   assert(audio.trace_events().empty());
 
   scenes.process_action_messages(context, 0.016F);
@@ -73,9 +88,45 @@ int main() {
   assert(world.action_key == -1);
 
   input = mir2::client::InputState{};
+  input.key_pressed[VK_F1] = true;
+  context.ui_input = mir2::client::ui::UiInputResult{false, true, false};
+  world.action_key = -1;
+  scenes.process_key_messages(context);
+  assert(world.action_key == -1);
+
+  input = mir2::client::InputState{};
+  input.key_pressed[VK_F1] = true;
+  context.ui_input = mir2::client::ui::UiInputResult{false, false, true};
+  world.action_key = -1;
+  scenes.process_key_messages(context);
+  assert(world.action_key == -1);
+
+  input = mir2::client::InputState{};
   input.left_pressed = true;
   input.left_down = true;
   context.ui_input = mir2::client::ui::UiInputResult{true, false, false};
+  world.focus_actor_id = 1;
+  world.focus_ground_item_id = 900;
+  world.legacy_target_x = 52;
+  world.legacy_target_y = 50;
+  world.legacy_chr_action = mir2::client::LegacyChrAction::walk;
+  world.pending_pickup_item_id = 900;
+  world.action_key = 0;
+  world.mouse_down_ms = 123;
+  scenes.process_action_messages(context, 0.016F);
+  assert(world.focus_actor_id == 0);
+  assert(world.focus_ground_item_id == 0);
+  assert(world.legacy_target_x == -1);
+  assert(world.legacy_target_y == -1);
+  assert(world.legacy_chr_action == mir2::client::LegacyChrAction::none);
+  assert(world.pending_pickup_item_id == 0);
+  assert(world.action_key == -1);
+  assert(world.mouse_down_ms == 0);
+
+  input = mir2::client::InputState{};
+  input.left_pressed = true;
+  input.left_down = true;
+  context.ui_input = mir2::client::ui::UiInputResult{false, true, false};
   world.focus_actor_id = 1;
   world.focus_ground_item_id = 900;
   world.legacy_target_x = 52;

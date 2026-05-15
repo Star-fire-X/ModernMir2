@@ -392,6 +392,7 @@ void ClientApp::capture_ui_input(ClientContext& context) {
   }
 
   modal_ui_.set_asset_manager(&assets_);
+  modal_ui_.set_trace_callback([](const std::string_view label) { legacy_trace(label); });
   context.ui_input = modal_ui_.capture_input(mapped_input_);
   context.ui_input.consumed = true;
 }

@@ -9,7 +9,10 @@ void LegacyUiTrace::emit(const std::string_view label) { events_.emplace_back(la
 
 void LegacyUiTrace::clear() { events_.clear(); }
 
-LegacyUiManager::LegacyUiManager() { reset_root(); }
+LegacyUiManager::LegacyUiManager() {
+  tree_.set_trace_callback([this](const std::string_view label) { trace_.emit(label); });
+  reset_root();
+}
 
 UiNode& LegacyUiManager::root() {
   auto* node = tree_.root();
@@ -75,6 +78,10 @@ void LegacyUiManager::show_modal(Window& window) {
 
 void LegacyUiManager::close_modal(UiNode& window) { tree_.close_modal(&window); }
 
+void LegacyUiManager::show_active_menu(UiNode& menu) { tree_.show_active_menu(&menu); }
+
+void LegacyUiManager::close_active_menu(UiNode* menu) { tree_.close_active_menu(menu); }
+
 void LegacyUiManager::set_focus(UiNode* node) { tree_.focus(node); }
 
 void LegacyUiManager::release_focus() { tree_.focus(nullptr); }
@@ -82,6 +89,18 @@ void LegacyUiManager::release_focus() { tree_.focus(nullptr); }
 void LegacyUiManager::set_capture(UiNode* node) { tree_.set_capture(node); }
 
 void LegacyUiManager::release_capture(UiNode* node) { tree_.release_capture(node); }
+
+UiInputResult LegacyUiManager::capture_input(const InputState& input) {
+  return tree_.capture_input(input);
+}
+
+void LegacyUiManager::process_queued_events(const InputState& input) {
+  tree_.process_queued_events(input);
+}
+
+void LegacyUiManager::trace_legacy_shortcut_fallback() {
+  tree_.trace_legacy_shortcut_fallback();
+}
 
 void LegacyUiManager::direct_paint(SoftwareRenderer& renderer) {
   trace_.emit("ui_windows_dwin_direct_paint");
