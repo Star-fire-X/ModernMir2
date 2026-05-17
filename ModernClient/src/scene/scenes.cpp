@@ -63,6 +63,7 @@
 #include "scene/legacy_magic_npc_ui.hpp"
 #include "scene/legacy_play_ui.hpp"
 #include "scene/legacy_trade_group_guild_ui.hpp"
+#include "scene/legacy_ui_lifecycle.hpp"
 #include "shared/legacy/map_render_order.hpp"
 #include "shared/legacy/map_render_math.hpp"
 #include "shared/legacy/movement_rules.hpp"
@@ -134,6 +135,10 @@ void legacy_magic_npc_trace(const legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabe
 void legacy_trade_group_guild_trace(
     const legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel label) {
   legacy_trace(legacy_trade_group_guild_ui::legacy_trade_group_guild_ui_trace_label(label));
+}
+
+void legacy_ui_lifecycle_trace(const legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel label) {
+  legacy_trace(legacy_ui_lifecycle::legacy_ui_lifecycle_trace_label(label));
 }
 
 void legacy_trace_map_layer(
@@ -2977,6 +2982,8 @@ class LegacyHud final {
       tooltip_->hide();
       legacy_inventory_trace(
           legacy_inventory_ui::LegacyInventoryUiTraceLabel::hide_hint_when_item_missing_or_moving);
+      legacy_ui_lifecycle_trace(legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::
+                                    hide_tooltip_when_item_missing_or_moving);
     }
   }
 
@@ -3960,6 +3967,8 @@ class LegacyHud final {
       if (state_->world.pending_item_action.active &&
           state_->world.pending_item_action.kind == PendingItemActionKind::trade_add) {
         state_->restore_pending_item_action();
+        legacy_ui_lifecycle_trace(legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::
+                                      restore_pending_item_on_window_close);
       }
       state_->world.trade = TradeUiState{};
     }
@@ -4589,6 +4598,8 @@ class LegacyHud final {
     if (world.moving_item.active) {
       legacy_inventory_trace(
           legacy_inventory_ui::LegacyInventoryUiTraceLabel::hide_hint_when_item_missing_or_moving);
+      legacy_ui_lifecycle_trace(legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::
+                                    hide_tooltip_when_item_missing_or_moving);
       return;
     }
     if (valid_bag_slot(hovered_bag_slot_)) {
@@ -4624,6 +4635,8 @@ class LegacyHud final {
     }
     legacy_inventory_trace(
         legacy_inventory_ui::LegacyInventoryUiTraceLabel::hide_hint_when_item_missing_or_moving);
+    legacy_ui_lifecycle_trace(legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::
+                                  hide_tooltip_when_item_missing_or_moving);
     if (item_bag_ != nullptr && item_bag_->visible) {
       const auto rect = item_bag_->resolved_bounds();
       const auto lx = input.mouse_x - rect.x;
@@ -7032,6 +7045,8 @@ class WorldScene final : public Scene {
     audio_cues_.reset();
     legacy_hud_.reset();
     ui_.clear();
+    legacy_ui_lifecycle_trace(
+        legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::scene_exit_clears_ui_tree);
     context.state->clear_play_scene_state();
     next_left_hold_ms_ = 0;
     next_right_hold_ms_ = 0;

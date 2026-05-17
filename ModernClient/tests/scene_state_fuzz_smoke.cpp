@@ -18,6 +18,14 @@ mir2::client_v1::GroundItemState item(const std::uint64_t id, const std::int32_t
   return mir2::client_v1::GroundItemState{id, x, y, 1, "Gold"};
 }
 
+mir2::client_v1::ItemState potion() {
+  mir2::client_v1::ItemState item;
+  item.name = "Potion";
+  item.make_index = 1001;
+  item.looks = 1;
+  return item;
+}
+
 void assert_draw_orders_valid(const mir2::client::GameStateStore& state) {
   std::unordered_set<std::uint64_t> seen_actors;
   for (const auto id : state.world.actor_draw_order) {
@@ -58,7 +66,7 @@ int main() {
   std::mt19937 rng{0x4D495232U};
 
   for (int step = 0; step < 1000; ++step) {
-    switch (rng() % 14U) {
+    switch (rng() % 18U) {
       case 0: {
         seed_visible_world(state);
         break;
@@ -107,9 +115,20 @@ int main() {
         assert(state.world.pending_pickup_item_id == 0);
         break;
       case 6:
+        state.world.moving_item = mir2::client::MovingItemState{
+            true, mir2::client::MovingItemSource::bag, 6, potion()};
+        state.world.pending_item_action.active = true;
+        state.world.npc_dialog.visible = true;
+        state.world.trade.visible = true;
+        state.world.minimap.visible = true;
         state.clear_play_scene_state();
         assert(state.world.actors.empty());
         assert(state.world.ground_items.empty());
+        assert(!state.world.moving_item.active);
+        assert(!state.world.pending_item_action.active);
+        assert(!state.world.npc_dialog.visible);
+        assert(!state.world.trade.visible);
+        assert(!state.world.minimap.visible);
         break;
       case 7:
         state.apply(mir2::client_v1::ActionAck{true, static_cast<std::uint32_t>(step)});
@@ -132,6 +151,33 @@ int main() {
         break;
       case 12:
         state.expire_map_door_states(static_cast<std::uint64_t>(rng() % 20000U));
+        break;
+      case 13:
+        if (!state.world.map_transition_pending) {
+          state.apply(mir2::client_v1::ActorDeath{1, 330, 270, 0});
+          assert(state.world.actors[1].dead);
+          seed_visible_world(state);
+          assert(!state.world.actors[1].dead);
+        }
+        break;
+      case 14: {
+        auto moving = potion();
+        moving.name = "TradePotion";
+        state.world.bag_items[6] = mir2::client_v1::ItemState{};
+        state.begin_pending_item_action(mir2::client::PendingItemActionKind::trade_add,
+                                        mir2::client::MovingItemSource::bag, 6, 0, moving,
+                                        1234);
+        state.apply(mir2::client_v1::TradeState{false, "", {}, {}, 0, 0, false, false});
+        assert(!state.world.pending_item_action.active);
+        assert(state.world.bag_items[6].name == "TradePotion");
+        break;
+      }
+      case 15:
+        state.clear_world_ui_state();
+        assert(!state.world.moving_item.active);
+        assert(!state.world.pending_item_action.active);
+        assert(state.world.focus_actor_id == 0);
+        assert(state.world.pending_pickup_item_id == 0);
         break;
       default:
         if (!state.world.map_transition_pending) {

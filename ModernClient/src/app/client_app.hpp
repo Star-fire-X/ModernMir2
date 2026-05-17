@@ -107,6 +107,7 @@ class ClientApp {
   void request_guild_update_notice(const client_v1::GuildUpdateNoticeRequest& request);
   void request_guild_update_grade(const client_v1::GuildUpdateGradeRequest& request);
   void request_minimap(const client_v1::MiniMapRequest& request);
+  void request_revive();
   void request_close();
   void show_info_modal(const std::wstring& title, const std::wstring& message);
   [[nodiscard]] HWND window_handle() const { return window_.handle(); }
