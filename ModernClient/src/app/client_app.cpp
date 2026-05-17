@@ -31,6 +31,7 @@
 #include "scene/legacy_magic_npc_ui.hpp"
 #include "scene/legacy_play_ui.hpp"
 #include "scene/legacy_trade_group_guild_ui.hpp"
+#include "scene/legacy_ui_lifecycle.hpp"
 #include "ui/legacy_ui.hpp"
 
 #include <algorithm>
@@ -157,6 +158,10 @@ void legacy_magic_npc_trace(const legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabe
 void legacy_trade_group_guild_trace(
     const legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel label) {
   legacy_trace(legacy_trade_group_guild_ui::legacy_trade_group_guild_ui_trace_label(label));
+}
+
+void legacy_ui_lifecycle_trace(const legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel label) {
+  legacy_trace(legacy_ui_lifecycle::legacy_ui_lifecycle_trace_label(label));
 }
 
 /// 在软件渲染器上绘制精灵帧
@@ -1189,6 +1194,12 @@ void ClientApp::request_minimap(const client_v1::MiniMapRequest& request) {
   protocol_.send(request);
 }
 
+void ClientApp::request_revive() {
+  legacy_ui_lifecycle_trace(
+      legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::send_revive_request);
+  protocol_.send(client_v1::ReviveRequest{});
+}
+
 // 请求关闭：委托给 handle_close_request 弹出退出确认
 void ClientApp::request_close() {
   handle_close_request();
@@ -1343,6 +1354,8 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
       state_.lobby.delete_character_pending = false;
       state_.lobby.enter_character_pending = false;
       state_.clear_play_scene_state();
+      legacy_ui_lifecycle_trace(
+          legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::disconnect_clears_play_ui);
       // 客户端主动发起的断开（reason="client_disconnect"）不弹提示
       if (!disconnected->reason.empty() && disconnected->reason != "client_disconnect") {
         // 游戏中意外掉线：弹出重连确认框
@@ -1382,6 +1395,8 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             << " map_transition=" << state_.world.map_transition_pending;
         legacy_trace(out.str());
       }
+      legacy_ui_lifecycle_trace(
+          legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::drop_unreachable_world_message);
       return true;
     };
 
@@ -1679,6 +1694,12 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
               return;
             }
             state_.apply(value);                    // 角色死亡状态
+            if (value.actor_id == state_.world.self_actor_id) {
+              legacy_ui_lifecycle_trace(
+                  legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::show_revive_prompt);
+              show_confirm_modal(L"Revive", L"You are dead. Revive at safe zone?",
+                                 [this] { request_revive(); });
+            }
           } else if constexpr (std::is_same_v<T, client_v1::MagicList>) {
             legacy_magic_npc_trace(
                 legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_magic_list_fifo);
@@ -1933,6 +1954,8 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.lobby.delete_character_pending = false;
             state_.lobby.enter_character_pending = false;
             state_.clear_play_scene_state();
+            legacy_ui_lifecycle_trace(
+                legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::disconnect_clears_play_ui);
             state_.connection_phase = GameStateStore::ConnectionPhase::login;
             request_scene_change(SceneId::login);
             show_modal(L"Disconnected", widen(value.text));     // 服务端发起的断开原因
@@ -2354,6 +2377,8 @@ void ClientApp::begin_login_replay(const bool enter_selected_character) {
         state_.lobby.characters[static_cast<std::size_t>(state_.lobby.selected_index)].name;
   }
   state_.clear_play_scene_state();  // 清空世界状态
+  legacy_ui_lifecycle_trace(
+      legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::disconnect_clears_play_ui);
   state_.connection_phase = enter_selected_character
                                 ? GameStateStore::ConnectionPhase::login
                                 : GameStateStore::ConnectionPhase::reselect_character;

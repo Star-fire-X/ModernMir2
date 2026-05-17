@@ -252,6 +252,13 @@ int main() {
   world.legacy_target_x = 52;
   world.legacy_target_y = 50;
   world.legacy_chr_action = mir2::client::LegacyChrAction::walk;
+  world.npc_dialog.visible = true;
+  world.trade.visible = true;
+  world.minimap.visible = true;
+  world.moving_item = mir2::client::MovingItemState{
+      true, mir2::client::MovingItemSource::bag, 6, potion};
+  world.pending_item_action.active = true;
+  world.pending_pickup_item_id = 900;
 
   scenes.change_scene(mir2::client::SceneId::loading, context);
   assert(world.map_id == "0");
@@ -264,6 +271,12 @@ int main() {
   assert(world.ground_item_draw_order.empty());
   assert(world.focus_actor_id == 0);
   assert(world.target_actor_id == 0);
+  assert(!world.npc_dialog.visible);
+  assert(!world.trade.visible);
+  assert(!world.minimap.visible);
+  assert(!world.moving_item.active);
+  assert(!world.pending_item_action.active);
+  assert(world.pending_pickup_item_id == 0);
   assert(!world.action_locked);
   assert(world.legacy_target_x == -1);
   assert(world.legacy_target_y == -1);
