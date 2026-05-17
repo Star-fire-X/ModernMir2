@@ -56,6 +56,7 @@ function Get-CiBuildTargets {
     "mir2_player_movement_smoke",
     "mir2_visibility_delta_smoke",
     "mir2_monster_legacy_combat_damage_smoke",
+    "mir2_attack_protocol_golden_smoke",
     "mir2_skill_formula_golden_smoke",
     "mir2_skill_protocol_golden_smoke",
     "mir2_skill_status_poison_buff_hide_shield_smoke",

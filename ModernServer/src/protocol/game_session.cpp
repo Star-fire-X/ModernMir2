@@ -35,6 +35,31 @@ void GameSession::deliver(const LegacyPacket& packet) {
   });
 }
 
+void GameSession::deliver(const LegacyPacket& packet, std::chrono::milliseconds delay) {
+  if (delay.count() <= 0) {
+    deliver(packet);
+    return;
+  }
+
+  auto self = shared_from_this();
+  asio::dispatch(socket_.get_executor(), [this, self, packet, delay] {
+    if (closed_) {
+      return;
+    }
+    auto timer = std::make_shared<asio::steady_timer>(socket_.get_executor());
+    timer->expires_after(delay);
+    timer->async_wait([this, self, packet, timer](const std::error_code& error) {
+      if (error || closed_) {
+        return;
+      }
+      outbound_frames_.push_back(LegacyProtocolCodec::encode(packet));
+      if (!write_in_progress_) {
+        do_write();
+      }
+    });
+  });
+}
+
 void GameSession::deliver_and_close(const LegacyPacket& packet, std::chrono::milliseconds delay,
                                     std::string reason) {
   auto self = shared_from_this();

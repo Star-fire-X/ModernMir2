@@ -2060,8 +2060,12 @@ void ClientV1GameGatewayService::handle_session_event(const SessionEvent& event)
       event.kind == SessionEventKind::send_packet_and_close) {
     std::vector<client_v1::Message> messages;
     translate_legacy_packet(event.session_id, event.packet, messages);
+    const auto delay =
+        event.kind == SessionEventKind::send_packet
+            ? std::chrono::milliseconds(event.delay_ms >= 0 ? event.delay_ms : 0)
+            : std::chrono::milliseconds(0);
     for (const auto& message : messages) {
-      send_message(event.session_id, message);
+      send_message(event.session_id, message, delay);
     }
     if (event.kind == SessionEventKind::send_packet_and_close) {
       disconnect(event.session_id, 409, event.reason.empty() ? "server_closed" : event.reason);

@@ -504,6 +504,9 @@ if(BUILD_TESTING)
   add_executable(mir2_legacy_combat_formula_smoke tests/legacy_combat_formula_smoke.cpp)
   target_link_libraries(mir2_legacy_combat_formula_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_combat_formula_smoke COMMAND mir2_legacy_combat_formula_smoke)
+  add_executable(mir2_attack_protocol_golden_smoke tests/attack_protocol_golden_smoke.cpp)
+  target_link_libraries(mir2_attack_protocol_golden_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_attack_protocol_golden_smoke COMMAND mir2_attack_protocol_golden_smoke)
 
   add_executable(mir2_player_derived_ability_equipment_smoke
       tests/player_derived_ability_equipment_smoke.cpp)
@@ -902,6 +905,7 @@ if(BUILD_TESTING)
       mir2_client_v1_protocol_smoke
       mir2_movement_blocking_legacy_smoke
       mir2_combat_smoke
+      mir2_attack_protocol_golden_smoke
       mir2_items_smoke
       mir2_world_tick_cadence_smoke
       mir2_legacy_player_input_budget_smoke

@@ -21,6 +21,7 @@ class GameSession : public std::enable_shared_from_this<GameSession> {
 
   void start(std::uint64_t session_id);
   void deliver(const LegacyPacket& packet);
+  void deliver(const LegacyPacket& packet, std::chrono::milliseconds delay);
   void deliver_and_close(const LegacyPacket& packet, std::chrono::milliseconds delay,
                          std::string reason);
   void close(const std::string& reason);

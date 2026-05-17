@@ -135,6 +135,22 @@ void ClientV1GatewayServiceBase::send_message(std::uint64_t session_id,
   }
 }
 
+void ClientV1GatewayServiceBase::send_message(std::uint64_t session_id,
+                                              const client_v1::Message& message,
+                                              std::chrono::milliseconds delay) {
+  std::shared_ptr<ClientV1Session> session;
+  {
+    std::scoped_lock lock(mutex_);
+    const auto it = sessions_.find(session_id);
+    if (it != sessions_.end()) {
+      session = it->second;
+    }
+  }
+  if (session != nullptr) {
+    session->send(message, delay);
+  }
+}
+
 void ClientV1GatewayServiceBase::disconnect(std::uint64_t session_id, std::uint16_t code,
                                             const std::string& reason) {
   std::shared_ptr<ClientV1Session> session;

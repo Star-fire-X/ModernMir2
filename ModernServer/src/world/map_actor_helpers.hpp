@@ -660,9 +660,15 @@ std::int32_t actor_magic_defense(const GameObject& object) {
   return 0;
 }
 
-void queue_packet(RuntimeDispatch& dispatch, std::uint64_t session_id, LegacyPacket packet) {
+void queue_packet(RuntimeDispatch& dispatch, std::uint64_t session_id, LegacyPacket packet,
+                  std::int32_t delay_ms) {
   dispatch.session_events.push_back(SessionEvent{
-      SessionEventKind::send_packet, "game_gateway", session_id, {}, std::move(packet), {}});
+      SessionEventKind::send_packet, "game_gateway", session_id, {}, std::move(packet), {},
+      delay_ms});
+}
+
+void queue_packet(RuntimeDispatch& dispatch, std::uint64_t session_id, LegacyPacket packet) {
+  queue_packet(dispatch, session_id, std::move(packet), 0);
 }
 
 void queue_force_disconnect(RuntimeDispatch& dispatch, std::uint64_t session_id,
