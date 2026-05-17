@@ -23,7 +23,7 @@ target_include_directories(modern_client_headers
     ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
-add_library(modern_client_core STATIC
+set(MODERN_CLIENT_CORE_SOURCES
   src/app/client_app.cpp
   src/audio/direct_sound_audio_backend.cpp
   src/audio/audio_id_mapping.cpp
@@ -48,7 +48,25 @@ add_library(modern_client_core STATIC
   src/scene/scenes.cpp
 )
 
+add_library(modern_client_core STATIC ${MODERN_CLIENT_CORE_SOURCES})
+
 target_link_libraries(modern_client_core
+  PUBLIC
+    modern_client_headers
+    d3d11
+    dxgi
+    d3dcompiler
+    gdi32
+    user32
+    ws2_32
+    dsound
+    dxguid
+    winmm
+)
+
+add_library(modern_client_test_core STATIC ${MODERN_CLIENT_CORE_SOURCES})
+target_compile_definitions(modern_client_test_core PUBLIC MIR2_CLIENT_TESTING)
+target_link_libraries(modern_client_test_core
   PUBLIC
     modern_client_headers
     d3d11
@@ -77,10 +95,17 @@ function(add_modern_client_core_smoke target source)
   add_test(NAME ${target} COMMAND ${target})
 endfunction()
 
+function(add_modern_client_test_core_smoke target source)
+  add_executable(${target} ${source})
+  target_link_libraries(${target} PRIVATE modern_client_test_core)
+  add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
 add_modern_client_core_smoke(modern_client_asset_smoke tests/asset_smoke.cpp)
 add_modern_client_header_smoke(modern_client_protocol_map_smoke tests/protocol_map_smoke.cpp)
 add_modern_client_header_smoke(modern_client_flow_smoke tests/client_flow_smoke.cpp)
 add_modern_client_header_smoke(modern_client_auth_error_text_smoke tests/auth_error_text_smoke.cpp)
+add_modern_client_test_core_smoke(modern_client_auth_gate_flow_smoke tests/auth_gate_flow_smoke.cpp)
 add_modern_client_header_smoke(modern_client_text_encoding_smoke tests/text_encoding_smoke.cpp)
 add_modern_client_header_smoke(modern_client_item_pending_smoke tests/item_pending_smoke.cpp)
 add_modern_client_header_smoke(modern_client_character_select_smoke tests/character_select_smoke.cpp)
@@ -160,6 +185,7 @@ add_custom_target(modern_client_ci_phase2_fast
     modern_client_protocol_map_smoke
     modern_client_flow_smoke
     modern_client_auth_error_text_smoke
+    modern_client_auth_gate_flow_smoke
     modern_client_text_encoding_smoke
     modern_client_movement_smoke
     modern_client_movement_action_gate_smoke
