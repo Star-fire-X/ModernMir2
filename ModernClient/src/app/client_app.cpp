@@ -436,6 +436,34 @@ void ClientApp::refresh_mapped_input() {
   mapped_input_.mouse_y = logical_point.y;
 }
 
+#ifdef MIR2_CLIENT_TESTING
+void ClientApp::set_config_for_test(const ClientConfig& config) { config_ = config; }
+
+void ClientApp::enable_protocol_test_mode_for_test() {
+  protocol_.enable_test_mode_for_test();
+}
+
+void ClientApp::complete_connect_for_test() { protocol_.complete_connect_for_test(); }
+
+void ClientApp::push_protocol_disconnect_for_test(std::string reason) {
+  protocol_.push_disconnected_for_test(std::move(reason));
+}
+
+void ClientApp::pump_protocol_for_test() {
+  ClientContext context{this, &config_, &state_, &assets_, &audio_, &renderer_, &mapped_input_};
+  handle_protocol_events(context);
+  flush_scene_change_if_pending(context);
+}
+
+std::vector<client_v1::Frame> ClientApp::drain_sent_frames_for_test() {
+  return protocol_.drain_sent_frames_for_test();
+}
+
+const std::vector<ProtocolClient::ConnectAttempt>& ClientApp::connect_attempts_for_test() const {
+  return protocol_.connect_attempts_for_test();
+}
+#endif
+
 // 请求切换到指定场景（延迟执行，在当前帧更新完毕后生效）
 void ClientApp::request_scene_change(SceneId id) {
   requested_scene_ = id;

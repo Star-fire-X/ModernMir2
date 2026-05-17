@@ -23,6 +23,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "app/legacy_frame_scheduler.hpp"
 #include "assets/asset_manager.hpp"
@@ -111,6 +112,24 @@ class ClientApp {
   void request_close();
   void show_info_modal(const std::wstring& title, const std::wstring& message);
   [[nodiscard]] HWND window_handle() const { return window_.handle(); }
+
+#ifdef MIR2_CLIENT_TESTING
+  void set_config_for_test(const ClientConfig& config);
+  void enable_protocol_test_mode_for_test();
+  void complete_connect_for_test();
+  template <typename T>
+  void push_protocol_message_for_test(const T& message) {
+    protocol_.push_message_for_test(message);
+  }
+  void push_protocol_disconnect_for_test(std::string reason);
+  void pump_protocol_for_test();
+  [[nodiscard]] GameStateStore& state_for_test() { return state_; }
+  [[nodiscard]] const GameStateStore& state_for_test() const { return state_; }
+  [[nodiscard]] SceneId current_scene_for_test() const { return scenes_.current_id(); }
+  [[nodiscard]] std::vector<client_v1::Frame> drain_sent_frames_for_test();
+  [[nodiscard]] const std::vector<ProtocolClient::ConnectAttempt>& connect_attempts_for_test()
+      const;
+#endif
 
  private:
   /// 注册/改密仍沿用旧的待连接标记；主登录链路由 AuthFlowPhase 驱动。

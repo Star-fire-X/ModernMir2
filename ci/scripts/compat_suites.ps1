@@ -185,6 +185,7 @@ function Get-CiBuildTargets {
     "modern_client_asset_smoke",
     "modern_client_protocol_map_smoke",
     "modern_client_flow_smoke",
+    "modern_client_auth_gate_flow_smoke",
     "modern_client_text_encoding_smoke",
     "modern_client_movement_smoke"
   )
