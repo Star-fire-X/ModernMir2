@@ -45,14 +45,30 @@
       "delphi_line": "ObjBase.pas:5687-5692"
     },
     {
-      "stage": "server_damage",
+      "stage": "server_main_target_damage",
       "message_type": "SM_STRUCK",
       "message_id": 31,
-      "condition": "only when line target exists and hit check passes",
+      "delay_ms": 200,
+      "condition": "adjacent main target exists and the normal _Attack hit check passes",
+      "delphi_line": "ObjBase.pas:5432-5449",
       "fields": {
-        "damage": "<final_damage>",
-        "hp": "<target_hp>"
-      }
+        "damage": "<main_target_damage>",
+        "hp": "<main_target_hp>"
+      },
+      "note": "Long-hit mode still runs the normal main-target path after the range-2 DirectAttack path."
+    },
+    {
+      "stage": "server_range2_directattack_damage",
+      "message_type": "SM_STRUCK",
+      "message_id": 31,
+      "delay_ms": 500,
+      "condition": "range-2 line target exists and DirectAttack hit check passes",
+      "delphi_line": "ObjBase.pas:5261-5265, ObjBase.pas:5270-5284",
+      "fields": {
+        "damage": "<secondary_damage>",
+        "hp": "<range2_target_hp>"
+      },
+      "note": "DirectAttack queues visible struck after 500ms; non-human targets also receive immediate internal RM_STRUCK for AI reaction."
     }
   ],
   "cplusplus_mapping": {

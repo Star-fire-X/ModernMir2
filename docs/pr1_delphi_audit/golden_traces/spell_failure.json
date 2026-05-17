@@ -1,6 +1,6 @@
 {
   "flow": "spell_failure",
-  "description": "普通技能入口成功但 SpellNow 分支失败: MP 已扣, SM_SPELL 已广播, then SM_MAGICFIRE_FAIL or no effect",
+  "description": "普通技能入口成功但 SpellNow 分支失败: MP 已扣, SM_SPELL 已广播; fireball target/range/anti-magic failure still emits normal SM_MAGICFIRE with no delayed effect, while nofire failures emit SM_MAGICFIRE_FAIL.",
   "delphi_source": {
     "mp_cost": "ObjBase.pas:7106-7128 DoSpell",
     "spell_entry": "Magic.pas:534-537 SpellNow entry",
@@ -27,20 +27,28 @@
       "delphi_line": "Magic.pas:537"
     },
     {
-      "stage": "server_branch_fail",
+      "stage": "server_fireball_branch_no_effect",
       "examples": [
         "target missing",
         "target out of range",
-        "anti magic rejected",
-        "required item missing after visual path"
+        "anti magic rejected"
       ],
+      "message_type": "SM_MAGICFIRE",
+      "message_id": 638,
+      "condition": "case 1/5 leaves nofire=false and needfire=true; SpellNow post-processing sends normal magic fire",
+      "delphi_line": "Magic.pas:548-570, Magic.pas:983-988",
       "side_effect": "No delayed damage/heal is queued."
     },
     {
-      "stage": "server_fail_visual",
+      "stage": "server_nofire_fail_visual",
       "message_type": "SM_MAGICFIRE_FAIL",
       "message_id": 639,
-      "condition": "SpellNow post-processing reaches failure visual path"
+      "condition": "DoSpell returns false because nofire remains TRUE, then SpellXY sends RM_MAGICFIRE_FAIL",
+      "delphi_line": "Magic.pas:983-998, ObjBase.pas:9538-9539",
+      "examples": [
+        "required bujuk/poison powder missing",
+        "target validation fails inside a nofire branch"
+      ]
     },
     {
       "stage": "expected_absence",

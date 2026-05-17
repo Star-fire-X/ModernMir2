@@ -139,16 +139,17 @@
           "message_type": "RM_STRUCK",
           "message_id": 31,
           "delay_ms": 200,
-          "condition": "target is RC_USERHUMAN",
+          "condition": "main target took positive damage; applies to both player and monster targets for client-visible SM_STRUCK",
           "fields": {"damage": "<final_damage>", "hp": "<target.HP>", "max_hp": "<target.MaxHP>", "hiter_id": "<attacker_id>"}
         },
         {
-          "action": "send_rm_struck_immediate",
-          "message_type": "RM_STRUCK",
-          "message_id": 31,
+          "action": "send_monster_internal_rm_struck",
+          "message_type": "RM_STRUCK_INTERNAL",
+          "client_visible": false,
           "delay_ms": 0,
-          "condition": "target is NOT RC_USERHUMAN",
-          "fields": "(same as above)"
+          "condition": "main target is NOT RC_USERHUMAN",
+          "fields": "(same as above)",
+          "note": "ObjBase.pas:5542 immediate SendMsg is for monster RunMsg/AI reaction, not a socket-visible SM_STRUCK broadcast."
         },
         {
           "action": "stone_check",

@@ -297,6 +297,9 @@ begin
     target.StruckDamage(damage, Self);
     SendDelayMsg(RM_STRUCK, RM_REFMESSAGE, damage, target.WAbil.HP,
                  target.WAbil.MaxHP, Longint(Self), '', 500);
+    if target.RaceServer <> RC_USERHUMAN then
+      target.SendMsg(target, RM_STRUCK, damage, target.WAbil.HP,
+                     target.WAbil.MaxHP, Longint(Self), '');
     Result := TRUE;
   end;
   // MISS = Result FALSE, 不发送消息给目标
@@ -466,7 +469,7 @@ end;
 // 烈火: 1 熟练度 (每次)
 // 十字: 1 熟练度 (每次)
 
-// Step 10: 非人类目标 immediate RM_STRUCK (5542-5543)
+// Step 10: 非人类目标 internal immediate RM_STRUCK (5542-5543)
 if targ.RaceServer <> RC_USERHUMAN then
   targ.SendMsg(RM_STRUCK, dam, targ.WAbil.HP, targ.WAbil.MaxHP, Longint(Self), '');
 ```
@@ -791,9 +794,12 @@ SendRefMsg(RM_DEATH, Dir, CX, CY, 1, '');   // SM_DEATH (32)
    → 广播攻击动作给所有视野玩家
    → 客户端播放攻击动画
 
-2. RM_STRUCK (SendDelayMsg, 200ms delay for RC_USERHUMAN; SendMsg immediate for monsters)
-   → 发送受击消息给目标
+2. RM_STRUCK (SendDelayMsg, 200ms client-visible delay for main target)
+   → 发送受击消息给目标, 最终转为客户端 SM_STRUCK
    → 客户端播放受击动画
+
+2a. RM_STRUCK internal (SendMsg immediate for non-human targets)
+   → 怪物 RunMsg/AI 立即反应, 不是 socket 可见 SM_STRUCK
 
 3. RM_HEALTHSPELLCHANGED (HealthSpellChanged → UpdateMsg / SendRefMsg)
    → HP/MP 变化通知
@@ -809,8 +815,10 @@ SendRefMsg(RM_DEATH, Dir, CX, CY, 1, '');   // SM_DEATH (32)
 
 | 消息 | 延迟 | 接收者 | 用途 |
 |------|------|--------|------|
-| RM_STRUCK (objbase:5261) | 500ms | target (RC_USERHUMAN) | 命中+HP刷新 |
-| RM_STRUCK (objbase:5449) | 200ms | target (RC_USERHUMAN) | 受击动画+伤害 |
+| RM_STRUCK (objbase:5261-5262) | 500ms | target | 二级 DirectAttack 命中+HP刷新 (刺杀/半月/十字) |
+| RM_STRUCK internal (objbase:5264-5265) | 0ms | non-human DirectAttack target | 二级命中的怪物 RunMsg/AI 反应, 非 socket 可见包 |
+| RM_STRUCK (objbase:5449) | 200ms | target | 主目标客户端可见受击动画+伤害 |
+| RM_STRUCK internal (objbase:5542) | 0ms | non-human target | 怪物 RunMsg/AI 反应, 非 socket 可见包 |
 | RM_MAGIC_LVEXP | 3000ms for attack-triggered sword skills; 1000ms for normal SpellNow training | attacker | 技能训练显示 |
 | RM_BREAKWEAPON | 0ms (immediate) | attacker | 武器破损通知 |
 
@@ -838,7 +846,7 @@ SendRefMsg(RM_DEATH, Dir, CX, CY, 1, '');   // SM_DEATH (32)
 
 - **攻击间隔**: Delphi 服务端使用 `LatestHitTime` + `900 - HitSpeed*60` (`ObjBase.pas:9309-9316`); 客户端另有 `CanNextHit` (`ClMain.pas:3348-3362`)。PR3 必须保留双层门。
 - **MISS 行为**: `DirectAttack` 命中失败时不进入 `StruckDamage`, 因而不广播 `SM_STRUCK`。`attack_miss.json` 冻结该序列。
-- **玩家/怪物受击延迟**: 玩家目标 `RM_STRUCK` 延迟 200ms (`ObjBase.pas:5449`), 怪物目标即时 (`ObjBase.pas:5542`)。`struck_delay_player_vs_monster.json` 冻结差异。
+- **玩家/怪物受击延迟**: 客户端可见 `SM_STRUCK` 对玩家和怪物主目标均延迟 200ms (`ObjBase.pas:5449`); 刺杀/半月/十字的二级 `DirectAttack` 可见受击延迟 500ms (`ObjBase.pas:5261-5262`)。怪物目标额外收到即时内部 `RM_STRUCK` (`ObjBase.pas:5264-5265`, `ObjBase.pas:5542`) 供 AI/RunMsg 反应。`struck_delay_player_vs_monster.json` 冻结该差异。
 - **半月/十字**: 半月 3 个方向无伤害衰减 (`ObjBase.pas:5285-5304`); 十字斩对玩家使用 80% 伤害 (`ObjBase.pas:5320-5323`)。
 - **装备特技/红毒/吸血**: 石化、红毒和吸血公式已在 `verification_checklist.md` P1 项冻结, 后续 PR 只实现/测试, 不重新解释 Delphi 语义。
 - **死亡路径**: `Die` 的经验、PK、掉落和 `SM_DEATH` 顺序由 `death_player.json` 冻结, PR9 负责实现验证。

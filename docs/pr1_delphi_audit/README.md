@@ -62,7 +62,7 @@
 | `attack_widehit.json` | 半月三格扇形且无衰减 |
 | `attack_crosshit.json` | 十字斩和 PvP 80% |
 | `attack_firehit.json` | 烈火蓄力、倍率、训练 |
-| `struck_delay_player_vs_monster.json` | 玩家/怪物 `SM_STRUCK` 延迟差异 |
+| `struck_delay_player_vs_monster.json` | 主目标 200ms、DirectAttack 二级 500ms、怪物内部即时反应差异 |
 | `spell_fireball.json` | 火球动作、弹道、延迟伤害 |
 | `spell_failure.json` | MP 已扣、动作已广播、效果失败 |
 | `spell_heal.json` | 治愈延迟回血 |

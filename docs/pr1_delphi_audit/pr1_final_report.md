@@ -24,8 +24,8 @@ PR1 已在 `docs/pr1_delphi_audit/` 内完成收口: P0 攻击/施法时序和 P
 |---|---|---|
 | 服务端攻击节流额外 200ms 下限 | C++ 安全增强, 不改变合法节奏, 需要测试锁住。 | PR3 |
 | 无效攻击是否刷新攻击冷却 | Delphi 只在合法 `HitXY` 流程刷新; C++ 需验证目标失败路径。 | PR3/PR5 |
-| 玩家 `RM_STRUCK` 200ms 延迟 | Delphi 玩家延迟、怪物即时; C++ frame-end 派发存在对齐风险。 | PR2/PR9 |
-| 施毒/隐身 `nofire` | Delphi 不发送普通 magic fire; C++ 分支需逐项验证。 | PR7/PR8 |
+| 客户端可见 `SM_STRUCK` 延迟 | Delphi 对玩家和怪物主目标延迟 200ms; 刺杀/半月/十字二级 `DirectAttack` 延迟 500ms。怪物即时 `RM_STRUCK` 是内部 AI/RunMsg 反应。C++ frame-end 派发存在对齐风险。 | PR2/PR5/PR9 |
+| 施毒/隐身 `nofire` | Delphi 成功/抵抗分支会发送普通 `SM_MAGICFIRE`; 缺道具或目标失败才走 `SM_MAGICFIRE_FAIL`。 | PR7/PR8 |
 | Magic ID 34 | Delphi 源码引用但 MDB 无定义; 启用需显式配置。 | PR5/PR11 |
 | AC/MAC `ShortInt` range | 极端装备值是否模拟溢出是 PR4 的实现决定。 | PR4 |
 
@@ -39,7 +39,7 @@ PR1 已在 `docs/pr1_delphi_audit/` 内完成收口: P0 攻击/施法时序和 P
 | `attack_widehit.json` | 半月三格扇形且无衰减 |
 | `attack_crosshit.json` | 十字斩和 PvP 80% |
 | `attack_firehit.json` | 烈火蓄力、倍率、训练 |
-| `struck_delay_player_vs_monster.json` | 玩家/怪物受击延迟差异 |
+| `struck_delay_player_vs_monster.json` | 主目标 200ms、DirectAttack 二级 500ms、怪物内部即时反应差异 |
 | `spell_fireball.json` | 火球动作、弹道、延迟伤害 |
 | `spell_failure.json` | MP 已扣、动作已广播、效果失败 |
 | `spell_heal.json` | 治愈延迟回血 |
@@ -52,10 +52,10 @@ PR1 已在 `docs/pr1_delphi_audit/` 内完成收口: P0 攻击/施法时序和 P
 
 | PR | 输入 |
 |---|---|
-| PR2 | 普攻消息顺序、MISS、玩家/怪物 `SM_STRUCK` 延迟、`attack_basic.json`。 |
+| PR2 | 普攻消息顺序、MISS、主目标可见 `SM_STRUCK` 200ms 延迟、怪物内部即时反应、`attack_basic.json`。 |
 | PR3 | 双层攻击节奏、ActionLock 10s、同玩家 FIFO、无效攻击冷却风险。 |
 | PR4 | Delphi Round、Luck gate、AC/MAC range、魔法盾、红毒、吸血、石化公式。 |
-| PR5 | 刺杀、半月、烈火、野蛮、十字斩全部战士技能规则。 |
+| PR5 | 刺杀、半月、烈火、野蛮、十字斩全部战士技能规则, 包含 DirectAttack 二级命中 500ms 受击延迟。 |
 | PR6 | 火球/大火球/雷电/地狱火/疾光/爆裂/地狱雷光/冰咆哮/火墙 trace。 |
 | PR7 | 治愈、施毒、灵魂火符、召唤、心灵启示、圣言、诱惑等道士/控制技能。 |
 | PR8 | 毒、隐身、防御状态、魔法盾、tick 顺序和下线/死亡清理。 |
