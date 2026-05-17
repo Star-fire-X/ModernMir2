@@ -25,6 +25,7 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -314,6 +315,63 @@ enum class LoginState {
   lsChgpw,       ///< 修改密码
   lsCloseAll     ///< 关闭客户端
 };
+
+enum class AuthFlowPhase {
+  EditingLogin,
+  ConnectingLoginGate,
+  WaitingLoginResult,
+  WaitingServerList,
+  BrowsingServers,
+  WaitingServerSelection,
+  ConnectingCharacterGate,
+  QueryingCharacters,
+  BrowsingCharacters,
+  WaitingStartPlay,
+  ConnectingRunGate,
+  EnteringWorld,
+  ViewingLoginNotice,
+  WaitingWorldSnapshot,
+  InGame,
+  Disconnected,
+};
+
+[[nodiscard]] inline std::string_view auth_flow_phase_name(const AuthFlowPhase phase) {
+  switch (phase) {
+    case AuthFlowPhase::EditingLogin:
+      return "EditingLogin";
+    case AuthFlowPhase::ConnectingLoginGate:
+      return "ConnectingLoginGate";
+    case AuthFlowPhase::WaitingLoginResult:
+      return "WaitingLoginResult";
+    case AuthFlowPhase::WaitingServerList:
+      return "WaitingServerList";
+    case AuthFlowPhase::BrowsingServers:
+      return "BrowsingServers";
+    case AuthFlowPhase::WaitingServerSelection:
+      return "WaitingServerSelection";
+    case AuthFlowPhase::ConnectingCharacterGate:
+      return "ConnectingCharacterGate";
+    case AuthFlowPhase::QueryingCharacters:
+      return "QueryingCharacters";
+    case AuthFlowPhase::BrowsingCharacters:
+      return "BrowsingCharacters";
+    case AuthFlowPhase::WaitingStartPlay:
+      return "WaitingStartPlay";
+    case AuthFlowPhase::ConnectingRunGate:
+      return "ConnectingRunGate";
+    case AuthFlowPhase::EnteringWorld:
+      return "EnteringWorld";
+    case AuthFlowPhase::ViewingLoginNotice:
+      return "ViewingLoginNotice";
+    case AuthFlowPhase::WaitingWorldSnapshot:
+      return "WaitingWorldSnapshot";
+    case AuthFlowPhase::InGame:
+      return "InGame";
+    case AuthFlowPhase::Disconnected:
+      return "Disconnected";
+  }
+  return "Unknown";
+}
 
 /// 登录界面状态
 /// 包含账号名、密码、资料、状态提示等
@@ -637,6 +695,7 @@ struct GameStateStore {
   std::uint64_t pending_self_actor_id{0};  ///< 进入世界后自己的 actor_id
   int pending_spawn_x{0};                  ///< 角色出生 X 坐标
   int pending_spawn_y{0};                  ///< 角色出生 Y 坐标
+  AuthFlowPhase auth_phase{AuthFlowPhase::EditingLogin};
 
   [[nodiscard]] const MagicShortcutState* magic_for_id(const std::uint16_t magic_id) const {
     const auto it = std::find_if(world.magics.begin(), world.magics.end(),

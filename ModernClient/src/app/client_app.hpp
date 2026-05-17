@@ -113,19 +113,11 @@ class ClientApp {
   [[nodiscard]] HWND window_handle() const { return window_.handle(); }
 
  private:
-  /// 当前正在进行的连接类型
-  /// 传奇客户端的网络层分为多个独立的网关连接：
-  /// 登录网关(LoginGate)、角色网关(SelGate)、游戏网关(RunGate)。
-  /// 客户端根据当前所处阶段连接到不同的网关，每个阶段发送
-  /// 的第一个消息包类型不同。此枚举跟踪当前正在建立的连接
-  /// 属于哪个阶段，以便连接建立后发送正确的初始化包。
+  /// 注册/改密仍沿用旧的待连接标记；主登录链路由 AuthFlowPhase 驱动。
   enum class PendingConnect {
     none,            ///< 无待建立的连接
-    login,           ///< 正在连接到登录网关（将发送 LoginRequest）
     create_account,  ///< 正在连接到注册网关（将发送 CreateAccountRequest）
-    change_password, ///< 正在连接到修改密码网关
-    select_character,///< 正在连接到角色网关（将发送 CharacterListRequest）
-    game             ///< 正在连接到游戏网关（将发送 EnterWorldRequest）
+    change_password  ///< 正在连接到修改密码网关
   };
 
   /// 循环定时器，每隔 interval_seconds 触发一次回调
