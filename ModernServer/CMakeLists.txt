@@ -102,6 +102,7 @@ set(MIR2_HOST_SOURCES
   src/world/game_object.cpp
   src/world/castle_manager.cpp
   src/world/guild_manager.cpp
+  src/world/legacy_chat_parser.cpp
   src/world/legacy_event_manager.cpp
   src/world/legacy_frame_driver.cpp
   src/world/legacy_item_rules.cpp
@@ -200,6 +201,12 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_legacy_string_semantics_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_string_semantics_smoke
     COMMAND mir2_legacy_string_semantics_smoke)
+
+  add_executable(mir2_legacy_chat_parser_smoke
+    tests/legacy_chat_parser_smoke.cpp)
+  target_link_libraries(mir2_legacy_chat_parser_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_chat_parser_smoke
+    COMMAND mir2_legacy_chat_parser_smoke)
 
   add_executable(mir2_canonical_login_state_smoke
     tests/canonical_login_state_smoke.cpp)
@@ -899,6 +906,7 @@ if(BUILD_TESTING)
       mir2_npc_shop_interleaving_fuzz_smoke
       mir2_canonical_legacy_command_smoke
       mir2_legacy_string_semantics_smoke
+      mir2_legacy_chat_parser_smoke
       mir2_canonical_login_state_smoke
       mir2_canonical_login_error_smoke
       mir2_client_v1_canonical_command_smoke

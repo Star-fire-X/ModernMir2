@@ -45,6 +45,7 @@ function Get-CiBuildTargets {
     "mir2_legacy_protocol_command_golden_smoke",
     "mir2_canonical_legacy_command_smoke",
     "mir2_legacy_string_semantics_smoke",
+    "mir2_legacy_chat_parser_smoke",
     "mir2_client_v1_protocol_smoke",
     "mir2_movement_blocking_legacy_smoke",
     "mir2_combat_smoke",
