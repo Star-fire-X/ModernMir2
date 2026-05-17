@@ -276,9 +276,11 @@ function Get-CiTestNames {
 
   if ($ProjectName -eq "ModernClient") {
     $localResourceTests = @(Get-LocalResourceTestNames)
+    $ciExcludedTests = @("modern_client_world_scene_legacy_order_smoke")
     return @($targets | Where-Object {
       $_ -ne "modern_mir2_client" -and
-      ($localResourceTests -notcontains $_)
+      ($localResourceTests -notcontains $_) -and
+      ($ciExcludedTests -notcontains $_)
     })
   }
 
@@ -414,6 +416,11 @@ function Get-CiQuarantinedTests {
       Project = "ModernClient"
       Test = "modern_client_map_render_alignment_smoke"
       Reason = "Ends with real-resource assertions against map and WIL data; keep local-only until fixture support exists."
+    },
+    [pscustomobject]@{
+      Project = "ModernClient"
+      Test = "modern_client_world_scene_legacy_order_smoke"
+      Reason = "Hard-codes F:\mir2\Legend of Mir for WorldScene audio setup; keep outside CI and AssetRoot runner until fixture support exists."
     },
     [pscustomobject]@{
       Project = "ModernClient"
