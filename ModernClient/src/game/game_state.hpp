@@ -316,6 +316,12 @@ enum class LoginState {
   lsCloseAll     ///< 关闭客户端
 };
 
+enum class LoginPendingFocus {
+  none,
+  account,
+  password
+};
+
 enum class AuthFlowPhase {
   EditingLogin,
   ConnectingLoginGate,
@@ -383,6 +389,7 @@ struct LoginViewState {
   LoginState login_state{LoginState::lsLogin};
   std::wstring status{};  ///< 状态文本（显示在界面底部的提示信息）
   bool request_pending{false};
+  LoginPendingFocus pending_focus{LoginPendingFocus::none};
 };
 
 /// 游戏大厅状态（选服/选角）

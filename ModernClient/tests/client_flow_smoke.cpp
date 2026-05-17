@@ -11,6 +11,7 @@ int main() {
 
   GameStateStore state;
   assert(state.auth_phase == AuthFlowPhase::EditingLogin);
+  assert(state.login.pending_focus == LoginPendingFocus::none);
   struct PhaseNameExpectation {
     AuthFlowPhase phase;
     std::string_view name;
@@ -51,6 +52,16 @@ int main() {
   state.auth_phase = AuthFlowPhase::WaitingServerList;
   assert(state.auth_phase == AuthFlowPhase::WaitingServerList);
 
+  LoginResult failed_login{false, -1, "guest", "", "login_failed"};
+  assert(!failed_login.success);
+  state.login.password = "pass";
+  state.auth_phase = AuthFlowPhase::EditingLogin;
+  state.login.pending_focus = LoginPendingFocus::password;
+  assert(state.auth_phase == AuthFlowPhase::EditingLogin);
+  assert(state.login.pending_focus == LoginPendingFocus::password);
+  assert(state.login.password == "pass");
+  state.login.pending_focus = LoginPendingFocus::none;
+
   state.apply(ServerList{{ServerEntry{"ModernServer", "127.0.0.1", 5600}}});
   state.auth_phase = AuthFlowPhase::BrowsingServers;
   assert(state.lobby.selected_server_name == "ModernServer");
@@ -78,7 +89,19 @@ int main() {
   state.auth_phase = AuthFlowPhase::ViewingLoginNotice;
   assert(state.login_notice.title == "Welcome");
   assert(state.auth_phase == AuthFlowPhase::ViewingLoginNotice);
-  state.auth_phase = AuthFlowPhase::EnteringWorld;
+  auto notice_ok_count = 0;
+  auto acknowledge_notice = [&] {
+    if (state.auth_phase != AuthFlowPhase::ViewingLoginNotice) {
+      return;
+    }
+    ++notice_ok_count;
+    state.login_notice = LoginNoticeViewState{};
+    state.auth_phase = AuthFlowPhase::EnteringWorld;
+  };
+  acknowledge_notice();
+  acknowledge_notice();
+  assert(notice_ok_count == 1);
+  assert(state.auth_phase == AuthFlowPhase::EnteringWorld);
 
   state.auth_phase = AuthFlowPhase::WaitingStartPlay;
   SelectCharacterResult select_character{true, "Hero", "world-token", "127.0.0.1", 5602, ""};

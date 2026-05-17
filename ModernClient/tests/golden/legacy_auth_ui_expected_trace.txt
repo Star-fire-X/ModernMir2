@@ -9,6 +9,13 @@ recv_login_success
 recv_server_list
 show_server_select
 
+[auth.login.failure]
+send_login
+recv_login_failure
+show_login_error_modal
+modal_ok
+focus_login_password
+
 [auth.server_select.to_character_select]
 click_server_select
 send_select_server
@@ -25,6 +32,11 @@ send_select_character
 recv_start_play
 connect_game_gateway
 show_login_notice_or_loading
+
+[auth.login_notice.accept]
+show_login_notice_or_loading
+login_notice_ok
+waiting_world_snapshot
 
 [auth.character_create.success]
 open_create_character_dialog

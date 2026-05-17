@@ -28,6 +28,47 @@ void test_server_select_layout() {
   assert(same(layout.close_button, RectI{494, 150, 24, 24}));
   assert(same(layout.server_button(0), RectI{313, 313, 180, 34}));
   assert(same(layout.server_button(1), RectI{313, 355, 180, 34}));
+  assert(layout.dialog_sprite_index == 256);
+  assert(!layout.dialog_uses_prguse2);
+}
+
+void test_server_select_layout_columns() {
+  const auto one = auth::legacy_server_select_layout(RectI{0, 0, 300, 360}, 1);
+  assert(same(one.server_button(0), RectI{313, 334, 180, 34}));
+
+  const auto eight = auth::legacy_server_select_layout(RectI{0, 0, 300, 360}, 8);
+  assert(same(eight.server_button(0), RectI{313, 187, 180, 34}));
+  assert(same(eight.server_button(7), RectI{313, 481, 180, 34}));
+
+  const auto sixteen = auth::legacy_server_select_layout(RectI{0, 0, 404, 360}, 16);
+  assert(same(sixteen.dialog, RectI{198, 120, 404, 360}));
+  assert(same(sixteen.close_button, RectI{546, 151, 24, 24}));
+  assert(same(sixteen.server_button(0), RectI{223, 187, 180, 34}));
+  assert(same(sixteen.server_button(8), RectI{393, 187, 180, 34}));
+  assert(same(sixteen.server_button(15), RectI{393, 481, 180, 34}));
+  assert(sixteen.dialog_sprite_index == 4);
+  assert(sixteen.dialog_uses_prguse2);
+
+  const auto twenty_four = auth::legacy_server_select_layout(RectI{0, 0, 584, 360}, 24);
+  assert(same(twenty_four.dialog, RectI{108, 120, 584, 360}));
+  assert(same(twenty_four.close_button, RectI{635, 155, 24, 24}));
+  assert(same(twenty_four.server_button(0), RectI{133, 187, 180, 34}));
+  assert(same(twenty_four.server_button(8), RectI{303, 187, 180, 34}));
+  assert(same(twenty_four.server_button(16), RectI{473, 187, 180, 34}));
+  assert(same(twenty_four.server_button(23), RectI{473, 481, 180, 34}));
+  assert(twenty_four.dialog_sprite_index == 5);
+  assert(twenty_four.dialog_uses_prguse2);
+}
+
+void test_message_modal_layout() {
+  const auto layout = auth::legacy_message_modal_layout(RectI{0, 0, 360, 180});
+  assert(same(layout.dialog, RectI{220, 210, 360, 180}));
+  assert(same(layout.title_origin, RectI{259, 230, 0, 0}));
+  assert(same(layout.text_origin, RectI{259, 248, 0, 0}));
+  assert(same(layout.ok_button, RectI{356, 336, 88, 28}));
+  assert(same(layout.yes_button, RectI{324, 336, 88, 28}));
+  assert(same(layout.no_button, RectI{356, 336, 88, 28}));
+  assert(same(layout.cancel_button, RectI{430, 336, 88, 28}));
 }
 
 void test_character_select_layout() {
@@ -66,6 +107,8 @@ void test_create_character_layout_is_centered() {
 int main() {
   test_login_layout();
   test_server_select_layout();
+  test_server_select_layout_columns();
+  test_message_modal_layout();
   test_character_select_layout();
   test_create_character_layout_is_centered();
   return 0;

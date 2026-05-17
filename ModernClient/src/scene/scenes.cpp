@@ -201,6 +201,9 @@ constexpr int kNewAccountDialogIndex = 63;
 constexpr int kLoginCloseButtonIndex = 64;
 constexpr int kSelectBackgroundIndex = 65;
 constexpr int kServerSelectDialogIndex = 256;
+constexpr int kServerSelectDialogTwoColumnIndex = 4;
+constexpr int kServerSelectDialogThreeColumnIndex = 5;
+constexpr int kServerSelectButtonIndex = 2;
 constexpr int kSelectLeftButtonIndex = 66;
 constexpr int kSelectRightButtonIndex = 67;
 constexpr int kSelectStartButtonIndex = 68;
@@ -409,6 +412,12 @@ class ResourceTextEdit final : public ui::TextEdit {
   }
   void on_focus_lost() override { show_caret = false; }
   bool on_key_down(const int virtual_key) override {
+    if (virtual_key == VK_TAB) {
+      if (on_tab) {
+        on_tab();
+      }
+      return true;
+    }
     if (virtual_key != VK_ESCAPE) {
       return false;
     }
@@ -419,6 +428,7 @@ class ResourceTextEdit final : public ui::TextEdit {
   }
 
   std::function<void()> on_cancel{};
+  std::function<void()> on_tab{};
 
  private:
   static LRESULT CALLBACK NativeEditProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -431,6 +441,13 @@ class ResourceTextEdit final : public ui::TextEdit {
   }
 
   LRESULT handle_native_message(UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == WM_KEYDOWN && wparam == VK_TAB) {
+      sync_from_native();
+      if (on_tab) {
+        on_tab();
+      }
+      return 0;
+    }
     if (message == WM_KEYDOWN && wparam == VK_ESCAPE) {
       sync_from_native();
       if (on_cancel) {
@@ -5334,11 +5351,13 @@ class LoginScene final : public Scene {
     account_edit_ = root->emplace_child<ResourceTextEdit>(login_layout_.account_edit);
     account_edit_->placeholder = L"";
     account_edit_->on_submit = [this] { focus_password_edit(); };
+    account_edit_->on_tab = [this] { focus_password_edit(); };
 
     password_edit_ = root->emplace_child<ResourceTextEdit>(login_layout_.password_edit);
     password_edit_->password_mode = true;
     password_edit_->placeholder = L"";
     password_edit_->on_submit = [this] { submit(); };
+    password_edit_->on_tab = [this] { focus_account_edit(); };
 
     change_password_button_ =
         add_sprite_button(root, context, ArchiveId::prguse, kLoginChangePasswordButtonIndex,
@@ -5545,6 +5564,7 @@ class LoginScene final : public Scene {
     }
     sync_native_edit_visibility(context.state->modal.visible);
     set_login_controls_enabled(!context.state->login.request_pending);
+    apply_pending_login_focus(context.state->modal.visible);
   }
 
   void render(ClientContext& context) override {
@@ -5889,6 +5909,29 @@ class LoginScene final : public Scene {
     if (!account_edit_->value.empty()) {
       legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::account_enter_focus_password);
       ui_.focus(password_edit_);
+    }
+  }
+
+  void focus_account_edit() {
+    if (account_edit_ != nullptr) {
+      ui_.focus(account_edit_);
+    }
+  }
+
+  void apply_pending_login_focus(const bool modal_visible) {
+    if (state_ == nullptr || modal_visible || login_mode_ != LoginMode::login ||
+        state_->login.pending_focus == LoginPendingFocus::none) {
+      return;
+    }
+    const auto focus = state_->login.pending_focus;
+    state_->login.pending_focus = LoginPendingFocus::none;
+    if (focus == LoginPendingFocus::password && password_edit_ != nullptr) {
+      legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::focus_login_password);
+      ui_.focus(password_edit_);
+      return;
+    }
+    if (focus == LoginPendingFocus::account && account_edit_ != nullptr) {
+      ui_.focus(account_edit_);
     }
   }
 
@@ -6364,11 +6407,17 @@ class ServerSelectScene final : public Scene {
     auto* root = ui_.set_root<ui::UiNode>(RectI{0, 0, 800, 600});
     const auto count = context.state->lobby.servers.size();
     const auto visible_count = std::min<std::size_t>(count, kMaxServerButtons);
+    const auto dialog_archive = visible_count <= 8 ? ArchiveId::prguse : ArchiveId::prguse2;
+    const auto dialog_index = visible_count <= 8
+                                  ? kServerSelectDialogIndex
+                                  : (visible_count <= 16 ? kServerSelectDialogTwoColumnIndex
+                                                         : kServerSelectDialogThreeColumnIndex);
+    const auto fallback_width = visible_count <= 8 ? 300 : (visible_count <= 16 ? 404 : 584);
     server_layout_ = legacy_auth_ui::legacy_server_select_layout(
-        sprite_rect(get_frame(context, ArchiveId::prguse, kServerSelectDialogIndex), 0, 0, 300,
-                    360),
+        sprite_rect(get_frame(context, dialog_archive, dialog_index), 0, 0, fallback_width, 360),
         visible_count);
     dialog_rect_ = server_layout_.dialog;
+    server_button_frame_ = get_frame(context, ArchiveId::prguse2, kServerSelectButtonIndex);
 
     server_close_button_ = add_sprite_button(root, context, ArchiveId::prguse,
                                              kLoginCloseButtonIndex,
@@ -6383,7 +6432,8 @@ class ServerSelectScene final : public Scene {
     });
 
     for (std::size_t index = 0; index < visible_count; ++index) {
-      auto* button = add_hotspot_button(root, server_layout_.server_button(index));
+      auto* button = add_hotspot_button(root, server_button_bounds(index));
+      button->draw_fallback = false;
       bind_audio_click(button, context.audio, LegacyClickSound::stone,
                        [this, index] { select_server(index); });
       server_buttons_.push_back(button);
@@ -6396,6 +6446,7 @@ class ServerSelectScene final : public Scene {
   void exit(ClientContext& /*context*/) override {
     app_ = nullptr;
     state_ = nullptr;
+    server_button_frame_.reset();
     server_buttons_.clear();
   }
 
@@ -6421,14 +6472,18 @@ class ServerSelectScene final : public Scene {
 
   void render(ClientContext& context) override {
     draw_archive_sprite(context, ArchiveId::chr_sel, kLoginBackgroundIndex, 0, 0);
-    draw_archive_sprite(context, ArchiveId::prguse, kServerSelectDialogIndex, dialog_rect_.x,
+    draw_archive_sprite(context,
+                        server_layout_.dialog_uses_prguse2 ? ArchiveId::prguse2
+                                                            : ArchiveId::prguse,
+                        server_layout_.dialog_sprite_index, dialog_rect_.x,
                         dialog_rect_.y);
     const auto visible_count =
         std::min<std::size_t>(context.state->lobby.servers.size(), kMaxServerButtons);
     for (std::size_t index = 0; index < visible_count; ++index) {
       const auto* server = &context.state->lobby.servers[index];
       const auto selected = static_cast<int>(index) == context.state->lobby.selected_server_index;
-      const auto row = server_layout_.server_button(index);
+      const auto row = server_button_bounds(index);
+      draw_sprite(*context.renderer, server_button_frame_, row.x, row.y);
       context.renderer->draw_text(row.x + 20, row.y + 9, widen(server->name),
                                   selected ? 0xFFFFFF66U : 0xFFF5F7FAU);
     }
@@ -6437,6 +6492,15 @@ class ServerSelectScene final : public Scene {
   ui::UiTree& ui_tree() override { return ui_; }
 
  private:
+  RectI server_button_bounds(const std::size_t index) const {
+    auto bounds = server_layout_.server_button(index);
+    if (server_button_frame_ != nullptr && !server_button_frame_->empty()) {
+      bounds.w = server_button_frame_->width;
+      bounds.h = server_button_frame_->height;
+    }
+    return bounds;
+  }
+
   void select_server(const std::size_t index) {
     if (app_ == nullptr || state_ == nullptr || index >= state_->lobby.servers.size()) {
       return;
@@ -6447,7 +6511,7 @@ class ServerSelectScene final : public Scene {
     app_->request_select_server(state_->lobby.servers[index].name);
   }
 
-  static constexpr std::size_t kMaxServerButtons = 8;
+  static constexpr std::size_t kMaxServerButtons = 24;
 
   ClientApp* app_{nullptr};
   GameStateStore* state_{nullptr};
@@ -6456,6 +6520,7 @@ class ServerSelectScene final : public Scene {
   RectI dialog_rect_{};
   HotspotButton* server_close_button_{nullptr};
   std::vector<HotspotButton*> server_buttons_{};
+  std::shared_ptr<const SpriteFrame> server_button_frame_{};
 };
 
 /// 角色选择场景：显示角色列表，支持创建/删除角色
@@ -6964,19 +7029,16 @@ class LoginNoticeScene final : public Scene {
   void enter(ClientContext& context) override {
     app_ = context.app;
     state_ = context.state;
+    acknowledged_ = false;
     ui_.clear();
-    message_rect_ =
-        centered_rect(get_frame(context, ArchiveId::prguse, kMessageDialogIndex), 800, 600, 360, 180);
+    message_layout_ = legacy_auth_ui::legacy_message_modal_layout(
+        sprite_rect(get_frame(context, ArchiveId::prguse, kMessageDialogIndex), 0, 0, 360, 180));
     auto* root = ui_.set_root<ui::UiNode>(RectI{0, 0, 800, 600});
     auto* ok_button =
         add_sprite_button(root, context, ArchiveId::prguse, kMessageOkButtonIndex,
-                          message_rect_.x + (message_rect_.w - 88) / 2,
-                          message_rect_.y + 126, 88, 28);
-    bind_audio_click(ok_button, context.audio, LegacyClickSound::stone, [this] {
-      if (app_ != nullptr) {
-        app_->acknowledge_login_notice();
-      }
-    });
+                          message_layout_.ok_button.x, message_layout_.ok_button.y, 88, 28);
+    bind_audio_click(ok_button, context.audio, LegacyClickSound::stone,
+                     [this] { acknowledge_once(); });
   }
 
   void exit(ClientContext& /*context*/) override {
@@ -6984,12 +7046,18 @@ class LoginNoticeScene final : public Scene {
     state_ = nullptr;
   }
 
-  void update(ClientContext& /*context*/, float /*delta_seconds*/) override {}
+  void update(ClientContext& context, float /*delta_seconds*/) override {
+    if (context.input != nullptr && context.state != nullptr && !context.state->modal.visible &&
+        !context.ui_input.consumed &&
+        (context.input->key_pressed[VK_RETURN] || context.input->enter_pressed)) {
+      acknowledge_once();
+    }
+  }
 
   void render(ClientContext& context) override {
     draw_archive_sprite(context, ArchiveId::chr_sel, kLoginBackgroundIndex, 0, 0);
-    draw_archive_sprite(context, ArchiveId::prguse, kMessageDialogIndex, message_rect_.x,
-                        message_rect_.y);
+    draw_archive_sprite(context, ArchiveId::prguse, kMessageDialogIndex, message_layout_.dialog.x,
+                        message_layout_.dialog.y);
     const auto title = context.state->login_notice.title.empty()
                            ? std::wstring{}
                            : widen(context.state->login_notice.title);
@@ -6997,11 +7065,13 @@ class LoginNoticeScene final : public Scene {
                           ? std::wstring{}
                           : widen(context.state->login_notice.text);
     if (!title.empty()) {
-      context.renderer->draw_text(message_rect_.x + 34, message_rect_.y + 34, title,
+      context.renderer->draw_text(message_layout_.text_origin.x, message_layout_.dialog.y + 34,
+                                  title,
                                   0xFFF5F7FAU);
     }
     if (!text.empty()) {
-      context.renderer->draw_text(message_rect_.x + 34, message_rect_.y + 70, text,
+      context.renderer->draw_text(message_layout_.text_origin.x, message_layout_.dialog.y + 70,
+                                  text,
                                   0xFFD7E0EAU);
     }
   }
@@ -7009,10 +7079,19 @@ class LoginNoticeScene final : public Scene {
   ui::UiTree& ui_tree() override { return ui_; }
 
  private:
+  void acknowledge_once() {
+    if (acknowledged_ || app_ == nullptr) {
+      return;
+    }
+    acknowledged_ = true;
+    app_->acknowledge_login_notice();
+  }
+
   ClientApp* app_{nullptr};
   GameStateStore* state_{nullptr};
   ui::UiTree ui_{};
-  RectI message_rect_{};
+  legacy_auth_ui::LegacyMessageModalLayout message_layout_{};
+  bool acknowledged_{false};
 };
 
 /// 世界场景：游戏主场景
