@@ -62,6 +62,7 @@
 #include "scene/legacy_inventory_ui.hpp"
 #include "scene/legacy_magic_npc_ui.hpp"
 #include "scene/legacy_play_ui.hpp"
+#include "scene/legacy_trade_group_guild_ui.hpp"
 #include "shared/legacy/map_render_order.hpp"
 #include "shared/legacy/map_render_math.hpp"
 #include "shared/legacy/movement_rules.hpp"
@@ -128,6 +129,11 @@ void legacy_inventory_trace(const legacy_inventory_ui::LegacyInventoryUiTraceLab
 
 void legacy_magic_npc_trace(const legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel label) {
   legacy_trace(legacy_magic_npc_ui::legacy_magic_npc_ui_trace_label(label));
+}
+
+void legacy_trade_group_guild_trace(
+    const legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel label) {
+  legacy_trace(legacy_trade_group_guild_ui::legacy_trade_group_guild_ui_trace_label(label));
 }
 
 void legacy_trace_map_layer(
@@ -1619,74 +1625,66 @@ class GroupPanelNode final : public ui::UiNode {
 
   void paint(SoftwareRenderer& renderer) override {
     const auto rect = resolved_bounds();
-    renderer.fill_rect(rect, 0xE010172AU);
-    renderer.stroke_rect(rect, 0xFFCBD5E1U);
     if (state == nullptr) {
       ui::UiNode::paint(renderer);
       return;
     }
     const auto& group = state->world.group;
-    draw_legacy_text(renderer, rect.x + 12, rect.y + 10, L"Group", 0xFFFFFF66U);
-    draw_legacy_text(renderer, rect.x + 12, rect.y + 34,
-                     group.allow_group ? L"Allow invite: Yes" : L"Allow invite: No",
-                     0xFFE5E7EBU);
-    for (std::size_t index = 0; index < std::min<std::size_t>(group.members.size(), 6);
-         ++index) {
-      draw_legacy_text(renderer, rect.x + 18, rect.y + 62 + static_cast<int>(index) * 18,
-                       widen(group.members[index]), 0xFFFFFF66U);
+    for (std::size_t index = 0; index < group.members.size(); ++index) {
+      const auto text_rect = layout.member_text_rect(static_cast<int>(index));
+      draw_legacy_text(renderer, rect.x + text_rect.x, rect.y + text_rect.y,
+                       widen(group.members[index]), 0xFFC0C0C0U);
     }
     ui::UiNode::paint(renderer);
   }
 
   GameStateStore* state{nullptr};
+  legacy_trade_group_guild_ui::LegacyGroupLayout layout{};
 };
 
 class TradePanelNode final : public ui::UiNode {
  public:
-  explicit TradePanelNode(const RectI bounds) : ui::UiNode(bounds) {}
+  explicit TradePanelNode(const RectI bounds, const bool remote_side)
+      : ui::UiNode(bounds), remote(remote_side) {}
 
   void paint(SoftwareRenderer& renderer) override {
     const auto rect = resolved_bounds();
-    renderer.fill_rect(rect, 0xE010172AU);
-    renderer.stroke_rect(rect, 0xFFCBD5E1U);
     if (state == nullptr || assets == nullptr) {
       ui::UiNode::paint(renderer);
       return;
     }
     const auto& trade = state->world.trade;
-    draw_legacy_text(renderer, rect.x + 12, rect.y + 10,
-                     trade.remote_name.empty() ? L"Trade" : L"Trade: " + widen(trade.remote_name),
-                     0xFFFFFF66U);
-    draw_legacy_text(renderer, rect.x + 22, rect.y + 34, L"Mine", 0xFFFFE08AU);
-    draw_legacy_text(renderer, rect.x + 162, rect.y + 34, L"Theirs", 0xFFFFE08AU);
-    draw_items(renderer, trade.local_items, rect.x + 20, rect.y + 56);
-    draw_items(renderer, trade.remote_items, rect.x + 160, rect.y + 56);
-    draw_legacy_text(renderer, rect.x + 20, rect.y + 154,
-                     L"Gold " + std::to_wstring(trade.local_gold), 0xFFE5E7EBU);
-    draw_legacy_text(renderer, rect.x + 160, rect.y + 154,
-                     L"Gold " + std::to_wstring(trade.remote_gold), 0xFFE5E7EBU);
-    draw_legacy_text(renderer, rect.x + 20, rect.y + 174,
-                     trade.local_accept ? L"Accepted" : L"Waiting", 0xFFE5E7EBU);
-    draw_legacy_text(renderer, rect.x + 160, rect.y + 174,
-                     trade.remote_accept ? L"Accepted" : L"Waiting", 0xFFE5E7EBU);
+    const auto name = remote ? trade.remote_name : state->selected_character;
+    const auto name_width = renderer.measure_text_width(widen(name));
+    draw_legacy_text(renderer,
+                     rect.x + layout.name_center_x + (layout.name_center_width - name_width) / 2,
+                     rect.y + layout.name_y, widen(name), 0xFFC0C0C0U);
+    draw_items(renderer, remote ? trade.remote_items : trade.local_items, rect.x, rect.y);
+    draw_legacy_text(renderer, rect.x + layout.gold_text_x, rect.y + layout.gold_text_y,
+                     std::to_wstring(remote ? trade.remote_gold : trade.local_gold),
+                     0xFFC0C0C0U);
+    if ((remote && trade.remote_accept) || (!remote && trade.local_accept)) {
+      draw_legacy_text(renderer, rect.x + 145, rect.y + 146, L"OK", 0xFFFFFF66U);
+    }
     ui::UiNode::paint(renderer);
   }
 
   GameStateStore* state{nullptr};
   AssetManager* assets{nullptr};
+  legacy_trade_group_guild_ui::LegacyTradeLayout layout{};
+  bool remote{false};
 
  private:
   void draw_items(SoftwareRenderer& renderer, const std::vector<client_v1::ItemSlotState>& items,
                   const int x, const int y) const {
-    for (int slot = 0; slot < 8; ++slot) {
-      const RectI cell{x + (slot % 4) * 31, y + (slot / 4) * 31, 29, 29};
-      renderer.stroke_rect(cell, 0x66555F70U);
-    }
     for (const auto& entry : items) {
-      if (entry.slot < 0 || entry.slot >= 8 || item_empty(entry.item)) {
+      if (entry.slot < 0 || entry.slot >= layout.grid_columns * layout.grid_rows ||
+          item_empty(entry.item)) {
         continue;
       }
-      const RectI cell{x + (entry.slot % 4) * 31, y + (entry.slot / 4) * 31, 29, 29};
+      auto cell = layout.cell_rect(entry.slot);
+      cell.x += x;
+      cell.y += y;
       draw_bag_item_icon(renderer, item_icon_frame(assets, entry.item, ArchiveId::items), cell,
                          item_low_dura(entry.item));
     }
@@ -1699,35 +1697,55 @@ class GuildPanelNode final : public ui::UiNode {
 
   void paint(SoftwareRenderer& renderer) override {
     const auto rect = resolved_bounds();
-    renderer.fill_rect(rect, 0xE010172AU);
-    renderer.stroke_rect(rect, 0xFFCBD5E1U);
     if (state == nullptr) {
       ui::UiNode::paint(renderer);
       return;
     }
     const auto& guild = state->world.guild;
-    draw_legacy_text(renderer, rect.x + 12, rect.y + 10,
+    draw_legacy_text(renderer, rect.x + layout.title_x, rect.y + layout.title_y,
                      guild.guild_name.empty() ? L"Guild" : widen(guild.guild_name),
-                     0xFFFFFF66U);
-    if (!guild.rank_name.empty()) {
-      draw_legacy_text(renderer, rect.x + 12, rect.y + 34, widen(guild.rank_name),
-                       0xFFE5E7EBU);
-    }
-    if (!guild.notice.empty()) {
-      draw_legacy_text(renderer, rect.x + 12, rect.y + 58, widen(guild.notice),
-                       0xFFE5E7EBU);
-    }
-    draw_legacy_text(renderer, rect.x + 12, rect.y + 92, L"Members", 0xFFFFE08AU);
-    for (std::size_t index = 0; index < std::min<std::size_t>(guild.members.size(), 8);
-         ++index) {
-      const auto& member = guild.members[index];
-      draw_legacy_text(renderer, rect.x + 18, rect.y + 116 + static_cast<int>(index) * 18,
-                       widen(member.name + " " + member.rank), 0xFFFFFF66U);
+                     0xFFC0C0C0U);
+    const auto lines = display_lines(guild);
+    const auto max_top =
+        std::max(0, static_cast<int>(lines.size()) - layout.max_visible_lines());
+    top_line = std::clamp(top_line, 0, max_top);
+    for (int index = top_line; index < static_cast<int>(lines.size()); ++index) {
+      const auto row = index - top_line;
+      if (row * layout.line_height > layout.max_line_pixel_height) {
+        break;
+      }
+      draw_legacy_text(renderer, rect.x + layout.line_x,
+                       rect.y + layout.line_y + row * layout.line_height,
+                       lines[static_cast<std::size_t>(index)], 0xFFC0C0C0U);
     }
     ui::UiNode::paint(renderer);
   }
 
+  [[nodiscard]] int line_count() const {
+    if (state == nullptr) {
+      return 0;
+    }
+    return static_cast<int>(display_lines(state->world.guild).size());
+  }
+
   GameStateStore* state{nullptr};
+  legacy_trade_group_guild_ui::LegacyGuildLayout layout{};
+  int top_line{0};
+
+ private:
+  std::vector<std::wstring> display_lines(const GuildUiState& guild) const {
+    std::vector<std::wstring> lines;
+    if (!guild.notice.empty()) {
+      lines.emplace_back(widen(guild.notice));
+    }
+    if (!guild.rank_name.empty()) {
+      lines.emplace_back(L"Rank: " + widen(guild.rank_name));
+    }
+    for (const auto& member : guild.members) {
+      lines.emplace_back(widen(member.name + " " + member.rank));
+    }
+    return lines;
+  }
 };
 
 class LegacyMiniMapNode final : public ui::UiNode {
@@ -1779,6 +1797,16 @@ class LegacyMiniMapNode final : public ui::UiNode {
 /// 管理装备栏、背包网格、底部操作栏、工具提示和拖拽覆盖层
 /// 支持从背包/装备栏点击、拖拽和双击操作
 class LegacyHud final {
+  enum class SocialPromptKind {
+    none,
+    group_create,
+    group_add,
+    group_remove,
+    trade_gold,
+    guild_add,
+    guild_remove
+  };
+
  public:
   /// 初始化 HUD：创建 UI 树节点并建立事件绑定
   void initialize(ClientContext& context, ui::UiTree& tree) {
@@ -2379,71 +2407,260 @@ class LegacyHud final {
       return button;
     };
 
-    group_window_ = root->emplace_child<ui::Window>(RectI{270, 170, 250, 190});
+    group_layout_ = legacy_trade_group_guild_ui::legacy_group_layout();
+    trade_layout_ = legacy_trade_group_guild_ui::legacy_trade_layout();
+    guild_layout_ = legacy_trade_group_guild_ui::legacy_guild_layout();
+    social_prompt_layout_ = legacy_trade_group_guild_ui::legacy_social_prompt_layout();
+
+    group_window_ = add_sprite_window(root, context, ArchiveId::prguse,
+                                      group_layout_.resource_index,
+                                      group_layout_.window.x,
+                                      group_layout_.window.y,
+                                      group_layout_.window.w,
+                                      group_layout_.window.h);
     group_window_->visible = false;
     group_window_->floating = true;
     group_content_ =
-        group_window_->emplace_child<GroupPanelNode>(RectI{0, 0, 250, 190});
+        group_window_->emplace_child<GroupPanelNode>(RectI{0, 0, group_window_->bounds.w,
+                                                           group_window_->bounds.h});
     group_content_->state = state_;
-    make_text_button(group_window_, RectI{178, 8, 54, 22}, L"Close",
+    group_content_->layout = group_layout_;
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::group_window_created);
+    auto* group_close = add_sprite_button(group_window_, context, ArchiveId::prguse,
+                                          group_layout_.close_resource_index,
+                                          group_layout_.close_button.x,
+                                          group_layout_.close_button.y,
+                                          group_layout_.close_button.w,
+                                          group_layout_.close_button.h);
+    bind_audio_click(group_close, context.audio, LegacyClickSound::normal,
                      [this] { close_group_window(); });
-    make_text_button(group_window_, RectI{18, 140, 58, 24}, L"Allow",
+    auto* group_allow = add_sprite_button(group_window_, context, ArchiveId::prguse,
+                                          group_layout_.allow_resource_index,
+                                          group_layout_.allow_button.x,
+                                          group_layout_.allow_button.y,
+                                          group_layout_.allow_button.w,
+                                          group_layout_.allow_button.h);
+    bind_audio_click(group_allow, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] { toggle_group_mode(app); });
-    make_text_button(group_window_, RectI{82, 140, 58, 24}, L"Create",
+    auto* group_create = add_sprite_button(group_window_, context, ArchiveId::prguse,
+                                           group_layout_.create_resource_index,
+                                           group_layout_.create_button.x,
+                                           group_layout_.create_button.y,
+                                           group_layout_.create_button.w,
+                                           group_layout_.create_button.h);
+    bind_audio_click(group_create, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] { request_group_create(app); });
-    make_text_button(group_window_, RectI{146, 140, 42, 24}, L"Add",
+    auto* group_add = add_sprite_button(group_window_, context, ArchiveId::prguse,
+                                        group_layout_.add_resource_index,
+                                        group_layout_.add_button.x,
+                                        group_layout_.add_button.y,
+                                        group_layout_.add_button.w,
+                                        group_layout_.add_button.h);
+    bind_audio_click(group_add, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] { request_group_add(app); });
-    make_text_button(group_window_, RectI{194, 140, 42, 24}, L"Del",
+    auto* group_remove = add_sprite_button(group_window_, context, ArchiveId::prguse,
+                                           group_layout_.remove_resource_index,
+                                           group_layout_.remove_button.x,
+                                           group_layout_.remove_button.y,
+                                           group_layout_.remove_button.w,
+                                           group_layout_.remove_button.h);
+    bind_audio_click(group_remove, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] { request_group_remove(app); });
 
-    trade_window_ = root->emplace_child<ui::Window>(RectI{460, 40, 310, 236});
+    trade_remote_window_ = add_sprite_window(root, context, ArchiveId::prguse,
+                                             trade_layout_.remote_resource_index,
+                                             trade_layout_.remote_window.x,
+                                             trade_layout_.remote_window.y,
+                                             trade_layout_.remote_window.w,
+                                             trade_layout_.remote_window.h);
+    trade_remote_window_->visible = false;
+    trade_remote_window_->floating = false;
+    trade_remote_content_ = trade_remote_window_->emplace_child<TradePanelNode>(
+        RectI{0, 0, trade_remote_window_->bounds.w, trade_remote_window_->bounds.h}, true);
+    trade_remote_content_->state = state_;
+    trade_remote_content_->assets = assets_;
+    trade_remote_content_->layout = trade_layout_;
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::trade_remote_window_created);
+
+    trade_window_ = add_sprite_window(root, context, ArchiveId::prguse,
+                                      trade_layout_.local_resource_index,
+                                      trade_layout_.local_window.x,
+                                      trade_layout_.local_window.y,
+                                      trade_layout_.local_window.w,
+                                      trade_layout_.local_window.h);
     trade_window_->visible = false;
-    trade_window_->floating = true;
-    trade_content_ =
-        trade_window_->emplace_child<TradePanelNode>(RectI{0, 0, 310, 236});
+    trade_window_->floating = false;
+    trade_content_ = trade_window_->emplace_child<TradePanelNode>(
+        RectI{0, 0, trade_window_->bounds.w, trade_window_->bounds.h}, false);
     trade_content_->state = state_;
     trade_content_->assets = assets_;
-    make_text_button(trade_window_, RectI{238, 8, 54, 22}, L"Close",
+    trade_content_->layout = trade_layout_;
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::trade_local_window_created);
+    auto* trade_grid = trade_window_->emplace_child<ui::Grid>(trade_layout_.grid);
+    trade_grid->col_count = trade_layout_.grid_columns;
+    trade_grid->row_count = trade_layout_.grid_rows;
+    trade_grid->col_width = trade_layout_.cell_width;
+    trade_grid->row_height = trade_layout_.cell_height;
+    trade_grid->on_cell_select = [this, app = context.app](ui::Grid&, const int col,
+                                                           const int row) {
+      handle_trade_grid_select(app, row * trade_layout_.grid_columns + col);
+    };
+    auto* trade_close = add_sprite_button(trade_window_, context, ArchiveId::prguse,
+                                          trade_layout_.close_resource_index,
+                                          trade_layout_.close_button.x,
+                                          trade_layout_.close_button.y,
+                                          trade_layout_.close_button.w,
+                                          trade_layout_.close_button.h);
+    bind_audio_click(trade_close, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] { close_trade_window(app); });
-    make_text_button(trade_window_, RectI{20, 202, 42, 24}, L"Add",
-                     [this, app = context.app] { add_selected_bag_item_to_trade(app); });
-    make_text_button(trade_window_, RectI{66, 202, 42, 24}, L"Del",
-                     [this, app = context.app] { remove_first_trade_item(app); });
-    make_text_button(trade_window_, RectI{112, 202, 52, 24}, L"Gold",
+    auto* trade_gold = add_sprite_button(trade_window_, context, ArchiveId::prguse,
+                                         trade_layout_.gold_resource_index,
+                                         trade_layout_.gold_button.x,
+                                         trade_layout_.gold_button.y,
+                                         trade_layout_.gold_button.w,
+                                         trade_layout_.gold_button.h);
+    bind_audio_click(trade_gold, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] { set_trade_gold(app); });
-    make_text_button(trade_window_, RectI{170, 202, 60, 24}, L"Accept",
+    auto* trade_ok = add_sprite_button(trade_window_, context, ArchiveId::prguse,
+                                       trade_layout_.ok_resource_index,
+                                       trade_layout_.ok_button.x,
+                                       trade_layout_.ok_button.y,
+                                       trade_layout_.ok_button.w,
+                                       trade_layout_.ok_button.h);
+    bind_audio_click(trade_ok, context.audio, LegacyClickSound::normal,
                      [app = context.app] {
                        if (app != nullptr) {
+                         legacy_trade_group_guild_trace(
+                             legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                                 click_trade_accept);
                          app->request_trade_accept(client_v1::TradeAcceptRequest{});
                        }
                      });
-    make_text_button(trade_window_, RectI{236, 202, 60, 24}, L"Cancel",
-                     [this, app = context.app] { close_trade_window(app); });
 
-    guild_window_ = root->emplace_child<ui::Window>(RectI{18, 60, 330, 300});
+    guild_window_ = add_sprite_window(root, context, ArchiveId::prguse,
+                                      guild_layout_.resource_index,
+                                      guild_layout_.window.x,
+                                      guild_layout_.window.y,
+                                      guild_layout_.window.w,
+                                      guild_layout_.window.h);
     guild_window_->visible = false;
-    guild_window_->floating = true;
-    guild_content_ =
-        guild_window_->emplace_child<GuildPanelNode>(RectI{0, 0, 330, 300});
+    guild_window_->floating = false;
+    guild_content_ = guild_window_->emplace_child<GuildPanelNode>(
+        RectI{0, 0, guild_window_->bounds.w, guild_window_->bounds.h});
     guild_content_->state = state_;
-    make_text_button(guild_window_, RectI{258, 8, 54, 22}, L"Close",
+    guild_content_->layout = guild_layout_;
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::guild_window_created);
+    auto* guild_close = add_sprite_button(guild_window_, context, ArchiveId::prguse,
+                                          guild_layout_.close_resource_index,
+                                          guild_layout_.close_button.x,
+                                          guild_layout_.close_button.y,
+                                          guild_layout_.close_button.w,
+                                          guild_layout_.close_button.h);
+    bind_audio_click(guild_close, context.audio, LegacyClickSound::normal,
                      [this] { close_guild_window(); });
-    make_text_button(guild_window_, RectI{18, 264, 62, 24}, L"Home",
+    auto* guild_home = add_sprite_button(guild_window_, context, ArchiveId::prguse,
+                                         guild_layout_.home_resource_index,
+                                         guild_layout_.home_button.x,
+                                         guild_layout_.home_button.y,
+                                         guild_layout_.home_button.w,
+                                         guild_layout_.home_button.h);
+    bind_audio_click(guild_home, context.audio, LegacyClickSound::normal,
                      [app = context.app] {
       if (app != nullptr) {
+        legacy_trade_group_guild_trace(
+            legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::click_guild_home);
         app->request_guild_home(client_v1::GuildHomeRequest{});
       }
     });
-    make_text_button(guild_window_, RectI{86, 264, 78, 24}, L"Members",
+    auto* guild_list = add_sprite_button(guild_window_, context, ArchiveId::prguse,
+                                         guild_layout_.list_resource_index,
+                                         guild_layout_.list_button.x,
+                                         guild_layout_.list_button.y,
+                                         guild_layout_.list_button.w,
+                                         guild_layout_.list_button.h);
+    bind_audio_click(guild_list, context.audio, LegacyClickSound::normal,
                      [app = context.app] {
       if (app != nullptr) {
+        legacy_trade_group_guild_trace(
+            legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::click_guild_members);
         app->request_guild_members(client_v1::GuildMemberListRequest{});
       }
     });
-    make_text_button(guild_window_, RectI{170, 264, 52, 24}, L"Add",
+    auto* guild_chat = add_sprite_button(guild_window_, context, ArchiveId::prguse,
+                                         guild_layout_.chat_resource_index,
+                                         guild_layout_.chat_button.x,
+                                         guild_layout_.chat_button.y,
+                                         guild_layout_.chat_button.w,
+                                         guild_layout_.chat_button.h);
+    bind_audio_click(guild_chat, context.audio, LegacyClickSound::normal,
+                     [this] { toggle_guild_chat_lines(); });
+    auto* guild_add = add_sprite_button(guild_window_, context, ArchiveId::prguse,
+                                        guild_layout_.add_resource_index,
+                                        guild_layout_.add_button.x,
+                                        guild_layout_.add_button.y,
+                                        guild_layout_.add_button.w,
+                                        guild_layout_.add_button.h);
+    bind_audio_click(guild_add, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] { request_guild_add(app); });
-    make_text_button(guild_window_, RectI{228, 264, 52, 24}, L"Del",
+    auto* guild_remove = add_sprite_button(guild_window_, context, ArchiveId::prguse,
+                                           guild_layout_.remove_resource_index,
+                                           guild_layout_.remove_button.x,
+                                           guild_layout_.remove_button.y,
+                                           guild_layout_.remove_button.w,
+                                           guild_layout_.remove_button.h);
+    bind_audio_click(guild_remove, context.audio, LegacyClickSound::normal,
                      [this, app = context.app] { request_guild_remove(app); });
+    auto unsupported_guild = [app = context.app] {
+      if (app != nullptr) {
+        app->show_info_modal(L"Guild", L"This guild action is not migrated yet.");
+      }
+    };
+    for (const auto [resource, rect] : std::array<std::pair<int, RectI>, 6>{
+             std::pair{guild_layout_.edit_notice_resource_index, guild_layout_.edit_notice_button},
+             std::pair{guild_layout_.edit_grade_resource_index, guild_layout_.edit_grade_button},
+             std::pair{guild_layout_.ally_resource_index, guild_layout_.ally_button},
+             std::pair{guild_layout_.break_ally_resource_index, guild_layout_.break_ally_button},
+             std::pair{guild_layout_.war_resource_index, guild_layout_.war_button},
+             std::pair{guild_layout_.cancel_war_resource_index, guild_layout_.cancel_war_button}}) {
+      auto* button = add_sprite_button(guild_window_, context, ArchiveId::prguse,
+                                       resource, rect.x, rect.y, rect.w, rect.h);
+      bind_audio_click(button, context.audio, LegacyClickSound::normal, unsupported_guild);
+    }
+    auto* guild_up = add_sprite_button(guild_window_, context, ArchiveId::prguse,
+                                       guild_layout_.up_resource_index,
+                                       guild_layout_.up_button.x,
+                                       guild_layout_.up_button.y,
+                                       guild_layout_.up_button.w,
+                                       guild_layout_.up_button.h);
+    bind_audio_click(guild_up, context.audio, LegacyClickSound::normal,
+                     [this] { scroll_guild_lines(-guild_layout_.scroll_step); });
+    auto* guild_down = add_sprite_button(guild_window_, context, ArchiveId::prguse,
+                                         guild_layout_.down_resource_index,
+                                         guild_layout_.down_button.x,
+                                         guild_layout_.down_button.y,
+                                         guild_layout_.down_button.w,
+                                         guild_layout_.down_button.h);
+    bind_audio_click(guild_down, context.audio, LegacyClickSound::normal,
+                     [this] { scroll_guild_lines(guild_layout_.scroll_step); });
+
+    social_prompt_ = root->emplace_child<ui::Window>(social_prompt_layout_.window);
+    social_prompt_->visible = false;
+    social_prompt_->floating = false;
+    social_prompt_->fallback_fill_color = 0xEE10172AU;
+    social_prompt_->fallback_border_color = 0xFFCBD5E1U;
+    social_prompt_edit_ = social_prompt_->emplace_child<ui::TextEdit>(social_prompt_layout_.edit);
+    social_prompt_edit_->placeholder = L"input";
+    social_prompt_edit_->on_submit = [this, app = context.app] { submit_social_prompt(app); };
+    make_text_button(social_prompt_, social_prompt_layout_.ok_button, L"OK",
+                     [this, app = context.app] { submit_social_prompt(app); });
+    make_text_button(social_prompt_, social_prompt_layout_.cancel_button, L"Cancel",
+                     [this] { close_social_prompt(); });
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::social_prompt_created);
 
     minimap_ = root->emplace_child<LegacyMiniMapNode>(RectI{620, 24, 166, 139});
     minimap_->state = state_;
@@ -2502,10 +2719,14 @@ class LegacyHud final {
     repair_content_ = nullptr;
     group_window_ = nullptr;
     group_content_ = nullptr;
+    trade_remote_window_ = nullptr;
+    trade_remote_content_ = nullptr;
     trade_window_ = nullptr;
     trade_content_ = nullptr;
     guild_window_ = nullptr;
     guild_content_ = nullptr;
+    social_prompt_ = nullptr;
+    social_prompt_edit_ = nullptr;
     minimap_ = nullptr;
     belt_buttons_.fill(nullptr);
     belt_last_click_ms_.fill(0);
@@ -2538,6 +2759,7 @@ class LegacyHud final {
     merchant_selected_index_ = -1;
     storage_page_ = 0;
     chat_password_mode_ = false;
+    social_prompt_kind_ = SocialPromptKind::none;
   }
 
   void sync(ClientContext& context) {
@@ -2581,6 +2803,10 @@ class LegacyHud final {
       trade_content_->state = state_;
       trade_content_->assets = assets_;
     }
+    if (trade_remote_content_ != nullptr) {
+      trade_remote_content_->state = state_;
+      trade_remote_content_->assets = assets_;
+    }
     if (guild_content_ != nullptr) {
       guild_content_->state = state_;
     }
@@ -2593,6 +2819,7 @@ class LegacyHud final {
     sync_merchant_windows();
     sync_stage3_windows();
     sync_minimap_window();
+    sync_social_prompt_window();
     sync_items(context);
     refresh_overlay_layers();
   }
@@ -2770,6 +2997,12 @@ class LegacyHud final {
         (input.key_down[VK_MENU] && (input.key_pressed['X'] || input.key_pressed['Q']));
     if (!shortcut_candidate) {
       return false;
+    }
+    if (tree.modal() != nullptr && context.input->key_pressed[VK_ESCAPE] &&
+        social_prompt_ != nullptr && social_prompt_->visible) {
+      tree.trace_legacy_shortcut_fallback();
+      close_social_prompt();
+      return true;
     }
     if (context.ui_input.text_focus) {
       return false;
@@ -3122,20 +3355,51 @@ class LegacyHud final {
       }
     }
     if (group_window_ != nullptr) {
+      const auto was_visible = group_window_->visible;
       group_window_->set_visible(*tree_, world.group.visible);
       if (world.group.visible) {
+        if (!was_visible) {
+          legacy_trade_group_guild_trace(
+              legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::show_group_window);
+        }
         tree_->bring_to_front(group_window_);
       }
     }
+    if (trade_remote_window_ != nullptr) {
+      const auto was_visible = trade_remote_window_->visible;
+      trade_remote_window_->set_visible(*tree_, world.trade.visible);
+      if (world.trade.visible) {
+        if (!was_visible) {
+          legacy_trade_group_guild_trace(
+              legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                  show_trade_remote_window);
+        }
+        tree_->bring_to_front(trade_remote_window_);
+      }
+    }
     if (trade_window_ != nullptr) {
+      const auto was_visible = trade_window_->visible;
       trade_window_->set_visible(*tree_, world.trade.visible);
       if (world.trade.visible) {
+        if (!was_visible) {
+          legacy_trade_group_guild_trace(
+              legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                  show_trade_local_window);
+        }
         tree_->bring_to_front(trade_window_);
+      } else if (was_visible) {
+        legacy_trade_group_guild_trace(
+            legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::hide_trade_windows);
       }
     }
     if (guild_window_ != nullptr) {
+      const auto was_visible = guild_window_->visible;
       guild_window_->set_visible(*tree_, world.guild.visible);
       if (world.guild.visible) {
+        if (!was_visible) {
+          legacy_trade_group_guild_trace(
+              legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::show_guild_window);
+        }
         tree_->bring_to_front(guild_window_);
       }
     }
@@ -3148,6 +3412,15 @@ class LegacyHud final {
     minimap_->set_visible(*tree_, state_->world.minimap.visible);
     if (minimap_->visible) {
       tree_->bring_to_front(minimap_);
+    }
+  }
+
+  void sync_social_prompt_window() {
+    if (social_prompt_ != nullptr && social_prompt_->visible && tree_ != nullptr) {
+      tree_->bring_to_front(social_prompt_);
+      if (social_prompt_edit_ != nullptr) {
+        tree_->focus(social_prompt_edit_);
+      }
     }
   }
 
@@ -3612,20 +3885,21 @@ class LegacyHud final {
     return world.whisper_name;
   }
 
-  void open_group(ClientApp* app) {
+  void open_group(ClientApp*) {
     if (state_ == nullptr) {
       return;
     }
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::shortcut_open_group);
     state_->world.group.visible = true;
-    if (state_->world.group.members.empty()) {
-      state_->world.group.members.push_back(state_->selected_character);
-    }
     if (tree_ != nullptr && group_window_ != nullptr) {
+      const auto was_visible = group_window_->visible;
       group_window_->set_visible(*tree_, true);
       tree_->bring_to_front(group_window_);
-    }
-    if (app != nullptr) {
-      app->request_group_mode(client_v1::GroupModeRequest{state_->world.group.allow_group});
+      if (!was_visible) {
+        legacy_trade_group_guild_trace(
+            legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::show_group_window);
+      }
     }
   }
 
@@ -3645,85 +3919,93 @@ class LegacyHud final {
     const auto allow = !state_->world.group.allow_group;
     state_->world.group.allow_group = allow;
     state_->world.group.visible = true;
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::click_group_allow);
     app->request_group_mode(client_v1::GroupModeRequest{allow});
   }
 
-  void request_group_create(ClientApp* app) {
-    request_group_target(app, 0);
+  void request_group_create(ClientApp*) {
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::click_group_create);
+    open_social_prompt(SocialPromptKind::group_create);
   }
 
-  void request_group_add(ClientApp* app) {
-    request_group_target(app, 1);
+  void request_group_add(ClientApp*) {
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::click_group_add);
+    open_social_prompt(SocialPromptKind::group_add);
   }
 
-  void request_group_remove(ClientApp* app) {
-    request_group_target(app, 2);
-  }
-
-  void request_group_target(ClientApp* app, const int op) {
-    if (app == nullptr) {
-      return;
-    }
-    const auto target = focused_target_name();
-    if (target.empty()) {
-      app->show_info_modal(L"Group", L"Select a player first.");
-      return;
-    }
-    if (op == 0) {
-      app->request_group_create(client_v1::GroupCreateRequest{target});
-    } else if (op == 1) {
-      app->request_group_add(client_v1::GroupAddMemberRequest{target});
-    } else {
-      app->request_group_remove(client_v1::GroupRemoveMemberRequest{target});
-    }
+  void request_group_remove(ClientApp*) {
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::click_group_remove);
+    open_social_prompt(SocialPromptKind::group_remove);
   }
 
   void open_trade(ClientApp* app) {
     if (state_ == nullptr) {
       return;
     }
-    state_->world.trade.visible = true;
-    if (tree_ != nullptr && trade_window_ != nullptr) {
-      trade_window_->set_visible(*tree_, true);
-      tree_->bring_to_front(trade_window_);
-    }
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::shortcut_open_trade);
     if (app != nullptr) {
       app->request_trade_try(client_v1::TradeTryRequest{focused_target_name()});
     }
   }
 
   void close_trade_window(ClientApp* app) {
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::close_trade_window);
+    if (state_ != nullptr) {
+      if (state_->world.pending_item_action.active &&
+          state_->world.pending_item_action.kind == PendingItemActionKind::trade_add) {
+        state_->restore_pending_item_action();
+      }
+      state_->world.trade = TradeUiState{};
+    }
     if (app != nullptr) {
       app->request_trade_cancel(client_v1::TradeCancelRequest{});
-    }
-    if (state_ != nullptr) {
-      state_->world.trade = TradeUiState{};
     }
     if (trade_window_ != nullptr && tree_ != nullptr) {
       trade_window_->hide(*tree_);
     }
+    if (trade_remote_window_ != nullptr && tree_ != nullptr) {
+      trade_remote_window_->hide(*tree_);
+    }
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::hide_trade_windows);
   }
 
-  void add_selected_bag_item_to_trade(ClientApp* app) {
-    if (state_ == nullptr || app == nullptr || !valid_bag_slot(selected_bag_slot_)) {
-      if (app != nullptr) {
-        app->show_info_modal(L"Trade", L"Select a bag item first.");
-      }
+  void handle_trade_grid_select(ClientApp* app, const int slot) {
+    if (app == nullptr || state_ == nullptr || slot < 0) {
       return;
     }
-    const auto& item = state_->world.bag_items[static_cast<std::size_t>(selected_bag_slot_)];
-    if (item_empty(item)) {
-      app->show_info_modal(L"Trade", L"Select a bag item first.");
+    auto& world = state_->world;
+    if (world.moving_item.active && world.moving_item.source == MovingItemSource::bag &&
+        !item_empty(world.moving_item.item)) {
+      legacy_trade_group_guild_trace(
+          legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+              drop_bag_item_on_trade_grid);
+      const auto item = world.moving_item.item;
+      state_->begin_pending_item_action(PendingItemActionKind::trade_add, MovingItemSource::bag,
+                                        world.moving_item.source_slot, slot, item,
+                                        detail::monotonic_ms());
+      world.moving_item = MovingItemState{};
+      app->request_trade_add_item(client_v1::TradeAddItemRequest{item.make_index, item.name});
       return;
     }
-    app->request_trade_add_item(client_v1::TradeAddItemRequest{item.make_index, item.name});
-  }
-
-  void remove_first_trade_item(ClientApp* app) {
-    if (app == nullptr || state_ == nullptr || state_->world.trade.local_items.empty()) {
+    const auto item_it =
+        std::find_if(world.trade.local_items.begin(), world.trade.local_items.end(),
+                     [slot](const client_v1::ItemSlotState& entry) {
+                       return entry.slot == slot && !item_empty(entry.item);
+                     });
+    if (item_it == world.trade.local_items.end()) {
       return;
     }
-    const auto& item = state_->world.trade.local_items.front().item;
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+            drag_trade_item_back_to_bag);
+    const auto& item = item_it->item;
     if (item.make_index == 0 || item.name.empty()) {
       return;
     }
@@ -3734,17 +4016,14 @@ class LegacyHud final {
     if (state_ == nullptr || app == nullptr) {
       return;
     }
-    app->request_trade_gold(client_v1::TradeSetGoldRequest{state_->world.self_ability.gold});
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::click_trade_gold);
+    open_social_prompt(SocialPromptKind::trade_gold);
   }
 
   void open_guild(ClientApp* app) {
-    if (state_ != nullptr) {
-      state_->world.guild.visible = true;
-    }
-    if (tree_ != nullptr && guild_window_ != nullptr) {
-      guild_window_->set_visible(*tree_, true);
-      tree_->bring_to_front(guild_window_);
-    }
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::shortcut_open_guild);
     if (app != nullptr) {
       app->request_guild_open(client_v1::GuildOpenRequest{});
     }
@@ -3759,28 +4038,136 @@ class LegacyHud final {
     }
   }
 
-  void request_guild_add(ClientApp* app) {
-    if (app == nullptr) {
-      return;
-    }
-    const auto target = focused_target_name();
-    if (target.empty()) {
-      app->show_info_modal(L"Guild", L"Select a player first.");
-      return;
-    }
-    app->request_guild_add(client_v1::GuildAddMemberRequest{target});
+  void request_guild_add(ClientApp*) {
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::click_guild_add_member);
+    open_social_prompt(SocialPromptKind::guild_add);
   }
 
-  void request_guild_remove(ClientApp* app) {
-    if (app == nullptr) {
+  void request_guild_remove(ClientApp*) {
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::click_guild_remove_member);
+    open_social_prompt(SocialPromptKind::guild_remove);
+  }
+
+  void scroll_guild_lines(const int delta) {
+    if (guild_content_ == nullptr) {
       return;
     }
-    const auto target = focused_target_name();
-    if (target.empty()) {
-      app->show_info_modal(L"Guild", L"Select a player first.");
+    if (delta > 0) {
+      legacy_trade_group_guild_trace(
+          legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::click_guild_scroll_down);
+      const auto max_top =
+          std::max(0, guild_content_->line_count() - guild_layout_.max_visible_lines());
+      guild_content_->top_line =
+          std::min(max_top, guild_content_->top_line + guild_layout_.scroll_step);
+      legacy_trade_group_guild_trace(
+          legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::guild_top_line_plus_three);
+    } else {
+      legacy_trade_group_guild_trace(
+          legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::click_guild_scroll_up);
+      guild_content_->top_line = std::max(0, guild_content_->top_line - guild_layout_.scroll_step);
+      legacy_trade_group_guild_trace(
+          legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+              guild_top_line_minus_three);
+    }
+  }
+
+  void toggle_guild_chat_lines() {
+    if (guild_content_ == nullptr) {
       return;
     }
-    app->request_guild_remove(client_v1::GuildRemoveMemberRequest{target});
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::click_guild_chat_toggle);
+    guild_content_->top_line = 0;
+    legacy_trade_group_guild_trace(
+        legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+            show_guild_chat_lines_or_noop);
+  }
+
+  void open_social_prompt(const SocialPromptKind kind) {
+    if (social_prompt_ == nullptr || social_prompt_edit_ == nullptr || tree_ == nullptr) {
+      return;
+    }
+    social_prompt_kind_ = kind;
+    social_prompt_edit_->value.clear();
+    if (kind == SocialPromptKind::trade_gold) {
+      legacy_trade_group_guild_trace(
+          legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::show_trade_gold_prompt);
+      social_prompt_edit_->value =
+          state_ != nullptr ? std::to_wstring(state_->world.self_ability.gold) : L"0";
+    } else if (kind == SocialPromptKind::guild_add || kind == SocialPromptKind::guild_remove) {
+      legacy_trade_group_guild_trace(
+          legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::show_guild_name_prompt);
+    } else {
+      legacy_trade_group_guild_trace(
+          legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::show_group_name_prompt);
+    }
+    social_prompt_->show_modal(*tree_);
+    tree_->focus(social_prompt_edit_);
+  }
+
+  void close_social_prompt() {
+    if (social_prompt_ != nullptr && tree_ != nullptr) {
+      social_prompt_->hide(*tree_);
+      tree_->close_modal(social_prompt_);
+    }
+    social_prompt_kind_ = SocialPromptKind::none;
+  }
+
+  void submit_social_prompt(ClientApp* app) {
+    if (app == nullptr || social_prompt_edit_ == nullptr) {
+      close_social_prompt();
+      return;
+    }
+    const auto value = narrow(trim_copy(social_prompt_edit_->value));
+    if (value.empty()) {
+      close_social_prompt();
+      return;
+    }
+    switch (social_prompt_kind_) {
+      case SocialPromptKind::group_create:
+        app->request_group_create(client_v1::GroupCreateRequest{value});
+        break;
+      case SocialPromptKind::group_add:
+        app->request_group_add(client_v1::GroupAddMemberRequest{value});
+        break;
+      case SocialPromptKind::group_remove:
+        app->request_group_remove(client_v1::GroupRemoveMemberRequest{value});
+        break;
+      case SocialPromptKind::trade_gold: {
+        const auto gold = parse_prompt_gold(value);
+        if (gold < 0) {
+          close_social_prompt();
+          return;
+        }
+        app->request_trade_gold(client_v1::TradeSetGoldRequest{gold});
+        break;
+      }
+      case SocialPromptKind::guild_add:
+        app->request_guild_add(client_v1::GuildAddMemberRequest{value});
+        break;
+      case SocialPromptKind::guild_remove:
+        app->request_guild_remove(client_v1::GuildRemoveMemberRequest{value});
+        break;
+      case SocialPromptKind::none:
+        break;
+    }
+    close_social_prompt();
+  }
+
+  [[nodiscard]] std::int32_t parse_prompt_gold(const std::string& value) const {
+    std::int64_t amount = 0;
+    for (const auto ch : value) {
+      if (ch < '0' || ch > '9') {
+        return -1;
+      }
+      amount = amount * 10 + (ch - '0');
+      if (amount > std::numeric_limits<std::int32_t>::max()) {
+        return std::numeric_limits<std::int32_t>::max();
+      }
+    }
+    return static_cast<std::int32_t>(amount);
   }
 
   void request_minimap(ClientApp* app) {
@@ -4386,13 +4773,6 @@ class LegacyHud final {
       return;
     }
 
-    if (world.trade.visible && !world.moving_item.active) {
-      if (!item_empty(item)) {
-        play_item_click(audio_, item);
-      }
-      return;
-    }
-
     if (!world.moving_item.active) {
       if (item_empty(item)) {
         return;
@@ -4681,10 +5061,14 @@ class LegacyHud final {
   RepairDialogNode* repair_content_{nullptr};
   ui::Window* group_window_{nullptr};
   GroupPanelNode* group_content_{nullptr};
+  ui::Window* trade_remote_window_{nullptr};
+  TradePanelNode* trade_remote_content_{nullptr};
   ui::Window* trade_window_{nullptr};
   TradePanelNode* trade_content_{nullptr};
   ui::Window* guild_window_{nullptr};
   GuildPanelNode* guild_content_{nullptr};
+  ui::Window* social_prompt_{nullptr};
+  ui::TextEdit* social_prompt_edit_{nullptr};
   LegacyMiniMapNode* minimap_{nullptr};
   std::array<HotspotButton*, 6> belt_buttons_{};
   std::array<std::uint64_t, 6> belt_last_click_ms_{};
@@ -4717,6 +5101,12 @@ class LegacyHud final {
   legacy_magic_npc_ui::LegacyNpcDialogLayout npc_dialog_layout_{};
   legacy_magic_npc_ui::LegacyMerchantMenuLayout merchant_menu_layout_{};
   legacy_magic_npc_ui::LegacySellDialogLayout sell_dialog_layout_{};
+  legacy_trade_group_guild_ui::LegacyGroupLayout group_layout_{};
+  legacy_trade_group_guild_ui::LegacyTradeLayout trade_layout_{};
+  legacy_trade_group_guild_ui::LegacyGuildLayout guild_layout_{};
+  legacy_trade_group_guild_ui::LegacySocialPromptLayout social_prompt_layout_{};
+
+  SocialPromptKind social_prompt_kind_{SocialPromptKind::none};
 
   // 右键快捷菜单状态
   struct ItemContextMenu {

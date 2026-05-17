@@ -30,6 +30,7 @@
 #include "scene/legacy_inventory_ui.hpp"
 #include "scene/legacy_magic_npc_ui.hpp"
 #include "scene/legacy_play_ui.hpp"
+#include "scene/legacy_trade_group_guild_ui.hpp"
 #include "ui/legacy_ui.hpp"
 
 #include <algorithm>
@@ -151,6 +152,11 @@ void legacy_inventory_trace(const legacy_inventory_ui::LegacyInventoryUiTraceLab
 
 void legacy_magic_npc_trace(const legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel label) {
   legacy_trace(legacy_magic_npc_ui::legacy_magic_npc_ui_trace_label(label));
+}
+
+void legacy_trade_group_guild_trace(
+    const legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel label) {
+  legacy_trace(legacy_trade_group_guild_ui::legacy_trade_group_guild_ui_trace_label(label));
 }
 
 /// 在软件渲染器上绘制精灵帧
@@ -1045,6 +1051,8 @@ void ClientApp::request_storage_withdraw(const client_v1::StorageWithdrawRequest
 }
 
 void ClientApp::request_group_mode(const client_v1::GroupModeRequest& request) {
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_group_mode);
   protocol_.send(request);
 }
 
@@ -1052,6 +1060,8 @@ void ClientApp::request_group_create(const client_v1::GroupCreateRequest& reques
   if (request.target_name.empty()) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_create_group);
   protocol_.send(request);
 }
 
@@ -1059,6 +1069,8 @@ void ClientApp::request_group_add(const client_v1::GroupAddMemberRequest& reques
   if (request.target_name.empty()) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_add_group_member);
   protocol_.send(request);
 }
 
@@ -1066,16 +1078,22 @@ void ClientApp::request_group_remove(const client_v1::GroupRemoveMemberRequest& 
   if (request.target_name.empty()) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_remove_group_member);
   protocol_.send(request);
 }
 
 void ClientApp::request_trade_try(const client_v1::TradeTryRequest& request) {
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_trade_try);
   auto legacy_request = request;
   legacy_request.target_name = legacy_byte_payload(std::move(legacy_request.target_name));
   protocol_.send(legacy_request);
 }
 
 void ClientApp::request_trade_cancel(const client_v1::TradeCancelRequest& request) {
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_trade_cancel);
   protocol_.send(request);
 }
 
@@ -1083,6 +1101,8 @@ void ClientApp::request_trade_add_item(const client_v1::TradeAddItemRequest& req
   if (request.item_make_index == 0 || request.name.empty()) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_trade_add_item);
   auto legacy_request = request;
   legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
   protocol_.send(legacy_request);
@@ -1092,6 +1112,8 @@ void ClientApp::request_trade_remove_item(const client_v1::TradeRemoveItemReques
   if (request.item_make_index == 0 || request.name.empty()) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_trade_remove_item);
   auto legacy_request = request;
   legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
   protocol_.send(legacy_request);
@@ -1101,22 +1123,32 @@ void ClientApp::request_trade_gold(const client_v1::TradeSetGoldRequest& request
   if (request.gold < 0) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_trade_gold);
   protocol_.send(request);
 }
 
 void ClientApp::request_trade_accept(const client_v1::TradeAcceptRequest& request) {
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_trade_accept);
   protocol_.send(request);
 }
 
 void ClientApp::request_guild_open(const client_v1::GuildOpenRequest& request) {
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_guild_open);
   protocol_.send(request);
 }
 
 void ClientApp::request_guild_home(const client_v1::GuildHomeRequest& request) {
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_guild_home);
   protocol_.send(request);
 }
 
 void ClientApp::request_guild_members(const client_v1::GuildMemberListRequest& request) {
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_guild_members);
   protocol_.send(request);
 }
 
@@ -1124,6 +1156,8 @@ void ClientApp::request_guild_add(const client_v1::GuildAddMemberRequest& reques
   if (request.name.empty()) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_guild_add);
   protocol_.send(request);
 }
 
@@ -1131,6 +1165,8 @@ void ClientApp::request_guild_remove(const client_v1::GuildRemoveMemberRequest& 
   if (request.name.empty()) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_guild_remove);
   protocol_.send(request);
 }
 
@@ -1838,11 +1874,38 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             legacy_magic_npc_trace(
                 legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_storage_or_bag);
           } else if constexpr (std::is_same_v<T, client_v1::GroupState>) {
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    recv_group_state_fifo);
             state_.apply(value);                    // 组队窗口状态
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    refresh_group_window);
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    refresh_group_members);
           } else if constexpr (std::is_same_v<T, client_v1::TradeState>) {
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    recv_trade_state_fifo);
             state_.apply(value);                    // 交易窗口状态
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    refresh_trade_items);
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    refresh_trade_accept);
           } else if constexpr (std::is_same_v<T, client_v1::GuildState>) {
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    recv_guild_state_fifo);
             state_.apply(value);                    // 行会窗口状态
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    refresh_guild_lines);
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    refresh_guild_members);
 
           // ---- 通知/公告类消息 ----
           } else if constexpr (std::is_same_v<T, client_v1::LoginNotice>) {
@@ -1857,6 +1920,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::append_top_sys_message);
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::append_system_message);
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    append_system_message);
           } else if constexpr (std::is_same_v<T, client_v1::Notice>) {
             show_modal(widen(value.title), widen(value.text));  // 弹出公告对话框
           } else if constexpr (std::is_same_v<T, client_v1::DisconnectReason>) {

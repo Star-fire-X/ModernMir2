@@ -186,7 +186,8 @@ enum class PendingItemActionKind {
   use,
   equip,
   unequip,
-  drop
+  drop,
+  trade_add
 };
 
 struct PendingItemActionState {
@@ -898,6 +899,7 @@ struct GameStateStore {
     const auto& bag_item = world.bag_items[static_cast<std::size_t>(slot)];
     switch (pending.kind) {
       case PendingItemActionKind::equip:
+      case PendingItemActionKind::trade_add:
       case PendingItemActionKind::drop:
         if (pending.source == MovingItemSource::bag && slot == pending.source_slot &&
             !same_item_identity(bag_item, pending.item)) {
@@ -922,6 +924,7 @@ struct GameStateStore {
     const auto pending = world.pending_item_action;
     switch (pending.kind) {
       case PendingItemActionKind::equip:
+      case PendingItemActionKind::trade_add:
       case PendingItemActionKind::drop:
         if (pending.source == MovingItemSource::bag && valid_bag_slot(pending.source_slot) &&
             !same_item_identity(world.bag_items[static_cast<std::size_t>(pending.source_slot)],
@@ -965,6 +968,7 @@ struct GameStateStore {
         }
         return;
       case PendingItemActionKind::drop:
+      case PendingItemActionKind::trade_add:
       case PendingItemActionKind::use:
       case PendingItemActionKind::none:
         return;
@@ -1618,6 +1622,10 @@ struct GameStateStore {
 
   /// 应用交易状态
   void apply(const client_v1::TradeState& message) {
+    if (!message.visible && world.pending_item_action.active &&
+        world.pending_item_action.kind == PendingItemActionKind::trade_add) {
+      restore_pending_item_action();
+    }
     world.trade.visible = message.visible;
     world.trade.remote_name = message.remote_name;
     world.trade.local_items = message.local_items;

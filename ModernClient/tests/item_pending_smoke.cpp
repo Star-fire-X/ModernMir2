@@ -103,6 +103,39 @@ void test_drop_pending_ignores_unrelated_updates() {
   assert(!state.world.pending_item_action.active);
 }
 
+void test_trade_add_pending_waits_for_inventory_or_restores_on_cancel() {
+  GameStateStore state;
+  const auto sword = make_item("Wooden Sword", 1001, 5);
+  state.world.bag_items[6] = sword;
+  state.begin_pending_item_action(PendingItemActionKind::trade_add, MovingItemSource::bag, 6, 0,
+                                  sword, 100);
+  state.world.bag_items[6] = ItemState{};
+
+  state.apply(TradeState{true, "Ally", {}, {}, 0, 0, false, false});
+  assert(state.world.pending_item_action.active);
+
+  state.apply(TradeState{true, "Ally", {ItemSlotState{0, sword}}, {}, 0, 0, false, false});
+  assert(state.world.pending_item_action.active);
+
+  state.apply(TradeState{false, "Ally", {}, {}, 0, 0, false, false});
+  assert(!state.world.pending_item_action.active);
+  assert(state.world.bag_items[6].make_index == sword.make_index);
+
+  state.begin_pending_item_action(PendingItemActionKind::trade_add, MovingItemSource::bag, 6, 0,
+                                  sword, 200);
+  state.world.bag_items[6] = ItemState{};
+  state.apply(InventoryRemove{6});
+  assert(!state.world.pending_item_action.active);
+
+  state.begin_pending_item_action(PendingItemActionKind::trade_add, MovingItemSource::bag, 6, 0,
+                                  sword, 400);
+  state.world.bag_items[6] = ItemState{};
+  assert(state.pending_item_action_expired(3600));
+  state.restore_pending_item_action();
+  assert(!state.world.pending_item_action.active);
+  assert(state.world.bag_items[6].make_index == sword.make_index);
+}
+
 void test_magic_key_rebinds_clear_previous_owner() {
   GameStateStore state;
   state.world.magics.push_back(MagicShortcutState{1, 1, 0, 0, 0, "Fire", 0, 0});
@@ -171,6 +204,7 @@ int main() {
   test_unequip_pending_clears_on_matching_bag_or_equipment_update();
   test_use_failure_and_timeout_restore_source_slot();
   test_drop_pending_ignores_unrelated_updates();
+  test_trade_add_pending_waits_for_inventory_or_restores_on_cancel();
   test_magic_key_rebinds_clear_previous_owner();
   test_durability_change_updates_matching_bag_and_equipment_items();
   test_inventory_fifo_refresh_clears_pending_before_followup_messages();
