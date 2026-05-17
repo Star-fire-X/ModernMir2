@@ -1,0 +1,30 @@
+{
+  "flow": "death_player",
+  "description": "HP→0 → Die → 经验分配 → PK惩罚 → 掉落 → SM_DEATH广播",
+  "delphi_source": "ObjBase.pas:2583-2810 Die",
+  "stages": [
+    {"stage":"death_trigger","action":"DamageHealth → HP:=max(0,HP-damage) → HP=0","delphi_line":"ObjBase.pas:3601"},
+    {"stage":"die_entry","action":"Die","delphi_line":"ObjBase.pas:2597","sub_stages":[
+      {"action":"set_flags","effects":"Death:=TRUE; DeathTime:=GetTickCount; clear IncHealth/IncSpell/IncHealing"}
+    ]},
+    {"stage":"exp_award","delphi_line":"ObjBase.pas:2611-2676","sub_stages":[
+      {"action":"calc_exp","function":"ExpHiter.CalcGetExp(Self.Level, Self.FightExp)"},
+      {"action":"gain_exp","function":"ExpHiter.GainExp(exp)","message":"RM_WINEXP(44)→SM_WINEXP"},
+      {"action":"slave_exp","condition":"ExpHiter.Master<>nil","function":"Master.GainExp(exp)"}
+    ]},
+    {"stage":"pk_penalty","delphi_line":"ObjBase.pas:2678-2732","condition":"human killed human","sub_stages":[
+      {"action":"guild_war_check","rule":"GetGuildRelation=2 → guildwarkill (skip PK penalty)"},
+      {"action":"castle_war_check","rule":"BoCastleUnderAttack → guildwarkill"},
+      {"action":"inc_pk_point","effect":"LastHiter.IncPkPoint(100)"},
+      {"action":"body_luck","effect":"LastHiter.AddBodyLuck(-500)"},
+      {"action":"weapon_curse","condition":"PKLevel<1 AND Random(5)=0","effect":"MakeWeaponUnlock","probability":"20%"}
+    ]},
+    {"stage":"item_drop","delphi_line":"ObjBase.pas:2734-2766","condition":"NOT FightZone AND NOT Fight3Zone AND NOT BoAnimal","sub_stages":[
+      {"action":"drop_equipped","function":"DropUseItems(nil) → RM_ITEMSHOW"},
+      {"action":"scatter_bag","function":"ScatterBagItems(nil) → RM_ITEMSHOW"},
+      {"action":"scatter_gold","function":"ScatterGolds(nil) → RM_ITEMSHOW"}
+    ]},
+    {"stage":"broadcast_death","message_type":"SM_DEATH","message_id":32,"delphi_line":"ObjBase.pas:2806","fields":{"dir":"<Dir>","x":"<CX>","y":"<CY>","value":1},"receivers":"all_visible_players"}
+  ],
+  "cplusplus_mapping": "map_actor.cpp:3185-3397 settle_player_death, apply_bad_kill_penalty, try_legacy_revival"
+}

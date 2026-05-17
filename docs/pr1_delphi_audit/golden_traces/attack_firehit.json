@@ -1,0 +1,133 @@
+{
+  "flow": "attack_firehit",
+  "description": "CM_SPELL(26)→蓄力→CM_FIREHIT→SM_FIREHIT→烈火倍率大伤害→SM_STRUCK→(可选)SM_DEATH",
+  "delphi_source": {
+    "client_prepare": "ClMain.pas:1797-1873 UseMagic (FireHit cooldown 10s)",
+    "server_prepare": "ObjBase.pas:9468-9484 SpellXY SWD_FIREHIT branch",
+    "server_timeout": "ObjBase.pas:11841-11851 Operate periodic (20s timeout)",
+    "client_attack": "ClMain.pas:2174-2221 AttackTarget (BoFireHit→CM_FIREHIT)",
+    "server_attack": "ObjBase.pas:9302 HitXY → 5550 HitHit → 5252 _Attack (HM_FIREHIT branch:5403-5405)",
+    "damage_chain": "ObjBase.pas:5236 GetAttackPower → 3433 GetHitStruckDamage → 3470 StruckDamage → 3585 DamageHealth",
+    "death": "ObjBase.pas:2583 Die"
+  },
+  "stages": [
+    {
+      "stage": "client_prepare",
+      "action": "UseMagic → FireHit branch",
+      "delphi_line": "ClMain.pas:1811-1814",
+      "checks": {
+        "cooldown": "GetTickCount - LatestFireHitTime > 10000ms",
+        "mp": "MP >= spell + defSpell"
+      },
+      "side_effect": "ActionLock:=TRUE; ServerMagicCode:=-1"
+    },
+    {
+      "stage": "server_spellxy_prepare",
+      "action": "SpellXY → SWD_FIREHIT case",
+      "delphi_line": "ObjBase.pas:9468-9484",
+      "sub_stages": [
+        {"action": "mp_check", "formula": "MP >= GetSWSpell(PFireHitSkill) + DefSpell"},
+        {"action": "consume_mp", "function": "DamageSpell(mp_cost); HealthSpellChanged"},
+        {"action": "set_flag", "effect": "BoAllowFireHit := TRUE; LatestFireHitTime := GetTickCount"}
+      ]
+    },
+    {
+      "stage": "client_attack_send",
+      "action": "AttackTarget → BoFireHit=true → CM_FIREHIT (3025)",
+      "delphi_line": "ClMain.pas:2183-2205",
+      "checks": {
+        "can_next_hit": "GetTickCount - LastHitTime > nexthit",
+        "can_next_action": "IsIdle AND NOT paralyzed",
+        "server_accept": "NOT ActionLock OR timeout_10s"
+      }
+    },
+    {
+      "stage": "server_attack_dispatch",
+      "action": "HitXY → HitHit → _Attack(HM_FIREHIT, target)",
+      "delphi_line": "ObjBase.pas:5252-5547",
+      "sub_stages": [
+        {
+          "action": "calc_base_attack_power",
+          "function": "GetAttackPower(LoByte(DC), HiByte(DC)-LoByte(DC))",
+          "delphi_line": "ObjBase.pas:5368",
+          "random_calls": [
+            {"call": "Random(ranval+1)", "range": "[0, ranval]", "purpose": "damage_roll"},
+            {"call": "Random(10-min(9,Luck))", "condition": "luck>0", "purpose": "luck_gate"}
+          ]
+        },
+        {
+          "stage": "firehit_bonus",
+          "action": "Apply FireHit multiplier",
+          "delphi_line": "ObjBase.pas:5403-5405",
+          "formula": "HitDouble = 4 + FireLevel * 4; bonus = Round(dam / 100.0 * (HitDouble * 10)); dam += bonus",
+          "result_by_level": {
+            "level_0": "HitDouble=4, bonus=Round(dam*0.40), total=1.40x",
+            "level_1": "HitDouble=8, bonus=Round(dam*0.80), total=1.80x",
+            "level_2": "HitDouble=12, bonus=Round(dam*1.20), total=2.20x",
+            "level_3": "HitDouble=16, bonus=Round(dam*1.60), total=2.60x"
+          }
+        },
+        {
+          "action": "hit_check",
+          "formula": "Random(target.SpeedPoint) < AccuracyPoint",
+          "on_miss": "dam:=0; 不发送SM_STRUCK; 消耗烈火状态(已使用)"
+        },
+        {
+          "action": "armor_reduction",
+          "function": "target.GetHitStruckDamage(self, dam)",
+          "formula": "damage = max(0, dam - (AC_min + Random(AC_range+1)))"
+        },
+        {
+          "action": "apply_damage",
+          "function": "target.StruckDamage(dam, self) → DamageHealth(damage)",
+          "sub_stages": [
+            {"action": "equipment_durability_loss"},
+            {"action": "magic_shield_absorb", "condition": "BoMagicShield", "formula": "Round(damage*1.5) MP absorb"},
+            {"action": "hp_reduce", "formula": "HP = max(0, HP - damage)"}
+          ]
+        },
+        {
+          "action": "send_rm_struck",
+          "message_type": "RM_STRUCK (SM_STRUCK:31)",
+          "delay_ms": 200,
+          "condition": "target is RC_USERHUMAN",
+          "fields": {"damage": "<final_damage>", "hp": "<target.HP>", "max_hp": "<target.MaxHP>"}
+        },
+        {
+          "action": "firehit_skill_training",
+          "formula": "TrainSkill(PFireHitSkill, 1)",
+          "delphi_line": "ObjBase.pas:5505",
+          "note": "烈火每次攻击固定+1熟练度"
+        }
+      ]
+    },
+    {
+      "stage": "server_broadcast",
+      "action": "HitMotion→SendRefMsg(RM_FIREHIT) → SM_FIREHIT(8)",
+      "delphi_line": "ObjBase.pas:5687-5692",
+      "message_type": "SM_FIREHIT",
+      "message_id": 8,
+      "receivers": "all_visible_players",
+      "client_anim": {
+        "action": "ActHit (6f×85ms=510ms)",
+        "hit_effect": "HitEffectNumber=4 → HitEffectBase[4]=3390 (烈火命中特效)",
+        "sound": "weaponsound + s_firehit at frame 2",
+        "delphi_ref": "Actor.pas:2646-2682, Actor.pas:1996-2001"
+      }
+    },
+    {
+      "stage": "server_timeout",
+      "action": "Operate periodic check → 20s timeout",
+      "delphi_line": "ObjBase.pas:11841-11851",
+      "condition": "GetTickCount - LatestFireHitTime > 20000",
+      "effect": "BoAllowFireHit := FALSE (烈火蓄力状态自动取消)"
+    }
+  ],
+  "cplusplus_mapping": {
+    "prepare": "map_actor_mail.hpp:2789-2830 (spell case 26, prepare_legacy_sword_skill)",
+    "attack_consume": "map_actor_mail.hpp:2306-2316 (consume_legacy_sword_skill)",
+    "firehit_bonus": "map_actor_mail.hpp:2345-2355 (fire_hit_bonus calculation)",
+    "broadcast": "map_actor_mail.hpp:2322-2330 (make_hit_packet with kCmFireHit ident)",
+    "training": "map_actor_mail.hpp:2670-2689 (sword skill magic training)"
+  }
+}

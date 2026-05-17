@@ -1,0 +1,68 @@
+{
+  "flow": "attack_miss",
+  "description": "CM_HIT -> SM_HIT action -> accuracy miss -> no SM_STRUCK and no HP change",
+  "delphi_source": {
+    "client_send": "ClMain.pas:2174-2221 AttackTarget",
+    "server_entry": "ObjBase.pas:9302 HitXY",
+    "attack_branch": "ObjBase.pas:5252 _Attack",
+    "hit_check": "ObjBase.pas:5435 Random(target.SpeedPoint) < AccuracyPoint",
+    "motion": "ObjBase.pas:5687-5692 HitMotion"
+  },
+  "stages": [
+    {
+      "stage": "client_send",
+      "message_type": "CM_HIT",
+      "message_id": 3014,
+      "fields": {
+        "x": "<attacker_x>",
+        "y": "<attacker_y>",
+        "dir": "<dir>",
+        "feature": 0,
+        "state": 0
+      },
+      "note": "Target is resolved server-side from facing tile."
+    },
+    {
+      "stage": "server_attack_action",
+      "action": "HitXY -> HitHit -> HitMotion",
+      "message_type": "SM_HIT",
+      "message_id": 14,
+      "delphi_line": "ObjBase.pas:5687-5692"
+    },
+    {
+      "stage": "server_hit_check",
+      "action": "accuracy miss",
+      "formula": "Random(target.SpeedPoint) >= AccuracyPoint",
+      "delphi_line": "ObjBase.pas:5435",
+      "random_calls": [
+        {
+          "call": "Random(target.SpeedPoint)",
+          "range": "[0, SpeedPoint-1]"
+        }
+      ]
+    },
+    {
+      "stage": "expected_absence",
+      "messages_not_sent": [
+        {
+          "type": "SM_STRUCK",
+          "id": 31
+        },
+        {
+          "type": "SM_HEALTHSPELLCHANGED",
+          "id": 53
+        },
+        {
+          "type": "SM_DEATH",
+          "id": 32
+        }
+      ],
+      "side_effect": "No target HP change; weapon/sword training must not be credited from a pure miss."
+    }
+  ],
+  "cplusplus_mapping": {
+    "attack_dispatch": "map_actor_mail.hpp case ActorMailKind::attack",
+    "miss_trace": "LegacyCombat miss trace",
+    "pr_owner": "PR2/PR5"
+  }
+}

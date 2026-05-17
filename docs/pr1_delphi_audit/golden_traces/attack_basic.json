@@ -1,0 +1,236 @@
+{
+  "flow": "attack_basic",
+  "description": "CM_HIT → SM_HIT → hit/miss → SM_STRUCK → HP变化 → (可选)SM_DEATH",
+  "delphi_source": {
+    "client": "ClMain.pas:2174-2221 AttackTarget, ClMain.pas:3348-3362 CanNextHit",
+    "server_entry": "ObjBase.pas:11811 TUserHuman.Operate → 12081 HitXY",
+    "attack_chain": "ObjBase.pas:9302 HitXY → 5550 HitHit → 5252 _Attack",
+    "damage_chain": "ObjBase.pas:5236 GetAttackPower → 3433 GetHitStruckDamage → 3470 StruckDamage → 3585 DamageHealth",
+    "death": "ObjBase.pas:2583 Die"
+  },
+  "stages": [
+    {
+      "stage": "client_pre_check",
+      "action": "CanNextHit + CanNextAction + ServerAcceptNextAction",
+      "checks": {
+        "can_next_hit": "GetTickCount - LastHitTime > (1400 - min(800, min(370, Level*14) + HitSpeed*60))",
+        "can_next_action": "IsIdle AND NOT paralyzed AND dizzy_expired",
+        "server_accept": "NOT ActionLock OR (GetTickCount - ActionLockTime > 10000)"
+      }
+    },
+    {
+      "stage": "client_send",
+      "action": "SendMsg",
+      "message_type": "CM_HIT",
+      "message_id": 3014,
+      "fields": {
+        "x": "<attacker_x>",
+        "y": "<attacker_y>",
+        "dir": "<attack_dir>",
+        "feature": 0,
+        "state": 0
+      },
+      "note": "Delphi client sends attacker position, not target position; server accepts only x/y == self.CX/self.CY and resolves target from facing tile.",
+      "side_effect": "ActionLock:=TRUE; LastHitTime:=GetTickCount"
+    },
+    {
+      "stage": "server_operate_dispatch",
+      "action": "TUserHuman.Operate → GetMsg → CM_HIT case",
+      "delphi_line": "ObjBase.pas:12081"
+    },
+    {
+      "stage": "server_hitxy",
+      "action": "HitXY(Ident, x, y, dir)",
+      "delphi_line": "ObjBase.pas:9302",
+      "sub_stages": [
+        {
+          "action": "speedhack_check",
+          "formula": "GetTickCount - LatestHitTime >= 900 - HitSpeed*60",
+          "fail_action": "HitTimeOverCount++; if >= 4: Exit; HitTimeOverSum++; if >= 6: Exit"
+        },
+        {
+          "action": "LatestHitTime := GetTickCount"
+        }
+      ]
+    },
+    {
+      "stage": "server_hithit",
+      "action": "HitHit(nil, hitmode, dir)",
+      "delphi_line": "ObjBase.pas:5550",
+      "sub_stages": [
+        {
+          "action": "check_weapon_upgrade",
+          "messages": [
+            {"type": "SM_BREAKWEAPON", "id": 1102, "condition": "weapon_broken"},
+            {"type": "SM_ABILITY", "id": 52, "condition": "upgrade_success"},
+            {"type": "SM_SUBABILITY", "id": 752, "condition": "upgrade_success"}
+          ]
+        },
+        {
+          "action": "resolve_target",
+          "fallback": "if target=nil → GetFrontCret"
+        },
+        {
+          "action": "mp_check_wide_cross",
+          "condition": "hitmode ∈ {HM_WIDEHIT, HM_CROSSHIT}",
+          "fail": "downgrade to HM_HIT if MP insufficient"
+        }
+      ]
+    },
+    {
+      "stage": "server_attack",
+      "action": "_Attack(hitmode, target)",
+      "delphi_line": "ObjBase.pas:5252",
+      "sub_stages": [
+        {
+          "action": "calc_attack_power",
+          "function": "GetAttackPower(LoByte(DC), HiByte(DC)-LoByte(DC))",
+          "delphi_line": "ObjBase.pas:5236-5250",
+          "random_calls": [
+            {"call": "Random(ranval+1)", "range": "[0, ranval]", "purpose": "damage_roll"},
+            {"call": "Random(10-min(9,Luck))", "range": "[0, 10-luck-1]", "purpose": "luck_gate", "condition": "luck>0"},
+            {"call": "Random(10-max(0,-Luck))", "range": "[0, 10+luck-1]", "purpose": "curse_gate", "condition": "luck<0"}
+          ]
+        },
+        {
+          "action": "hit_check",
+          "formula": "Random(target.SpeedPoint) < AccuracyPoint",
+          "delphi_line": "ObjBase.pas:5435",
+          "random_calls": [
+            {"call": "Random(target.SpeedPoint)", "range": "[0, SpeedPoint-1]", "purpose": "hit_roll"}
+          ],
+          "on_miss": "dam := 0; 不发送 SM_STRUCK"
+        },
+        {
+          "action": "armor_reduction",
+          "function": "target.GetHitStruckDamage(self, dam)",
+          "delphi_line": "ObjBase.pas:3433-3449",
+          "random_calls": [
+            {"call": "Random(ShortInt(AC_max-AC_min)+1)", "range": "[0, AC_range]", "purpose": "armor_roll"}
+          ],
+          "formula": "damage = max(0, dam - (AC_min + Random(AC_range+1)))"
+        },
+        {
+          "action": "weapon_durability_calc",
+          "formula": "Random(5) + 2 - AddAbil.WeaponStrong",
+          "delphi_line": "ObjBase.pas:5444",
+          "random_calls": [
+            {"call": "Random(5)", "range": "[0, 4]", "purpose": "weapon_damage"}
+          ]
+        },
+        {
+          "action": "apply_damage",
+          "function": "target.StruckDamage(dam, self)",
+          "delphi_line": "ObjBase.pas:3470-3581",
+          "sub_sub_stages": [
+            {"action": "record_hiter", "condition": "damage>0 AND hiter<>nil"},
+            {"action": "equipment_durability_loss", "formula": "Random(10)+5 (per item Random(8)=0 check)"},
+            {"action": "poison_damage_armor_bonus", "formula": "wdam*=1.2; damage*=1.2", "condition": "POISON_DAMAGEARMOR active"},
+            {"action": "recalc_abilities", "condition": "any equipment destroyed"},
+            {"action": "DamageHealth(damage)", "delphi_line": "ObjBase.pas:3585-3608",
+             "sub_sub_sub_stages": [
+               {"action": "magic_shield_absorb", "formula": "Round(damage*1.5)", "condition": "BoMagicShield AND damage>0 AND MP>0"},
+               {"action": "hp_reduce", "formula": "HP = max(0, HP - damage)"}
+             ]}
+          ]
+        },
+        {
+          "action": "send_rm_struck",
+          "message_type": "RM_STRUCK",
+          "message_id": 31,
+          "delay_ms": 200,
+          "condition": "target is RC_USERHUMAN",
+          "fields": {"damage": "<final_damage>", "hp": "<target.HP>", "max_hp": "<target.MaxHP>", "hiter_id": "<attacker_id>"}
+        },
+        {
+          "action": "send_rm_struck_immediate",
+          "message_type": "RM_STRUCK",
+          "message_id": 31,
+          "delay_ms": 0,
+          "condition": "target is NOT RC_USERHUMAN",
+          "fields": "(same as above)"
+        },
+        {
+          "action": "stone_check",
+          "formula": "Random(5+target.AntiPoison)=0",
+          "condition": "BoAbilMakeStone",
+          "effect": "MakePoison(POISON_STONE, 5, 0)"
+        },
+        {
+          "action": "life_steal",
+          "formula": "SuckupEnemyHealth += dam * SuckupEnemyHealthRate/100; if >=2: DamageHealth(-n)",
+          "condition": "SuckupEnemyHealthRate>0"
+        },
+        {
+          "action": "skill_training",
+          "delphi_line": "ObjBase.pas:5470-5527",
+          "messages": [
+            {"type": "RM_MAGIC_LVEXP", "delay_ms": 3000, "fields": {"magic_id": "<sword_magic_id>", "level": "<level>", "cur_train": "<cur_train>"}}
+          ]
+        }
+      ]
+    },
+    {
+      "stage": "server_hitmotion",
+      "action": "HitMotion(msg, dir, CX, CY) → SendRefMsg(RM_HIT, dir, cx, cy, 0, '')",
+      "delphi_line": "ObjBase.pas:5687-5692",
+      "message_type": "SM_HIT",
+      "message_id": 14,
+      "receivers": "all_visible_players",
+      "fields": {"dir": "<dir>", "x": "<cx>", "y": "<cy>"}
+    },
+    {
+      "stage": "server_weapon_durability",
+      "action": "DoDamageWeapon(weapondamage)",
+      "delphi_line": "ObjBase.pas:5537",
+      "condition": "weapondamage > 0"
+    },
+    {
+      "stage": "server_death_check",
+      "action": "if HP=0 → Die",
+      "delphi_line": "ObjBase.pas:2583",
+      "condition": "target HP reached 0",
+      "sub_stages": [
+        {"action": "award_exp", "message_type": "RM_WINEXP", "message_id": 44},
+        {"action": "pk_penalty", "message_type": "RM_BREAKWEAPON (20% chance)", "condition": "human killed human + PKLevel<1"},
+        {"action": "drop_items", "message_type": "RM_ITEMSHOW"},
+        {"action": "broadcast_death", "message_type": "SM_DEATH", "message_id": 32, "receivers": "all_visible_players"}
+      ]
+    },
+    {
+      "stage": "client_receive_hit",
+      "action": "收到 SM_HIT (14)",
+      "handlers": [
+        {"action": "ProcMsg → ReadyAction(SM_HIT)", "delphi_line": "Actor.pas:1214"},
+        {"action": "CalcActorFrame → ActHit: 6f×85ms=510ms", "delphi_line": "Actor.pas:2646-2682"},
+        {"action": "RunSound → weaponsound", "delphi_line": "Actor.pas:1952"},
+        {"action": "RunActSound at frame 2 → weaponsound", "delphi_line": "Actor.pas:1972-1976"}
+      ]
+    },
+    {
+      "stage": "client_receive_struck",
+      "action": "收到 SM_STRUCK (31) [+ 200ms delay]",
+      "handlers": [
+        {"action": "ProcMsg → ReadyAction(SM_STRUCK)", "delphi_line": "Actor.pas:1215-1219"},
+        {"action": "CalcActorFrame → ActStruck: 3f×70ms=210ms", "delphi_line": "Actor.pas:2758-2768"},
+        {"action": "struckframetime := max(80, 200-Level)", "delphi_line": "Actor.pas:1149-1159"},
+        {"action": "RunSound → strucksound", "delphi_line": "Actor.pas:1943-1947"}
+      ]
+    },
+    {
+      "stage": "client_receive_healthspell",
+      "action": "收到 SM_HEALTHSPELLCHANGED (53)",
+      "handlers": [
+        {"action": "Operate → RM_HEALTHSPELLCHANGED handler → 更新HP/MP显示", "delphi_line": "ObjBase.pas:12413-12421"}
+      ]
+    }
+  ],
+  "cplusplus_mapping": {
+    "attack_dispatch": "map_actor_mail.hpp:2175-2691 (case ActorMailKind::attack)",
+    "hit_check": "map_actor_mail.hpp:2357-2365",
+    "damage_calc": "map_actor.cpp:2526-2570 (roll_legacy_player_attack_power)",
+    "armor_reduction": "map_actor.cpp:639 (legacy_physical_struck_damage)",
+    "struck_broadcast": "make_struck_packet / make_death_packet",
+    "hit_broadcast": "make_hit_packet"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "flow": "attack_widehit",
+  "description": "半月弯刀: front-left/front/front-right fan, same damage for every valid target",
+  "delphi_source": {
+    "sword_toggle": "ObjBase.pas:9451-9467 SWD_WIDEHIT",
+    "mp_cost": "ObjBase.pas:5621 DamageSpell(GetSWSpell(PWideHitSkill)+DefSpell)",
+    "targeting": "ObjBase.pas:5285-5304 SwordWideAttack",
+    "motion": "ObjBase.pas:5687-5692 HitMotion"
+  },
+  "stages": [
+    {
+      "stage": "prepare_or_toggle",
+      "message_type": "CM_SPELL",
+      "message_id": 3017,
+      "fields": {
+        "magic_id": 25
+      },
+      "action": "Enable wide-hit sword mode when learned."
+    },
+    {
+      "stage": "client_send",
+      "message_type": "CM_WIDEHIT",
+      "message_id": 3024,
+      "fields": {
+        "dir": "<dir>",
+        "x": "<attacker_x>",
+        "y": "<attacker_y>",
+        "feature": 0,
+        "state": 0
+      },
+      "note": "Client sends attacker position; fan targets are resolved server-side."
+    },
+    {
+      "stage": "server_targeting",
+      "action": "SwordWideAttack uses direction offsets 7, 1, 2 relative to facing direction.",
+      "delphi_line": "ObjBase.pas:5285-5304",
+      "shape": "three-cell fan"
+    },
+    {
+      "stage": "server_motion",
+      "message_type": "SM_WIDEHIT",
+      "message_id": 24,
+      "receivers": "all visible players"
+    },
+    {
+      "stage": "server_damage",
+      "rule": "Every valid fan target uses the same base damage; Delphi does not apply secondary-target falloff.",
+      "messages": [
+        {
+          "type": "SM_STRUCK",
+          "id": 31,
+          "per_target": true
+        }
+      ]
+    },
+    {
+      "stage": "training",
+      "rule": "Train sword skill on successful hit path.",
+      "delphi_line": "ObjBase.pas:5470-5527"
+    }
+  ],
+  "cplusplus_mapping": {
+    "targeting": "collect_wide_hit_targets",
+    "pr_owner": "PR5"
+  }
+}

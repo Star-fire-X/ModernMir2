@@ -1,0 +1,27 @@
+{
+  "flow": "spell_poison",
+  "description": "CM_SPELL(magic_id=6) → SM_SPELL → 抗毒判定 → RM_MAKEPOISON → SM_MAGICFIRE → 每tick HP衰减",
+  "delphi_source": "Magic.pas:734-829, ObjBase.pas:5898 MakePoison",
+  "stages": [
+    {"stage":"client_send","message_type":"CM_SPELL","message_id":3017,"fields":{"magic_id":6}},
+    {"stage":"server_spellnow_entry","message_type":"SM_SPELL","message_id":17,"delphi_line":"Magic.pas:537","note":"SpellNow入口先广播施法动作"},
+    {"stage":"server_check","sub_stages":[
+      {"action":"poison_powder_check","rule":"U_BUJUK or U_ARMRINGL: StdMode=25, Shape<=2, Dura>=100","delphi_line":"Magic.pas:742-763"},
+      {"action":"anti_poison","formula":"6 >= Random(7+target.AntiPoison)","random_range":"[0,6+AntiPoison]"},
+      {"action":"shape_1","effect":"POISON_DECHEALTH(绿毒)","formula":"power=GetPower13(30)+2*GetRPow(SC)"},
+      {"action":"shape_2","effect":"POISON_DAMAGEARMOR(红毒)","formula":"power=GetPower13(40)+2*GetRPow(SC)"}
+    ]},
+    {"stage":"server_make_poison","message_type":"RM_MAKEPOISON","fields":{"kind":"POISON_DECHEALTH or POISON_DAMAGEARMOR","power":"<duration_seconds>"}},
+    {"stage":"server_success_post","message_type":"SM_MAGICFIRE","message_id":638,"delphi_line":"Magic.pas:794, Magic.pas:983-986","note":"Successful poison resets nofire:=FALSE before post-processing."},
+    {"stage":"server_resist_post","message_type":"SM_MAGICFIRE","message_id":638,"condition":"valid powder but anti-poison roll fails","note":"No RM_MAKEPOISON is sent, but nofire is still reset to FALSE after the item branch."},
+    {"stage":"server_missing_item_failure","message_type":"SM_MAGICFIRE_FAIL","message_id":639,"condition":"enough MP but no valid poison powder","note":"MP and SM_SPELL already happened before SpellNow returns FALSE."},
+    {"stage":"server_tick","action":"per-tick: HealthSpellChanged with HP reduction","period":">2500ms","formula":"damage=1+PoisonLevel","delphi_line":"ObjBase.pas:7921-7931"}
+  ],
+  "cplusplus_mapping": {
+    "spell_dispatch": "map_actor_mail.hpp:3151 (spell case 6, green/red poison)",
+    "poison_duration": "map_actor.cpp:1153 legacy_poison_seconds",
+    "poison_apply": "Player::apply_legacy_poison() → status_effects_",
+    "poison_tick": "map_actor_player.hpp:146 tick_status_effects → HealthSpellChanged per tick",
+    "item_check": "remove_bag_item (毒粉 StdMode=25, Shape≤2, Dura≥100)"
+  }
+}
