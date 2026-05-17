@@ -1,0 +1,41 @@
+{
+  "flow": "struck_delay_player_vs_monster",
+  "description": "Delphi sends player struck with 200ms delay but monster struck immediately",
+  "delphi_source": {
+    "player_delay": "ObjBase.pas:5449 SendDelayMsg(RM_STRUCK, ..., 200)",
+    "monster_immediate": "ObjBase.pas:5542 SendMsg(RM_STRUCK)",
+    "client_handler": "Actor.pas:1215-1219 ReadyAction(SM_STRUCK)"
+  },
+  "stages": [
+    {
+      "stage": "attack_hits_player",
+      "message_type": "SM_STRUCK",
+      "message_id": 31,
+      "delay_ms": 200,
+      "fields": {
+        "target": "RC_USERHUMAN",
+        "damage": "<final_damage>",
+        "hp": "<player_hp>"
+      }
+    },
+    {
+      "stage": "attack_hits_monster",
+      "message_type": "SM_STRUCK",
+      "message_id": 31,
+      "delay_ms": 0,
+      "fields": {
+        "target": "RC_ANIMAL/monster",
+        "damage": "<final_damage>",
+        "hp": "<monster_hp>"
+      }
+    },
+    {
+      "stage": "ordering_rule",
+      "rule": "SM_HIT/skill action remains visible immediately; player struck is delayed independently of the attack action packet."
+    }
+  ],
+  "cplusplus_mapping": {
+    "current_risk": "Frame-end queueing may collapse the 200ms player delay unless PR2/PR9 preserve it explicitly.",
+    "pr_owner": "PR2/PR9"
+  }
+}

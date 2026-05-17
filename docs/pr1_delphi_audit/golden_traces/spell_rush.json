@@ -1,0 +1,23 @@
+{
+  "flow": "spell_rush",
+  "description": "CM_SPELL(27)→SM_RUSH→逐格推人→SM_STRUCK→SM_BACKSTEP(被推者)",
+  "delphi_source": "ObjBase.pas:9485-9510 SpellXY SWD_RUSHRUSH, Magic.pas:61-85 MagPushArround",
+  "stages": [
+    {"stage":"client_send","message_type":"CM_SPELL","message_id":3017,"fields":{"magic_id":27,"dir":"<dir>"},"cooldown":"3s (ClMain.pas:1817)"},
+    {"stage":"prepare","action":"MP check + DamageSpell + HealthSpellChanged"},
+    {"stage":"rush","action":"CharRushRush → MagPushArround","sub_stages":[
+      {"action":"find_front_target","target":"find_attack_target_by_position(dx,dy,1)"},
+      {"action":"level_gap_check","rule":"user.Level > target.Level"},
+      {"action":"gate_roll","formula":"Random(20) < 6 + level*3 + level_gap","random_range":"[0,19]"},
+      {"action":"push","action":"CharPushed(target, push_dir) → 逐格推动","stop_condition":"阻挡(can_walk=false) or 玩家/NPC"},
+      {"action":"self_move","rule":"attacker movement is handled by CharRushRush; PR5 must preserve Delphi push/move ordering from ObjBase.pas:9485-9510"}
+    ]},
+    {"stage":"broadcast","messages":[
+      {"type":"SM_RUSH(6) or SM_RUSHKUNG(7)","to":"attacker+visible","anim":"ActRushLeft/Right: 3f×120ms=360ms"},
+      {"type":"SM_BACKSTEP(9)","to":"pushed_target","anim":"backstep动作"},
+      {"type":"SM_STRUCK(31)","to":"pushed_target","fields":{"damage":"<rush_damage>"}}
+    ]},
+    {"stage":"training","formula":"TrainSkill(27, 1) (每次固定1点)"}
+  ],
+  "cplusplus_mapping": "map_actor_mail.hpp:2730 handle_legacy_rush_rush, map_actor.cpp:2709-2713 rush_gate"
+}

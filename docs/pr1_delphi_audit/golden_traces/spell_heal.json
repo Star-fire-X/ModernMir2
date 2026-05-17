@@ -1,0 +1,24 @@
+{
+  "flow": "spell_heal",
+  "description": "CM_SPELL(magic_id=2) → SM_SPELL → RM_MAGHEALING(800ms) → HP恢复",
+  "delphi_source": "Magic.pas:699-721, ObjBase.pas:708-712",
+  "stages": [
+    {"stage":"client_send","message_type":"CM_SPELL","message_id":3017,"fields":{"magic_id":2}},
+    {"stage":"server_spellnow","action":"SendRefMsg(RM_SPELL) → SM_SPELL(17)","delphi_line":"Magic.pas:537"},
+    {"stage":"server_case_2","action":"Healing branch","delphi_line":"Magic.pas:699-721",
+      "sub_stages":[
+        {"action":"default_target","rule":"if target=nil → target:=user"},
+        {"action":"friend_check","function":"IsProperFriend(target)"},
+        {"action":"calc_power","formula":"GetAttackPower(GetPower(MPow(pum))+LoByte(SC)*2, ShortInt(HiByte(SC)-LoByte(SC))*2+1)"},
+        {"action":"hp_check","condition":"target.HP < target.MaxHP"},
+        {"action":"send_heal","message_type":"RM_MAGHEALING","delay_ms":800,"fields":{"heal":"<pwr>"}},
+        {"action":"heal_gauge","condition":"BoAbilSeeHealGauge","message_type":"RM_INSTANCEHEALGUAGE"}
+      ]}
+  ],
+  "cplusplus_mapping": {
+    "spell_dispatch": "map_actor_mail.hpp:3133 (spell case 2, self-heal delayed)",
+    "heal_power": "map_actor.cpp:1036 legacy_heal_power",
+    "heal_application": "Player::apply_heal() → DamageHealth(-heal_amount)",
+    "broadcast": "RM_MAGHEALING → ActorVitals hp change"
+  }
+}

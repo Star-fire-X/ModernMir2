@@ -1,0 +1,61 @@
+{
+  "flow": "attack_crosshit",
+  "description": "十字斩: cross targets, SM_CROSSHIT action, 80% damage against player targets",
+  "delphi_source": {
+    "sword_toggle": "ObjBase.pas:9512-9528 SWD_CROSSHIT",
+    "mp_cost": "ObjBase.pas:5631 DamageSpell(GetSWSpell(PCrossHitSkill)+DefSpell)",
+    "targeting": "ObjBase.pas:5306-5332 SwordCrossAttack",
+    "pvp_scale": "ObjBase.pas:5320-5323 Round(damage*0.8)",
+    "motion": "ObjBase.pas:5687-5692 HitMotion"
+  },
+  "stages": [
+    {
+      "stage": "prepare_or_toggle",
+      "message_type": "CM_SPELL",
+      "message_id": 3017,
+      "fields": {
+        "magic_id": 34
+      },
+      "action": "Toggle cross-hit mode."
+    },
+    {
+      "stage": "client_send",
+      "message_type": "CM_CROSSHIT",
+      "message_id": 3035,
+      "fields": {
+        "dir": "<dir>",
+        "x": "<attacker_x>",
+        "y": "<attacker_y>",
+        "feature": 0,
+        "state": 0
+      },
+      "note": "Client sends attacker position; cross targets are resolved server-side."
+    },
+    {
+      "stage": "server_motion",
+      "message_type": "SM_CROSSHIT",
+      "message_id": 35,
+      "receivers": "all visible players"
+    },
+    {
+      "stage": "server_damage",
+      "rules": [
+        "Monster/NPC targets use full cross-hit damage.",
+        "Player targets use Round(damage*0.8)."
+      ],
+      "delphi_line": "ObjBase.pas:5320-5323",
+      "messages": [
+        {
+          "type": "SM_STRUCK",
+          "id": 31,
+          "per_target": true
+        }
+      ]
+    }
+  ],
+  "cplusplus_mapping": {
+    "targeting": "collect_cross_hit_targets",
+    "pr_owner": "PR5",
+    "config_note": "Magic ID 34 is source-only in MDB and must be deliberately provided when enabled."
+  }
+}
