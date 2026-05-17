@@ -26,6 +26,7 @@
 
 #include "app/client_app.hpp"
 
+#include "app/auth_error_text.hpp"
 #include "scene/legacy_auth_ui.hpp"
 #include "scene/legacy_inventory_ui.hpp"
 #include "scene/legacy_magic_npc_ui.hpp"
@@ -1370,12 +1371,14 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
       if (!disconnected->reason.empty() && disconnected->reason != "client_disconnect") {
         state_.auth_phase = AuthFlowPhase::Disconnected;
         // 游戏中意外掉线：弹出重连确认框
+        const auto message =
+            legacy_auth_error_message(AuthErrorContext::disconnect, 0, disconnected->reason);
         if (state_.connection_phase == GameStateStore::ConnectionPhase::play &&
             !state_.login.account_id.empty() && !state_.login.password.empty()) {
-          show_confirm_modal(L"Disconnected", widen(disconnected->reason) + L". Reconnect?",
+          show_confirm_modal(L"Disconnected", message + L". Reconnect?",
                              [this] { request_reconnect(); });
         } else {
-          show_modal(L"Disconnected", widen(disconnected->reason));
+          show_modal(L"Disconnected", message);
         }
       }
       flush_scene_change_if_pending(context);
@@ -1440,7 +1443,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
                 return;
               }
               state_.login.status = L"Login failed";
-              show_modal(L"Login Failed", widen(value.error_message));
+              show_modal(L"Login Failed",
+                         legacy_auth_error_message(AuthErrorContext::login, value.code,
+                                                   value.error_message));
             }
 
           // 服务端要求补充账号资料（如 SSN、生日等）
@@ -1500,7 +1505,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             if (!value.success) {
               state_.lobby.server_select_pending = false;
               state_.auth_phase = AuthFlowPhase::BrowsingServers;
-              show_modal(L"Select Server Failed", widen(value.error_message));
+              show_modal(L"Select Server Failed",
+                         legacy_auth_error_message(AuthErrorContext::select_server, 0,
+                                                   value.error_message));
               return;
             }
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_select_server_ok);
@@ -1570,7 +1577,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.lobby.enter_character_pending = false;
             if (!value.success) {
               state_.auth_phase = AuthFlowPhase::BrowsingCharacters;
-              show_modal(L"Character Select Failed", widen(value.error_message));
+              show_modal(L"Character Select Failed",
+                         legacy_auth_error_message(AuthErrorContext::select_character, 0,
+                                                   value.error_message));
               return;
             }
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_start_play);
@@ -1596,7 +1605,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           } else if constexpr (std::is_same_v<T, client_v1::EnterWorldResult>) {
             if (!value.success) {
               state_.auth_phase = AuthFlowPhase::BrowsingCharacters;
-              show_modal(L"Enter World Failed", widen(value.error_message));
+              show_modal(L"Enter World Failed",
+                         legacy_auth_error_message(AuthErrorContext::enter_world, 0,
+                                                   value.error_message));
               return;
             }
             state_.pending_self_actor_id = value.self_actor_id;
@@ -1984,7 +1995,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.connection_phase = GameStateStore::ConnectionPhase::login;
             state_.auth_phase = AuthFlowPhase::EditingLogin;
             request_scene_change(SceneId::login);
-            show_modal(L"Disconnected", widen(value.text));     // 服务端发起的断开原因
+            show_modal(L"Disconnected",
+                       legacy_auth_error_message(AuthErrorContext::disconnect, value.code,
+                                                 value.text));  // 服务端发起的断开原因
 
           // ---- 心跳应答 ----
           } else if constexpr (std::is_same_v<T, client_v1::Pong>) {
@@ -1997,7 +2010,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
               state_.login.login_state = LoginState::lsNewidRetry;
               state_.login.status = L"Account creation failed. Please retry.";
               request_scene_change(SceneId::login);
-              show_modal(L"Create Account Failed", widen(value.error_message));
+              show_modal(L"Create Account Failed",
+                         legacy_auth_error_message(AuthErrorContext::create_account, value.code,
+                                                   value.error_message, state_.login.account_id));
               return;
             }
             state_.login.login_state = LoginState::lsLogin;
@@ -2021,7 +2036,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
               state_.login.needs_account_update = true;
               state_.login.login_state = LoginState::lsNewid;
               state_.login.status = L"Account update failed.";
-              show_modal(L"Update Account Failed", widen(value.error_message));
+              show_modal(L"Update Account Failed",
+                         legacy_auth_error_message(AuthErrorContext::update_account, value.code,
+                                                   value.error_message));
               return;
             }
             state_.login.needs_account_update = false;
@@ -2032,7 +2049,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           } else if constexpr (std::is_same_v<T, client_v1::ChangePasswordResult>) {
             state_.login.request_pending = false;
             if (!value.success) {
-              show_modal(L"Operation Failed", widen(value.error_message));
+              show_modal(L"Operation Failed",
+                         legacy_auth_error_message(AuthErrorContext::change_password, value.code,
+                                                   value.error_message));
               state_.login.status = L"Password change failed.";
               state_.login.login_state = LoginState::lsChgpw;
               return;
@@ -2046,7 +2065,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             if (!value.success) {
               pending_character_refresh_trace_ = PendingCharacterRefreshTrace::none;
               state_.login.status = L"Character creation failed. Please retry.";
-              show_modal(L"Create Character Failed", widen(value.error_message));
+              show_modal(L"Create Character Failed",
+                         legacy_auth_error_message(AuthErrorContext::create_character, value.code,
+                                                   value.error_message));
               return;
             }
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_new_character_success);
@@ -2058,7 +2079,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.lobby.delete_character_pending = false;
             if (!value.success) {
               pending_character_refresh_trace_ = PendingCharacterRefreshTrace::none;
-              show_modal(L"Delete Character Failed", widen(value.error_message));
+              show_modal(L"Delete Character Failed",
+                         legacy_auth_error_message(AuthErrorContext::delete_character, value.code,
+                                                   value.error_message));
               return;
             }
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_delete_character_success);
