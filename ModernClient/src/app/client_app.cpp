@@ -501,13 +501,15 @@ void ClientApp::request_login(const std::string& account_id, const std::string& 
   state_.pending_spawn_y = 0;
   state_.lobby.characters.clear();
   state_.connection_phase = GameStateStore::ConnectionPhase::login;
-  pending_connect_ = PendingConnect::login;
+  state_.auth_phase = AuthFlowPhase::ConnectingLoginGate;
+  pending_connect_ = PendingConnect::none;
   // 设置 5 秒超时提示
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for login gateway..."); });
   if (!protocol_.connect(config_.login_host, config_.login_port)) {
     state_.login.request_pending = false;
     pending_connect_ = PendingConnect::none;
+    state_.auth_phase = AuthFlowPhase::EditingLogin;
     cancel_one_shot_timer(wait_msg_timer_);
     state_.login.status = L"Login gateway connection failed.";
     show_modal(L"Connection Failed", L"Unable to connect to login gateway.");
@@ -610,6 +612,7 @@ void ClientApp::request_select_server(const std::string& server_name) {
   state_.connection_phase = GameStateStore::ConnectionPhase::login;
   state_.login.status = L"Selecting server...";
   state_.lobby.server_select_pending = true;
+  state_.auth_phase = AuthFlowPhase::WaitingServerSelection;
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for server selection..."); });
   legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_select_server);
@@ -624,6 +627,7 @@ void ClientApp::request_character_list() {
   state_.lobby.character_list_pending = true;
   state_.connection_phase = GameStateStore::ConnectionPhase::select_character;
   state_.login.status = L"Requesting character list...";
+  state_.auth_phase = AuthFlowPhase::QueryingCharacters;
   schedule_one_shot_timer(sel_chr_wait_timer_, 5.0f,
                           [this] { sel_chr_wait_timer_tick(L"Still waiting for character list..."); });
   legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_query_character);
@@ -685,6 +689,7 @@ void ClientApp::request_selected_character_enter() {
   state_.selected_character = legacy_byte_payload(
       state_.lobby.characters[static_cast<std::size_t>(state_.lobby.selected_index)].name);
   state_.lobby.enter_character_pending = true;
+  state_.auth_phase = AuthFlowPhase::WaitingStartPlay;
   schedule_one_shot_timer(sel_chr_wait_timer_, 5.0f,
                           [this] { sel_chr_wait_timer_tick(L"Still waiting for character entry..."); });
   legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_select_character);
@@ -698,6 +703,7 @@ void ClientApp::acknowledge_login_notice() {
   if (protocol_.connected()) {
     protocol_.send(client_v1::LoginNoticeOk{});
   }
+  state_.auth_phase = AuthFlowPhase::EnteringWorld;
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for world snapshot..."); });
   request_scene_change(SceneId::loading);
@@ -1313,7 +1319,7 @@ void ClientApp::handle_auto_character_list() {
 
 // 核心协议事件分发器：在每一帧的 network poll 之后调用
 // 处理三种类型的事件：
-//   1. ConnectedEvent —— 连接建立后根据 pending_connect_ 发送对应的首个请求
+//   1. ConnectedEvent —— 连接建立后根据 auth_phase 发送主链路首个请求
 //   2. DisconnectedEvent —— 连接断开处理（游戏中断线弹出重连确认）
 //   3. ProtocolFrameEvent —— 协议帧，按 MessageId 解码后分发
 void ClientApp::handle_protocol_events(ClientContext& context) {
@@ -1323,20 +1329,24 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
       // 发送客户端握手包（协议版本、构建号、资源修订号）
       protocol_.send(client_v1::ClientHello{client_v1::kProtocolVersion, config_.client_build,
                                             config_.resource_revision, 0});
-      // 根据连接类型发送对应的首个业务请求
-      if (pending_connect_ == PendingConnect::login) {
-        legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_login);
-        protocol_.send(client_v1::LoginRequest{state_.login.account_id, state_.login.password});
-      } else if (pending_connect_ == PendingConnect::create_account) {
+      // 注册/改密保留旧分支；登录主链路由 auth_phase 驱动。
+      if (pending_connect_ == PendingConnect::create_account) {
         protocol_.send(pending_create_account_);
+        pending_connect_ = PendingConnect::none;
       } else if (pending_connect_ == PendingConnect::change_password) {
         protocol_.send(pending_change_password_);
-      } else if (pending_connect_ == PendingConnect::select_character) {
+        pending_connect_ = PendingConnect::none;
+      } else if (state_.auth_phase == AuthFlowPhase::ConnectingLoginGate) {
+        state_.auth_phase = AuthFlowPhase::WaitingLoginResult;
+        legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_login);
+        protocol_.send(client_v1::LoginRequest{state_.login.account_id, state_.login.password});
+      } else if (state_.auth_phase == AuthFlowPhase::ConnectingCharacterGate) {
         request_character_list();
-      } else if (pending_connect_ == PendingConnect::game) {
+      } else if (state_.auth_phase == AuthFlowPhase::ConnectingRunGate) {
+        state_.auth_phase = AuthFlowPhase::EnteringWorld;
         protocol_.send(
             client_v1::EnterWorldRequest{state_.enter_world_token, config_.client_build,
-                                         config_.resource_revision});
+                                          config_.resource_revision});
         schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                                 [this] { wait_msg_timer_tick(L"Still waiting for world entry..."); });
       }
@@ -1358,6 +1368,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::disconnect_clears_play_ui);
       // 客户端主动发起的断开（reason="client_disconnect"）不弹提示
       if (!disconnected->reason.empty() && disconnected->reason != "client_disconnect") {
+        state_.auth_phase = AuthFlowPhase::Disconnected;
         // 游戏中意外掉线：弹出重连确认框
         if (state_.connection_phase == GameStateStore::ConnectionPhase::play &&
             !state_.login.account_id.empty() && !state_.login.password.empty()) {
@@ -1411,9 +1422,11 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
               state_.login.login_state = LoginState::lsLogin;
               state_.login.needs_account_update = false;
               state_.login.status = L"Authenticated. Waiting for server list...";
+              state_.auth_phase = AuthFlowPhase::WaitingServerList;
             } else {
               state_.login.request_pending = false;
               state_.login.needs_account_update = false;
+              state_.auth_phase = AuthFlowPhase::EditingLogin;
               // 自动播放模式：账号不存在（code=-4）时自动创建
               if (config_.auto_play.enabled && config_.auto_play.create_account &&
                   !auto_account_create_requested_ && value.code == -4) {
@@ -1438,6 +1451,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.login.needs_account_update = true;
             state_.login.login_state = LoginState::lsNewid;
             state_.login.status = L"Account details required.";
+            state_.auth_phase = AuthFlowPhase::EditingLogin;
             if (config_.auto_play.enabled) {
               protocol_.send(client_v1::UpdateAccountRequest{
                   legacy_byte_payload(value.account_id), legacy_byte_payload(state_.login.password),
@@ -1453,6 +1467,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.login.needs_account_update = false;
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_server_list);
             state_.apply(value);
+            state_.auth_phase = AuthFlowPhase::BrowsingServers;
             if (state_.lobby.servers.empty()) {
               show_modal(L"Server List", L"No game servers are available.");
               return;
@@ -1484,6 +1499,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           } else if constexpr (std::is_same_v<T, client_v1::SelectServerResult>) {
             if (!value.success) {
               state_.lobby.server_select_pending = false;
+              state_.auth_phase = AuthFlowPhase::BrowsingServers;
               show_modal(L"Select Server Failed", widen(value.error_message));
               return;
             }
@@ -1493,17 +1509,19 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
                 state_.pending_character_port == 0) {
               state_.lobby.server_select_pending = false;
               pending_connect_ = PendingConnect::none;
+              state_.auth_phase = AuthFlowPhase::BrowsingServers;
               state_.login.status = L"Server selection returned an invalid character gateway.";
               show_modal(L"Select Server Failed", L"Character gateway details were missing.");
               return;
             }
             state_.login.status = L"Connecting character gateway...";
-            pending_connect_ = PendingConnect::select_character;
+            state_.auth_phase = AuthFlowPhase::ConnectingCharacterGate;
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::connect_character_gateway);
             if (!protocol_.connect(value.address, value.port)) {
               state_.lobby.server_select_pending = false;
               state_.lobby.character_list_pending = false;
               pending_connect_ = PendingConnect::none;
+              state_.auth_phase = AuthFlowPhase::BrowsingServers;
               cancel_one_shot_timer(sel_chr_wait_timer_);
               state_.login.status = L"Character gateway connection failed.";
               show_modal(L"Connection Failed", L"Unable to connect to character gateway.");
@@ -1517,6 +1535,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_query_character);
             state_.apply(value);
             state_.connection_phase = GameStateStore::ConnectionPhase::select_character;
+            state_.auth_phase = AuthFlowPhase::BrowsingCharacters;
             state_.login.status = L"Character list received.";
             const auto character_refresh_trace_pending =
                 pending_character_refresh_trace_ != PendingCharacterRefreshTrace::none;
@@ -1550,6 +1569,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           } else if constexpr (std::is_same_v<T, client_v1::SelectCharacterResult>) {
             state_.lobby.enter_character_pending = false;
             if (!value.success) {
+              state_.auth_phase = AuthFlowPhase::BrowsingCharacters;
               show_modal(L"Character Select Failed", widen(value.error_message));
               return;
             }
@@ -1560,12 +1580,13 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             request_scene_change(SceneId::loading);
             state_.connection_phase = GameStateStore::ConnectionPhase::play;
             state_.login.status = L"Connecting game gateway...";
-            pending_connect_ = PendingConnect::game;
+            state_.auth_phase = AuthFlowPhase::ConnectingRunGate;
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::connect_game_gateway);
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::show_login_notice_or_loading);
             if (!protocol_.connect(value.address, value.port)) {
               state_.lobby.enter_character_pending = false;
               pending_connect_ = PendingConnect::none;
+              state_.auth_phase = AuthFlowPhase::BrowsingCharacters;
               cancel_one_shot_timer(wait_msg_timer_);
               state_.login.status = L"Game gateway connection failed.";
               show_modal(L"Connection Failed", L"Unable to connect to world gateway.");
@@ -1574,6 +1595,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           // 进入世界结果：保存角色出生坐标和 actor_id
           } else if constexpr (std::is_same_v<T, client_v1::EnterWorldResult>) {
             if (!value.success) {
+              state_.auth_phase = AuthFlowPhase::BrowsingCharacters;
               show_modal(L"Enter World Failed", widen(value.error_message));
               return;
             }
@@ -1583,6 +1605,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.pending_spawn_y = value.y;
             state_.connection_phase = GameStateStore::ConnectionPhase::play;
             state_.login.status = L"World admission accepted.";
+            state_.auth_phase = AuthFlowPhase::WaitingWorldSnapshot;
 
           // 世界快照：客户端收到完整的初始世界状态，切换到世界场景
           } else if constexpr (std::is_same_v<T, client_v1::WorldSnapshot>) {
@@ -1590,6 +1613,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             login_replay_active_ = false;
             login_replay_enter_selected_ = false;
             state_.login_notice = LoginNoticeViewState{};
+            state_.auth_phase = AuthFlowPhase::InGame;
             request_scene_change(SceneId::world);
 
           // ---- 以下为世界运行时的增量更新消息 ----
@@ -1933,6 +1957,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.login_notice.title = value.title;
             state_.login_notice.text = value.text;
             state_.login.status = L"Login notice received.";
+            state_.auth_phase = AuthFlowPhase::ViewingLoginNotice;
             request_scene_change(SceneId::login_notice);
           } else if constexpr (std::is_same_v<T, client_v1::SysMessage>) {
             legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::recv_sys_message_fifo);
@@ -1957,6 +1982,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             legacy_ui_lifecycle_trace(
                 legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::disconnect_clears_play_ui);
             state_.connection_phase = GameStateStore::ConnectionPhase::login;
+            state_.auth_phase = AuthFlowPhase::EditingLogin;
             request_scene_change(SceneId::login);
             show_modal(L"Disconnected", widen(value.text));     // 服务端发起的断开原因
 
@@ -1984,6 +2010,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             // 自动模式：创建成功后立即用刚注册的账号登录
             state_.login.status = L"Autoplay account ready. Logging in...";
             state_.login.request_pending = true;
+            state_.auth_phase = AuthFlowPhase::WaitingLoginResult;
             protocol_.send(client_v1::LoginRequest{
                 legacy_byte_payload(config_.auto_play.account_id),
                 legacy_byte_payload(config_.auto_play.password)});
@@ -2000,6 +2027,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.login.needs_account_update = false;
             state_.login.login_state = LoginState::lsLogin;
             state_.login.status = L"Account details updated. Waiting for server list...";
+            state_.auth_phase = AuthFlowPhase::WaitingServerList;
 
           } else if constexpr (std::is_same_v<T, client_v1::ChangePasswordResult>) {
             state_.login.request_pending = false;
