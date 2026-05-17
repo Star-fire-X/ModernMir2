@@ -189,9 +189,42 @@ function Get-CiBuildTargets {
   )
 
   $clientPhase2 = Join-Unique -Values ($clientPhase1 + @(
+    "modern_client_movement_action_gate_smoke",
+    "modern_client_legacy_move_decision_smoke",
+    "modern_client_legacy_attack_timing_smoke",
     "modern_client_item_pending_smoke",
+    "modern_client_frame_order_smoke",
+    "modern_client_scene_trace_golden_smoke",
+    "modern_client_legacy_ui_expected_trace_smoke",
+    "modern_client_legacy_ui_manager_smoke",
+    "modern_client_legacy_ui_paint_layers_smoke",
+    "modern_client_legacy_ui_input_trace_smoke",
+    "modern_client_legacy_auth_ui_trace_smoke",
+    "modern_client_legacy_auth_ui_layout_smoke",
+    "modern_client_legacy_play_ui_trace_smoke",
+    "modern_client_legacy_play_ui_layout_smoke",
+    "modern_client_legacy_inventory_ui_trace_smoke",
+    "modern_client_legacy_inventory_ui_layout_smoke",
+    "modern_client_legacy_magic_npc_ui_trace_smoke",
+    "modern_client_legacy_magic_npc_ui_layout_smoke",
+    "modern_client_legacy_trade_group_guild_ui_trace_smoke",
+    "modern_client_legacy_trade_group_guild_ui_layout_smoke",
+    "modern_client_legacy_ui_lifecycle_trace_smoke",
+    "modern_client_legacy_ui_golden_image_smoke",
+    "modern_client_legacy_ui_lifecycle_fuzz_smoke",
+    "modern_client_scene_state_fuzz_smoke",
+    "modern_client_ui_capture_process_order_smoke",
+    "modern_client_world_scene_legacy_order_smoke",
+    "modern_client_inventory_ui_smoke",
+    "modern_client_chat_magic_ui_smoke",
+    "modern_client_trade_group_guild_ui_smoke",
+    "modern_client_ui_smoke",
     "modern_client_character_select_smoke",
-    "modern_client_legacy_animation_smoke"
+    "modern_client_legacy_animation_smoke",
+    "modern_client_legacy_animation_replay_golden_smoke",
+    "modern_client_legacy_actor_event_semantics_smoke",
+    "modern_client_world_render_smoke",
+    "modern_client_combat_presentation_smoke"
   ))
 
   $clientPhase3 = Join-Unique -Values ($clientPhase2 + @(
