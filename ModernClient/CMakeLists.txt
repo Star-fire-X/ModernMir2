@@ -133,6 +133,10 @@ add_modern_client_core_smoke(modern_client_legacy_trade_group_guild_ui_layout_sm
 add_modern_client_core_smoke(modern_client_legacy_ui_lifecycle_trace_smoke tests/legacy_ui_lifecycle_trace_smoke.cpp)
 target_compile_definitions(modern_client_legacy_ui_lifecycle_trace_smoke
   PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_core_smoke(modern_client_legacy_ui_golden_image_smoke tests/legacy_ui_golden_image_smoke.cpp)
+target_compile_definitions(modern_client_legacy_ui_golden_image_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_core_smoke(modern_client_legacy_ui_lifecycle_fuzz_smoke tests/legacy_ui_lifecycle_fuzz_smoke.cpp)
 add_modern_client_header_smoke(modern_client_scene_state_fuzz_smoke tests/scene_state_fuzz_smoke.cpp)
 add_modern_client_core_smoke(modern_client_ui_capture_process_order_smoke tests/ui_capture_process_order_smoke.cpp)
 add_modern_client_core_smoke(modern_client_world_scene_legacy_order_smoke tests/world_scene_legacy_order_smoke.cpp)
@@ -177,12 +181,15 @@ add_custom_target(modern_client_ci_phase2_fast
     modern_client_legacy_trade_group_guild_ui_trace_smoke
     modern_client_legacy_trade_group_guild_ui_layout_smoke
     modern_client_legacy_ui_lifecycle_trace_smoke
+    modern_client_legacy_ui_golden_image_smoke
+    modern_client_legacy_ui_lifecycle_fuzz_smoke
     modern_client_scene_state_fuzz_smoke
     modern_client_ui_capture_process_order_smoke
     modern_client_world_scene_legacy_order_smoke
     modern_client_inventory_ui_smoke
     modern_client_chat_magic_ui_smoke
     modern_client_trade_group_guild_ui_smoke
+    modern_client_ui_smoke
     modern_client_character_select_smoke
     modern_client_legacy_animation_smoke
     modern_client_legacy_animation_replay_golden_smoke

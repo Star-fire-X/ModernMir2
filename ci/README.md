@@ -27,6 +27,10 @@ pwsh ci/scripts/run_compat_tests.ps1 -Project client -Suite phase2-fast -Config 
 server-only paths, only the client job for client-only paths, and neither for docs-only changes.
 The fast build jobs also restore/save the vcpkg binary package cache used by `sqlite3:x64-windows`.
 
+For ModernClient, `phase2-fast` intentionally runs the legacy UI trace/layout/lifecycle/fuzz
+smokes plus the synthetic UI pixel golden fixture. These tests use deterministic in-repo
+fixtures only, so they do not require real WIL/WIX/MAP/WAV assets in GitHub CI.
+
 ## Nightly Compatibility
 
 `nightly.yml` runs the larger Windows-only `phase3-nightly` suite on schedule and by manual dispatch.
@@ -54,3 +58,5 @@ pwsh ci/scripts/run_local_resource_tests.ps1 -AssetRoot "F:\mir2\Legend of Mir"
 ```
 
 The local resource script checks for `Data/` and `Map/`, then runs the client tests that require real WIL/WIX/MAP/WAV assets.
+Real Delphi screenshot or full-resource golden image parity should stay in this local/private
+resource path until the repository has a reviewed fixture or private artifact policy.

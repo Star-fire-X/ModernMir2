@@ -1,0 +1,8 @@
+# Synthetic PR-11 UI pixel fixture. Uses deterministic rect nodes only; no WIL/WIX assets.
+checksum_fnv1a64=0xF8B552C8143A4103
+background_10_10=0xFF000000
+window_110_110=0xFF202020
+top_140_140=0xFF404040
+hint_170_170=0xFF606060
+moving_200_200=0xFF808080
+background_300_300=0xFF000000

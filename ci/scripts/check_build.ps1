@@ -70,6 +70,22 @@ function Resolve-RequestedCMakeGenerator {
 
 $ResolvedGenerator = Resolve-CMakeGenerator (Resolve-RequestedCMakeGenerator)
 
+function Get-CiBuildParallelArgs {
+  $requested = @($env:CI_BUILD_PARALLEL_LEVEL, $env:CMAKE_BUILD_PARALLEL_LEVEL) |
+      Where-Object { $_ } |
+      Select-Object -First 1
+
+  if ($requested) {
+    $jobs = 0
+    if (-not [int]::TryParse($requested, [ref]$jobs) -or $jobs -le 0) {
+      Fail "CI build parallel level must be a positive integer, got '$requested'."
+    }
+    return @("--parallel", "$jobs")
+  }
+
+  return @("--parallel")
+}
+
 function Resolve-VcpkgToolchain {
   param([string]$RequestedToolchainFile = "")
 
@@ -154,6 +170,7 @@ function Invoke-CMakeBuild {
   }
 
   Write-Host "Building $Name ($Config)..."
+  $buildParallelArgs = @(Get-CiBuildParallelArgs)
   if ($Suite) {
     $targets = @(Get-CiBuildTargets -Suite $Suite -ProjectName $Name)
     if ($targets.Count -eq 0) {
@@ -168,19 +185,19 @@ function Invoke-CMakeBuild {
 
     if ($aggregateTarget) {
       Write-Host "Using aggregate CI target: $aggregateTarget"
-      cmake --build $buildDir --config $Config --parallel --target $aggregateTarget
+      cmake --build $buildDir --config $Config @buildParallelArgs --target $aggregateTarget
       if ($LASTEXITCODE -ne 0) {
         Fail "$Name aggregate target $aggregateTarget build failed. Fix the first compiler/linker error before changing tests or CI policy."
       }
     } else {
-      $buildArgs = @("--build", $buildDir, "--config", $Config, "--parallel", "--target") + $targets
+      $buildArgs = @("--build", $buildDir, "--config", $Config) + $buildParallelArgs + @("--target") + $targets
       cmake @buildArgs
       if ($LASTEXITCODE -ne 0) {
         Fail "$Name CI suite '$Suite' build failed. Fix the first compiler/linker error before changing tests or CI policy."
       }
     }
   } else {
-    cmake --build $buildDir --config $Config --parallel
+    cmake --build $buildDir --config $Config @buildParallelArgs
     if ($LASTEXITCODE -ne 0) {
       Fail "$Name build failed. Fix the first compiler/linker error before changing tests or CI policy."
     }
