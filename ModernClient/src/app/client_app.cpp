@@ -488,6 +488,7 @@ void ClientApp::request_login(const std::string& account_id, const std::string& 
   state_.login.account_id = legacy_byte_payload(account_id);
   state_.login.password = legacy_byte_payload(password);
   state_.login.login_state = LoginState::lsLogin;
+  state_.login.pending_focus = LoginPendingFocus::none;
   state_.login_notice = LoginNoticeViewState{};
   // 清除可能残留的上次登录记录
   state_.enter_world_token.clear();
@@ -699,12 +700,17 @@ void ClientApp::request_selected_character_enter() {
 
 // 确认登录公告：向服务端发送 LoginNoticeOk，然后切换到加载场景等待世界快照
 void ClientApp::acknowledge_login_notice() {
+  if (state_.auth_phase != AuthFlowPhase::ViewingLoginNotice) {
+    return;
+  }
+  legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::login_notice_ok);
   state_.login.status = L"Login notice accepted. Waiting for world...";
   state_.login_notice = LoginNoticeViewState{};
   if (protocol_.connected()) {
     protocol_.send(client_v1::LoginNoticeOk{});
   }
   state_.auth_phase = AuthFlowPhase::EnteringWorld;
+  legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::waiting_world_snapshot);
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for world snapshot..."); });
   request_scene_change(SceneId::loading);
@@ -1443,6 +1449,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
                 return;
               }
               state_.login.status = L"Login failed";
+              state_.login.pending_focus = LoginPendingFocus::password;
+              legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_login_failure);
+              legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::show_login_error_modal);
               show_modal(L"Login Failed",
                          legacy_auth_error_message(AuthErrorContext::login, value.code,
                                                    value.error_message));
@@ -2446,17 +2455,16 @@ void ClientApp::show_modal(const std::wstring& title, const std::wstring& messag
   modal_confirm_action_ = {};
   modal_has_cancel_ = false;
   modal_enter_confirms_ = true;
-  // 计算对话框居中位置
-  const auto dialog_rect =
-      centered_rect(assets_.get_frame(ArchiveId::prguse, kMessageDialogIndex),
-                    kNativeClientWidth, kNativeClientHeight, 360, 180);
+  const auto layout = legacy_auth_ui::legacy_message_modal_layout(
+      sprite_rect(assets_.get_frame(ArchiveId::prguse, kMessageDialogIndex), 0, 0, 360, 180));
   // 创建全屏根节点（用于屏蔽点击穿透）
   auto* root = modal_ui_.set_root<ui::UiNode>(RectI{0, 0, kNativeClientWidth, kNativeClientHeight});
   // 添加"确定"按钮
-  auto* button = add_modal_button(root, assets_, kMessageOkButtonIndex,
-                                  dialog_rect.x + (dialog_rect.w - 88) / 2,
-                                  dialog_rect.y + 126);
+  auto* button =
+      add_modal_button(root, assets_, kMessageOkButtonIndex, layout.ok_button.x,
+                       layout.ok_button.y);
   button->on_click = [this] {
+    legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::modal_ok);
     state_.hide_modal();
     modal_ui_.clear();
     modal_confirm_action_ = {};
@@ -2478,14 +2486,13 @@ void ClientApp::show_confirm_modal(const std::wstring& title, const std::wstring
   modal_confirm_action_ = std::move(on_confirm);
   modal_has_cancel_ = true;
   modal_enter_confirms_ = true;
-  const auto dialog_rect =
-      centered_rect(assets_.get_frame(ArchiveId::prguse, kMessageDialogIndex),
-                    kNativeClientWidth, kNativeClientHeight, 360, 180);
+  const auto layout = legacy_auth_ui::legacy_message_modal_layout(
+      sprite_rect(assets_.get_frame(ArchiveId::prguse, kMessageDialogIndex), 0, 0, 360, 180));
   auto* root = modal_ui_.set_root<ui::UiNode>(RectI{0, 0, kNativeClientWidth, kNativeClientHeight});
   // "是"按钮
   auto* ok_button =
-      add_modal_button(root, assets_, kMessageYesButtonIndex, dialog_rect.x + 104,
-                       dialog_rect.y + 126);
+      add_modal_button(root, assets_, kMessageYesButtonIndex, layout.yes_button.x,
+                       layout.yes_button.y);
   ok_button->on_click = [this] {
     auto on_confirm = std::move(modal_confirm_action_);
     state_.hide_modal();
@@ -2498,8 +2505,8 @@ void ClientApp::show_confirm_modal(const std::wstring& title, const std::wstring
   };
   // "取消"按钮：如果是在 lsCloseAll（退出确认）状态下取消，恢复登录状态
   auto* cancel_button =
-      add_modal_button(root, assets_, kMessageCancelButtonIndex, dialog_rect.x + 210,
-                       dialog_rect.y + 126);
+      add_modal_button(root, assets_, kMessageCancelButtonIndex, layout.cancel_button.x,
+                       layout.cancel_button.y);
   cancel_button->on_click = [this] {
     state_.hide_modal();
     modal_ui_.clear();
@@ -2566,7 +2573,11 @@ void ClientApp::process_modal_input() {
   }
   if (modal_enter_confirms_ &&
       (mapped_input_.key_pressed[VK_RETURN] || mapped_input_.enter_pressed)) {
+    const auto trace_modal_ok = !modal_confirm_action_ && !modal_has_cancel_;
     auto on_confirm = std::move(modal_confirm_action_);
+    if (trace_modal_ok) {
+      legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::modal_ok);
+    }
     state_.hide_modal();
     modal_ui_.clear();
     modal_has_cancel_ = false;
@@ -2596,18 +2607,22 @@ void ClientApp::render_modal() {
     return;
   }
   const auto dialog_frame = assets_.get_frame(ArchiveId::prguse, kMessageDialogIndex);
+  const auto layout = legacy_auth_ui::legacy_message_modal_layout(
+      sprite_rect(dialog_frame, 0, 0, 360, 180));
   const auto dialog_rect =
-      centered_rect(dialog_frame, renderer_.logical_width(), renderer_.logical_height(), 360, 180);
+      centered_rect(dialog_frame, renderer_.logical_width(), renderer_.logical_height(),
+                    layout.dialog.w, layout.dialog.h);
   draw_sprite(renderer_, dialog_frame, dialog_rect.x, dialog_rect.y);
   if (!state_.modal.title.empty()) {
     const auto title_x =
         dialog_rect.x + std::max(39, (dialog_rect.w - renderer_.measure_text_width(state_.modal.title)) / 2);
     draw_legacy_bold_text(renderer_, title_x, dialog_rect.y + 20, state_.modal.title, 0xFFFFFFFFU);
   }
-  auto y = dialog_rect.y + 38;
+  auto y = dialog_rect.y + (layout.text_origin.y - layout.dialog.y);
   for (const auto& line : split_modal_lines(state_.modal.message)) {
     if (!line.empty()) {
-      draw_legacy_bold_text(renderer_, dialog_rect.x + 39, y, line, 0xFFFFFFFFU);
+      draw_legacy_bold_text(renderer_, dialog_rect.x + (layout.text_origin.x - layout.dialog.x),
+                            y, line, 0xFFFFFFFFU);
     }
     y += 14;
   }
