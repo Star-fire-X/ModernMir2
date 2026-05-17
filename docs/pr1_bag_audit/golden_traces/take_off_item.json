@@ -1,0 +1,21 @@
+{
+  "name": "take_off_item",
+  "source": "static_delphi_review",
+  "description": "Take-off appends equipment item to bag, then sends OK before add-item.",
+  "events": [
+    {"seq": 1, "actor": "client", "action": "WaitingUseItem = equipment item"},
+    {"seq": 2, "direction": "client_to_server", "message": "CM_TAKEOFFITEM", "recog": "MakeIndex", "param": "equip slot", "body": "item name"},
+    {"seq": 3, "actor": "server", "action": "validate UseItems[slot].MakeIndex and name"},
+    {"seq": 4, "actor": "server", "action": "AddItem(equipped item); UseItems[slot].Index = 0"},
+    {"seq": 5, "direction": "server_to_client", "message": "SM_TAKEOFF_OK", "recog": "Feature"},
+    {"seq": 6, "direction": "server_to_client", "message": "SM_ADDITEM", "body": "TClientItem"},
+    {"seq": 7, "direction": "server_to_client", "message": "SM_ABILITY"},
+    {"seq": 8, "direction": "server_to_client", "message": "SM_SUBABILITY"},
+    {"seq": 9, "direction": "server_to_client", "message": "SM_FEATURECHANGED"}
+  ],
+  "failure_events": [
+    {"seq": 1, "direction": "server_to_client", "message": "SM_TAKEOFF_FAIL"},
+    {"seq": 2, "actor": "client", "action": "restore WaitingUseItem to equipment slot"}
+  ],
+  "identity": "CM_TAKEOFFITEM Recog is MakeIndex; Param is equip slot"
+}

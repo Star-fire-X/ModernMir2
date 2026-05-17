@@ -1,0 +1,14 @@
+{
+  "name": "drag_reorder_local_only",
+  "source": "static_delphi_review",
+  "description": "Pure bag-to-bag drag is local ItemArr movement and sends no CM packet.",
+  "events": [
+    {"seq": 1, "actor": "client", "action": "select ItemArr[source_slot]; ItemMoving=true; clear source visual slot"},
+    {"seq": 2, "actor": "client", "action": "drop on destination bag slot"},
+    {"seq": 3, "actor": "client", "action": "if occupied, swap ItemArr[destination] and MovingItem"},
+    {"seq": 4, "actor": "client", "action": "if empty, place MovingItem and clear moving state"},
+    {"seq": 5, "actor": "client", "action": "ArrangeItemBag"},
+    {"seq": 6, "direction": "client_to_server", "message": "none"}
+  ],
+  "identity": "local ItemArr slot only; server identity unchanged"
+}

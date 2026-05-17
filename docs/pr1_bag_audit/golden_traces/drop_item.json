@@ -1,0 +1,26 @@
+{
+  "name": "drop_item",
+  "source": "static_delphi_review",
+  "description": "Item drop creates ground item before removing from server bag.",
+  "events": [
+    {"seq": 1, "actor": "client", "action": "DropMovingItem sends request and AddDropItem pending copy"},
+    {"seq": 2, "direction": "client_to_server", "message": "CM_DROPITEM", "recog": "MakeIndex", "body": "item name"},
+    {"seq": 3, "actor": "server", "action": "UserDropItem scans ItemList by MakeIndex and name"},
+    {"seq": 4, "actor": "server", "action": "DropItemDown creates ground item"},
+    {"seq": 5, "actor": "server", "action": "Dispose item pointer; ItemList.Delete(index)"},
+    {"seq": 6, "direction": "server_to_client", "message": "RM_WEIGHTCHANGED"},
+    {"seq": 7, "direction": "server_to_client", "message": "SM_DROPITEM_SUCCESS", "recog": "MakeIndex", "body": "item name"}
+  ],
+  "failure_events": [
+    {"seq": 1, "direction": "server_to_client", "message": "SM_DROPITEM_FAIL", "recog": "MakeIndex", "body": "item name"},
+    {"seq": 2, "actor": "client", "action": "ClientGetDropItemFail restores pending dropped item"}
+  ],
+  "special_item_events": [
+    {"seq": 1, "actor": "client", "action": "non-gold special item uses DropMovingItem without confirmation"},
+    {"seq": 2, "direction": "client_to_server", "message": "CM_DROPITEM", "recog": "MakeIndex", "body": "item name"},
+    {"seq": 3, "actor": "server", "action": "UserDropItem rejects TAIWANEVENTITEM"},
+    {"seq": 4, "direction": "server_to_client", "message": "SM_DROPITEM_FAIL", "recog": "MakeIndex", "body": "item name"},
+    {"seq": 5, "actor": "client", "action": "ClientGetDropItemFail restores pending dropped item"}
+  ],
+  "identity": "CM_DROPITEM Recog is MakeIndex"
+}
