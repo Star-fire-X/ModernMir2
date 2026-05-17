@@ -228,6 +228,11 @@ struct LegacyAttackThrottleResult {
   std::int32_t over_count{0};
 };
 
+[[nodiscard]] inline std::uint64_t legacy_server_attack_interval_ms(
+    const std::int32_t hit_speed) {
+  return static_cast<std::uint64_t>(std::max(200, 900 - hit_speed * 60));
+}
+
 enum class LegacyPlayerState {
   loading,
   ready,

@@ -17,7 +17,9 @@ int main() {
   world.action_lock_started_ms = 1000;
   assert(!server_accept_next_action(world, 1100));
   assert(!can_next_action(world, self, 1100));
-  assert(!server_accept_next_action(world, 11001));
+  assert(!server_accept_next_action(world, 11000));
+  assert(world.action_locked);
+  assert(server_accept_next_action(world, 11001));
   assert(!world.action_locked);
   assert(can_next_action(world, self, 11001));
   assert(server_accept_next_action(world, 11002));
@@ -49,6 +51,11 @@ int main() {
   assert(!world.action_fail_lock);
 
   GameStateStore state;
+  state.world.action_locked = true;
+  state.apply(ActionAck{true, 0});
+  assert(!state.world.action_locked);
+  assert(!state.world.action_fail_lock);
+
   WorldSnapshot snapshot;
   snapshot.self_actor_id = 1;
   snapshot.actors.push_back(WorldActor{1, "Hero", 30, 20, 2, 0, 0, ActorType::player});
