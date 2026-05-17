@@ -851,8 +851,7 @@ LegacySpellThrottleResult Player::begin_spell_attempt(std::uint64_t now_ms,
 }
 
 LegacyAttackThrottleResult Player::begin_attack_attempt(std::uint64_t now_ms) {
-  const auto interval_ms =
-      static_cast<std::uint64_t>(std::max(200, 900 - legacy_hit_speed_ * 60));
+  const auto interval_ms = legacy_server_attack_interval_ms(legacy_hit_speed_);
   if (latest_hit_time_ms_ != 0 && now_ms - latest_hit_time_ms_ < interval_ms) {
     ++hit_time_over_count_;
     ++hit_time_over_sum_;

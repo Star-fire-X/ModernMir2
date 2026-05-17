@@ -9,6 +9,7 @@
 #include "protocol/legacy_game_codec.hpp"
 #include "protocol/legacy_types.hpp"
 #include "shared/legacy/action_ids.hpp"
+#include "world/game_object.hpp"
 #include "world/logic_runtime.hpp"
 
 namespace {
@@ -169,13 +170,13 @@ mir2::LogicCommand enter(std::uint64_t session_id, mir2::CharacterRecord record)
 }
 
 mir2::LogicCommand attack(std::uint64_t session_id, std::int32_t x, std::int32_t y,
-                          std::uint16_t ident = mir2::kCmHit) {
+                          std::uint16_t ident = mir2::kCmHit, std::uint8_t dir = 0) {
   mir2::LogicCommand command;
   command.kind = mir2::LogicCommandKind::attack;
   command.session_id = session_id;
   command.x = x;
   command.y = y;
-  command.dir = 0;
+  command.dir = dir;
   command.game_message.ident = ident;
   return command;
 }
@@ -254,6 +255,38 @@ void assert_equipped_hit_speed_reduces_interval() {
   assert(count_ack(dispatch, 103, true) == 1);
 }
 
+void assert_server_attack_interval_formula() {
+  assert(mir2::legacy_server_attack_interval_ms(0) == 900);
+  assert(mir2::legacy_server_attack_interval_ms(5) == 600);
+  assert(mir2::legacy_server_attack_interval_ms(10) == 300);
+  assert(mir2::legacy_server_attack_interval_ms(12) == 200);
+  assert(mir2::legacy_server_attack_interval_ms(99) == 200);
+  assert(mir2::legacy_server_attack_interval_ms(-1) == 960);
+}
+
+void assert_no_target_attack_consumes_cooldown() {
+  auto config = base_config();
+  config.spawns.push_back(target("CooldownTarget", 10, 9));
+  mir2::LogicRuntime runtime(config);
+  runtime.initialize();
+  enter_player(runtime, 106, character("NoTargetHero"));
+
+  static_cast<void>(runtime.route_logic_command(attack(106, 1, 1, mir2::kCmHit, 2)));
+  auto dispatch = tick_player(runtime, 2000);
+  assert(count_ack(dispatch, 106, true) == 1);
+  assert(has_trace(dispatch, "LegacyCombat", "no_target"));
+
+  static_cast<void>(runtime.route_logic_command(attack(106, 10, 9)));
+  dispatch = tick_player(runtime, 2800);
+  assert(count_ack(dispatch, 106, false) == 1);
+  assert(has_trace(dispatch, "LegacyCombat", "attack_cooldown_reject"));
+
+  static_cast<void>(runtime.route_logic_command(attack(106, 10, 9)));
+  dispatch = tick_player(runtime, 3700);
+  assert(count_ack(dispatch, 106, true) == 1);
+  assert(has_trace(dispatch, "LegacyCombat", "struck"));
+}
+
 void assert_repeated_fast_attack_disconnects() {
   auto config = base_config();
   config.spawns.push_back(target("HackTarget", 10, 9));
@@ -310,9 +343,11 @@ void assert_rejected_attack_keeps_prepared_sword_skill() {
 }  // namespace
 
 int main() {
+  assert_server_attack_interval_formula();
   assert_budget_batch_rejects_second_attack();
   assert_base_interval_allows_later_attack();
   assert_equipped_hit_speed_reduces_interval();
+  assert_no_target_attack_consumes_cooldown();
   assert_repeated_fast_attack_disconnects();
   assert_rejected_attack_keeps_prepared_sword_skill();
   return 0;

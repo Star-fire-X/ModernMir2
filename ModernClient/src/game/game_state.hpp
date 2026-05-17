@@ -444,6 +444,7 @@ inline bool server_accept_next_action(WorldViewState& world, const std::uint64_t
   }
   if (elapsed_ms(now, world.action_lock_started_ms) > 10000U) {
     world.action_locked = false;
+    return true;
   }
   return false;
 }
@@ -508,19 +509,27 @@ inline bool can_next_action(const WorldViewState& world, const ActorState& self,
   return !actor_action_animating(self, now);
 }
 
+inline std::int32_t legacy_next_hit_delay_ms(const std::int32_t level,
+                                             const std::int32_t hit_speed,
+                                             const bool attack_slow) {
+  auto level_fast = std::min(370, level * 14);
+  level_fast = std::min(800, level_fast + hit_speed * 60);
+  auto next_hit = 1400 - level_fast;
+  if (attack_slow) {
+    next_hit += 1500;
+  }
+  return std::max(0, next_hit);
+}
+
 /// 检查角色是否可以发起下一次攻击
 inline bool can_next_hit(const WorldViewState& world, const ActorState& self,
                          const std::uint64_t now) {
   if (self.dead) {
     return false;
   }
-  auto level_fast = std::min(370, static_cast<int>(world.self_ability_detail.level) * 14);
-  level_fast = std::min(800, level_fast + static_cast<int>(world.self_ability_detail.speed) * 60);
-  auto next_hit = 1400 - level_fast;
-  if (world.attack_slow) {
-    next_hit += 1500;
-  }
-  next_hit = std::max(0, next_hit);
+  const auto next_hit = legacy_next_hit_delay_ms(
+      static_cast<std::int32_t>(world.self_ability_detail.level),
+      world.self_ability_detail.speed, world.attack_slow);
   return world.latest_hit_ms == 0 ||
          elapsed_ms(now, world.latest_hit_ms) > static_cast<std::uint64_t>(next_hit);
 }
