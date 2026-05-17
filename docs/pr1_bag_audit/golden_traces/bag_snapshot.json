@@ -1,0 +1,19 @@
+{
+  "name": "bag_snapshot",
+  "source": "static_delphi_review",
+  "description": "Full bag refresh uses compact server ItemList order for non-empty bags; empty bags emit no SM_BAGITEMS.",
+  "events": [
+    {"seq": 1, "direction": "client_to_server", "message": "CM_QUERYBAGITEMS"},
+    {"seq": 2, "actor": "server", "action": "iterate ItemList[0..Count-1]"},
+    {"seq": 3, "direction": "server_to_client", "message": "SM_BAGITEMS", "series": "ItemList.Count", "body": "TClientItem records separated by /"},
+    {"seq": 4, "actor": "client", "action": "FillChar(ItemArr); AddItemBag(each TClientItem)"},
+    {"seq": 5, "actor": "client", "action": "optional restore saved .itm layout by identity"},
+    {"seq": 6, "actor": "client", "action": "ArrangeItemBag; BoBagLoaded=true"}
+  ],
+  "empty_bag_events": [
+    {"seq": 1, "direction": "client_to_server", "message": "CM_QUERYBAGITEMS"},
+    {"seq": 2, "actor": "server", "action": "SendBagItems builds empty data"},
+    {"seq": 3, "actor": "server", "action": "no SM_BAGITEMS is sent because data is empty"}
+  ],
+  "identity": "TClientItem.MakeIndex plus TClientItem.S.Name"
+}
