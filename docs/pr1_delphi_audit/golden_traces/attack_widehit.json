@@ -44,12 +44,23 @@
     },
     {
       "stage": "server_damage",
-      "rule": "Every valid fan target uses the same base damage; Delphi does not apply secondary-target falloff.",
+      "rule": "Every valid fan DirectAttack target uses the same base damage; Delphi does not apply secondary-target falloff. The normal main-target _Attack path still runs separately.",
       "messages": [
         {
           "type": "SM_STRUCK",
           "id": 31,
-          "per_target": true
+          "delay_ms": 200,
+          "condition": "adjacent main target exists and the normal _Attack hit check passes",
+          "delphi_line": "ObjBase.pas:5432-5449",
+          "note": "Main-target struck is queued by the normal _Attack path."
+        },
+        {
+          "type": "SM_STRUCK",
+          "id": 31,
+          "delay_ms": 500,
+          "per_directattack_target": true,
+          "delphi_line": "ObjBase.pas:5261-5265, ObjBase.pas:5285-5304",
+          "note": "DirectAttack queues visible struck after 500ms; non-human targets also receive immediate internal RM_STRUCK for AI reaction."
         }
       ]
     },

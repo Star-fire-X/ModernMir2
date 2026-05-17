@@ -112,8 +112,8 @@
 | G1 | 半月弯刀三格目标无伤害衰减 | ObjBase.pas:5285-5304 | PR5 |
 | G2 | 十字斩 PvP 目标使用 80% 伤害 | ObjBase.pas:5320-5323 | PR5 |
 | G3 | 当前 Delphi 版本无 `dueltime` 字段, 攻击节流使用 `LatestHitTime` | 全局搜索: 0 matches; ObjBase.pas:9309 | PR3 |
-| G4 | 施毒术 `nofire:=TRUE`, 不发送普通弹道 | Magic.pas:736 | PR7/PR8 |
-| G5 | 隐身术/集体隐身术 `nofire:=TRUE` | Magic.pas:919-930 | PR8 |
+| G4 | 施毒术 `nofire:=TRUE` 是失败路径保护; 成功/抗毒抵抗会重置为 FALSE 并发送普通弹道 | Magic.pas:736-794, 983-998 | PR7/PR8 |
+| G5 | 隐身术/集体隐身术 `nofire:=TRUE` 是失败路径保护; shared bujuk 成功后重置为 FALSE 并发送普通弹道 | Magic.pas:919-933, 983-998 | PR8 |
 | G6 | AC/MAC range 使用 `ShortInt` 转换 | ObjBase.pas:3433 | PR4 |
 
 ---

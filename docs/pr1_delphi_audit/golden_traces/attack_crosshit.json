@@ -48,7 +48,18 @@
         {
           "type": "SM_STRUCK",
           "id": 31,
-          "per_target": true
+          "delay_ms": 200,
+          "condition": "adjacent main target exists and the normal _Attack hit check passes",
+          "delphi_line": "ObjBase.pas:5432-5449",
+          "note": "Main-target struck is queued by the normal _Attack path."
+        },
+        {
+          "type": "SM_STRUCK",
+          "id": 31,
+          "delay_ms": 500,
+          "per_directattack_target": true,
+          "delphi_line": "ObjBase.pas:5261-5265, ObjBase.pas:5306-5332",
+          "note": "DirectAttack queues visible struck after 500ms; non-human targets also receive immediate internal RM_STRUCK for AI reaction."
         }
       ]
     }

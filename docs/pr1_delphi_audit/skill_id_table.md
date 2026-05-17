@@ -75,7 +75,7 @@
 - 技能等级缩放: GetPower13 (有50%基底, 50%-100%)
 - 护身符: U_BUJUK (首选) 或 U_ARMRINGL (备选), StdMode=25
 - 毒粉: Shape≤2 (1=灰/绿毒, 2=黄/红毒), Dura≥100
-- nofire=true: 隐身/毒类技能不发送SM_MAGICFIRE
+- nofire=true 是失败路径默认保护; 成功施毒/隐身分支会重置为 FALSE 并发送普通 SM_MAGICFIRE, 缺道具或目标失败才走 SM_MAGICFIRE_FAIL
 
 ---
 

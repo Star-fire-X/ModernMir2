@@ -1,11 +1,12 @@
 {
   "flow": "spell_fireball",
-  "description": "CM_SPELL(magic_id=1) → SM_SPELL → SM_MAGICFIRE → RM_DELAYMAGIC(600ms) → SM_STRUCK → HP变化",
+  "description": "CM_SPELL(magic_id=1) → SM_SPELL → SM_MAGICFIRE → RM_DELAYMAGIC(600ms) → RM_MAGSTRUCK/RM_STRUCK_MAG → SM_STRUCK → HP变化",
   "delphi_source": {
     "client": "ClMain.pas:1797-1873 UseMagic",
     "server_entry": "ObjBase.pas:12112 CM_SPELL → SpellXY(1, tx, ty, targ)",
     "spell_dispatch": "Magic.pas:441 SpellNow → 548-570 (case 1/5)",
-    "mag_helper": "Magic.pas:55-58 MPow, Magic.pas:449-453 GetPower"
+    "mag_helper": "Magic.pas:55-58 MPow, Magic.pas:449-453 GetPower",
+    "delayed_damage": "ObjBase.pas:7437-7462 RM_MAGSTRUCK → SendRefMsg(RM_STRUCK_MAG)"
   },
   "stages": [
     {
@@ -73,9 +74,9 @@
       "stage": "server_delayed_damage",
       "action": "600ms later: RM_DELAYMAGIC fires",
       "sub_stages": [
-        {"action": "GetHitStruckDamage → magic damage with MAC reduction"},
-        {"action": "SendDelayMsg(RM_STRUCK, ... 200ms)"},
-        {"action": "HealthSpellChanged"}
+        {"action": "target.SendMsg(self, RM_MAGSTRUCK, 0, magpwr, 0, 0, '')", "delphi_line": "ObjBase.pas:7437"},
+        {"action": "GetMagStruckDamage → StruckDamage → HealthSpellChanged", "delphi_line": "ObjBase.pas:7448-7457"},
+        {"action": "SendRefMsg(RM_STRUCK_MAG, ...) immediately", "message_type": "SM_STRUCK", "message_id": 31, "extra_delay_ms": 0, "delphi_line": "ObjBase.pas:7458, ObjBase.pas:12572-12614", "fields": {"magic_hit_flag": "lTag2=1"}}
       ]
     },
     {
@@ -98,7 +99,7 @@
     },
     {
       "stage": "client_receive_struck",
-      "action": "收到 SM_STRUCK (31) [+200ms delay]",
+      "action": "收到 SM_STRUCK (31) [after RM_DELAYMAGIC 600ms; no extra 200ms struck delay]",
       "handlers": [
         {"action": "ReadyAction(SM_STRUCK) → ActStruck: 3f×70ms=210ms"}
       ]

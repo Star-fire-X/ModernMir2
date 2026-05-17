@@ -1,14 +1,16 @@
 {
   "flow": "struck_delay_player_vs_monster",
-  "description": "Delphi sends player struck with 200ms delay but monster struck immediately",
+  "description": "Delphi queues client-visible SM_STRUCK with 200ms delay for main-target hits and 500ms delay for secondary DirectAttack sword-skill hits; monster targets also receive an immediate internal RM_STRUCK AI message.",
   "delphi_source": {
-    "player_delay": "ObjBase.pas:5449 SendDelayMsg(RM_STRUCK, ..., 200)",
-    "monster_immediate": "ObjBase.pas:5542 SendMsg(RM_STRUCK)",
+    "main_visible_struck_delay": "ObjBase.pas:5449 targ.SendDelayMsg(RM_STRUCK, ..., 200)",
+    "main_monster_internal_immediate": "ObjBase.pas:5542 targ.SendMsg(targ, RM_STRUCK, ...) for non-human AI reaction",
+    "directattack_visible_struck_delay": "ObjBase.pas:5261-5262 target.SendDelayMsg(RM_STRUCK, ..., 500)",
+    "directattack_monster_internal_immediate": "ObjBase.pas:5264-5265 target.SendMsg(target, RM_STRUCK, ...) for non-human AI reaction",
     "client_handler": "Actor.pas:1215-1219 ReadyAction(SM_STRUCK)"
   },
   "stages": [
     {
-      "stage": "attack_hits_player",
+      "stage": "main_attack_hits_player",
       "message_type": "SM_STRUCK",
       "message_id": 31,
       "delay_ms": 200,
@@ -19,10 +21,10 @@
       }
     },
     {
-      "stage": "attack_hits_monster",
+      "stage": "main_attack_hits_monster_visible",
       "message_type": "SM_STRUCK",
       "message_id": 31,
-      "delay_ms": 0,
+      "delay_ms": 200,
       "fields": {
         "target": "RC_ANIMAL/monster",
         "damage": "<final_damage>",
@@ -30,12 +32,50 @@
       }
     },
     {
+      "stage": "main_monster_internal_reaction",
+      "message_type": "RM_STRUCK",
+      "client_visible": false,
+      "delay_ms": 0,
+      "condition": "target.RaceServer <> RC_USERHUMAN",
+      "fields": {
+        "target": "RC_ANIMAL/monster",
+        "damage": "<final_damage>",
+        "hp": "<monster_hp>"
+      },
+      "note": "Immediate SendMsg at ObjBase.pas:5542 feeds monster RunMsg/AI state; it is not the client-visible SM_STRUCK packet."
+    },
+    {
+      "stage": "secondary_directattack_visible",
+      "message_type": "SM_STRUCK",
+      "message_id": 31,
+      "delay_ms": 500,
+      "condition": "secondary sword-skill hit through DirectAttack (long/wide/cross)",
+      "fields": {
+        "target": "RC_USERHUMAN or RC_ANIMAL/monster",
+        "damage": "<secondary_damage>",
+        "hp": "<target_hp>"
+      }
+    },
+    {
+      "stage": "secondary_directattack_monster_internal_reaction",
+      "message_type": "RM_STRUCK",
+      "client_visible": false,
+      "delay_ms": 0,
+      "condition": "DirectAttack target.RaceServer <> RC_USERHUMAN",
+      "fields": {
+        "target": "RC_ANIMAL/monster",
+        "damage": "<secondary_damage>",
+        "hp": "<monster_hp>"
+      },
+      "note": "Immediate SendMsg at ObjBase.pas:5264-5265 feeds monster RunMsg/AI state for secondary sword-skill hits."
+    },
+    {
       "stage": "ordering_rule",
-      "rule": "SM_HIT/skill action remains visible immediately; player struck is delayed independently of the attack action packet."
+      "rule": "SM_HIT/skill action remains visible immediately; main-target SM_STRUCK is delayed 200ms, secondary DirectAttack SM_STRUCK is delayed 500ms. Monster AI may react internally before either visible struck packet."
     }
   ],
   "cplusplus_mapping": {
-    "current_risk": "Frame-end queueing may collapse the 200ms player delay unless PR2/PR9 preserve it explicitly.",
-    "pr_owner": "PR2/PR9"
+    "current_risk": "Frame-end queueing may collapse the 200ms main-target and 500ms DirectAttack visible struck delays unless PR2/PR9 preserve them explicitly.",
+    "pr_owner": "PR2/PR5/PR9"
   }
 }

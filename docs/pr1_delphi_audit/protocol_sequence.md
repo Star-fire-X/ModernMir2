@@ -13,18 +13,18 @@
 | CM_WALK | 3011 | 走路 | x, y, dir | - | ActionIntent(kind=walk) |
 | CM_SITDOWN | 3012 | 坐下 | - | - | - |
 | CM_RUN | 3013 | 跑步 | x, y, dir | - | ActionIntent(kind=run) |
-| CM_HIT | 3014 | 普通攻击 | target_id, x, y, dir | kCmHit | ActionIntent(kind=attack, legacy_ident=kCmHit) |
-| CM_HEAVYHIT | 3015 | 攻杀 | 同上 | kCmHeavyHit | ActionIntent(legacy_ident=kCmHeavyHit) |
-| CM_BIGHIT | 3016 | 烈火攻击 | 同上 | kCmBigHit | ActionIntent(legacy_ident=kCmBigHit) |
+| CM_HIT | 3014 | 普通攻击 | self_x, self_y, dir, feature=0, state=0 | kCmHit | ActionIntent(kind=attack, legacy_ident=kCmHit) |
+| CM_HEAVYHIT | 3015 | 攻杀 | 同 CM_HIT | kCmHeavyHit | ActionIntent(legacy_ident=kCmHeavyHit) |
+| CM_BIGHIT | 3016 | 烈火攻击 | 同 CM_HIT | kCmBigHit | ActionIntent(legacy_ident=kCmBigHit) |
 | CM_SPELL | 3017 | 施法 | magic_id, target_id, x, y, dir | - | SpellIntent(magic_id) |
-| CM_POWERHIT | 3018 | 气功 | (同) | kCmPowerHit | ActionIntent(legacy_ident=kCmPowerHit) |
-| CM_LONGHIT | 3019 | 刺杀 | (同) | kCmLongHit | ActionIntent(legacy_ident=kCmLongHit) |
-| CM_WIDEHIT | 3024 | 半月 | (同) | kCmWideHit | ActionIntent(legacy_ident=kCmWideHit) |
-| CM_FIREHIT | 3025 | 烈火命中 | (同) | kCmFireHit | ActionIntent(legacy_ident=kCmFireHit) |
-| CM_CROSSHIT | 3035 | 十字斩 | (同) | kCmCrossHit | ActionIntent(legacy_ident=kCmCrossHit) |
+| CM_POWERHIT | 3018 | 气功 | 同 CM_HIT | kCmPowerHit | ActionIntent(legacy_ident=kCmPowerHit) |
+| CM_LONGHIT | 3019 | 刺杀 | 同 CM_HIT | kCmLongHit | ActionIntent(legacy_ident=kCmLongHit) |
+| CM_WIDEHIT | 3024 | 半月 | 同 CM_HIT | kCmWideHit | ActionIntent(legacy_ident=kCmWideHit) |
+| CM_FIREHIT | 3025 | 烈火命中 | 同 CM_HIT | kCmFireHit | ActionIntent(legacy_ident=kCmFireHit) |
+| CM_CROSSHIT | 3035 | 十字斩 | 同 CM_HIT | kCmCrossHit | ActionIntent(legacy_ident=kCmCrossHit) |
 | CM_THROW | 3005 | 投掷 | (stub) | - | - |
 
-**注意**: CM_* 与 SM_* 的对应关系: `SM = CM - 3000` (Actor.pas:1118)
+**注意**: 多数 Actor 泛用动作遵循 `SM = CM - 3000` (Actor.pas:1118), 但 `CM_FIREHIT(3025) -> SM_FIREHIT(8)` 是显式例外; 其他非动作包也不适用该规则。
 
 ---
 
@@ -104,13 +104,14 @@
          │      │   │   → SendDelayMsg(RM_STRUCK, 200ms delay, to target)
          │      │   │   → SM_HEALTHSPELLCHANGED (53) to self+open_health
          │      │   └─ MISS: 无消息给目标
-         │      ├─ SwordLongAttack (刺杀): DirectAttack at range 2
-         │      ├─ SwordWideAttack (半月): DirectAttack×3 (正前+左前+右前)
-         │      └─ SwordCrossAttack (十字): DirectAttack×7 (PvP80%)
+         │      ├─ SwordLongAttack (刺杀): range-2 DirectAttack → visible RM_STRUCK 500ms
+         │      ├─ SwordWideAttack (半月): fan DirectAttack×3 → visible RM_STRUCK 500ms
+         │      └─ SwordCrossAttack (十字): cross DirectAttack×7 (PvP80%) → visible RM_STRUCK 500ms
+         │      (normal main-target _Attack path still queues visible RM_STRUCK 200ms when applicable)
          │      → 技能训练 RM_MAGIC_LVEXP (1000ms delay)
          ├─ (3) HitMotion(msg, dir, cx, cy)
          │      → SendRefMsg(RM_HIT, dir, cx, cy, 0, '')  // SM_HIT (14)
-         └─ (4) 怪物目标: SendMsg(RM_STRUCK, immediate)
+         └─ (4) 怪物目标: SendMsg(RM_STRUCK, immediate internal AI reaction)
 
 帧 N+ω: [客户端] 收到 SM_HIT → ProcMsg → ReadyAction(SM_HIT)
          → CalcActorFrame(HIT) → 播放 hit:6f×85ms=510ms 动画
@@ -147,8 +148,8 @@
   (3) SendDelayMsg(RM_DELAYMAGIC, pwr, pos, 2, target, '', 600)
   (4) needfire:=TRUE → SendRefMsg(RM_MAGICFIRE, ...)          // SM_MAGICFIRE (638)
   (5) 训练: SendDelayMsg(RM_MAGIC_LVEXP, ..., 1000ms)
-  (6) 600ms后: 服务端处理 RM_DELAYMAGIC → GetHitStruckDamage → 伤害
-       → SendDelayMsg(RM_STRUCK, ...200ms)  // SM_STRUCK (31)
+  (6) 600ms后: 服务端处理 RM_DELAYMAGIC → RM_MAGSTRUCK → GetMagStruckDamage → 伤害
+       → SendRefMsg(RM_STRUCK_MAG, immediate)  // SM_STRUCK (31), lTag2=1, no extra 200ms
 
 [客户端]
   收到 SM_HEALTHSPELLCHANGED (53) → MP刷新
@@ -305,8 +306,9 @@
 | 半月无衰减 | `SwordWideAttack` 三格使用同一 damage | PR5 不按副目标衰减 |
 | 十字PvP 80% | `SwordCrossAttack` 对玩家 `Round(damage*0.8)` | PR5 区分玩家/怪物目标 |
 | 烈火倍率 | 基础伤害后 `Round(dam/100*(HitDouble*10))` | PR4/PR5 使用 Delphi rounding |
-| 怪物RM_STRUCK immediate | SendMsg (无延迟) | PR2/PR9 trace 校验或记录兼容差异 |
-| 玩家RM_STRUCK 200ms delay | SendDelayMsg(200ms) | PR2/PR9 trace 校验或记录兼容差异 |
+| 客户端可见RM_STRUCK 200ms delay | 主目标 `SendDelayMsg(200ms)` 对玩家/怪物都适用 | PR2/PR9 trace 校验或记录兼容差异 |
+| 客户端可见DirectAttack RM_STRUCK 500ms delay | 刺杀/半月/十字二级命中 `SendDelayMsg(500ms)` | PR5/PR9 trace 校验或记录兼容差异 |
+| 怪物RM_STRUCK immediate | 非玩家主目标和 DirectAttack 目标额外 `SendMsg` (无延迟), 仅供 RunMsg/AI 内部反应 | PR2/PR5/PR9 区分内部消息与客户端可见包 |
 
 **关键风险**: C++ frame-end dispatch 一次性发送所有 queued 消息, 而 Delphi 使用 `SendDelayMsg` 分时发送。这可能导致客户端在同一帧收到更多消息。
 
@@ -316,7 +318,7 @@
 
 | 项目 | PR1 结论 | 后续 PR |
 |------|----------|---------|
-| Delphi `SendDelayMsg(200ms)` vs C++ frame-end dispatch | 玩家 `RM_STRUCK` 延迟、怪物即时已经冻结为行为基线。 | PR2/PR9 |
+| Delphi `SendDelayMsg` vs C++ frame-end dispatch | 客户端可见主目标 `SM_STRUCK` 200ms、DirectAttack 二级命中 500ms 已经冻结; 怪物即时 `RM_STRUCK` 仅为内部反应消息。 | PR2/PR5/PR9 |
 | 施毒/隐身 `nofire:=TRUE` | 默认抑制失败路径后处理; 成功分支重置为 FALSE 并发送普通 `SM_MAGICFIRE`。 | PR7/PR8 |
 | 死亡消息顺序 | 经验、PK惩罚、掉落先结算, 最后广播 `SM_DEATH`。 | PR9/PR12 |
 | SM_RUSH vs SM_RUSHKUNG | 是否成功推人决定动作消息。 | PR5 |

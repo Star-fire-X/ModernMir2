@@ -218,7 +218,7 @@ Power计算:
   → 600ms延迟, 服务端在延迟后对目标造成伤害
 
 训练: train := TRUE if target.RaceServer >= RC_ANIMAL
-失败: target := nil (不造成伤害, 但消息已发)
+失败: target := nil; 不排 RM_DELAYMAGIC/不造成伤害, 但入口 SM_SPELL 已发且后处理仍发送普通 RM_MAGICFIRE
 
 Random调用:
   - Random(10) → 抗魔判定 [0,9]

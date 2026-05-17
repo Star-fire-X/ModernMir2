@@ -90,7 +90,7 @@
           "action": "send_rm_struck",
           "message_type": "RM_STRUCK (SM_STRUCK:31)",
           "delay_ms": 200,
-          "condition": "target is RC_USERHUMAN",
+          "condition": "main target took positive damage; client-visible SM_STRUCK is delayed for player and monster targets",
           "fields": {"damage": "<final_damage>", "hp": "<target.HP>", "max_hp": "<target.MaxHP>"}
         },
         {
