@@ -2173,6 +2173,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       break;
     }
     case ActorMailKind::attack: {
+      constexpr std::int32_t kLegacyMainStruckDelayMs = 200;
       auto attacker_it = objects_.find(mail.actor_id);
       if (attacker_it == objects_.end()) {
         break;
@@ -2458,11 +2459,16 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         if (watcher.id() != target->id() && !is_legacy_visible_to(watcher, *target)) {
           return;
         }
-        queue_packet(dispatch, watcher.session_id(),
-                     target_died ? make_death_packet(watcher.session_id(), *target,
-                                                     watcher.id() == target->id())
-                                 : make_struck_packet(watcher.session_id(), *target, attacker->id(),
-                                                      applied_damage, false));
+        if (target_died) {
+          queue_packet(dispatch, watcher.session_id(),
+                       make_death_packet(watcher.session_id(), *target,
+                                         watcher.id() == target->id()));
+        } else {
+          queue_packet(dispatch, watcher.session_id(),
+                       make_struck_packet(watcher.session_id(), *target, attacker->id(),
+                                          applied_damage, false),
+                       kLegacyMainStruckDelayMs);
+        }
       });
       add_legacy_trace(dispatch, "LegacyCombat", target_died ? "death" : "struck", effective_mail,
                        current_tick, now_ms, true, 0, applied_damage,

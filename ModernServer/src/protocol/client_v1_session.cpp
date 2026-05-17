@@ -38,6 +38,33 @@ void ClientV1Session::send(const client_v1::Message& message) {
   });
 }
 
+void ClientV1Session::send(const client_v1::Message& message, std::chrono::milliseconds delay) {
+  if (delay.count() <= 0) {
+    send(message);
+    return;
+  }
+
+  auto self = shared_from_this();
+  asio::dispatch(strand_, [this, self, message, delay] {
+    if (closed_) {
+      return;
+    }
+    auto timer = std::make_shared<asio::steady_timer>(strand_);
+    timer->expires_after(delay);
+    timer->async_wait(asio::bind_executor(
+        strand_, [this, self, message, timer](const std::error_code& error) {
+          if (error || closed_) {
+            return;
+          }
+          outbound_frames_.push_back(
+              client_v1::encode_frame(client_v1::encode_any(message, next_sequence_++)));
+          if (!writing_) {
+            do_write();
+          }
+        }));
+  });
+}
+
 void ClientV1Session::send_disconnect_and_close(std::uint16_t code, std::string reason) {
   auto self = shared_from_this();
   asio::dispatch(strand_, [this, self, code, reason = std::move(reason)]() mutable {
