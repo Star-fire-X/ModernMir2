@@ -7120,6 +7120,7 @@ class WorldScene final : public Scene {
     }
     map_.reset();
     loaded_map_id_.clear();
+    reported_missing_map_id_.clear();
     animation_.reset();
     audio_cues_.reset();
     legacy_hud_.reset();
@@ -8170,11 +8171,18 @@ class WorldScene final : public Scene {
     if (context.assets == nullptr) {
       return;
     }
-    if (loaded_map_id_ == context.state->world.map_id && map_ != nullptr) {
+    if (loaded_map_id_ == context.state->world.map_id) {
       return;
     }
     loaded_map_id_ = context.state->world.map_id;
     map_ = context.assets->load_map(loaded_map_id_);
+    if (map_ == nullptr && reported_missing_map_id_ != loaded_map_id_) {
+      std::string line{"[mir2-resource] missing map: "};
+      line.append(loaded_map_id_);
+      line.push_back('\n');
+      OutputDebugStringA(line.c_str());
+      reported_missing_map_id_ = loaded_map_id_;
+    }
     audio_cues_.reset();
   }
 
@@ -8650,6 +8658,7 @@ class WorldScene final : public Scene {
   }
 
   std::string loaded_map_id_{};
+  std::string reported_missing_map_id_{};
   std::shared_ptr<const MapDocument> map_{};
   AnimationManager animation_{};
   LegacyAudioCueTracker audio_cues_{};
