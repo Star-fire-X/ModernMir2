@@ -184,6 +184,7 @@ function Get-CiBuildTargets {
   $clientPhase1 = @(
     "modern_mir2_client",
     "modern_client_asset_smoke",
+    "modern_client_startup_resource_check_smoke",
     "modern_client_protocol_map_smoke",
     "modern_client_flow_smoke",
     "modern_client_auth_gate_flow_smoke",

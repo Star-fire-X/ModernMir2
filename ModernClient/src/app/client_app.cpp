@@ -27,6 +27,7 @@
 #include "app/client_app.hpp"
 
 #include "app/auth_error_text.hpp"
+#include "app/startup_resource_check.hpp"
 #include "scene/legacy_auth_ui.hpp"
 #include "scene/legacy_inventory_ui.hpp"
 #include "scene/legacy_magic_npc_ui.hpp"
@@ -36,7 +37,6 @@
 #include "ui/legacy_ui.hpp"
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <fstream>
 #include <filesystem>
@@ -260,24 +260,6 @@ std::wstring resolve_default_asset_root() {
   return {};
 }
 
-std::vector<int> missing_required_prguse_frames(AssetManager& assets) {
-  constexpr std::array kRequiredFrames{
-      1,   3,   4,   5,   6,   7,   8,   9,   10,  11,  15,  16,
-      17,  18,  19,  26,  29,  128, 130, 132, 134, 136, 138, 140,
-      229, 230, 232, 234, 236, 238, 240, 242, 244, 246, 248, 249,
-      250, 251, 252, 253, 254, 255, 360, 361, 363, 365, 367, 370,
-      371, 372, 373, 376, 377, 382, 383, 385, 386, 387, 388, 392,
-      393, 396, 398};
-  std::vector<int> missing;
-  for (const auto index : kRequiredFrames) {
-    const auto frame = assets.get_frame(ArchiveId::prguse, index);
-    if (frame == nullptr || frame->empty()) {
-      missing.push_back(index);
-    }
-  }
-  return missing;
-}
-
 }  // namespace
 
 // 默认构造，所有子系统在其各自的默认构造函数中初始化为空状态
@@ -304,11 +286,33 @@ bool ClientApp::initialize() {
   if (!renderer_.initialize(window_.handle(), kNativeClientWidth, kNativeClientHeight)) {
     return false;
   }
-  // 加载资源管理器（WIL/WIX/地图文件索引）
-  if (!assets_.initialize(config_.asset_root)) {
+
+  const auto show_startup_resource_failure =
+      [this](const StartupResourceCheckResult& result) {
+        const auto report = format_startup_resource_report(result, config_.asset_root);
+        OutputDebugStringW((report + L"\n").c_str());
+        MessageBoxW(window_.handle(), report.c_str(), L"Resource Check", MB_OK | MB_ICONERROR);
+      };
+
+  const auto root_check = check_startup_asset_root(config_.asset_root);
+  if (!root_check.ok()) {
+    show_startup_resource_failure(root_check);
     return false;
   }
-  const auto missing_frames = missing_required_prguse_frames(assets_);
+
+  // 加载资源管理器（WIL/WIX/地图文件索引）
+  if (!assets_.initialize(config_.asset_root)) {
+    StartupResourceCheckResult result;
+    result.fatal_issues.push_back(StartupResourceIssue{
+        StartupResourceSeverity::fatal, {}, -1, L"asset_root could not be initialized"});
+    show_startup_resource_failure(result);
+    return false;
+  }
+  const auto auth_resource_check = check_startup_auth_resources(assets_);
+  if (!auth_resource_check.ok()) {
+    show_startup_resource_failure(auth_resource_check);
+    return false;
+  }
   // 初始化音频服务并加载 Delphi sound.lst；音频失败不阻塞客户端启动。
   audio_.initialize(config_.asset_root, window_.handle());
   audio_.apply_settings(config_.audio);
@@ -317,15 +321,6 @@ bool ClientApp::initialize() {
   refresh_mapped_input();
   ClientContext context{this, &config_, &state_, &assets_, &audio_, &renderer_, &mapped_input_};
   scenes_.initialize(context);
-  if (!missing_frames.empty()) {
-    std::wstringstream message;
-    message << L"Missing Prguse frames:";
-    for (const auto index : missing_frames) {
-      message << L" " << index;
-    }
-    OutputDebugStringW((message.str() + L"\n").c_str());
-    show_modal(L"Resource Check", message.str());
-  }
   return true;
 }
 

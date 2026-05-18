@@ -25,6 +25,7 @@ target_include_directories(modern_client_headers
 
 set(MODERN_CLIENT_CORE_SOURCES
   src/app/client_app.cpp
+  src/app/startup_resource_check.cpp
   src/audio/direct_sound_audio_backend.cpp
   src/audio/audio_id_mapping.cpp
   src/audio/legacy_audio_cue_tracker.cpp
@@ -102,6 +103,7 @@ function(add_modern_client_test_core_smoke target source)
 endfunction()
 
 add_modern_client_core_smoke(modern_client_asset_smoke tests/asset_smoke.cpp)
+add_modern_client_core_smoke(modern_client_startup_resource_check_smoke tests/startup_resource_check_smoke.cpp)
 add_modern_client_header_smoke(modern_client_protocol_map_smoke tests/protocol_map_smoke.cpp)
 add_modern_client_header_smoke(modern_client_flow_smoke tests/client_flow_smoke.cpp)
 add_modern_client_header_smoke(modern_client_auth_error_text_smoke tests/auth_error_text_smoke.cpp)
@@ -182,6 +184,7 @@ add_custom_target(modern_client_ci_phase2_fast
   DEPENDS
     modern_mir2_client
     modern_client_asset_smoke
+    modern_client_startup_resource_check_smoke
     modern_client_protocol_map_smoke
     modern_client_flow_smoke
     modern_client_auth_error_text_smoke
