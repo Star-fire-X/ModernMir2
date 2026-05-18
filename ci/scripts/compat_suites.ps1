@@ -205,6 +205,12 @@ function Get-CiBuildTargets {
     "modern_client_legacy_ui_input_trace_smoke",
     "modern_client_legacy_auth_ui_trace_smoke",
     "modern_client_legacy_auth_ui_layout_smoke",
+    "modern_client_delphi_auth_trace_contract_smoke",
+    "modern_client_delphi_ui_manifest_smoke",
+    "modern_client_auth_ui_manifest_contract_smoke",
+    "modern_client_auth_ui_screenshot_golden_smoke",
+    "modern_client_auth_animation_frame_smoke",
+    "modern_client_auth_modal_focus_audio_matrix_smoke",
     "modern_client_legacy_play_ui_trace_smoke",
     "modern_client_legacy_play_ui_layout_smoke",
     "modern_client_legacy_inventory_ui_trace_smoke",
@@ -241,7 +247,9 @@ function Get-CiBuildTargets {
     "modern_client_scene_audio_smoke",
     "modern_client_audio_service_smoke",
     "modern_client_legacy_sound_rules_smoke",
-    "modern_client_legacy_audio_cue_tracker_smoke"
+    "modern_client_legacy_audio_cue_tracker_smoke",
+    "modern_client_auth_animation_real_asset_frame_smoke",
+    "modern_client_auth_ui_real_asset_screenshot_smoke"
   ))
 
   if ($ProjectName -eq "ModernServer") {
@@ -450,6 +458,16 @@ function Get-CiQuarantinedTests {
       Project = "ModernClient"
       Test = "modern_client_legacy_audio_cue_tracker_smoke"
       Reason = "Requires real Wav resources; run with ci/scripts/run_local_resource_tests.ps1 instead."
+    },
+    [pscustomobject]@{
+      Project = "ModernClient"
+      Test = "modern_client_auth_animation_real_asset_frame_smoke"
+      Reason = "Requires real ChrSel resources; run with ci/scripts/run_local_resource_tests.ps1 instead."
+    },
+    [pscustomobject]@{
+      Project = "ModernClient"
+      Test = "modern_client_auth_ui_real_asset_screenshot_smoke"
+      Reason = "Requires real Prguse/Prguse2 assets; run with ci/scripts/run_local_resource_tests.ps1 instead."
     }
   )
 }
@@ -462,6 +480,8 @@ function Get-LocalResourceTestNames {
     "modern_client_wav_reader_smoke",
     "modern_client_audio_service_smoke",
     "modern_client_scene_audio_smoke",
-    "modern_client_legacy_audio_cue_tracker_smoke"
+    "modern_client_legacy_audio_cue_tracker_smoke",
+    "modern_client_auth_animation_real_asset_frame_smoke",
+    "modern_client_auth_ui_real_asset_screenshot_smoke"
   )
 }
