@@ -1,0 +1,11 @@
+# asset-free Delphi auth UI deterministic render
+login_idle hash=0x454106aa753c2ac3 p350,259=0xff3c4f5d p391,325=0xff8d9486 p472,188=0xff647985
+login_error_modal hash=0x86202d9ad5d195e8 p350,259=0xff5b3c31 p391,325=0xff5b3c31 p472,188=0xff647985 p259,248=0xffc4bca4 p356,336=0xff8d9486
+server_select_1 hash=0xe879546c5cb6bf3b p250,120=0xff26333d p313,334=0xff8d9486
+server_select_8 hash=0x5137b79b1bc45843 p250,120=0xff26333d p313,187=0xff8d9486
+server_select_16 hash=0xcb0a592a91f62a03 p198,120=0xff26333d p223,187=0xff8d9486
+server_select_24 hash=0x4caa1881a444d66f p108,120=0xff26333d p133,187=0xff8d9486
+character_select_empty hash=0x6af18e90f98b294e p385,456=0xff8d9486 p400,8=0xffc4bca4 p120,150=0xff26333d p460,152=0xff26333d
+character_select_one hash=0xb63639dfde37f811 p385,456=0xff8d9486 p400,8=0xffc4bca4 p120,150=0xff733d8e p460,152=0xff26333d
+character_select_two hash=0x9d641b101a46b322 p385,456=0xff8d9486 p400,8=0xffc4bca4 p120,150=0xff733d8e p460,152=0xff957234
+login_notice_ok hash=0x31b8c3a22a48cf10 p259,248=0xffc4bca4 p356,336=0xff8d9486

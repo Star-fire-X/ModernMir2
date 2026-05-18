@@ -1,0 +1,6 @@
+# local real-resource Delphi auth UI render
+login_idle hash=0x024ac5c10dddf7c4 p350,259=0xff080000 p391,325=0xff1d1818 p472,188=0xff353129
+login_error_modal hash=0xca07609b768db65e p350,259=0xff181008 p391,325=0xff181008 p472,188=0xff353129 p356,336=0xff080000
+server_select_24 hash=0x445d48511937cdb2 p108,120=0xff000000 p133,187=0xff635a5a p473,481=0xff423939
+character_select_empty hash=0x29895cdd9d2a11f4 p385,456=0xff5a5239 p133,453=0xff080000 p685,454=0xff1d1818
+login_notice_ok hash=0x8a9928ee2b8e16b3 p356,336=0xff080000

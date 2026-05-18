@@ -1,0 +1,27 @@
+# asset-free Delphi auth animation timeline
+login_door t=0 cur=0 sprite=23 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=230 cur=0 sprite=23 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=231 cur=1 sprite=24 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=461 cur=1 sprite=24 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=462 cur=2 sprite=25 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=692 cur=2 sprite=25 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=693 cur=3 sprite=26 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=923 cur=3 sprite=26 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=924 cur=4 sprite=27 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=1154 cur=4 sprite=27 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=1155 cur=5 sprite=28 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=1385 cur=5 sprite=28 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=1386 cur=6 sprite=29 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=1616 cur=6 sprite=29 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=1617 cur=7 sprite=30 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=1847 cur=7 sprite=30 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=1848 cur=8 sprite=31 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=2078 cur=8 sprite=31 fade_out=0 fade_in=0 fade_before_main=0 fade_after_main=0 scene_ready=0
+login_door t=2079 cur=9 sprite=32 fade_out=1 fade_in=1 fade_before_main=29 fade_after_main=1 scene_ready=0
+login_door t=2080 cur=9 sprite=32 fade_out=1 fade_in=1 fade_before_main=1 fade_after_main=1 scene_ready=1
+door_fade trigger=frame9 flags=DoFadeOut+DoFadeIn initial=29 main_paint=1 next_login_scene=stSelectChr
+start_character_fast_fade trigger=SelChrStartClick flags=DoFastFadeOut initial=29 main_paint=1 scene_change=server_driven
+character_unfreeze job=1 sex=0 slot=1 origin=417,48 body_sprites=100,101,102,103,104,105,106,107,108,109,110,111,112 threshold=>120 complete=idle0 draw_before_advance=1
+character_unfreeze_effect slot=1 origin=430,60 effect_sprites=4,5,6,7,8,9,10,11,12,13,14,15,16,17 threshold=>110 draw_blend=1
+character_freeze job=1 sex=0 slot=0 origin=77,46 body_sprites=112,111,110,109,108,107,106,105,104,103,102,101,100 threshold=>50 complete=frozen0 draw_before_advance=1
+character_idle job=1 sex=0 slot=0 origin=77,46 body_sprites=80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,80 threshold=>300 wrap=1 draw_before_advance=1
