@@ -62,6 +62,7 @@ mir2::RuntimeDispatch say(mir2::LogicRuntime& runtime, std::uint64_t session_id,
   command.kind = mir2::LogicCommandKind::say;
   command.session_id = session_id;
   command.text = std::move(text);
+  command.timestamp_ms = now_ms;
   static_cast<void>(runtime.route_logic_command(command));
   return runtime.tick(now_ms);
 }
@@ -173,7 +174,8 @@ bool check_guild_chat(mir2::LogicRuntime& runtime) {
 }
 
 bool check_shout(mir2::LogicRuntime& runtime) {
-  const auto dispatch = say(runtime, 1, "!hi", 2255);
+  static_cast<void>(runtime.tick(11255));
+  const auto dispatch = say(runtime, 1, "!hi", 11506);
   return has_packet(dispatch, 1, mir2::kSmHear, 0, mir2::make_word(0, 151),
                     "(!)Alice:hi") &&
          has_packet(dispatch, 2, mir2::kSmHear, 0, mir2::make_word(0, 151),
@@ -185,13 +187,13 @@ bool check_shout(mir2::LogicRuntime& runtime) {
 }
 
 bool check_group_is_silent(mir2::LogicRuntime& runtime) {
-  const auto dispatch = say(runtime, 1, "!!hi", 2506);
+  const auto dispatch = say(runtime, 1, "!!hi", 11757);
   return !has_text(dispatch, 1, "Alice: !!hi") &&
          packets(dispatch, 1, mir2::kSmSysMessage).empty();
 }
 
 bool check_unknown_command_is_silent(mir2::LogicRuntime& runtime) {
-  const auto dispatch = say(runtime, 1, "@NoSuchCmd", 2757);
+  const auto dispatch = say(runtime, 1, "@NoSuchCmd", 12008);
   return !has_text(dispatch, 1, "Alice: @NoSuchCmd") &&
          packets(dispatch, 1, mir2::kSmHear).empty();
 }
@@ -208,7 +210,7 @@ bool check_system_packet_builder(mir2::LogicRuntime& runtime) {
   static_cast<void>(runtime.route_actor_mail(mail));
   const auto dispatch = runtime.tick();
   return has_packet(dispatch, 1, mir2::kSmSysMessage, static_cast<std::int32_t>(alice),
-                    mir2::make_word(196, 255), "-Alice: hi");
+                    mir2::make_word(255, 56), "-Alice: hi");
 }
 
 }  // namespace

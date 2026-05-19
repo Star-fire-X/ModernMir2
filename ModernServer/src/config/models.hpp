@@ -159,6 +159,7 @@ struct MapConfig {
   std::int32_t mine_map{0};
   std::string back_map{};
   std::vector<MapGateConfig> gates{};
+  bool quiz_zone{false};
 };
 
 struct SpawnConfig {

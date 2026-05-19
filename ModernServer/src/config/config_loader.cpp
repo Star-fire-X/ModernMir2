@@ -684,6 +684,7 @@ void load_maps(const std::filesystem::path& directory, HostConfig& config,
     map.need_level = value_or<int>(table, "need_level", value_or<int>(table, "level", 0));
     map.mine_map = value_or<int>(table, "mine_map", value_or<int>(table, "mine", 0));
     map.back_map = value_or<std::string>(table, "back_map", {});
+    map.quiz_zone = value_or<bool>(table, "quiz_zone", value_or<bool>(table, "quiz", false));
     map.allow_pk = value_or<bool>(table, "allow_pk", !map.law_full);
     if (auto safe_zones = table["safe_zones"].as_array()) {
       for (const auto& zone_node : *safe_zones) {

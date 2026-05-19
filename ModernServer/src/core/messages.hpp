@@ -209,6 +209,7 @@ struct LogicCommand {
   std::int32_t client_version{0};
   std::int32_t client_checksum{0};
   bool start_new{false};
+  std::uint64_t timestamp_ms{0};
 };
 
 enum class ActorMailKind {

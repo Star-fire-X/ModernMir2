@@ -94,6 +94,7 @@ class WorldService : public Module {
   std::size_t session_action_reject_count_{0};
 #endif
   std::uint64_t next_ingress_seq_{0};
+  std::uint64_t current_frame_now_ms_{0};
   mutable std::mutex gate_events_mutex_{};
   std::deque<SessionEvent> pending_gate_events_{};
   std::uint64_t run_socket_last_flushed_{0};

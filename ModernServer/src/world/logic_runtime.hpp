@@ -36,6 +36,11 @@ struct LegacyRuntimeContext {
   std::size_t player_input_budget_per_tick{0};
 };
 
+struct LegacyShutUpEntry {
+  std::string character_name{};
+  std::uint64_t expire_ms{0};
+};
+
 class LogicRuntime {
  public:
   explicit LogicRuntime(HostConfig config);
@@ -66,6 +71,10 @@ class LogicRuntime {
       std::string_view character_name) const;
   [[nodiscard]] std::optional<MonsterSnapshot> legacy_monster_snapshot(
       std::string_view map_id, std::uint64_t actor_id) const;
+  void add_legacy_shut_up(std::string_view character_name, std::uint64_t duration_ms,
+                          std::uint64_t now_ms);
+  void release_legacy_shut_up(std::string_view character_name);
+  [[nodiscard]] std::vector<LegacyShutUpEntry> legacy_shut_up_entries() const;
   [[nodiscard]] std::size_t map_count() const { return maps_.size(); }
   [[nodiscard]] std::size_t online_session_count() const { return session_index_.size(); }
   [[nodiscard]] std::uint64_t current_tick() const { return current_tick_; }
@@ -100,6 +109,12 @@ class LogicRuntime {
     std::uint64_t actor_id{0};
     std::string account_id{};
     std::string character_name{};
+    std::string latest_say_text{};
+    std::uint64_t bomb_say_time_ms{0};
+    std::int32_t bomb_say_count{0};
+    std::uint64_t auto_shut_up_until_ms{0};
+    bool has_latest_cry_time{false};
+    std::uint64_t latest_cry_time_ms{0};
   };
 
   struct CloseRecord {
@@ -137,7 +152,8 @@ class LogicRuntime {
   [[nodiscard]] ActorMail make_player_mail(const LogicCommand& command,
                                            const ActorLocator& locator) const;
   [[nodiscard]] bool route_legacy_chat_command(const LogicCommand& command,
-                                               const ActorLocator& locator,
+                                               ActorLocator& locator,
+                                               std::uint64_t now_ms,
                                                RuntimeDispatch& dispatch);
   [[nodiscard]] bool is_merchant_npc_config(const NpcConfig& npc,
                                             const ActorMail& mail) const;
@@ -179,6 +195,7 @@ class LogicRuntime {
   CastleDialogContext castle_dialog_context_{};
   GuildCastleSnapshot guild_castle_snapshot_{};
   std::unordered_map<std::string, MerchantStateRecord> merchant_states_{};
+  std::unordered_map<std::string, LegacyShutUpEntry> legacy_shut_up_list_{};
   std::unordered_map<std::string, std::unique_ptr<MapActor>> maps_{};
   std::vector<std::string> map_order_{};
   std::unordered_map<std::uint64_t, ActorLocator> session_index_{};
