@@ -31,6 +31,10 @@ std::string normalized_key(std::string_view value) {
   return util::lower_copy(util::trim(std::string(value)));
 }
 
+std::string legacy_character_key(std::string_view value) {
+  return util::lower_copy(std::string(value));
+}
+
 const ItemConfig* find_item_config_by_name(
     const std::unordered_map<std::int32_t, ItemConfig>& item_configs, std::string_view name) {
   const auto wanted = normalized_key(name);
@@ -417,6 +421,7 @@ void LogicRuntime::initialize() {
   monster_defs_.clear();
   monster_drops_.clear();
   item_configs_by_name_.clear();
+  legacy_shut_up_list_.clear();
   monster_groups_.clear();
   merchant_order_.clear();
   npc_order_.clear();
@@ -590,6 +595,35 @@ void LogicRuntime::set_guild_castle_snapshot(GuildCastleSnapshot guild_castle_sn
   }
 }
 
+void LogicRuntime::add_legacy_shut_up(std::string_view character_name,
+                                      std::uint64_t duration_ms,
+                                      std::uint64_t now_ms) {
+  const auto key = legacy_character_key(character_name);
+  if (key.empty()) {
+    return;
+  }
+  auto& entry = legacy_shut_up_list_[key];
+  if (entry.character_name.empty() || now_ms > entry.expire_ms) {
+    entry.character_name = std::string(character_name);
+    entry.expire_ms = now_ms + duration_ms;
+  } else {
+    entry.expire_ms += duration_ms;
+  }
+}
+
+void LogicRuntime::release_legacy_shut_up(std::string_view character_name) {
+  legacy_shut_up_list_.erase(legacy_character_key(character_name));
+}
+
+std::vector<LegacyShutUpEntry> LogicRuntime::legacy_shut_up_entries() const {
+  std::vector<LegacyShutUpEntry> entries;
+  entries.reserve(legacy_shut_up_list_.size());
+  for (const auto& [_, entry] : legacy_shut_up_list_) {
+    entries.push_back(entry);
+  }
+  return entries;
+}
+
 bool LogicRuntime::has_live_or_closing_character(std::string_view character_name) const {
   const auto key = util::lower_copy(std::string(character_name));
   if (key.empty()) {
@@ -727,8 +761,12 @@ ActorMail LogicRuntime::make_player_mail(const LogicCommand& command,
 }
 
 bool LogicRuntime::route_legacy_chat_command(const LogicCommand& command,
-                                             const ActorLocator& locator,
+                                             ActorLocator& locator,
+                                             std::uint64_t now_ms,
                                              RuntimeDispatch& dispatch) {
+  constexpr std::uint64_t kBombSayWindowMs = 3000;
+  constexpr std::uint64_t kAutoShutUpMs = 60ULL * 1000ULL;
+  constexpr std::uint64_t kCryCooldownMs = 10ULL * 1000ULL;
   const auto parsed = parse_legacy_chat_input(command.text);
 
   auto queue_delivery = [&](std::string map_id, std::uint64_t actor_id,
@@ -745,12 +783,53 @@ bool LogicRuntime::route_legacy_chat_command(const LogicCommand& command,
     mail.payload = std::move(payload);
     append_dispatch(dispatch, route_actor_mail(mail));
   };
+  auto queue_system = [&](std::string payload) {
+    queue_delivery(locator.map_id, locator.actor_id, LegacyChatDeliveryKind::system,
+                   std::move(payload), locator.actor_id);
+  };
 
   switch (parsed.kind) {
     case LegacyChatInputKind::empty:
       return true;
     case LegacyChatInputKind::command:
       return false;
+    default:
+      break;
+  }
+
+  if (command.text == locator.latest_say_text &&
+      now_ms >= locator.bomb_say_time_ms &&
+      now_ms - locator.bomb_say_time_ms < kBombSayWindowMs) {
+    ++locator.bomb_say_count;
+    if (locator.bomb_say_count >= 2) {
+      locator.auto_shut_up_until_ms = now_ms + kAutoShutUpMs;
+      queue_system("[由于您重复发出相同内容，一分钟内将被禁止交谈。]");
+    }
+  } else {
+    locator.latest_say_text = command.text;
+    locator.bomb_say_time_ms = now_ms;
+    locator.bomb_say_count = 0;
+  }
+
+  if (now_ms > locator.auto_shut_up_until_ms) {
+    locator.auto_shut_up_until_ms = 0;
+  }
+  auto shut_up = locator.auto_shut_up_until_ms != 0;
+  const auto shut_up_key = legacy_character_key(locator.character_name);
+  if (auto shut_up_it = legacy_shut_up_list_.find(shut_up_key);
+      shut_up_it != legacy_shut_up_list_.end()) {
+    if (now_ms > shut_up_it->second.expire_ms) {
+      legacy_shut_up_list_.erase(shut_up_it);
+    } else {
+      shut_up = true;
+    }
+  }
+  if (shut_up) {
+    queue_system("禁止聊天");
+    return true;
+  }
+
+  switch (parsed.kind) {
     case LegacyChatInputKind::normal:
       return false;
     case LegacyChatInputKind::whisper: {
@@ -788,9 +867,35 @@ bool LogicRuntime::route_legacy_chat_command(const LogicCommand& command,
       }
       return true;
     }
-    case LegacyChatInputKind::shout:
+    case LegacyChatInputKind::shout: {
+      const auto resolved_map_id = resolve_map_id(locator.map_id);
+      const auto map_it = std::find_if(config_.maps.begin(), config_.maps.end(),
+                                       [&](const MapConfig& map) {
+                                         return map.id == resolved_map_id;
+                                       });
+      if (map_it != config_.maps.end() && map_it->quiz_zone) {
+        queue_system("无法使用");
+        return true;
+      }
+      if (locator.has_latest_cry_time &&
+          now_ms - locator.latest_cry_time_ms <= kCryCooldownMs) {
+        const auto seconds = 10 - ((now_ms - locator.latest_cry_time_ms) / 1000);
+        queue_system(std::to_string(seconds) + "秒以后才能再次使用喊话。");
+        return true;
+      }
+      const auto character = snapshot_character_actor(locator.character_name);
+      if (!character.has_value() || character->ability.level <= 7) {
+        queue_system("喊话功能只有7级以上才可以使用");
+        return true;
+      }
+      locator.has_latest_cry_time = true;
+      locator.latest_cry_time_ms = now_ms;
       queue_delivery(locator.map_id, locator.actor_id, LegacyChatDeliveryKind::shout,
                      parsed.message_text);
+      return true;
+    }
+    case LegacyChatInputKind::empty:
+    case LegacyChatInputKind::command:
       return true;
   }
 
@@ -887,13 +992,14 @@ RuntimeDispatch LogicRuntime::route_logic_command(const LogicCommand& command) {
         append_dispatch(dispatch,
                         mark_session_disconnected(command.session_id, "logout"));
       } else {
+        const auto command_now_ms = command.timestamp_ms != 0 ? command.timestamp_ms : last_now_ms_;
         if (command.kind == LogicCommandKind::say &&
-            route_legacy_chat_command(command, it->second, dispatch)) {
+            route_legacy_chat_command(command, it->second, command_now_ms, dispatch)) {
           break;
         }
         const auto mail = make_player_mail(command, it->second);
         if (auto map_it = maps_.find(it->second.map_id); map_it != maps_.end()) {
-          static_cast<void>(map_it->second->enqueue_legacy_player_command(mail, last_now_ms_));
+          static_cast<void>(map_it->second->enqueue_legacy_player_command(mail, command_now_ms));
         }
       }
       break;
@@ -1801,6 +1907,13 @@ void LogicRuntime::process_user_engine_timers(std::uint64_t now_ms, RuntimeDispa
     add_stage_trace(dispatch, "LegacyTimer", "GuildMan.CheckGuildWarTimeOut", now_ms, 0, 0);
     add_stage_trace(dispatch, "LegacyTimer", "UserCastle.Run", now_ms, 0, 0);
     add_stage_trace(dispatch, "LegacyTimer", "ShutUpList.Cleanup", now_ms, 0, 0);
+    for (auto it = legacy_shut_up_list_.begin(); it != legacy_shut_up_list_.end();) {
+      if (now_ms > it->second.expire_ms) {
+        it = legacy_shut_up_list_.erase(it);
+      } else {
+        ++it;
+      }
+    }
   }
 }
 

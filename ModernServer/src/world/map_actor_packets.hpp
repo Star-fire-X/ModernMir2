@@ -348,7 +348,7 @@ LegacyPacket make_legacy_chat_packet(std::uint64_t session_id,
       break;
     case LegacyChatDeliveryKind::system:
       ident = kSmSysMessage;
-      color = make_word(196, 255);
+      color = make_word(255, 56);
       break;
     case LegacyChatDeliveryKind::normal:
     case LegacyChatDeliveryKind::none:
