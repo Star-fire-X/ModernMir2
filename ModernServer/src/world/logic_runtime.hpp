@@ -11,6 +11,7 @@
 #include "config/models.hpp"
 #include "core/messages.hpp"
 #include "world/game_object.hpp"
+#include "world/legacy_chat_parser.hpp"
 #include "world/legacy_event_manager.hpp"
 #include "world/legacy_random.hpp"
 #include "world/make_index_allocator.hpp"
@@ -73,7 +74,7 @@ class LogicRuntime {
       std::string_view map_id, std::uint64_t actor_id) const;
   void add_legacy_shut_up(std::string_view character_name, std::uint64_t duration_ms,
                           std::uint64_t now_ms);
-  void release_legacy_shut_up(std::string_view character_name);
+  bool release_legacy_shut_up(std::string_view character_name);
   [[nodiscard]] std::vector<LegacyShutUpEntry> legacy_shut_up_entries() const;
   [[nodiscard]] std::size_t map_count() const { return maps_.size(); }
   [[nodiscard]] std::size_t online_session_count() const { return session_index_.size(); }
@@ -115,6 +116,10 @@ class LogicRuntime {
     std::uint64_t auto_shut_up_until_ms{0};
     bool has_latest_cry_time{false};
     std::uint64_t latest_cry_time_ms{0};
+    bool hear_whisper{true};
+    bool hear_cry{true};
+    bool hear_guild_msg{true};
+    std::vector<std::string> whisper_block_list{};
   };
 
   struct CloseRecord {
@@ -151,6 +156,11 @@ class LogicRuntime {
   [[nodiscard]] bool has_live_or_closing_character(std::string_view character_name) const;
   [[nodiscard]] ActorMail make_player_mail(const LogicCommand& command,
                                            const ActorLocator& locator) const;
+  [[nodiscard]] bool handle_legacy_chat_command(const LogicCommand& command,
+                                                ActorLocator& locator,
+                                                const LegacyChatParseResult& parsed,
+                                                std::uint64_t now_ms,
+                                                RuntimeDispatch& dispatch);
   [[nodiscard]] bool route_legacy_chat_command(const LogicCommand& command,
                                                ActorLocator& locator,
                                                std::uint64_t now_ms,

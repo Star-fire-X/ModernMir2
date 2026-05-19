@@ -4609,6 +4609,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
         case LegacyChatDeliveryKind::whisper:
         case LegacyChatDeliveryKind::guild:
+        case LegacyChatDeliveryKind::shout_direct:
         case LegacyChatDeliveryKind::system: {
           auto* target = find_player(mail.actor_id);
           if (target == nullptr) {

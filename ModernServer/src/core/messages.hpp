@@ -275,6 +275,7 @@ enum class LegacyChatDeliveryKind {
   whisper,
   guild,
   shout,
+  shout_direct,
   system
 };
 
