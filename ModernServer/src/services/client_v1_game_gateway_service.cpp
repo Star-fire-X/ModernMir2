@@ -149,6 +149,25 @@ client_v1::ActorActionKind actor_action_kind_for_sm(std::uint16_t ident) {
   }
 }
 
+std::uint32_t legacy_chat_fore_color(std::uint16_t color) {
+  return static_cast<std::uint32_t>(color & 0xFFU);
+}
+
+std::uint32_t legacy_chat_back_color(std::uint16_t color) {
+  return static_cast<std::uint32_t>((color >> 8U) & 0xFFU);
+}
+
+client_v1::ChatLine legacy_chat_line(std::string text, std::uint16_t color) {
+  return client_v1::ChatLine{std::move(text), legacy_chat_fore_color(color),
+                             legacy_chat_back_color(color)};
+}
+
+client_v1::ActorSay legacy_actor_say(std::uint64_t actor_id, std::string text,
+                                     std::uint16_t color) {
+  return client_v1::ActorSay{actor_id, std::move(text), legacy_chat_fore_color(color),
+                             legacy_chat_back_color(color)};
+}
+
 template <typename T>
 std::size_t legacy_encoded_size_for() {
   const T value{};
@@ -2725,6 +2744,15 @@ void ClientV1GameGatewayService::translate_legacy_packet(
     }
     case kSmHear: {
       const auto text = legacy_decode_string(decoded->body);
+      const auto color = decoded->message.param;
+      if (color == make_word(0, 255) && actor_id != 0) {
+        messages.push_back(legacy_actor_say(actor_id, text, color));
+        break;
+      }
+      if (color == make_word(0, 151)) {
+        messages.push_back(legacy_chat_line(text, color));
+        break;
+      }
       messages.push_back(client_v1::SysMessage{text, 0});
       if (text.find("Trade cancelled.") != std::string::npos ||
           text.find("Trade completed.") != std::string::npos) {
@@ -2752,6 +2780,14 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       }
       break;
     }
+    case kSmSysMessage:
+    case kSmGroupMessage:
+    case kSmCry:
+    case kSmWhisper:
+    case kSmGuildMessage:
+      messages.push_back(legacy_chat_line(legacy_decode_string(decoded->body),
+                                          decoded->message.param));
+      break;
     case kSmMerchantSay: {
       const auto merchant_id =
           static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));

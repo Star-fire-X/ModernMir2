@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cctype>
 #include <iterator>
 #include <limits>
 #include <unordered_map>
@@ -33,6 +35,52 @@ std::string normalized_key(std::string_view value) {
 
 std::string legacy_character_key(std::string_view value) {
   return util::lower_copy(std::string(value));
+}
+
+bool legacy_ascii_equals_ci(std::string_view lhs, std::string_view rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  for (std::size_t index = 0; index < lhs.size(); ++index) {
+    const auto left = static_cast<unsigned char>(lhs[index]);
+    const auto right = static_cast<unsigned char>(rhs[index]);
+    if (std::tolower(left) != std::tolower(right)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool legacy_command_equals(std::string_view command,
+                           std::string_view utf8,
+                           std::string_view gbk) {
+  return command == utf8 || command == gbk;
+}
+
+bool is_legacy_gm_account(std::string_view account_id) {
+  const auto lowered = util::lower_copy(account_id);
+  return lowered == "guest" || lowered == "admin" || util::starts_with(lowered, "gm");
+}
+
+std::optional<std::int32_t> parse_legacy_int32(std::string_view text) {
+  if (text.empty()) {
+    return std::nullopt;
+  }
+  std::int32_t value = 0;
+  const auto* begin = text.data();
+  const auto* end = text.data() + text.size();
+  const auto [ptr, error] = std::from_chars(begin, end, value);
+  if (error != std::errc{} || ptr != end) {
+    return std::nullopt;
+  }
+  return value;
+}
+
+std::string legacy_minutes_text(std::uint64_t expire_ms, std::uint64_t now_ms) {
+  if (expire_ms <= now_ms) {
+    return "0";
+  }
+  return std::to_string((expire_ms - now_ms) / (60ULL * 1000ULL));
 }
 
 const ItemConfig* find_item_config_by_name(
@@ -612,8 +660,8 @@ void LogicRuntime::add_legacy_shut_up(std::string_view character_name,
   }
 }
 
-void LogicRuntime::release_legacy_shut_up(std::string_view character_name) {
-  legacy_shut_up_list_.erase(legacy_character_key(character_name));
+bool LogicRuntime::release_legacy_shut_up(std::string_view character_name) {
+  return legacy_shut_up_list_.erase(legacy_character_key(character_name)) != 0;
 }
 
 std::vector<LegacyShutUpEntry> LogicRuntime::legacy_shut_up_entries() const {
@@ -761,6 +809,185 @@ ActorMail LogicRuntime::make_player_mail(const LogicCommand& command,
   return mail;
 }
 
+bool LogicRuntime::handle_legacy_chat_command(const LogicCommand& command,
+                                              ActorLocator& locator,
+                                              const LegacyChatParseResult& parsed,
+                                              std::uint64_t now_ms,
+                                              RuntimeDispatch& dispatch) {
+  auto queue_delivery = [&](const ActorLocator& target, LegacyChatDeliveryKind kind,
+                            std::string payload, std::uint64_t recog_actor_id) {
+    ActorMail mail;
+    mail.kind = ActorMailKind::legacy_chat_delivery;
+    mail.map_id = target.map_id;
+    mail.actor_id = target.actor_id;
+    mail.session_id = command.session_id;
+    mail.session_seq = command.session_seq;
+    mail.target_actor_id = recog_actor_id;
+    mail.legacy_chat_kind = kind;
+    mail.payload = std::move(payload);
+    append_dispatch(dispatch, route_actor_mail(mail));
+  };
+  auto queue_system_to = [&](const ActorLocator& target, std::string payload) {
+    queue_delivery(target, LegacyChatDeliveryKind::system, std::move(payload),
+                   target.actor_id);
+  };
+  auto queue_system = [&](std::string payload) {
+    queue_system_to(locator, std::move(payload));
+  };
+  auto find_locator = [&](std::string_view character_name) -> ActorLocator* {
+    const auto key = legacy_character_key(character_name);
+    for (auto& [_, candidate] : session_index_) {
+      if (legacy_character_key(candidate.character_name) == key) {
+        return &candidate;
+      }
+    }
+    return nullptr;
+  };
+  auto toggle_block_whisper = [&](std::string_view character_name) {
+    if (character_name.empty()) {
+      return;
+    }
+    const auto key = legacy_character_key(character_name);
+    const auto it = std::find(locator.whisper_block_list.begin(),
+                              locator.whisper_block_list.end(), key);
+    if (it != locator.whisper_block_list.end()) {
+      locator.whisper_block_list.erase(it);
+      queue_system("[允许与:" + std::string(character_name) + " 私聊]");
+      return;
+    }
+    locator.whisper_block_list.push_back(key);
+    queue_system("[禁止与:" + std::string(character_name) + " 私聊]");
+  };
+
+  const auto gm_account = is_legacy_gm_account(locator.account_id);
+  const auto short_broadcast = parsed.command_name == "!" || parsed.command_name == "$" ||
+                               parsed.command_name == "#";
+  if (parsed.gm_broadcast != LegacyGmBroadcastKind::none || short_broadcast) {
+    if (!gm_account || parsed.broadcast_text.empty()) {
+      return true;
+    }
+    std::string message;
+    switch (parsed.gm_broadcast) {
+      case LegacyGmBroadcastKind::sysop_global_interserver:
+        message = "(公告)" + parsed.broadcast_text;
+        for (const auto& [_, target] : session_index_) {
+          queue_system_to(target, message);
+        }
+        return true;
+      case LegacyGmBroadcastKind::sysop_global_local:
+        message = "(!)" + parsed.broadcast_text;
+        for (const auto& [_, target] : session_index_) {
+          queue_system_to(target, message);
+        }
+        return true;
+      case LegacyGmBroadcastKind::sysop_map:
+        message = "(#)" + parsed.broadcast_text;
+        for (const auto& [_, target] : session_index_) {
+          if (target.map_id == locator.map_id) {
+            queue_system_to(target, message);
+          }
+        }
+        return true;
+      case LegacyGmBroadcastKind::none:
+        return true;
+    }
+  }
+
+  if (legacy_command_equals(parsed.command_name, "拒绝私聊",
+                            std::string_view("\xBE\xDC\xBE\xF8\xCB\xBD\xC1\xC4", 8))) {
+    locator.hear_whisper = !locator.hear_whisper;
+    queue_system(locator.hear_whisper ? "[允许接收私聊信息]" : "[拒绝接收私聊信息]");
+    return true;
+  }
+  if (legacy_command_equals(parsed.command_name, "允许私聊",
+                            std::string_view("\xD4\xCA\xD0\xED\xCB\xBD\xC1\xC4", 8))) {
+    locator.hear_whisper = true;
+    queue_system("[允许私聊]");
+    return true;
+  }
+  if (legacy_command_equals(parsed.command_name, "拒绝",
+                            std::string_view("\xBE\xDC\xBE\xF8", 4))) {
+    for (std::size_t index = 0; index < parsed.command_args.size() && index < 3; ++index) {
+      toggle_block_whisper(parsed.command_args[index]);
+    }
+    return true;
+  }
+  if (legacy_command_equals(parsed.command_name, "拒绝喊话",
+                            std::string_view("\xBE\xDC\xBE\xF8\xBA\xB0\xBB\xB0", 8)) ||
+      legacy_command_equals(parsed.command_name, "允许喊话",
+                            std::string_view("\xD4\xCA\xD0\xED\xBA\xB0\xBB\xB0", 8))) {
+    locator.hear_cry = !locator.hear_cry;
+    queue_system(locator.hear_cry ? "[允许接收(黄颜色字体)喊话]"
+                                  : "[拒绝接收(黄颜色字体)喊话]");
+    return true;
+  }
+  if (legacy_command_equals(
+          parsed.command_name, "允许行会喊话",
+          std::string_view("\xD4\xCA\xD0\xED\xD0\xD0\xBB\xE1\xBA\xB0\xBB\xB0", 12)) ||
+      legacy_command_equals(
+          parsed.command_name, "拒绝行会喊话",
+          std::string_view("\xBE\xDC\xBE\xF8\xD0\xD0\xBB\xE1\xBA\xB0\xBB\xB0", 12))) {
+    locator.hear_guild_msg = !locator.hear_guild_msg;
+    queue_system(locator.hear_guild_msg ? "允许接收行会喊话信息"
+                                        : "拒绝接收行会喊话信息");
+    return true;
+  }
+
+  const auto shutup = legacy_ascii_equals_ci(parsed.command_name, "Shutup");
+  const auto release_shutup =
+      legacy_ascii_equals_ci(parsed.command_name, "ReleaseShutup");
+  const auto shutup_list = legacy_ascii_equals_ci(parsed.command_name, "ShutupList");
+  if (shutup || release_shutup || shutup_list) {
+    if (!gm_account) {
+      return true;
+    }
+    for (auto it = legacy_shut_up_list_.begin(); it != legacy_shut_up_list_.end();) {
+      if (now_ms > it->second.expire_ms) {
+        it = legacy_shut_up_list_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    if (shutup) {
+      const auto target = parsed.command_args.empty() ? std::string{} : parsed.command_args[0];
+      if (target.empty()) {
+        queue_system("无法查找");
+        return true;
+      }
+      auto minutes = std::int32_t{5};
+      if (parsed.command_args.size() >= 2) {
+        if (const auto parsed_minutes = parse_legacy_int32(parsed.command_args[1]);
+            parsed_minutes.has_value() && *parsed_minutes >= 0) {
+          minutes = *parsed_minutes;
+        }
+      }
+      add_legacy_shut_up(target, static_cast<std::uint64_t>(minutes) * 60ULL * 1000ULL,
+                         now_ms);
+      queue_system(target + "禁止聊天 + " + std::to_string(minutes) + "分钟");
+      return true;
+    }
+    if (release_shutup) {
+      const auto target = parsed.command_args.empty() ? std::string{} : parsed.command_args[0];
+      if (target.empty() || !release_legacy_shut_up(target)) {
+        queue_system(target + " 无法查找");
+        return true;
+      }
+      if (const auto* target_locator = find_locator(target); target_locator != nullptr) {
+        queue_system_to(*target_locator, "从禁止聊天列表删除");
+      }
+      queue_system(target + " ");
+      return true;
+    }
+    for (const auto& [_, entry] : legacy_shut_up_list_) {
+      queue_system(entry.character_name + " " +
+                   legacy_minutes_text(entry.expire_ms, now_ms) + "分钟");
+    }
+    return true;
+  }
+
+  return false;
+}
+
 bool LogicRuntime::route_legacy_chat_command(const LogicCommand& command,
                                              ActorLocator& locator,
                                              std::uint64_t now_ms,
@@ -788,12 +1015,21 @@ bool LogicRuntime::route_legacy_chat_command(const LogicCommand& command,
     queue_delivery(locator.map_id, locator.actor_id, LegacyChatDeliveryKind::system,
                    std::move(payload), locator.actor_id);
   };
+  auto find_locator = [&](std::string_view character_name) -> ActorLocator* {
+    const auto key = legacy_character_key(character_name);
+    for (auto& [_, candidate] : session_index_) {
+      if (legacy_character_key(candidate.character_name) == key) {
+        return &candidate;
+      }
+    }
+    return nullptr;
+  };
 
   switch (parsed.kind) {
     case LegacyChatInputKind::empty:
       return true;
     case LegacyChatInputKind::command:
-      return false;
+      return handle_legacy_chat_command(command, locator, parsed, now_ms, dispatch);
     default:
       break;
   }
@@ -837,11 +1073,20 @@ bool LogicRuntime::route_legacy_chat_command(const LogicCommand& command,
       if (parsed.target_name.empty()) {
         return true;
       }
-      const auto target = locate_character_actor(parsed.target_name);
-      if (!target.has_value()) {
+      auto* target = find_locator(parsed.target_name);
+      if (target == nullptr) {
+        queue_system(parsed.target_name + "无法查找");
         return true;
       }
-      queue_delivery(target->first, target->second, LegacyChatDeliveryKind::whisper,
+      if (!target->hear_whisper ||
+          std::find(target->whisper_block_list.begin(),
+                    target->whisper_block_list.end(),
+                    legacy_character_key(locator.character_name)) !=
+              target->whisper_block_list.end()) {
+        queue_system(parsed.target_name + "拒绝密语");
+        return true;
+      }
+      queue_delivery(target->map_id, target->actor_id, LegacyChatDeliveryKind::whisper,
                      locator.character_name + "=> " + parsed.message_text,
                      locator.actor_id);
       return true;
@@ -859,12 +1104,12 @@ bool LogicRuntime::route_legacy_chat_command(const LogicCommand& command,
       }
       const auto payload = locator.character_name + ":" + parsed.message_text;
       for (const auto& member_name : guild->members) {
-        const auto member = locate_character_actor(member_name);
-        if (!member.has_value()) {
+        const auto* member = find_locator(member_name);
+        if (member == nullptr || !member->hear_guild_msg) {
           continue;
         }
-        queue_delivery(member->first, member->second, LegacyChatDeliveryKind::guild,
-                       payload, member->second);
+        queue_delivery(member->map_id, member->actor_id, LegacyChatDeliveryKind::guild,
+                       payload, member->actor_id);
       }
       return true;
     }
@@ -891,8 +1136,26 @@ bool LogicRuntime::route_legacy_chat_command(const LogicCommand& command,
       }
       locator.has_latest_cry_time = true;
       locator.latest_cry_time_ms = now_ms;
-      queue_delivery(locator.map_id, locator.actor_id, LegacyChatDeliveryKind::shout,
-                     parsed.message_text);
+      const auto speaker = snapshot_character_actor(locator.character_name);
+      if (!speaker.has_value()) {
+        return true;
+      }
+      const auto line = "(!)" + locator.character_name + ":" + parsed.message_text;
+      for (const auto& [_, target] : session_index_) {
+        if (target.map_id != locator.map_id || !target.hear_cry) {
+          continue;
+        }
+        const auto target_character = snapshot_character_actor(target.character_name);
+        if (!target_character.has_value()) {
+          continue;
+        }
+        if (std::abs(target_character->x - speaker->x) >= 50 ||
+            std::abs(target_character->y - speaker->y) >= 50) {
+          continue;
+        }
+        queue_delivery(target.map_id, target.actor_id, LegacyChatDeliveryKind::shout_direct,
+                       line, 0);
+      }
       return true;
     }
     case LegacyChatInputKind::empty:
@@ -1149,10 +1412,23 @@ RuntimeDispatch LogicRuntime::tick(std::uint64_t now_ms, LegacyRuntimeContext co
         const auto target_map_id = resolve_map_id(cross_map_mail.map_id);
         if (auto target_it = maps_.find(target_map_id); target_it != maps_.end() &&
             target_it->second->legacy_player_state(cross_map_mail.actor_id).has_value()) {
-          session_index_[cross_map_mail.session_id] =
-              ActorLocator{target_map_id, cross_map_mail.actor_id,
-                           cross_map_mail.character.account_id,
-                           cross_map_mail.character.character_name};
+          auto updated = ActorLocator{target_map_id, cross_map_mail.actor_id,
+                                      cross_map_mail.character.account_id,
+                                      cross_map_mail.character.character_name};
+          if (auto previous = session_index_.find(cross_map_mail.session_id);
+              previous != session_index_.end()) {
+            updated.latest_say_text = std::move(previous->second.latest_say_text);
+            updated.bomb_say_time_ms = previous->second.bomb_say_time_ms;
+            updated.bomb_say_count = previous->second.bomb_say_count;
+            updated.auto_shut_up_until_ms = previous->second.auto_shut_up_until_ms;
+            updated.has_latest_cry_time = previous->second.has_latest_cry_time;
+            updated.latest_cry_time_ms = previous->second.latest_cry_time_ms;
+            updated.hear_whisper = previous->second.hear_whisper;
+            updated.hear_cry = previous->second.hear_cry;
+            updated.hear_guild_msg = previous->second.hear_guild_msg;
+            updated.whisper_block_list = std::move(previous->second.whisper_block_list);
+          }
+          session_index_[cross_map_mail.session_id] = std::move(updated);
         }
       }
     }
