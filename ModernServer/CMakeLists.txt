@@ -226,6 +226,12 @@ if(BUILD_TESTING)
   add_test(NAME mir2_legacy_chat_commands_smoke
     COMMAND mir2_legacy_chat_commands_smoke)
 
+  add_executable(mir2_client_v1_legacy_chat_equivalence_smoke
+    tests/client_v1_legacy_chat_equivalence_smoke.cpp)
+  target_link_libraries(mir2_client_v1_legacy_chat_equivalence_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_client_v1_legacy_chat_equivalence_smoke
+    COMMAND mir2_client_v1_legacy_chat_equivalence_smoke)
+
   add_executable(mir2_canonical_login_state_smoke
     tests/canonical_login_state_smoke.cpp)
   target_link_libraries(mir2_canonical_login_state_smoke PRIVATE mir2_hostlib)
@@ -928,6 +934,7 @@ if(BUILD_TESTING)
       mir2_legacy_chat_router_smoke
       mir2_legacy_chat_rules_smoke
       mir2_legacy_chat_commands_smoke
+      mir2_client_v1_legacy_chat_equivalence_smoke
       mir2_canonical_login_state_smoke
       mir2_canonical_login_error_smoke
       mir2_client_v1_canonical_command_smoke
