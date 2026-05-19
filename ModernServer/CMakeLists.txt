@@ -747,6 +747,17 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_storage_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_storage_smoke COMMAND mir2_storage_smoke)
 
+  add_executable(mir2_storage_legacy_characterization_smoke
+    tests/storage_legacy_characterization_smoke.cpp)
+  target_link_libraries(mir2_storage_legacy_characterization_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_storage_legacy_characterization_smoke
+    COMMAND mir2_storage_legacy_characterization_smoke)
+
+  add_executable(mir2_storage_legacy_target_smoke tests/storage_legacy_target_smoke.cpp)
+  target_link_libraries(mir2_storage_legacy_target_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_storage_legacy_target_smoke COMMAND mir2_storage_legacy_target_smoke)
+  set_tests_properties(mir2_storage_legacy_target_smoke PROPERTIES DISABLED TRUE)
+
   add_executable(mir2_combat_smoke tests/combat_smoke.cpp)
   target_link_libraries(mir2_combat_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_combat_smoke COMMAND mir2_combat_smoke)
@@ -950,6 +961,7 @@ if(BUILD_TESTING)
       mir2_sell_smoke
       mir2_buy_smoke
       mir2_merchant_dialog_smoke
+      mir2_storage_legacy_characterization_smoke
       mir2_npc_instance_click_guard_smoke
       mir2_scripted_merchant_smoke
       mir2_scripted_npc_dialog_smoke

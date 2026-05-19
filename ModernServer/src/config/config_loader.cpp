@@ -1143,6 +1143,8 @@ HostConfig ConfigLoader::load(const std::filesystem::path& root) const {
   config.runtime.enable_legacy_gateways = value_or<bool>(server, "enable_legacy_gateways", true);
   config.runtime.enable_client_v1_gateways =
       value_or<bool>(server, "enable_client_v1_gateways", true);
+  config.runtime.legacy_approval_mode =
+      value_or<bool>(server, "legacy_approval_mode", false);
   config.runtime.backpressure_threshold =
       value_or<std::size_t>(server, "backpressure_threshold", 3072);
   config.runtime.disconnect_threshold =

@@ -18,6 +18,7 @@ struct RuntimeConfig {
   std::size_t io_threads{2};
   bool enable_legacy_gateways{true};
   bool enable_client_v1_gateways{true};
+  bool legacy_approval_mode{false};
   std::size_t backpressure_threshold{3072};
   std::size_t disconnect_threshold{3};
   std::uint32_t castle_context_refresh_ms{5000};

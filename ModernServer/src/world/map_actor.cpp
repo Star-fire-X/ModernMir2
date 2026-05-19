@@ -1223,7 +1223,8 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
                    CastleDialogContext castle_dialog_context,
                    std::unordered_map<std::string, MonsterDefConfig> monster_defs,
                    MakeIndexAllocator* make_index_allocator,
-                   std::string black_stone_name)
+                   std::string black_stone_name,
+                   bool legacy_approval_mode)
     : config_(std::move(config)),
       budgets_(std::move(budgets)),
       item_configs_(std::move(item_configs)),
@@ -1231,6 +1232,7 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
       monster_defs_(std::move(monster_defs)),
       map_quests_(std::move(map_quests)),
       black_stone_name_(std::move(black_stone_name)),
+      legacy_approval_mode_(legacy_approval_mode),
       castle_dialog_context_(std::move(castle_dialog_context)),
       make_index_allocator_(make_index_allocator) {
   movement_map_ = legacy::decode_map_file(config_.source_map);
@@ -2885,7 +2887,8 @@ bool MapActor::handle_weapon_upgrade_start(Player& player, Npc& npc,
     }
   }
 
-  auto removed_weapon = player.remove_equipped_item(kEquipWeapon, weapon->make_index, {},
+  auto removed_weapon = player.remove_equipped_item(kEquipWeapon, weapon->make_index,
+                                                   item_name(*weapon, item_configs_),
                                                    item_configs_);
   if (!removed_weapon.has_value()) {
     queue_system_notice(dispatch, player, "Weapon upgrade failed.");
