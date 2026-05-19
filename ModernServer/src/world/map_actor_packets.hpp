@@ -343,6 +343,7 @@ LegacyPacket make_legacy_chat_packet(std::uint64_t session_id,
       color = make_word(212, 255);
       break;
     case LegacyChatDeliveryKind::shout:
+    case LegacyChatDeliveryKind::shout_direct:
       recog = 0;
       color = make_word(0, 151);
       break;
