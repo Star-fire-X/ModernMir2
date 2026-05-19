@@ -42,7 +42,7 @@ bool matches_item(const LegacyUserItem& item, std::int32_t make_index, std::stri
   if (is_empty(item) || item.make_index != make_index) {
     return false;
   }
-  return !expected_name.empty() &&
+  return expected_name.empty() ||
          util::lower_copy(item_name(item, item_configs)) == util::lower_copy(expected_name);
 }
 

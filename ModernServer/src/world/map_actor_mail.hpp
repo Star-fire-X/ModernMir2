@@ -1538,6 +1538,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                      make_storage_result_packet(requester->session_id(), kSmStorageFull));
         break;
       }
+      if (mail.payload.empty()) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_storage_result_packet(requester->session_id(), kSmStorageFail));
+        break;
+      }
       const auto* bag_item = requester->bag_item(mail.item_make_index, mail.payload, item_configs_);
       if (bag_item == nullptr) {
         queue_packet(dispatch, requester->session_id(),
@@ -1593,6 +1598,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       if (legacy_approval_mode_) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_take_back_storage_result_packet(requester->session_id(),
+                                                          kSmTakeBackStorageItemFail, 0));
+        break;
+      }
+      if (mail.payload.empty()) {
         queue_packet(dispatch, requester->session_id(),
                      make_take_back_storage_result_packet(requester->session_id(),
                                                           kSmTakeBackStorageItemFail, 0));
