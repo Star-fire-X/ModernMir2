@@ -22,8 +22,9 @@
 #include "shared/legacy/action_ids.hpp"
 #include "shared/legacy/movement_rules.hpp"
 #include "util/string_utils.hpp"
-#include "world/legacy_magic_runtime.hpp"
+#include "world/legacy_chat_parser.hpp"
 #include "world/legacy_item_rules.hpp"
+#include "world/legacy_magic_runtime.hpp"
 #include "world/legacy_skill_formula.hpp"
 
 namespace mir2 {

@@ -253,7 +253,8 @@ enum class ActorMailKind {
   persistence_loaded,
   legacy_delayed_effect,
   legacy_magic_lvexp,
-  say
+  say,
+  legacy_chat_delivery
 };
 
 enum class LegacyDelayedEffectKind {
@@ -265,6 +266,15 @@ enum class LegacyDelayedEffectKind {
   open_health,
   make_poison,
   transparent
+};
+
+enum class LegacyChatDeliveryKind {
+  none,
+  normal,
+  whisper,
+  guild,
+  shout,
+  system
 };
 
 struct LegacyBuffTransferState {
@@ -355,6 +365,7 @@ struct ActorMail {
   std::int32_t poison_level{0};
   std::uint64_t duration_ticks{0};
   std::vector<LegacyBuffTransferState> legacy_buffs{};
+  LegacyChatDeliveryKind legacy_chat_kind{LegacyChatDeliveryKind::none};
   CharacterRecord character{};
   LegacyDefaultMessage game_message{};
   std::string payload{};
