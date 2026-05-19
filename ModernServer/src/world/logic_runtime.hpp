@@ -136,6 +136,9 @@ class LogicRuntime {
   [[nodiscard]] bool has_live_or_closing_character(std::string_view character_name) const;
   [[nodiscard]] ActorMail make_player_mail(const LogicCommand& command,
                                            const ActorLocator& locator) const;
+  [[nodiscard]] bool route_legacy_chat_command(const LogicCommand& command,
+                                               const ActorLocator& locator,
+                                               RuntimeDispatch& dispatch);
   [[nodiscard]] bool is_merchant_npc_config(const NpcConfig& npc,
                                             const ActorMail& mail) const;
   void add_stage_trace(RuntimeDispatch& dispatch, std::string stage, std::string action,

@@ -10,6 +10,7 @@
 
 #include "spdlog/spdlog.h"
 #include "util/string_utils.hpp"
+#include "world/legacy_chat_parser.hpp"
 #include "world/legacy_item_rules.hpp"
 
 namespace mir2 {
@@ -36,6 +37,17 @@ const ItemConfig* find_item_config_by_name(
   for (const auto& [_, item_config] : item_configs) {
     if (normalized_key(item_config.name) == wanted) {
       return &item_config;
+    }
+  }
+  return nullptr;
+}
+
+const GuildState* find_runtime_guild_state(const GuildCastleSnapshot& snapshot,
+                                           std::string_view guild_name) {
+  const auto wanted = util::lower_copy(std::string(guild_name));
+  for (const auto& guild : snapshot.guilds) {
+    if (util::lower_copy(guild.guild_name) == wanted) {
+      return &guild;
     }
   }
   return nullptr;
@@ -714,6 +726,77 @@ ActorMail LogicRuntime::make_player_mail(const LogicCommand& command,
   return mail;
 }
 
+bool LogicRuntime::route_legacy_chat_command(const LogicCommand& command,
+                                             const ActorLocator& locator,
+                                             RuntimeDispatch& dispatch) {
+  const auto parsed = parse_legacy_chat_input(command.text);
+
+  auto queue_delivery = [&](std::string map_id, std::uint64_t actor_id,
+                            LegacyChatDeliveryKind kind, std::string payload,
+                            std::uint64_t target_actor_id = 0) {
+    ActorMail mail;
+    mail.kind = ActorMailKind::legacy_chat_delivery;
+    mail.map_id = std::move(map_id);
+    mail.actor_id = actor_id;
+    mail.session_id = command.session_id;
+    mail.session_seq = command.session_seq;
+    mail.target_actor_id = target_actor_id;
+    mail.legacy_chat_kind = kind;
+    mail.payload = std::move(payload);
+    append_dispatch(dispatch, route_actor_mail(mail));
+  };
+
+  switch (parsed.kind) {
+    case LegacyChatInputKind::empty:
+      return true;
+    case LegacyChatInputKind::command:
+      return false;
+    case LegacyChatInputKind::normal:
+      return false;
+    case LegacyChatInputKind::whisper: {
+      if (parsed.target_name.empty()) {
+        return true;
+      }
+      const auto target = locate_character_actor(parsed.target_name);
+      if (!target.has_value()) {
+        return true;
+      }
+      queue_delivery(target->first, target->second, LegacyChatDeliveryKind::whisper,
+                     locator.character_name + "=> " + parsed.message_text,
+                     locator.actor_id);
+      return true;
+    }
+    case LegacyChatInputKind::group:
+      return true;
+    case LegacyChatInputKind::guild: {
+      const auto character = snapshot_character_actor(locator.character_name);
+      if (!character.has_value() || character->guild_name.empty()) {
+        return true;
+      }
+      const auto* guild = find_runtime_guild_state(guild_castle_snapshot_, character->guild_name);
+      if (guild == nullptr) {
+        return true;
+      }
+      const auto payload = locator.character_name + ":" + parsed.message_text;
+      for (const auto& member_name : guild->members) {
+        const auto member = locate_character_actor(member_name);
+        if (!member.has_value()) {
+          continue;
+        }
+        queue_delivery(member->first, member->second, LegacyChatDeliveryKind::guild,
+                       payload, member->second);
+      }
+      return true;
+    }
+    case LegacyChatInputKind::shout:
+      queue_delivery(locator.map_id, locator.actor_id, LegacyChatDeliveryKind::shout,
+                     parsed.message_text);
+      return true;
+  }
+
+  return true;
+}
+
 bool LogicRuntime::is_merchant_npc_config(const NpcConfig& npc, const ActorMail& mail) const {
   const auto service = util::lower_copy(npc.service);
   return !npc.merchant_goods.empty() || !npc.merchant_products.empty() ||
@@ -804,6 +887,10 @@ RuntimeDispatch LogicRuntime::route_logic_command(const LogicCommand& command) {
         append_dispatch(dispatch,
                         mark_session_disconnected(command.session_id, "logout"));
       } else {
+        if (command.kind == LogicCommandKind::say &&
+            route_legacy_chat_command(command, it->second, dispatch)) {
+          break;
+        }
         const auto mail = make_player_mail(command, it->second);
         if (auto map_it = maps_.find(it->second.map_id); map_it != maps_.end()) {
           static_cast<void>(map_it->second->enqueue_legacy_player_command(mail, last_now_ms_));

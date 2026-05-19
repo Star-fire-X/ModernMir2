@@ -4570,6 +4570,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (speaker == nullptr) {
         break;
       }
+      const auto parsed = parse_legacy_chat_input(mail.payload);
       if (handle_guild_castle_business_command(*speaker, objects_, mail.payload,
                                                guild_castle_snapshot_, dispatch)) {
         castle_dialog_context_ = guild_castle_snapshot_.castle_dialog;
@@ -4579,11 +4580,65 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         castle_dialog_context_ = guild_castle_snapshot_.castle_dialog;
         break;
       }
-      const auto line = speaker->character().character_name + ": " + mail.payload;
+      if (parsed.kind != LegacyChatInputKind::normal) {
+        break;
+      }
+      const auto line = speaker->character().character_name + ": " + parsed.message_text;
       queue_actor_origin_packet(objects_, dispatch, *speaker, true, [&](const Player& player) {
         queue_packet(dispatch, player.session_id(),
-                     make_hear_packet(player.session_id(), speaker->id(), line));
+                     make_legacy_chat_packet(player.session_id(), LegacyChatDeliveryKind::normal,
+                                             speaker->id(), line));
       });
+      break;
+    }
+    case ActorMailKind::legacy_chat_delivery: {
+      switch (mail.legacy_chat_kind) {
+        case LegacyChatDeliveryKind::normal: {
+          auto* speaker = find_player(mail.actor_id);
+          if (speaker == nullptr) {
+            break;
+          }
+          const auto line = speaker->character().character_name + ": " + mail.payload;
+          queue_actor_origin_packet(objects_, dispatch, *speaker, true, [&](const Player& player) {
+            queue_packet(dispatch, player.session_id(),
+                         make_legacy_chat_packet(player.session_id(),
+                                                 LegacyChatDeliveryKind::normal,
+                                                 speaker->id(), line));
+          });
+          break;
+        }
+        case LegacyChatDeliveryKind::whisper:
+        case LegacyChatDeliveryKind::guild:
+        case LegacyChatDeliveryKind::system: {
+          auto* target = find_player(mail.actor_id);
+          if (target == nullptr) {
+            break;
+          }
+          queue_packet(dispatch, target->session_id(),
+                       make_legacy_chat_packet(target->session_id(), mail.legacy_chat_kind,
+                                               mail.target_actor_id, mail.payload));
+          break;
+        }
+        case LegacyChatDeliveryKind::shout: {
+          auto* speaker = find_player(mail.actor_id);
+          if (speaker == nullptr) {
+            break;
+          }
+          const auto line = "(!)" + speaker->character().character_name + ":" + mail.payload;
+          for_each_player(objects_, [&](std::uint64_t, const Player& player) {
+            if (std::abs(player.x() - speaker->x()) >= 50 ||
+                std::abs(player.y() - speaker->y()) >= 50) {
+              return;
+            }
+            queue_packet(dispatch, player.session_id(),
+                         make_legacy_chat_packet(player.session_id(),
+                                                 LegacyChatDeliveryKind::shout, 0, line));
+          });
+          break;
+        }
+        case LegacyChatDeliveryKind::none:
+          break;
+      }
       break;
     }
     case ActorMailKind::legacy_magic_lvexp: {
