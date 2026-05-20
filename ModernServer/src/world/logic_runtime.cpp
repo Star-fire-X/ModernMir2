@@ -13,6 +13,7 @@
 #include "spdlog/spdlog.h"
 #include "util/string_utils.hpp"
 #include "world/legacy_chat_parser.hpp"
+#include "world/legacy_gm_commands.hpp"
 #include "world/legacy_item_rules.hpp"
 
 namespace mir2 {
@@ -57,11 +58,6 @@ bool legacy_command_equals(std::string_view command,
   return command == utf8 || command == gbk;
 }
 
-bool is_legacy_gm_account(std::string_view account_id) {
-  const auto lowered = util::lower_copy(account_id);
-  return lowered == "guest" || lowered == "admin" || util::starts_with(lowered, "gm");
-}
-
 std::optional<std::int32_t> parse_legacy_int32(std::string_view text) {
   if (text.empty()) {
     return std::nullopt;
@@ -81,6 +77,40 @@ std::string legacy_minutes_text(std::uint64_t expire_ms, std::uint64_t now_ms) {
     return "0";
   }
   return std::to_string((expire_ms - now_ms) / (60ULL * 1000ULL));
+}
+
+std::string join_legacy_args(const std::vector<std::string>& args, std::size_t begin,
+                             std::size_t end) {
+  std::string result;
+  for (auto index = begin; index < end && index < args.size(); ++index) {
+    if (!result.empty()) {
+      result += ' ';
+    }
+    result += args[index];
+  }
+  return result;
+}
+
+std::pair<std::int32_t, std::int32_t> legacy_direction_delta(std::uint8_t dir) {
+  switch (dir % 8) {
+    case 0:
+      return {0, -1};
+    case 1:
+      return {1, -1};
+    case 2:
+      return {1, 0};
+    case 3:
+      return {1, 1};
+    case 4:
+      return {0, 1};
+    case 5:
+      return {-1, 1};
+    case 6:
+      return {-1, 0};
+    case 7:
+      return {-1, -1};
+  }
+  return {0, 1};
 }
 
 const ItemConfig* find_item_config_by_name(
@@ -470,6 +500,7 @@ void LogicRuntime::initialize() {
   monster_drops_.clear();
   item_configs_by_name_.clear();
   legacy_shut_up_list_.clear();
+  legacy_admin_degrees_ = load_legacy_admin_list(config_.runtime.legacy_admin_list);
   monster_groups_.clear();
   merchant_order_.clear();
   npc_order_.clear();
@@ -690,6 +721,112 @@ bool LogicRuntime::has_live_or_closing_character(std::string_view character_name
   return false;
 }
 
+LegacyUserDegree LogicRuntime::resolve_legacy_user_degree(
+    std::string_view account_id, std::string_view character_name) const {
+  const auto admin_it = legacy_admin_degrees_.find(legacy_character_key(character_name));
+  if (admin_it != legacy_admin_degrees_.end()) {
+    return admin_it->second;
+  }
+  return legacy_heuristic_user_degree(account_id);
+}
+
+std::optional<std::uint64_t> LogicRuntime::find_actor_session_by_name(
+    std::string_view character_name) const {
+  const auto key = legacy_character_key(character_name);
+  if (key.empty()) {
+    return std::nullopt;
+  }
+  for (const auto& [session_id, locator] : session_index_) {
+    if (legacy_character_key(locator.character_name) == key) {
+      return session_id;
+    }
+  }
+  return std::nullopt;
+}
+
+void LogicRuntime::remove_legacy_group_member(std::uint64_t session_id) {
+  auto locator_it = session_index_.find(session_id);
+  if (locator_it == session_index_.end()) {
+    return;
+  }
+  const auto group_id = locator_it->second.legacy_group_id;
+  locator_it->second.legacy_group_id = 0;
+  if (group_id == 0) {
+    return;
+  }
+  auto group_it = legacy_groups_.find(group_id);
+  if (group_it == legacy_groups_.end()) {
+    return;
+  }
+  auto& members = group_it->second.members;
+  members.erase(std::remove(members.begin(), members.end(), session_id), members.end());
+  if (members.size() >= 2) {
+    return;
+  }
+  const auto remaining_members = members;
+  for (const auto member_session_id : remaining_members) {
+    if (auto member_it = session_index_.find(member_session_id);
+        member_it != session_index_.end()) {
+      member_it->second.legacy_group_id = 0;
+    }
+  }
+  legacy_groups_.erase(group_it);
+}
+
+void LogicRuntime::create_legacy_group(std::uint64_t owner_session_id,
+                                       std::string_view target_name) {
+  auto owner_it = session_index_.find(owner_session_id);
+  const auto target_session_id = find_actor_session_by_name(target_name);
+  if (owner_it == session_index_.end() || !target_session_id.has_value() ||
+      *target_session_id == owner_session_id) {
+    return;
+  }
+  auto target_it = session_index_.find(*target_session_id);
+  if (target_it == session_index_.end() || owner_it->second.legacy_group_id != 0 ||
+      target_it->second.legacy_group_id != 0) {
+    return;
+  }
+
+  const auto group_id = next_legacy_group_id_++;
+  legacy_groups_[group_id].members = {owner_session_id, *target_session_id};
+  owner_it->second.legacy_group_id = group_id;
+  target_it->second.legacy_group_id = group_id;
+}
+
+void LogicRuntime::add_legacy_group_member(std::uint64_t owner_session_id,
+                                           std::string_view target_name) {
+  auto owner_it = session_index_.find(owner_session_id);
+  const auto target_session_id = find_actor_session_by_name(target_name);
+  if (owner_it == session_index_.end() || owner_it->second.legacy_group_id == 0 ||
+      !target_session_id.has_value() || *target_session_id == owner_session_id) {
+    return;
+  }
+  auto group_it = legacy_groups_.find(owner_it->second.legacy_group_id);
+  auto target_it = session_index_.find(*target_session_id);
+  if (group_it == legacy_groups_.end() || target_it == session_index_.end() ||
+      target_it->second.legacy_group_id != 0) {
+    return;
+  }
+  group_it->second.members.push_back(*target_session_id);
+  target_it->second.legacy_group_id = owner_it->second.legacy_group_id;
+}
+
+void LogicRuntime::remove_legacy_group_member_by_name(std::uint64_t owner_session_id,
+                                                      std::string_view target_name) {
+  auto owner_it = session_index_.find(owner_session_id);
+  const auto target_session_id = find_actor_session_by_name(target_name);
+  if (owner_it == session_index_.end() || owner_it->second.legacy_group_id == 0 ||
+      !target_session_id.has_value()) {
+    return;
+  }
+  auto target_it = session_index_.find(*target_session_id);
+  if (target_it == session_index_.end() ||
+      target_it->second.legacy_group_id != owner_it->second.legacy_group_id) {
+    return;
+  }
+  remove_legacy_group_member(*target_session_id);
+}
+
 ActorMail LogicRuntime::make_player_mail(const LogicCommand& command,
                                          const ActorLocator& locator) const {
   ActorMail mail;
@@ -843,6 +980,79 @@ bool LogicRuntime::handle_legacy_chat_command(const LogicCommand& command,
     }
     return nullptr;
   };
+  auto find_session_id = [&](std::string_view character_name) -> std::optional<std::uint64_t> {
+    const auto key = legacy_character_key(character_name);
+    for (const auto& [session_id, candidate] : session_index_) {
+      if (legacy_character_key(candidate.character_name) == key) {
+        return session_id;
+      }
+    }
+    return std::nullopt;
+  };
+  auto args_text = [&]() {
+    std::string text;
+    for (std::size_t index = 0; index < parsed.command_args.size(); ++index) {
+      if (index != 0) {
+        text += ',';
+      }
+      text += parsed.command_args[index];
+    }
+    return text;
+  };
+  auto audit_gm_command = [&](std::string category, const LegacyGmCommandDefinition& definition,
+                              std::string reason) {
+    const auto target =
+        parsed.command_args.empty() ? std::string{} : parsed.command_args.front();
+    dispatch.audit_events.push_back(AuditEvent{
+        std::move(category),
+        "actor=" + locator.character_name + ";cmd=" + definition.canonical_name +
+            ";args=" + args_text() + ";target=" + target +
+            ";degree=" + std::string(legacy_user_degree_name(locator.user_degree)) +
+            ";required=" + std::string(legacy_user_degree_name(definition.minimum_degree)) +
+            ";reason=" + std::move(reason),
+        locator.account_id});
+  };
+  auto audit_failed = [&](const LegacyGmCommandDefinition& definition, std::string reason) {
+    audit_gm_command("gm.command.failed", definition, std::move(reason));
+  };
+  auto audit_ok = [&](const LegacyGmCommandDefinition& definition, std::string reason) {
+    audit_gm_command("gm.command.ok", definition, std::move(reason));
+  };
+  auto live_monster_count_for_map = [&](std::string_view map_id) {
+    const auto resolved_map_id = resolve_map_id(std::string(map_id));
+    auto count = 0;
+    for (const auto& group : monster_groups_) {
+      for (const auto& ref : group.monsters) {
+        if (resolve_map_id(ref.map_id) != resolved_map_id) {
+          continue;
+        }
+        const auto map_it = maps_.find(resolved_map_id);
+        if (map_it != maps_.end() && map_it->second->legacy_monster_counts_for_spawn(ref.actor_id)) {
+          ++count;
+        }
+      }
+    }
+    return count;
+  };
+  auto run_random_space_move = [&](std::string source_map_id, std::string target_map_id,
+                                   std::uint64_t actor_id) {
+    dispatch.legacy_random_space_moves.push_back(
+        LegacyRandomSpaceMoveRequest{std::move(source_map_id), std::move(target_map_id),
+                                     actor_id, 0});
+    process_legacy_random_space_moves(dispatch, now_ms);
+    process_cross_map_mails(dispatch);
+  };
+  auto run_space_move = [&](const ActorLocator& source, std::uint64_t actor_id,
+                            const std::string& target_map_id, std::int32_t x,
+                            std::int32_t y) {
+    if (auto map_it = maps_.find(resolve_map_id(source.map_id)); map_it != maps_.end()) {
+      append_dispatch(dispatch,
+                      map_it->second->legacy_space_move_player(
+                          actor_id, resolve_map_id(target_map_id), x, y, true,
+                          current_tick_, now_ms));
+      process_cross_map_mails(dispatch);
+    }
+  };
   auto toggle_block_whisper = [&](std::string_view character_name) {
     if (character_name.empty()) {
       return;
@@ -859,11 +1069,22 @@ bool LogicRuntime::handle_legacy_chat_command(const LogicCommand& command,
     queue_system("[禁止与:" + std::string(character_name) + " 私聊]");
   };
 
-  const auto gm_account = is_legacy_gm_account(locator.account_id);
   const auto short_broadcast = parsed.command_name == "!" || parsed.command_name == "$" ||
                                parsed.command_name == "#";
+  auto* command_definition = find_legacy_gm_command(parsed.command_name);
+  if (parsed.gm_broadcast != LegacyGmBroadcastKind::none && !parsed.command_name.empty()) {
+    const auto broadcast_command = parsed.command_name.substr(0, 1);
+    command_definition = find_legacy_gm_command(broadcast_command);
+  }
+  if (command_definition != nullptr &&
+      !legacy_user_degree_at_least(locator.user_degree,
+                                   command_definition->minimum_degree)) {
+    audit_gm_command("gm.command.denied", *command_definition, "permission");
+    return true;
+  }
+
   if (parsed.gm_broadcast != LegacyGmBroadcastKind::none || short_broadcast) {
-    if (!gm_account || parsed.broadcast_text.empty()) {
+    if (parsed.broadcast_text.empty()) {
       return true;
     }
     std::string message;
@@ -873,11 +1094,17 @@ bool LogicRuntime::handle_legacy_chat_command(const LogicCommand& command,
         for (const auto& [_, target] : session_index_) {
           queue_system_to(target, message);
         }
+        if (command_definition != nullptr) {
+          audit_gm_command("gm.command.ok", *command_definition, "broadcast");
+        }
         return true;
       case LegacyGmBroadcastKind::sysop_global_local:
         message = "(!)" + parsed.broadcast_text;
         for (const auto& [_, target] : session_index_) {
           queue_system_to(target, message);
+        }
+        if (command_definition != nullptr) {
+          audit_gm_command("gm.command.ok", *command_definition, "broadcast");
         }
         return true;
       case LegacyGmBroadcastKind::sysop_map:
@@ -887,10 +1114,507 @@ bool LogicRuntime::handle_legacy_chat_command(const LogicCommand& command,
             queue_system_to(target, message);
           }
         }
+        if (command_definition != nullptr) {
+          audit_gm_command("gm.command.ok", *command_definition, "broadcast");
+        }
         return true;
       case LegacyGmBroadcastKind::none:
         return true;
     }
+  }
+
+  if (command_definition != nullptr) {
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "GameMaster")) {
+      locator.legacy_sysop_mode = !locator.legacy_sysop_mode;
+      queue_system(locator.legacy_sysop_mode ? "进入管理员模式" : "退出管理员模式");
+      audit_ok(*command_definition, "gm_mode");
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "Observer")) {
+      locator.legacy_supervisor_mode = !locator.legacy_supervisor_mode;
+      queue_system(locator.legacy_supervisor_mode ? "进入观察模式" : "退出观察模式");
+      audit_ok(*command_definition, "observer_mode");
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "Superman")) {
+      locator.legacy_superman_mode = !locator.legacy_superman_mode;
+      queue_system(locator.legacy_superman_mode ? "进入无敌模式" : "退出无敌模式");
+      audit_ok(*command_definition, "superman_mode");
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "Map")) {
+      queue_system("地图: " + locator.map_id);
+      audit_ok(*command_definition, "map");
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "Human")) {
+      const auto target_map = parsed.command_args.empty() ? locator.map_id : parsed.command_args[0];
+      const auto resolved_map_id = resolve_map_id(target_map);
+      auto count = 0;
+      for (const auto& [_, target] : session_index_) {
+        if (resolve_map_id(target.map_id) == resolved_map_id) {
+          ++count;
+        }
+      }
+      queue_system("地图: " + target_map + "当前人数=" + std::to_string(count));
+      audit_ok(*command_definition, "human_count");
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "MobCount")) {
+      const auto target_map = parsed.command_args.empty() ? locator.map_id : parsed.command_args[0];
+      queue_system("地图: " + target_map + "当前怪物=" +
+                   std::to_string(live_monster_count_for_map(target_map)));
+      audit_ok(*command_definition, "mob_count");
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "MobLevel")) {
+      for (const auto& [_, def] : monster_defs_) {
+        queue_system(def.name + " " + std::to_string(def.level));
+      }
+      audit_ok(*command_definition, "mob_level");
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "Info")) {
+      const auto target = parsed.command_args.empty() ? std::string{} : parsed.command_args[0];
+      const auto character = snapshot_character_actor(target);
+      if (target.empty() || !character.has_value()) {
+        audit_failed(*command_definition, "target_not_found");
+        return true;
+      }
+      queue_system(character->character_name + " Lv." +
+                   std::to_string(character->ability.level) + " " +
+                   character->map_id + " " + std::to_string(character->x) + " " +
+                   std::to_string(character->y));
+      audit_ok(*command_definition, "info");
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "Kick")) {
+      const auto target = parsed.command_args.empty() ? std::string{} : parsed.command_args[0];
+      const auto target_session_id = find_session_id(target);
+      if (!target_session_id.has_value()) {
+        audit_failed(*command_definition, "target_not_found");
+        return true;
+      }
+      audit_ok(*command_definition, "kick");
+      append_dispatch(dispatch, mark_session_disconnected(*target_session_id, "legacy_gm_kick"));
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "Ting")) {
+      const auto target = parsed.command_args.empty() ? std::string{} : parsed.command_args[0];
+      auto* target_locator = find_locator(target);
+      if (target_locator == nullptr) {
+        queue_system(target + " 无法查找");
+        audit_failed(*command_definition, "target_not_found");
+        return true;
+      }
+      const auto target_map = default_map_id_.empty() ? target_locator->map_id : default_map_id_;
+      audit_ok(*command_definition, "ting");
+      run_random_space_move(target_locator->map_id, target_map, target_locator->actor_id);
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "SuperTing")) {
+      const auto target = parsed.command_args.empty() ? std::string{} : parsed.command_args[0];
+      const auto target_character = snapshot_character_actor(target);
+      if (target.empty() || !target_character.has_value()) {
+        queue_system(target + " 无法查找");
+        audit_failed(*command_definition, "target_not_found");
+        return true;
+      }
+      auto range = 2;
+      if (parsed.command_args.size() >= 2) {
+        if (const auto parsed_range = parse_legacy_int32(parsed.command_args[1]);
+            parsed_range.has_value()) {
+          range = std::clamp(*parsed_range, 0, 10);
+        }
+      }
+      for (const auto& [_, target_locator] : session_index_) {
+        const auto candidate = snapshot_character_actor(target_locator.character_name);
+        if (!candidate.has_value() || candidate->map_id != target_character->map_id ||
+            std::abs(candidate->x - target_character->x) > range ||
+            std::abs(candidate->y - target_character->y) > range) {
+          continue;
+        }
+        const auto target_map = default_map_id_.empty() ? candidate->map_id : default_map_id_;
+        dispatch.legacy_random_space_moves.push_back(
+            LegacyRandomSpaceMoveRequest{candidate->map_id, target_map,
+                                         target_locator.actor_id, 0});
+      }
+      audit_ok(*command_definition, "super_ting");
+      process_legacy_random_space_moves(dispatch, now_ms);
+      process_cross_map_mails(dispatch);
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "Move")) {
+      const auto target_map = parsed.command_args.empty() ? std::string{} : parsed.command_args[0];
+      if (target_map.empty() || maps_.find(resolve_map_id(target_map)) == maps_.end()) {
+        audit_failed(*command_definition, "map_not_found");
+        return true;
+      }
+      audit_ok(*command_definition, "move");
+      run_random_space_move(locator.map_id, target_map, locator.actor_id);
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "PositionMove")) {
+      if (parsed.command_args.size() < 3) {
+        queue_system("Fail");
+        audit_failed(*command_definition, "missing_args");
+        return true;
+      }
+      const auto x = parse_legacy_int32(parsed.command_args[1]);
+      const auto y = parse_legacy_int32(parsed.command_args[2]);
+      if (!x.has_value() || !y.has_value() ||
+          maps_.find(resolve_map_id(parsed.command_args[0])) == maps_.end()) {
+        queue_system("Fail");
+        audit_failed(*command_definition, "invalid_args");
+        return true;
+      }
+      audit_ok(*command_definition, "position_move");
+      run_space_move(locator, locator.actor_id, parsed.command_args[0], *x, *y);
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "Recall")) {
+      const auto target = parsed.command_args.empty() ? std::string{} : parsed.command_args[0];
+      auto* target_locator = find_locator(target);
+      const auto speaker = snapshot_character_actor(locator.character_name);
+      if (target_locator == nullptr || !speaker.has_value()) {
+        queue_system(target + " 无法查找");
+        audit_failed(*command_definition, "target_not_found");
+        return true;
+      }
+      const auto [dx, dy] = legacy_direction_delta(speaker->dir);
+      audit_ok(*command_definition, "recall");
+      run_space_move(*target_locator, target_locator->actor_id, locator.map_id,
+                     speaker->x + dx, speaker->y + dy);
+      return true;
+    }
+    auto apply_gm_to_actor = [&](ActorLocator& target_locator) {
+      const auto map_it = maps_.find(resolve_map_id(target_locator.map_id));
+      if (map_it == maps_.end()) {
+        audit_failed(*command_definition, "target_map_not_found");
+        return true;
+      }
+      auto result = map_it->second->legacy_apply_gm_command(
+          target_locator.actor_id, command_definition->canonical_name, parsed.command_args,
+          current_tick_, now_ms);
+      append_dispatch(dispatch, std::move(result.dispatch));
+      for (auto& message : result.messages) {
+        queue_system(std::move(message));
+      }
+      if (!result.handled) {
+        return false;
+      }
+      if (result.success) {
+        audit_ok(*command_definition, result.reason);
+      } else {
+        audit_failed(*command_definition, result.reason);
+      }
+      return true;
+    };
+    auto apply_gm_to_named_target = [&]() {
+      const auto target = parsed.command_args.empty() ? std::string{} : parsed.command_args[0];
+      auto* target_locator = find_locator(target);
+      if (target_locator == nullptr) {
+        const auto is_offline_gold =
+            legacy_ascii_equals_ci(command_definition->canonical_name, "AddGold") ||
+            legacy_ascii_equals_ci(command_definition->canonical_name, "DelGold");
+        if (is_offline_gold) {
+          audit_gm_command("gm.command.pending", *command_definition,
+                           "offline_character_mutation");
+        } else {
+          audit_failed(*command_definition, "target_not_found");
+        }
+        return true;
+      }
+      return apply_gm_to_actor(*target_locator);
+    };
+    const auto self_player_command =
+        legacy_ascii_equals_ci(command_definition->canonical_name, "Level") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "Level0") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "AdjustTestLevel") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "IncPkPoint") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "ChangeLuck") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "hair") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "Training") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "DeleteSkill") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "ChangeJob") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "ChangeGender") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "NameColor") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "Transparency") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "Make") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "DeleteItem") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "Test_GOLD_Change") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "WeaponRefinery") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "ChangeWeaponDura");
+    if (self_player_command) {
+      return apply_gm_to_actor(locator);
+    }
+    const auto target_player_command =
+        legacy_ascii_equals_ci(command_definition->canonical_name, "AdjustLevel") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "AdjustExp") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "FreePenalty") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "PKpoint") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "LuckyPoint") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "AddGold") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "DelGold") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "OPTraining") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "OPDeleteSkill") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "flag") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "showopen") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "showunit") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "setflag") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "setopen") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "setunit");
+    if (target_player_command) {
+      return apply_gm_to_named_target();
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "Mob") ||
+        legacy_ascii_equals_ci(command_definition->canonical_name, "RecallMob")) {
+      if (parsed.command_args.empty()) {
+        audit_failed(*command_definition, "missing_args");
+        return true;
+      }
+      const auto speaker = snapshot_character_actor(locator.character_name);
+      if (!speaker.has_value()) {
+        audit_failed(*command_definition, "speaker_not_found");
+        return true;
+      }
+      std::string monster_name;
+      auto count = 1;
+      auto slave_exp_level = std::uint8_t{0};
+      for (auto split = parsed.command_args.size(); split > 0; --split) {
+        const auto candidate = join_legacy_args(parsed.command_args, 0, split);
+        if (!monster_defs_.contains(normalized_key(candidate))) {
+          continue;
+        }
+        monster_name = candidate;
+        if (split < parsed.command_args.size()) {
+          count = parse_legacy_int32(parsed.command_args[split]).value_or(1);
+        }
+        if (legacy_ascii_equals_ci(command_definition->canonical_name, "RecallMob") &&
+            split + 1 < parsed.command_args.size()) {
+          slave_exp_level = static_cast<std::uint8_t>(
+              std::clamp(parse_legacy_int32(parsed.command_args[split + 1]).value_or(0), 0, 7));
+        }
+        break;
+      }
+      if (monster_name.empty()) {
+        audit_failed(*command_definition, "monster_spawn_failed");
+        return true;
+      }
+      const auto [dx, dy] = legacy_direction_delta(speaker->dir);
+      const auto clamped_count = std::clamp(count, 1, 50);
+      auto master_actor_id = std::uint64_t{0};
+      if (legacy_ascii_equals_ci(command_definition->canonical_name, "RecallMob")) {
+        master_actor_id = locator.actor_id;
+      }
+      const auto spawned = spawn_legacy_gm_monsters(
+          dispatch, locator.map_id, speaker->x + dx, speaker->y + dy,
+          monster_name, clamped_count, now_ms, master_actor_id, slave_exp_level);
+      if (spawned == 0) {
+        audit_failed(*command_definition, "monster_spawn_failed");
+      } else {
+        audit_ok(*command_definition, "spawned=" + std::to_string(spawned));
+      }
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "Mission")) {
+      if (parsed.command_args.size() >= 3) {
+        locator.legacy_sys_mission_map = resolve_map_id(parsed.command_args[0]);
+        locator.legacy_sys_mission_x =
+            parse_legacy_int32(parsed.command_args[1]).value_or(locator.legacy_sys_mission_x);
+        locator.legacy_sys_mission_y =
+            parse_legacy_int32(parsed.command_args[2]).value_or(locator.legacy_sys_mission_y);
+        locator.legacy_sys_mission = true;
+      } else if (parsed.command_args.size() >= 2) {
+        locator.legacy_sys_mission_map = locator.map_id;
+        locator.legacy_sys_mission_x =
+            parse_legacy_int32(parsed.command_args[0]).value_or(locator.legacy_sys_mission_x);
+        locator.legacy_sys_mission_y =
+            parse_legacy_int32(parsed.command_args[1]).value_or(locator.legacy_sys_mission_y);
+        locator.legacy_sys_mission = true;
+      } else {
+        locator.legacy_sys_mission = false;
+      }
+      audit_ok(*command_definition, locator.legacy_sys_mission ? "mission_set" : "mission_clear");
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "MobPlace")) {
+      if (parsed.command_args.size() < 3) {
+        audit_failed(*command_definition, "missing_args");
+        return true;
+      }
+      const auto spawn_x = parse_legacy_int32(parsed.command_args[0]).value_or(0);
+      const auto spawn_y = parse_legacy_int32(parsed.command_args[1]).value_or(0);
+      std::string monster_name;
+      auto count = 1;
+      for (auto split = parsed.command_args.size(); split > 2; --split) {
+        const auto candidate = join_legacy_args(parsed.command_args, 2, split);
+        if (!monster_defs_.contains(normalized_key(candidate))) {
+          continue;
+        }
+        monster_name = candidate;
+        if (split < parsed.command_args.size()) {
+          count = parse_legacy_int32(parsed.command_args[split]).value_or(1);
+        }
+        break;
+      }
+      if (monster_name.empty()) {
+        audit_failed(*command_definition, "monster_spawn_failed");
+        return true;
+      }
+      const auto clamped_count = std::clamp(count, 1, 500);
+      const auto target_xy = locator.legacy_sys_mission
+                                 ? std::optional<std::pair<std::int32_t, std::int32_t>>{
+                                       {locator.legacy_sys_mission_x, locator.legacy_sys_mission_y}}
+                                 : std::nullopt;
+      const auto map_id = locator.legacy_sys_mission ? locator.legacy_sys_mission_map
+                                                     : locator.map_id;
+      const auto spawned = spawn_legacy_gm_monsters(
+          dispatch, map_id, spawn_x, spawn_y, monster_name, clamped_count, now_ms,
+          0, 0, target_xy);
+      if (spawned == 0) {
+        audit_failed(*command_definition, "monster_spawn_failed");
+      } else {
+        audit_ok(*command_definition, "spawned=" + std::to_string(spawned));
+      }
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "ReloadAdmin")) {
+      legacy_admin_degrees_ = load_legacy_admin_list(config_.runtime.legacy_admin_list);
+      for (auto& [_, session] : session_index_) {
+        session.user_degree =
+            resolve_legacy_user_degree(session.account_id, session.character_name);
+      }
+      queue_system("ReloadAdmin OK");
+      audit_ok(*command_definition, "admin_list");
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "SabukWallGold")) {
+      queue_system("SabukWallGold 0");
+      audit_ok(*command_definition, "castle_snapshot");
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "AddGuild")) {
+      if (parsed.command_args.size() < 2) {
+        audit_failed(*command_definition, "missing_args");
+        return true;
+      }
+      const auto guild_name = parsed.command_args[0];
+      const auto lord_name = parsed.command_args[1];
+      if (find_runtime_guild_state(guild_castle_snapshot_, guild_name) != nullptr) {
+        audit_failed(*command_definition, "guild_exists");
+        return true;
+      }
+      auto* lord_locator = find_locator(lord_name);
+      if (lord_locator == nullptr) {
+        audit_failed(*command_definition, "target_not_found");
+        return true;
+      }
+      auto lord_snapshot = snapshot_character_actor(lord_name);
+      if (!lord_snapshot.has_value() || !lord_snapshot->guild_name.empty()) {
+        audit_failed(*command_definition, "target_has_guild");
+        return true;
+      }
+      GuildState guild;
+      guild.guild_name = guild_name;
+      guild.lord = lord_snapshot->character_name;
+      guild.members.push_back(lord_snapshot->character_name);
+      guild_castle_snapshot_.guilds.push_back(guild);
+      for (const auto& map_id : map_order_) {
+        if (auto map_it = maps_.find(map_id); map_it != maps_.end()) {
+          map_it->second->set_guild_castle_snapshot(guild_castle_snapshot_);
+        }
+      }
+      ActorMail sync;
+      sync.kind = ActorMailKind::guild_membership_sync;
+      sync.map_id = lord_locator->map_id;
+      sync.actor_id = lord_locator->actor_id;
+      sync.character.guild_name = guild_name;
+      sync.character.guild_title = "Lord";
+      append_dispatch(dispatch, route_actor_mail(sync));
+      PersistRequest request;
+      request.kind = PersistRequestKind::save_guild_state;
+      request.reply_to = "world_service";
+      request.guild_name = guild.guild_name;
+      request.guild_state = guild;
+      dispatch.persist_requests.push_back(std::move(request));
+      audit_ok(*command_definition, "guild_created");
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "DelGuild")) {
+      if (parsed.command_args.empty()) {
+        audit_failed(*command_definition, "missing_args");
+        return true;
+      }
+      const auto wanted = legacy_character_key(parsed.command_args[0]);
+      auto guild_it = std::find_if(guild_castle_snapshot_.guilds.begin(),
+                                   guild_castle_snapshot_.guilds.end(),
+                                   [&](const GuildState& guild) {
+                                     return legacy_character_key(guild.guild_name) == wanted;
+                                   });
+      if (guild_it == guild_castle_snapshot_.guilds.end()) {
+        audit_failed(*command_definition, "guild_not_found");
+        return true;
+      }
+      const auto guild_name = guild_it->guild_name;
+      const auto members = guild_it->members;
+      guild_castle_snapshot_.guilds.erase(guild_it);
+      for (const auto& member : members) {
+        if (auto* member_locator = find_locator(member); member_locator != nullptr) {
+          ActorMail sync;
+          sync.kind = ActorMailKind::guild_membership_sync;
+          sync.map_id = member_locator->map_id;
+          sync.actor_id = member_locator->actor_id;
+          append_dispatch(dispatch, route_actor_mail(sync));
+        }
+      }
+      for (const auto& map_id : map_order_) {
+        if (auto map_it = maps_.find(map_id); map_it != maps_.end()) {
+          map_it->second->set_guild_castle_snapshot(guild_castle_snapshot_);
+        }
+      }
+      PersistRequest request;
+      request.kind = PersistRequestKind::delete_guild;
+      request.reply_to = "world_service";
+      request.guild_name = guild_name;
+      dispatch.persist_requests.push_back(std::move(request));
+      audit_ok(*command_definition, "guild_deleted");
+      return true;
+    }
+    if (legacy_ascii_equals_ci(command_definition->canonical_name, "ChangeSabukLord")) {
+      if (parsed.command_args.empty()) {
+        audit_failed(*command_definition, "missing_args");
+        return true;
+      }
+      const auto* guild = find_runtime_guild_state(guild_castle_snapshot_, parsed.command_args[0]);
+      if (guild == nullptr) {
+        audit_failed(*command_definition, "guild_not_found");
+        return true;
+      }
+      guild_castle_snapshot_.castle_dialog.owner_guild = guild->guild_name;
+      guild_castle_snapshot_.castle_dialog.lord = guild->lord;
+      set_guild_castle_snapshot(guild_castle_snapshot_);
+      PersistRequest request;
+      request.kind = PersistRequestKind::save_castle_state;
+      request.reply_to = "world_service";
+      request.castle_name = guild_castle_snapshot_.castle_dialog.castle_name.empty()
+                                ? config_.runtime.castle_name
+                                : guild_castle_snapshot_.castle_dialog.castle_name;
+      request.guild_castle_snapshot = guild_castle_snapshot_;
+      request.payload_json = "{\"owner_guild\":\"" +
+                             guild_castle_snapshot_.castle_dialog.owner_guild +
+                             "\",\"lord\":\"" + guild_castle_snapshot_.castle_dialog.lord + "\"}";
+      dispatch.persist_requests.push_back(std::move(request));
+      audit_ok(*command_definition, "castle_lord_changed");
+      return true;
+    }
+  }
+
+  if (command_definition != nullptr &&
+      command_definition->implementation == LegacyGmCommandImplementation::pending) {
+    audit_gm_command("gm.command.pending", *command_definition,
+                     command_definition->dependency);
+    return true;
   }
 
   if (legacy_command_equals(parsed.command_name, "拒绝私聊",
@@ -938,9 +1662,6 @@ bool LogicRuntime::handle_legacy_chat_command(const LogicCommand& command,
       legacy_ascii_equals_ci(parsed.command_name, "ReleaseShutup");
   const auto shutup_list = legacy_ascii_equals_ci(parsed.command_name, "ShutupList");
   if (shutup || release_shutup || shutup_list) {
-    if (!gm_account) {
-      return true;
-    }
     for (auto it = legacy_shut_up_list_.begin(); it != legacy_shut_up_list_.end();) {
       if (now_ms > it->second.expire_ms) {
         it = legacy_shut_up_list_.erase(it);
@@ -964,6 +1685,9 @@ bool LogicRuntime::handle_legacy_chat_command(const LogicCommand& command,
       add_legacy_shut_up(target, static_cast<std::uint64_t>(minutes) * 60ULL * 1000ULL,
                          now_ms);
       queue_system(target + "禁止聊天 + " + std::to_string(minutes) + "分钟");
+      if (command_definition != nullptr) {
+        audit_gm_command("gm.command.ok", *command_definition, "shutup");
+      }
       return true;
     }
     if (release_shutup) {
@@ -976,11 +1700,17 @@ bool LogicRuntime::handle_legacy_chat_command(const LogicCommand& command,
         queue_system_to(*target_locator, "从禁止聊天列表删除");
       }
       queue_system(target + " ");
+      if (command_definition != nullptr) {
+        audit_gm_command("gm.command.ok", *command_definition, "release_shutup");
+      }
       return true;
     }
     for (const auto& [_, entry] : legacy_shut_up_list_) {
       queue_system(entry.character_name + " " +
                    legacy_minutes_text(entry.expire_ms, now_ms) + "分钟");
+    }
+    if (command_definition != nullptr) {
+      audit_gm_command("gm.command.ok", *command_definition, "shutup_list");
     }
     return true;
   }
@@ -1091,8 +1821,22 @@ bool LogicRuntime::route_legacy_chat_command(const LogicCommand& command,
                      locator.actor_id);
       return true;
     }
-    case LegacyChatInputKind::group:
+    case LegacyChatInputKind::group: {
+      const auto group_it = legacy_groups_.find(locator.legacy_group_id);
+      if (locator.legacy_group_id == 0 || group_it == legacy_groups_.end()) {
+        return true;
+      }
+      const auto payload = "-" + locator.character_name + ": " + parsed.message_text;
+      for (const auto member_session_id : group_it->second.members) {
+        const auto member_it = session_index_.find(member_session_id);
+        if (member_it == session_index_.end()) {
+          continue;
+        }
+        queue_delivery(member_it->second.map_id, member_it->second.actor_id,
+                       LegacyChatDeliveryKind::group, payload, locator.actor_id);
+      }
       return true;
+    }
     case LegacyChatInputKind::guild: {
       const auto character = snapshot_character_actor(locator.character_name);
       if (!character.has_value() || character->guild_name.empty()) {
@@ -1214,6 +1958,15 @@ RuntimeDispatch LogicRuntime::route_logic_command(const LogicCommand& command) {
       append_dispatch(dispatch, enqueue_ready_user(std::move(ready)));
       break;
     }
+    case LogicCommandKind::group_create:
+      create_legacy_group(command.session_id, command.text);
+      break;
+    case LogicCommandKind::group_add_member:
+      add_legacy_group_member(command.session_id, command.text);
+      break;
+    case LogicCommandKind::group_remove_member:
+      remove_legacy_group_member_by_name(command.session_id, command.text);
+      break;
     case LogicCommandKind::turn:
     case LogicCommandKind::walk:
     case LogicCommandKind::run:
@@ -1360,6 +2113,7 @@ RuntimeDispatch LogicRuntime::mark_session_disconnected(std::uint64_t session_id
   if (locator_it == session_index_.end()) {
     return dispatch;
   }
+  remove_legacy_group_member(session_id);
   if (auto map_it = maps_.find(locator_it->second.map_id); map_it != maps_.end()) {
     append_dispatch(dispatch, map_it->second->legacy_disconnect_player(locator_it->second.actor_id,
                                                                        last_now_ms_));
@@ -1400,39 +2154,7 @@ RuntimeDispatch LogicRuntime::tick(std::uint64_t now_ms, LegacyRuntimeContext co
 
   process_legacy_event_creates(combined, now_ms);
   process_legacy_random_space_moves(combined, now_ms);
-
-  while (!combined.cross_map_mails.empty()) {
-    auto cross_map_mails = std::move(combined.cross_map_mails);
-    combined.cross_map_mails.clear();
-    for (const auto& cross_map_mail : cross_map_mails) {
-      auto routed = route_actor_mail(cross_map_mail);
-      append_dispatch(combined, std::move(routed));
-      if (cross_map_mail.kind == ActorMailKind::spawn_player &&
-          cross_map_mail.session_id != 0) {
-        const auto target_map_id = resolve_map_id(cross_map_mail.map_id);
-        if (auto target_it = maps_.find(target_map_id); target_it != maps_.end() &&
-            target_it->second->legacy_player_state(cross_map_mail.actor_id).has_value()) {
-          auto updated = ActorLocator{target_map_id, cross_map_mail.actor_id,
-                                      cross_map_mail.character.account_id,
-                                      cross_map_mail.character.character_name};
-          if (auto previous = session_index_.find(cross_map_mail.session_id);
-              previous != session_index_.end()) {
-            updated.latest_say_text = std::move(previous->second.latest_say_text);
-            updated.bomb_say_time_ms = previous->second.bomb_say_time_ms;
-            updated.bomb_say_count = previous->second.bomb_say_count;
-            updated.auto_shut_up_until_ms = previous->second.auto_shut_up_until_ms;
-            updated.has_latest_cry_time = previous->second.has_latest_cry_time;
-            updated.latest_cry_time_ms = previous->second.latest_cry_time_ms;
-            updated.hear_whisper = previous->second.hear_whisper;
-            updated.hear_cry = previous->second.hear_cry;
-            updated.hear_guild_msg = previous->second.hear_guild_msg;
-            updated.whisper_block_list = std::move(previous->second.whisper_block_list);
-          }
-          session_index_[cross_map_mail.session_id] = std::move(updated);
-        }
-      }
-    }
-  }
+  process_cross_map_mails(combined);
   return combined;
 }
 
@@ -1527,6 +2249,50 @@ void LogicRuntime::process_legacy_random_space_moves(RuntimeDispatch& dispatch,
                       source_it->second->legacy_space_move_player(
                           request.actor_id, target_map_id, target->first, target->second,
                           true, current_tick_, now_ms));
+    }
+  }
+}
+
+void LogicRuntime::process_cross_map_mails(RuntimeDispatch& combined) {
+  while (!combined.cross_map_mails.empty()) {
+    auto cross_map_mails = std::move(combined.cross_map_mails);
+    combined.cross_map_mails.clear();
+    for (const auto& cross_map_mail : cross_map_mails) {
+      auto routed = route_actor_mail(cross_map_mail);
+      append_dispatch(combined, std::move(routed));
+      if (cross_map_mail.kind == ActorMailKind::spawn_player &&
+          cross_map_mail.session_id != 0) {
+        const auto target_map_id = resolve_map_id(cross_map_mail.map_id);
+        if (auto target_it = maps_.find(target_map_id); target_it != maps_.end() &&
+            target_it->second->legacy_player_state(cross_map_mail.actor_id).has_value()) {
+          auto updated = ActorLocator{target_map_id, cross_map_mail.actor_id,
+                                      cross_map_mail.character.account_id,
+                                      cross_map_mail.character.character_name};
+          if (auto previous = session_index_.find(cross_map_mail.session_id);
+              previous != session_index_.end()) {
+            updated.latest_say_text = std::move(previous->second.latest_say_text);
+            updated.bomb_say_time_ms = previous->second.bomb_say_time_ms;
+            updated.bomb_say_count = previous->second.bomb_say_count;
+            updated.auto_shut_up_until_ms = previous->second.auto_shut_up_until_ms;
+            updated.has_latest_cry_time = previous->second.has_latest_cry_time;
+            updated.latest_cry_time_ms = previous->second.latest_cry_time_ms;
+            updated.hear_whisper = previous->second.hear_whisper;
+            updated.hear_cry = previous->second.hear_cry;
+            updated.hear_guild_msg = previous->second.hear_guild_msg;
+            updated.whisper_block_list = std::move(previous->second.whisper_block_list);
+            updated.legacy_group_id = previous->second.legacy_group_id;
+            updated.user_degree = previous->second.user_degree;
+            updated.legacy_sysop_mode = previous->second.legacy_sysop_mode;
+            updated.legacy_supervisor_mode = previous->second.legacy_supervisor_mode;
+            updated.legacy_superman_mode = previous->second.legacy_superman_mode;
+            updated.legacy_sys_mission = previous->second.legacy_sys_mission;
+            updated.legacy_sys_mission_map = previous->second.legacy_sys_mission_map;
+            updated.legacy_sys_mission_x = previous->second.legacy_sys_mission_x;
+            updated.legacy_sys_mission_y = previous->second.legacy_sys_mission_y;
+          }
+          session_index_[cross_map_mail.session_id] = std::move(updated);
+        }
+      }
     }
   }
 }
@@ -1636,9 +2402,11 @@ void LogicRuntime::process_ready_users(std::uint64_t now_ms, RuntimeDispatch& di
       continue;
     }
 
-    session_index_[ready.session_id] =
-        ActorLocator{character.map_id, mail.actor_id, character.account_id,
-                     character.character_name};
+    auto locator = ActorLocator{character.map_id, mail.actor_id, character.account_id,
+                                character.character_name};
+    locator.user_degree =
+        resolve_legacy_user_degree(character.account_id, character.character_name);
+    session_index_[ready.session_id] = std::move(locator);
     run_user_order_.push_back(ready.session_id);
     dispatch.audit_events.push_back(
         AuditEvent{"world.enter", character.account_id + ":" + character.character_name,
@@ -1689,6 +2457,7 @@ void LogicRuntime::process_user_humans(std::uint64_t now_ms,
     const auto locator = locator_it->second;
     auto map_it = maps_.find(locator.map_id);
     if (map_it == maps_.end()) {
+      remove_legacy_group_member(session_id);
       session_index_.erase(locator_it);
       run_user_order_.erase(run_user_order_.begin() + static_cast<std::ptrdiff_t>(index));
       ++processed;
@@ -1705,6 +2474,7 @@ void LogicRuntime::process_user_humans(std::uint64_t now_ms,
       close_records_[util::lower_copy(locator.character_name)] =
           CloseRecord{session_id, locator.account_id, locator.character_name, now_ms,
                       "closed"};
+      remove_legacy_group_member(session_id);
       session_index_.erase(session_id);
       run_user_order_.erase(run_user_order_.begin() + static_cast<std::ptrdiff_t>(index));
     } else {
@@ -1888,6 +2658,61 @@ ActorMail LogicRuntime::make_monster_spawn_mail(const MonsterGroup& group,
   return mail;
 }
 
+std::int32_t LogicRuntime::spawn_legacy_gm_monsters(
+    RuntimeDispatch& dispatch, std::string map_id, std::int32_t x, std::int32_t y,
+    std::string monster_name, std::int32_t count, std::uint64_t now_ms,
+    std::uint64_t master_actor_id, std::uint8_t slave_exp_level,
+    std::optional<std::pair<std::int32_t, std::int32_t>> target_xy) {
+  const auto resolved_map_id = resolve_map_id(map_id);
+  const auto map_it = maps_.find(resolved_map_id);
+  if (map_it == maps_.end() || monster_defs_.find(normalized_key(monster_name)) == monster_defs_.end()) {
+    return 0;
+  }
+  if (!map_it->second->legacy_can_spawn_monster(x, y)) {
+    return 0;
+  }
+
+  MonsterGroup group;
+  group.name = std::move(monster_name);
+  group.map_id = resolved_map_id;
+  group.x = x;
+  group.y = y;
+  group.area = 0;
+  group.count = std::clamp(count, 1, 500);
+  group.spawn.map_id = resolved_map_id;
+  group.spawn.name = group.name;
+  group.spawn.x = x;
+  group.spawn.y = y;
+  group.legacy_group = false;
+  group.respawn_ms = 0;
+  group.start_time_ms = now_ms;
+
+  auto spawned = 0;
+  for (auto index = 0; index < group.count; ++index) {
+    const auto actor_id = next_actor_id_++;
+    auto mail = make_monster_spawn_mail(group, actor_id, x, y, now_ms, &dispatch);
+    mail.legacy_spawn_group = true;
+    mail.monster_no_item = true;
+    if (master_actor_id != 0) {
+      mail.master_actor_id = master_actor_id;
+      mail.monster_is_slave = true;
+      mail.slave_make_level = 3;
+      mail.slave_exp_level = slave_exp_level;
+      mail.master_royalty_time_ms = now_ms + 24ULL * 60ULL * 60ULL * 1000ULL;
+    }
+    if (target_xy.has_value()) {
+      mail.monster_has_target_xy = true;
+      mail.monster_target_x = target_xy->first;
+      mail.monster_target_y = target_xy->second;
+    }
+    map_it->second->enqueue_mail(mail);
+    group.monsters.push_back(ActorRef{resolved_map_id, actor_id, group.name});
+    ++spawned;
+  }
+  monster_groups_.push_back(std::move(group));
+  return spawned;
+}
+
 void LogicRuntime::process_monster_spawn_group(std::size_t group_index,
                                                std::uint64_t now_ms,
                                                RuntimeDispatch& dispatch) {
@@ -2006,6 +2831,7 @@ void LogicRuntime::process_monsters(std::uint64_t now_ms, RuntimeDispatch& dispa
 
   if (mon_cur_ >= monster_groups_.size()) {
     mon_cur_ = 0;
+    mon_sub_cur_ = 0;
   }
 
   const auto started = std::chrono::steady_clock::now();
@@ -2029,7 +2855,7 @@ void LogicRuntime::process_monsters(std::uint64_t now_ms, RuntimeDispatch& dispa
       const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                                std::chrono::steady_clock::now() - started)
                                .count();
-      if ((budget_ms == 0 && processed > 0) || (budget_ms > 0 && elapsed >= budget_ms)) {
+      if ((budget_ms == 0 && processed > 0) || (budget_ms > 0 && elapsed > budget_ms)) {
         lack = true;
         const auto next_sub = k + 1;
         if (next_sub >= group.monsters.size()) {
@@ -2052,9 +2878,13 @@ void LogicRuntime::process_monsters(std::uint64_t now_ms, RuntimeDispatch& dispa
       mon_cur_ = 0;
       mon_sub_cur_ = 0;
     }
+    add_stage_trace(dispatch, "ProcessMonsters", "budget_exhausted", now_ms,
+                    mon_cur_, mon_sub_cur_);
   } else {
     mon_cur_ = 0;
     mon_sub_cur_ = 0;
+    add_stage_trace(dispatch, "ProcessMonsters", "complete", now_ms, mon_cur_,
+                    mon_sub_cur_);
   }
 }
 

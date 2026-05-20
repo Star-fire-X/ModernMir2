@@ -76,6 +76,7 @@ int main() {
   updated.slaves[0].hp = 77;
   updated.slaves[0].mp = 3;
   updated.body_luck = 12500.0;
+  updated.birth_items_granted = true;
   repository.save_character(updated);
 
   const auto loaded = repository.load_character("guest", "Mage");
@@ -93,7 +94,7 @@ int main() {
       loaded->slaves[0].slave_make_level != 1 ||
       loaded->slaves[0].remain_royalty_sec != 86400 ||
       loaded->slaves[0].hp != 77 || loaded->slaves[0].mp != 3 ||
-      loaded->body_luck != 12500.0) {
+      loaded->body_luck != 12500.0 || !loaded->birth_items_granted) {
     return 1;
   }
 
@@ -156,6 +157,24 @@ int main() {
   if (guild_it == guild_snapshot.guilds.end() || guild_it->lord != "Mage" ||
       guild_it->members.size() != 2 || guild_it->applicants.size() != 1 ||
       guild_it->applicants.front() != "Visitor") {
+    return 1;
+  }
+
+  auto offline_guild_member = make_character("guest", "OfflineGuild", 0, 0, 0);
+  offline_guild_member.guild_name = "OldGuild";
+  offline_guild_member.guild_title = "Member";
+  if (!repository.create_character(offline_guild_member)) {
+    return 1;
+  }
+  mir2::GuildState old_guild;
+  old_guild.guild_name = "OldGuild";
+  old_guild.lord = "OfflineGuild";
+  old_guild.members = {"OfflineGuild"};
+  repository.save_guild_state(old_guild);
+  repository.delete_guild("OldGuild");
+  const auto cleared_offline = repository.load_character("guest", "OfflineGuild");
+  if (!cleared_offline.has_value() || !cleared_offline->guild_name.empty() ||
+      !cleared_offline->guild_title.empty()) {
     return 1;
   }
 

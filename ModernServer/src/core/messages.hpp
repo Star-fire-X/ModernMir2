@@ -75,6 +75,7 @@ struct CharacterRecord {
   std::uint32_t daily_quest{0};
   std::array<CharacterSlaveRecord, kMaxLegacySlaves> slaves{};
   double body_luck{0.0};
+  bool birth_items_granted{true};
 };
 
 struct LegacyWeaponUpgradeRecord {
@@ -182,6 +183,9 @@ enum class LogicCommandKind {
   trade_remove_item,
   trade_set_gold,
   trade_accept,
+  group_create,
+  group_add_member,
+  group_remove_member,
   logout,
   raw_packet
 };
@@ -274,6 +278,7 @@ enum class LegacyChatDeliveryKind {
   normal,
   whisper,
   guild,
+  group,
   shout,
   shout_direct,
   system
@@ -351,6 +356,10 @@ struct ActorMail {
   std::uint64_t slave_life_time_ms{0};
   bool monster_no_item{false};
   bool monster_tameable{true};
+  bool monster_has_target_xy{false};
+  std::int32_t monster_target_x{0};
+  std::int32_t monster_target_y{0};
+  std::uint8_t legacy_name_color{255};
   bool legacy_space_move_show2{false};
   std::uint32_t respawn_ms{0};
   std::uint8_t dir{0};

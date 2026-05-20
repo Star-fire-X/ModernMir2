@@ -1500,6 +1500,7 @@ RuntimeDispatch MapActor::legacy_space_move_player(
   transfer.dir = snapshot.dir;
   transfer.character = snapshot;
   transfer.legacy_buffs = player->legacy_buffs_for_transfer(current_tick);
+  transfer.legacy_name_color = player->legacy_name_color();
   transfer.legacy_space_move_show2 = show2;
 
   queue_packet(dispatch, player->session_id(), make_clear_objects_packet(player->session_id()));
@@ -1669,8 +1670,8 @@ RuntimeDispatch MapActor::legacy_process_monster(std::uint64_t actor_id,
     monster->mark_legacy_search_time(now_ms);
   }
   if (run_due) {
-    handle_monster_ai(*monster, dispatch, current_tick, now_ms);
     monster->mark_legacy_run_time(now_ms);
+    handle_monster_ai(*monster, dispatch, current_tick, now_ms);
   }
   if (!monster->is_dead() &&
       handle_monster_status_effects(*monster, dispatch, current_tick, now_ms)) {
@@ -3404,6 +3405,7 @@ bool MapActor::try_legacy_revival(Player& player, RuntimeDispatch& dispatch,
                                  current_tick, now_ms);
 }
 
+#include "world/map_actor_gm.hpp"
 #include "world/map_actor_npc.hpp"
 void MapActor::add_legacy_trace(RuntimeDispatch& dispatch,
                                 std::string stage,

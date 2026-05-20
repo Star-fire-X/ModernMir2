@@ -1,5 +1,6 @@
 #include "importer/legacy_importer.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <optional>
@@ -7,6 +8,7 @@
 #include <set>
 #include <sstream>
 #include <unordered_map>
+#include <vector>
 
 #ifdef MIR2_ENABLE_ODBC
 #include <windows.h>
@@ -133,6 +135,56 @@ std::optional<std::int32_t> parse_int32(std::string_view text) {
   } catch (...) {
   }
   return std::nullopt;
+}
+
+struct LegacyMonGenRecord {
+  std::string map_id;
+  std::string x;
+  std::string y;
+  std::string name;
+  std::string area = "0";
+  std::string count = "1";
+  std::string zen_minutes = "1";
+  std::string small_zen_rate = "0";
+};
+
+std::optional<LegacyMonGenRecord> parse_mongen_record(std::string_view line) {
+  const auto tokens = split_legacy_fields(line);
+  if (tokens.size() < 4) {
+    return std::nullopt;
+  }
+
+  std::size_t tail_start = tokens.size();
+  std::size_t numeric_tail_count = 0;
+  while (tail_start > 4 && numeric_tail_count < 4 &&
+         parse_int32(tokens[tail_start - 1]).has_value()) {
+    --tail_start;
+    ++numeric_tail_count;
+  }
+
+  auto name = join_tokens(tokens, 3, tail_start);
+  if (name.empty()) {
+    return std::nullopt;
+  }
+
+  LegacyMonGenRecord record;
+  record.map_id = tokens[0];
+  record.x = tokens[1];
+  record.y = tokens[2];
+  record.name = std::move(name);
+  if (numeric_tail_count > 0) {
+    record.area = tokens[tail_start];
+  }
+  if (numeric_tail_count > 1) {
+    record.count = tokens[tail_start + 1];
+  }
+  if (numeric_tail_count > 2) {
+    record.zen_minutes = tokens[tail_start + 2];
+  }
+  if (numeric_tail_count > 3) {
+    record.small_zen_rate = tokens[tail_start + 3];
+  }
+  return record;
 }
 
 std::filesystem::path first_existing_path(std::initializer_list<std::filesystem::path> paths) {
@@ -466,20 +518,20 @@ LegacyImportReport import_maps_and_spawns(const std::filesystem::path& legacy_ro
     if (line.empty() || util::starts_with(line, ";")) {
       continue;
     }
-    const auto tokens = split_ws(line);
-    if (tokens.size() < 4) {
+    const auto record = parse_mongen_record(line);
+    if (!record.has_value()) {
       continue;
     }
     if (!first) {
       spawns << ",\n";
     }
     first = false;
-    spawns << "  { map_id = " << quote(tokens[0]) << ", actor_type = \"monster\", name = "
-           << quote(tokens[3]) << ", x = " << tokens[1] << ", y = " << tokens[2]
-           << ", area = " << (tokens.size() > 4 ? tokens[4] : "0")
-           << ", count = " << (tokens.size() > 5 ? tokens[5] : "1")
-           << ", zen_minutes = " << (tokens.size() > 6 ? tokens[6] : "1")
-           << ", small_zen_rate = " << (tokens.size() > 7 ? tokens[7] : "0")
+    spawns << "  { map_id = " << quote(record->map_id)
+           << ", actor_type = \"monster\", name = " << quote(record->name)
+           << ", x = " << record->x << ", y = " << record->y
+           << ", area = " << record->area << ", count = " << record->count
+           << ", zen_minutes = " << record->zen_minutes
+           << ", small_zen_rate = " << record->small_zen_rate
            << ", legacy_group = true }";
     ++report.spawn_count;
   }
@@ -731,27 +783,53 @@ std::size_t import_monitems(const std::filesystem::path& legacy_root,
     return 0;
   }
 
+  std::vector<std::filesystem::path> monitem_files;
   for (const auto& entry : std::filesystem::directory_iterator(directory)) {
     if (!entry.is_regular_file() ||
         util::lower_copy(entry.path().extension().string()) != ".txt") {
       continue;
     }
-    const auto monster_name = entry.path().stem().string();
-    for (const auto& line : read_lines(entry.path())) {
+    monitem_files.push_back(entry.path());
+  }
+  std::sort(monitem_files.begin(), monitem_files.end(),
+            [](const auto& lhs, const auto& rhs) {
+              return lhs.generic_string() < rhs.generic_string();
+            });
+
+  for (const auto& path : monitem_files) {
+    const auto monster_name = path.stem().string();
+    for (const auto& line : read_lines(path)) {
       if (line.empty() || util::starts_with(line, ";")) {
         continue;
       }
-      const auto tokens = split_ws(line);
+      const auto tokens = split_legacy_fields(line);
       if (tokens.size() < 2) {
         continue;
       }
-      const auto slash = tokens[0].find('/');
-      if (slash == std::string::npos) {
+      std::optional<std::int32_t> sel;
+      std::optional<std::int32_t> max;
+      std::size_t item_start = 1;
+      if (const auto slash = tokens[0].find('/'); slash != std::string::npos) {
+        sel = parse_int32(tokens[0].substr(0, slash));
+        max = parse_int32(tokens[0].substr(slash + 1));
+      } else if (tokens.size() >= 3) {
+        sel = parse_int32(tokens[0]);
+        max = parse_int32(tokens[1]);
+        item_start = 2;
+      }
+      if (!sel.has_value() || !max.has_value() || item_start >= tokens.size()) {
         continue;
       }
-      const auto sel = parse_int32(tokens[0].substr(0, slash));
-      const auto max = parse_int32(tokens[0].substr(slash + 1));
-      if (!sel.has_value() || !max.has_value()) {
+      auto item_end = tokens.size();
+      auto count_text = std::string("1");
+      if (tokens.size() > item_start + 1) {
+        if (const auto count_value = parse_int32(tokens.back()); count_value.has_value()) {
+          count_text = tokens.back();
+          item_end = tokens.size() - 1;
+        }
+      }
+      const auto item_name = join_tokens(tokens, item_start, item_end);
+      if (item_name.empty()) {
         continue;
       }
       if (!first) {
@@ -761,8 +839,8 @@ std::size_t import_monitems(const std::filesystem::path& legacy_root,
       drops << "  { monster_name = " << quote(monster_name)
             << ", sel_point = " << (*sel - 1)
             << ", max_point = " << *max
-            << ", item_name = " << quote(tokens[1])
-            << ", count = " << (tokens.size() > 2 ? tokens[2] : "1") << " }";
+            << ", item_name = " << quote(item_name)
+            << ", count = " << count_text << " }";
       ++count;
     }
   }

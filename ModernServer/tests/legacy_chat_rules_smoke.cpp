@@ -68,6 +68,15 @@ mir2::RuntimeDispatch say(mir2::LogicRuntime& runtime, std::uint64_t session_id,
   return runtime.tick(now_ms);
 }
 
+void group_command(mir2::LogicRuntime& runtime, std::uint64_t session_id,
+                   mir2::LogicCommandKind kind, std::string text) {
+  mir2::LogicCommand command;
+  command.kind = kind;
+  command.session_id = session_id;
+  command.text = std::move(text);
+  static_cast<void>(runtime.route_logic_command(command));
+}
+
 std::uint64_t actor_id(mir2::LogicRuntime& runtime, std::string_view name) {
   const auto located = runtime.locate_character_actor(name);
   return located.has_value() ? located->second : 0;
@@ -242,11 +251,21 @@ bool check_channel_bomb_say() {
   }
   {
     auto runtime = make_runtime();
-    static_cast<void>(say(runtime, 1, "!!hi", 1502));
-    static_cast<void>(say(runtime, 1, "!!hi", 1753));
+    group_command(runtime, 1, mir2::LogicCommandKind::group_create, "Bob");
+    const auto alice = static_cast<std::int32_t>(actor_id(runtime, "Alice"));
+    const auto first = say(runtime, 1, "!!hi", 1502);
+    const auto second = say(runtime, 1, "!!hi", 1753);
     const auto third = say(runtime, 1, "!!hi", 2004);
-    if (!has_system(runtime, third, 1, "Alice",
-                    "[由于您重复发出相同内容，一分钟内将被禁止交谈。]")) {
+    const auto muted = say(runtime, 1, "!!muted", 2255);
+    if (!has_packet(first, 5, mir2::kSmSysMessage, alice, mir2::make_word(196, 255),
+                    "-Alice: hi") ||
+        !has_packet(second, 5, mir2::kSmSysMessage, alice, mir2::make_word(196, 255),
+                    "-Alice: hi") ||
+        has_text(third, 5, "-Alice: hi") ||
+        !has_system(runtime, third, 1, "Alice",
+                    "[由于您重复发出相同内容，一分钟内将被禁止交谈。]") ||
+        !has_system(runtime, muted, 1, "Alice", "禁止聊天") ||
+        has_text(muted, 5, "-Alice: muted")) {
       return false;
     }
   }

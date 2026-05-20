@@ -5,6 +5,7 @@
 
 #include "protocol/canonical_login_error.hpp"
 #include "protocol/legacy_string.hpp"
+#include "protocol/legacy_types.hpp"
 
 namespace mir2 {
 
@@ -30,16 +31,20 @@ CharacterRecord make_character(const std::string& account_id,
                    static_cast<std::uint8_t>(std::clamp(static_cast<int>(request.hair) * 2 +
                                                             static_cast<int>(request.sex),
                                                         0, 255)));
-  character.gold = 2000;
+  character.gold = 0;
   character.ability.level = 1;
   character.ability.hp = 15;
   character.ability.max_hp = 15;
   character.ability.mp = 15;
   character.ability.max_mp = 15;
+  character.ability.ac = 0;
+  character.ability.mac = 0;
+  character.ability.dc = make_word(1, 2);
+  character.ability.mc = make_word(1, 2);
+  character.ability.sc = make_word(1, 2);
   character.ability.max_exp = 100;
   character.ability.max_weight = 30;
-  character.ability.max_wear_weight = 100;
-  character.ability.max_hand_weight = 100;
+  character.birth_items_granted = false;
   return character;
 }
 

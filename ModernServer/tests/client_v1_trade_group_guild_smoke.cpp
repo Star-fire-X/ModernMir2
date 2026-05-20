@@ -298,6 +298,21 @@ int main() {
     stop_services();
     return fail("group create");
   }
+  send_message(*socket_a, mir2::client_v1::ChatSend{"!!hi"}, seq_a);
+  const auto group_chat_a = reader_a.wait_for_matching<mir2::client_v1::ChatLine>(
+      [](const auto& line) {
+        return line.text == "-HeroA: hi" && line.fore_color == 196 &&
+               line.back_color == 255;
+      });
+  const auto group_chat_b = reader_b.wait_for_matching<mir2::client_v1::ChatLine>(
+      [](const auto& line) {
+        return line.text == "-HeroA: hi" && line.fore_color == 196 &&
+               line.back_color == 255;
+      });
+  if (!group_chat_a.has_value() || !group_chat_b.has_value()) {
+    stop_services();
+    return fail("group chat");
+  }
   send_message(*socket_a, mir2::client_v1::GroupRemoveMemberRequest{"HeroB"}, seq_a);
   if (!reader_a.wait_for_matching<mir2::client_v1::GroupState>(
           [](const auto& state) { return !state.visible; }) ||
@@ -305,6 +320,15 @@ int main() {
           [](const auto& state) { return !state.visible; })) {
     stop_services();
     return fail("group remove");
+  }
+  send_message(*socket_a, mir2::client_v1::ChatSend{"!!after"}, seq_a);
+  if (reader_b
+          .wait_for_matching<mir2::client_v1::ChatLine>(
+              [](const auto& line) { return line.text == "-HeroA: after"; },
+              std::chrono::milliseconds(300))
+          .has_value()) {
+    stop_services();
+    return fail("group chat after remove");
   }
 
   send_message(*socket_a, mir2::client_v1::TradeTryRequest{"HeroB"}, seq_a);
@@ -341,11 +365,19 @@ int main() {
     return fail("trade open");
   }
   send_message(*socket_a, mir2::client_v1::TradeCancelRequest{}, seq_a);
-  send_message(*socket_a, mir2::client_v1::TradeTryRequest{"HeroB"}, seq_a);
   if (!reader_a.wait_for_matching<mir2::client_v1::TradeState>(
-          [](const auto& state) { return state.visible && state.remote_name == "HeroB"; }) ||
+          [](const auto& state) { return !state.visible; }) ||
       !reader_b.wait_for_matching<mir2::client_v1::TradeState>(
-          [](const auto& state) { return state.visible && state.remote_name == "HeroA"; })) {
+          [](const auto& state) { return !state.visible; })) {
+    stop_services();
+    return fail("trade cancel before retry");
+  }
+  send_message(*socket_a, mir2::client_v1::TradeTryRequest{"HeroB"}, seq_a);
+  const auto retry_a = reader_a.wait_for_matching<mir2::client_v1::TradeState>(
+      [](const auto& state) { return state.visible && state.remote_name == "HeroB"; });
+  const auto retry_b = reader_b.wait_for_matching<mir2::client_v1::TradeState>(
+      [](const auto& state) { return state.visible && state.remote_name == "HeroA"; });
+  if (!retry_a.has_value() || !retry_b.has_value()) {
     stop_services();
     return fail("trade retry after cancel");
   }

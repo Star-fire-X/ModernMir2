@@ -45,6 +45,14 @@ class MapActor {
     bool death_drop{false};
   };
 
+  struct LegacyGmCommandResult {
+    RuntimeDispatch dispatch{};
+    bool handled{false};
+    bool success{false};
+    std::string reason{};
+    std::vector<std::string> messages{};
+  };
+
   MapActor(MapConfig config, LogicBudgetConfig budgets,
            std::unordered_map<std::int32_t, ItemConfig> item_configs,
            std::unordered_map<std::int32_t, MagicConfig> magic_configs,
@@ -104,6 +112,10 @@ class MapActor {
   [[nodiscard]] RuntimeDispatch legacy_space_move_player(
       std::uint64_t actor_id, const std::string& target_map_id, std::int32_t target_x,
       std::int32_t target_y, bool show2, std::uint64_t current_tick, std::uint64_t now_ms);
+  [[nodiscard]] LegacyGmCommandResult legacy_apply_gm_command(
+      std::uint64_t actor_id, const std::string& command_name,
+      const std::vector<std::string>& args, std::uint64_t current_tick,
+      std::uint64_t now_ms);
   bool enqueue_legacy_player_command(const ActorMail& mail, std::uint64_t now_ms);
   bool mark_legacy_player_ghost(std::uint64_t actor_id, std::uint64_t now_ms);
   [[nodiscard]] RuntimeDispatch legacy_disconnect_player(std::uint64_t actor_id,

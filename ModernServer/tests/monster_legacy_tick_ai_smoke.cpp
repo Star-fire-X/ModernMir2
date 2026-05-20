@@ -127,9 +127,35 @@ int main() {
 
     const auto too_early = map.legacy_process_monster(monster_id, 2, 250, 0, 0);
     assert(has_process_monster_action(too_early, monster_id, "skip"));
+    auto snapshot = map.legacy_monster_snapshot(monster_id);
+    assert(snapshot.has_value());
+    assert(snapshot->legacy_run_time_ms == 0);
+    assert(snapshot->legacy_run_next_tick_ms == 250);
 
     const auto due = map.legacy_process_monster(monster_id, 3, 251, 0, 0);
     assert(has_process_monster_action(due, monster_id, "run"));
+    snapshot = map.legacy_monster_snapshot(monster_id);
+    assert(snapshot.has_value());
+    assert(snapshot->legacy_run_time_ms == 251);
+    assert(snapshot->legacy_search_time_ms == 0);
+  }
+
+  {
+    auto map = make_map();
+    constexpr std::uint64_t monster_id = 109;
+    spawn(map, make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::basic),
+          make_player(12, 120, "SearchHero", 20, 20));
+
+    static_cast<void>(map.legacy_process_monster(monster_id, 2, 1500, 0, 0));
+    auto snapshot = map.legacy_monster_snapshot(monster_id);
+    assert(snapshot.has_value());
+    assert(snapshot->legacy_search_time_ms == 0);
+    assert(snapshot->legacy_search_rate_ms == 1500);
+
+    static_cast<void>(map.legacy_process_monster(monster_id, 3, 1751, 0, 0));
+    snapshot = map.legacy_monster_snapshot(monster_id);
+    assert(snapshot.has_value());
+    assert(snapshot->legacy_search_time_ms == 1751);
   }
 
   {
@@ -216,6 +242,7 @@ int main() {
                                 static_cast<std::int32_t>(monster_id)).has_value());
     const auto after_hit = map.legacy_monster_snapshot(monster_id);
     assert(after_hit.has_value());
+    assert(after_hit->hit_time_ms == 1001);
 
     const auto cooldown = map.legacy_process_monster(monster_id, 3, 1252, 0, 0);
     assert(!find_packet_by_recog(cooldown, mir2::kSmHit,
@@ -226,6 +253,7 @@ int main() {
     assert(after_cooldown.has_value());
     assert(after_cooldown->x == after_hit->x);
     assert(after_cooldown->y == after_hit->y);
+    assert(after_cooldown->hit_time_ms == after_hit->hit_time_ms);
   }
 
   {

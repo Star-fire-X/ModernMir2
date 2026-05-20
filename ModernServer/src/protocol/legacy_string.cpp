@@ -95,6 +95,12 @@ bool is_valid_legacy_character_name(LegacyStringView name) {
     return false;
   }
   for (const unsigned char ch : bytes) {
+    if (ch < 0x20 || ch == 0x7F) {
+      return false;
+    }
+    if (ch >= 0x80) {
+      continue;
+    }
     if (!is_ascii_alnum(ch)) {
       return false;
     }

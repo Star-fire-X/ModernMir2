@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <filesystem>
 #include <iterator>
 #include <limits>
 #include <optional>
@@ -410,7 +411,12 @@ LegacyPacket make_out_of_connection_packet(std::uint64_t session_id) {
 void WorldService::start(HostContext& context) {
   context_ = &context;
   endpoint_ = context.bus->register_endpoint(name(), context.config.runtime.default_queue_capacity);
-  runtime_ = std::make_unique<LogicRuntime>(context.config);
+  auto runtime_config = context.config;
+  if (runtime_config.runtime.legacy_admin_list.is_relative()) {
+    runtime_config.runtime.legacy_admin_list =
+        context.root_dir / runtime_config.runtime.legacy_admin_list;
+  }
+  runtime_ = std::make_unique<LogicRuntime>(std::move(runtime_config));
   runtime_->initialize();
   PersistRequest merchant_request;
   merchant_request.kind = PersistRequestKind::load_merchant_states;
