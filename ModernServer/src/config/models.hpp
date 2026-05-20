@@ -13,6 +13,7 @@ struct RuntimeConfig {
   std::filesystem::path log_dir{"logs"};
   std::filesystem::path data_dir{"data"};
   std::filesystem::path asset_root{};
+  std::filesystem::path legacy_admin_list{"Envir/AdminList.txt"};
   std::filesystem::path status_file{"runtime/status.json"};
   std::size_t default_queue_capacity{4096};
   std::size_t io_threads{2};
@@ -213,10 +214,10 @@ struct MonsterDefConfig {
   std::int32_t sc{0};
   std::int32_t agility{0};
   std::int32_t accurate{0};
-  std::int32_t walk_speed_ms{20};
+  std::int32_t walk_speed_ms{200};
   std::int32_t walk_step{1};
   std::int32_t walk_wait_ms{0};
-  std::int32_t attack_speed_ms{100};
+  std::int32_t attack_speed_ms{200};
   MonsterAiProfile ai_profile{MonsterAiProfile::basic};
 };
 

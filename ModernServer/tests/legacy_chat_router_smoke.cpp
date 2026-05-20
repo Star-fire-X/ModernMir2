@@ -67,6 +67,15 @@ mir2::RuntimeDispatch say(mir2::LogicRuntime& runtime, std::uint64_t session_id,
   return runtime.tick(now_ms);
 }
 
+void group_command(mir2::LogicRuntime& runtime, std::uint64_t session_id,
+                   mir2::LogicCommandKind kind, std::string text) {
+  mir2::LogicCommand command;
+  command.kind = kind;
+  command.session_id = session_id;
+  command.text = std::move(text);
+  static_cast<void>(runtime.route_logic_command(command));
+}
+
 std::uint64_t actor_id(mir2::LogicRuntime& runtime, std::string_view name) {
   const auto located = runtime.locate_character_actor(name);
   return located.has_value() ? located->second : 0;
@@ -192,6 +201,29 @@ bool check_group_is_silent(mir2::LogicRuntime& runtime) {
          packets(dispatch, 1, mir2::kSmSysMessage).empty();
 }
 
+bool check_group_chat() {
+  auto runtime = make_runtime();
+  const auto alice = static_cast<std::int32_t>(actor_id(runtime, "Alice"));
+  group_command(runtime, 1, mir2::LogicCommandKind::group_create, "Bob");
+
+  const auto chat = say(runtime, 1, "!!hi", 1502);
+  const auto empty = say(runtime, 1, "!!", 1753);
+  group_command(runtime, 1, mir2::LogicCommandKind::group_remove_member, "Bob");
+  const auto removed = say(runtime, 1, "!!gone", 2004);
+
+  return has_packet(chat, 1, mir2::kSmSysMessage, alice, mir2::make_word(196, 255),
+                    "-Alice: hi") &&
+         has_packet(chat, 5, mir2::kSmSysMessage, alice, mir2::make_word(196, 255),
+                    "-Alice: hi") &&
+         packets(chat, 7, mir2::kSmSysMessage).empty() &&
+         has_packet(empty, 1, mir2::kSmSysMessage, alice, mir2::make_word(196, 255),
+                    "-Alice: ") &&
+         has_packet(empty, 5, mir2::kSmSysMessage, alice, mir2::make_word(196, 255),
+                    "-Alice: ") &&
+         packets(removed, 1, mir2::kSmSysMessage).empty() &&
+         packets(removed, 5, mir2::kSmSysMessage).empty();
+}
+
 bool check_unknown_command_is_silent(mir2::LogicRuntime& runtime) {
   const auto dispatch = say(runtime, 1, "@NoSuchCmd", 12008);
   return !has_text(dispatch, 1, "Alice: @NoSuchCmd") &&
@@ -232,6 +264,9 @@ int main() {
   }
   if (!check_group_is_silent(runtime)) {
     return fail("group silent");
+  }
+  if (!check_group_chat()) {
+    return fail("group chat");
   }
   if (!check_unknown_command_is_silent(runtime)) {
     return fail("unknown command");

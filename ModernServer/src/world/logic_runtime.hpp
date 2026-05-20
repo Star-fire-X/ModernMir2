@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "config/models.hpp"
@@ -13,6 +14,7 @@
 #include "world/game_object.hpp"
 #include "world/legacy_chat_parser.hpp"
 #include "world/legacy_event_manager.hpp"
+#include "world/legacy_gm_commands.hpp"
 #include "world/legacy_random.hpp"
 #include "world/make_index_allocator.hpp"
 #include "world/map_actor.hpp"
@@ -120,6 +122,15 @@ class LogicRuntime {
     bool hear_cry{true};
     bool hear_guild_msg{true};
     std::vector<std::string> whisper_block_list{};
+    std::uint64_t legacy_group_id{0};
+    LegacyUserDegree user_degree{LegacyUserDegree::normal};
+    bool legacy_sysop_mode{false};
+    bool legacy_supervisor_mode{false};
+    bool legacy_superman_mode{false};
+    bool legacy_sys_mission{false};
+    std::string legacy_sys_mission_map{};
+    std::int32_t legacy_sys_mission_x{0};
+    std::int32_t legacy_sys_mission_y{0};
   };
 
   struct CloseRecord {
@@ -152,8 +163,21 @@ class LogicRuntime {
     std::vector<ActorRef> monsters{};
   };
 
+  struct LegacyGroupState {
+    std::vector<std::uint64_t> members{};
+  };
+
   [[nodiscard]] std::string resolve_map_id(const std::string& requested_map) const;
   [[nodiscard]] bool has_live_or_closing_character(std::string_view character_name) const;
+  [[nodiscard]] LegacyUserDegree resolve_legacy_user_degree(
+      std::string_view account_id, std::string_view character_name) const;
+  [[nodiscard]] std::optional<std::uint64_t> find_actor_session_by_name(
+      std::string_view character_name) const;
+  void create_legacy_group(std::uint64_t owner_session_id, std::string_view target_name);
+  void add_legacy_group_member(std::uint64_t owner_session_id, std::string_view target_name);
+  void remove_legacy_group_member_by_name(std::uint64_t owner_session_id,
+                                          std::string_view target_name);
+  void remove_legacy_group_member(std::uint64_t session_id);
   [[nodiscard]] ActorMail make_player_mail(const LogicCommand& command,
                                            const ActorLocator& locator) const;
   [[nodiscard]] bool handle_legacy_chat_command(const LogicCommand& command,
@@ -184,6 +208,11 @@ class LogicRuntime {
                                                    std::int32_t y,
                                                    std::uint64_t now_ms,
                                                    RuntimeDispatch* dispatch);
+  [[nodiscard]] std::int32_t spawn_legacy_gm_monsters(
+      RuntimeDispatch& dispatch, std::string map_id, std::int32_t x, std::int32_t y,
+      std::string monster_name, std::int32_t count, std::uint64_t now_ms,
+      std::uint64_t master_actor_id = 0, std::uint8_t slave_exp_level = 0,
+      std::optional<std::pair<std::int32_t, std::int32_t>> target_xy = std::nullopt);
   void roll_legacy_monster_items_for_spawn(const MonsterGroup& group, ActorMail& mail,
                                            std::uint64_t now_ms, RuntimeDispatch* dispatch);
   void prune_monster_group(MonsterGroup& group);
@@ -192,6 +221,7 @@ class LogicRuntime {
   void process_user_engine_timers(std::uint64_t now_ms, RuntimeDispatch& dispatch);
   void process_legacy_event_creates(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void process_legacy_random_space_moves(RuntimeDispatch& dispatch, std::uint64_t now_ms);
+  void process_cross_map_mails(RuntimeDispatch& dispatch);
   void refresh_legacy_holy_curtain_groups(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void cleanup_close_records(std::uint64_t now_ms);
   void append_dispatch(RuntimeDispatch& target, RuntimeDispatch source);
@@ -206,6 +236,9 @@ class LogicRuntime {
   GuildCastleSnapshot guild_castle_snapshot_{};
   std::unordered_map<std::string, MerchantStateRecord> merchant_states_{};
   std::unordered_map<std::string, LegacyShutUpEntry> legacy_shut_up_list_{};
+  std::unordered_map<std::string, LegacyUserDegree> legacy_admin_degrees_{};
+  std::uint64_t next_legacy_group_id_{1};
+  std::unordered_map<std::uint64_t, LegacyGroupState> legacy_groups_{};
   std::unordered_map<std::string, std::unique_ptr<MapActor>> maps_{};
   std::vector<std::string> map_order_{};
   std::unordered_map<std::uint64_t, ActorLocator> session_index_{};

@@ -440,7 +440,7 @@ std::uint8_t actor_name_color(const GameObject& object) {
   if (player->pk_level() == 1) {
     return 251;
   }
-  return kDefaultNameColor;
+  return player->legacy_name_color();
 }
 
 std::string actor_name(const GameObject& object) {

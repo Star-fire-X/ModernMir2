@@ -342,6 +342,10 @@ LegacyPacket make_legacy_chat_packet(std::uint64_t session_id,
       ident = kSmGuildMessage;
       color = make_word(212, 255);
       break;
+    case LegacyChatDeliveryKind::group:
+      ident = kSmSysMessage;
+      color = make_word(196, 255);
+      break;
     case LegacyChatDeliveryKind::shout:
     case LegacyChatDeliveryKind::shout_direct:
       recog = 0;

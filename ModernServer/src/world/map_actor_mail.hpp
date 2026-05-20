@@ -49,6 +49,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           if (mail.target_actor_id != 0) {
             monster->select_target(mail.target_actor_id, now_ms);
           }
+          if (mail.monster_has_target_xy) {
+            monster->set_target_xy(mail.monster_target_x, mail.monster_target_y);
+          }
         }
       }
       if (!environment_.add_moving_object(object->x(), object->y(), object->id(), now_ms,
@@ -63,6 +66,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (mail.kind == ActorMailKind::spawn_player) {
         auto* player = find_player(mail.actor_id);
         if (player != nullptr) {
+          player->set_legacy_name_color(mail.legacy_name_color);
           player->restore_legacy_buffs_from_transfer(mail.legacy_buffs, current_tick);
           player->refresh_derived_state(item_configs_);
           player->set_in_safe_zone(is_safe_zone(config_, player->x(), player->y()));
@@ -4609,6 +4613,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
         case LegacyChatDeliveryKind::whisper:
         case LegacyChatDeliveryKind::guild:
+        case LegacyChatDeliveryKind::group:
         case LegacyChatDeliveryKind::shout_direct:
         case LegacyChatDeliveryKind::system: {
           auto* target = find_player(mail.actor_id);

@@ -271,9 +271,9 @@ BREAK)"});
 
   const auto snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value());
-  assert(snapshot->quest_marks[1] == 1);
-  assert(snapshot->quest_open_units[2] == 1);
-  assert(snapshot->quest_units[3] == 1);
+  assert(snapshot->quest_marks[0] == 0x80);
+  assert(snapshot->quest_open_units[0] == 0x40);
+  assert(snapshot->quest_units[0] == 0x20);
   assert(snapshot->script_params[1] == 10);
   assert(snapshot->script_params[2] == 20);
   assert(snapshot->script_params[3] == 6);

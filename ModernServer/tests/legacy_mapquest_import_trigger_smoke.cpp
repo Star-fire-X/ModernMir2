@@ -199,7 +199,7 @@ int main() {
   assert(has_mapquest_trace(enter_dispatch, "enter"));
   assert(!has_unsupported_script_trace(enter_dispatch));
   auto snapshot = runtime.snapshot_character_actor("Hero");
-  assert(snapshot.has_value() && snapshot->quest_marks[1] == 1);
+  assert(snapshot.has_value() && snapshot->quest_marks[0] == 0x80);
 
   static_cast<void>(runtime.route_logic_command(make_attack(10, 9)));
   const auto kill_dispatch = runtime.tick(1040);
@@ -207,7 +207,7 @@ int main() {
   assert(has_mapquest_trace(kill_dispatch, "monster_die"));
   assert(!has_unsupported_script_trace(kill_dispatch));
   snapshot = runtime.snapshot_character_actor("Hero");
-  assert(snapshot.has_value() && snapshot->quest_marks[2] == 1);
+  assert(snapshot.has_value() && snapshot->quest_marks[0] == 0xC0);
 
   const auto apple_show = find_packet_by_body(kill_dispatch, mir2::kSmItemShow, "Apple");
   assert(apple_show.has_value());
@@ -223,7 +223,7 @@ int main() {
   assert(has_mapquest_trace(pickup_dispatch, "pickup"));
   assert(!has_unsupported_script_trace(pickup_dispatch));
   snapshot = runtime.snapshot_character_actor("Hero");
-  assert(snapshot.has_value() && snapshot->quest_marks[3] == 1);
+  assert(snapshot.has_value() && snapshot->quest_marks[0] == 0xE0);
 
   std::filesystem::remove_all(root, ignored);
   return 0;

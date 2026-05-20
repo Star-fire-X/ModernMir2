@@ -147,7 +147,7 @@ CharacterRecord make_new_character(const std::string& account_id, const std::str
   record.job = job;
   record.sex = sex;
   record.hair = hair;
-  record.gold = 2000;
+  record.gold = 0;
   record.feature = 0;
   record.status = 0;
   record.ability.level = 1;
@@ -155,10 +155,14 @@ CharacterRecord make_new_character(const std::string& account_id, const std::str
   record.ability.mp = 15;
   record.ability.max_hp = 15;
   record.ability.max_mp = 15;
+  record.ability.ac = 0;
+  record.ability.mac = 0;
+  record.ability.dc = make_word(1, 2);
+  record.ability.mc = make_word(1, 2);
+  record.ability.sc = make_word(1, 2);
   record.ability.max_exp = 100;
   record.ability.max_weight = 30;
-  record.ability.max_wear_weight = 100;
-  record.ability.max_hand_weight = 100;
+  record.birth_items_granted = false;
   return record;
 }
 

@@ -277,6 +277,14 @@ int main() {
   }
 
   post_legacy_packet(bus, alice_session_id,
+                     make_text_packet(alice_session_id, mir2::kSmSysMessage, 1234,
+                                      mir2::make_word(196, 255), "-Alice: hi"));
+  if (!expect_chat_line(alice_reader, "-Alice: hi", 196, 255)) {
+    stop_services();
+    return fail("group sysmessage chat line");
+  }
+
+  post_legacy_packet(bus, alice_session_id,
                      make_text_packet(alice_session_id, mir2::kSmGroupMessage, 1234,
                                       mir2::make_word(196, 255), "-Alice: hi"));
   if (!expect_chat_line(alice_reader, "-Alice: hi", 196, 255)) {

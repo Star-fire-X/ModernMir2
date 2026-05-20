@@ -1,4 +1,6 @@
 #include <iostream>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -132,6 +134,13 @@ std::string gbk_command(std::string_view command_name) {
 mir2::LogicRuntime make_runtime() {
   mir2::HostConfig config;
   config.budgets.tick_ms = 20;
+  const auto admin_list =
+      std::filesystem::temp_directory_path() / "mir2_legacy_chat_commands_admin.txt";
+  {
+    std::ofstream output(admin_list);
+    output << "1Sysop\n";
+  }
+  config.runtime.legacy_admin_list = admin_list;
 
   mir2::MapConfig main_map;
   main_map.id = "0";

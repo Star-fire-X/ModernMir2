@@ -21,6 +21,58 @@ void MapActor::dispatch_legacy_initialize(Player& player, RuntimeDispatch& dispa
 
   player.refresh_derived_state(item_configs_);
   player.set_in_safe_zone(is_safe_zone(config_, player.x(), player.y()));
+
+  if (!player.character().birth_items_granted) {
+    bool starter_items_changed = false;
+    bool bag_empty = true;
+    for (const auto& item : player.character().bag_items) {
+      if (item.index != 0) {
+        bag_empty = false;
+        break;
+      }
+    }
+    bool equipped_empty = true;
+    for (const auto& item : player.character().equipped_items) {
+      if (item.index != 0) {
+        equipped_empty = false;
+        break;
+      }
+    }
+    if (player.character().ability.exp == 0 && bag_empty && equipped_empty) {
+      const auto grant_item = [&](std::string_view item_name) {
+        const auto* item_config = find_item_config_by_name_or_id(item_configs_, item_name);
+        if (item_config == nullptr) {
+          return;
+        }
+        LegacyUserItem item;
+        item.make_index = allocate_make_index();
+        item.index = static_cast<std::uint16_t>(std::clamp(item_config->id, 0, 65535));
+        item.dura_max = static_cast<std::uint16_t>(
+            std::clamp(item_config->dura_max > 0 ? item_config->dura_max : 1000, 0, 65535));
+        item.dura = item.dura_max;
+        if (player.can_add_bag_item(item, item_configs_) && player.has_free_bag_slot()) {
+          static_cast<void>(player.add_bag_item(item));
+          starter_items_changed = true;
+          queue_packet(dispatch, player.session_id(),
+                       make_add_item_packet(player.session_id(), item, item_configs_));
+        }
+      };
+      grant_item("蜡烛");
+      grant_item("金创药(小量)");
+      grant_item("木剑");
+      if (player.character().sex == 0) {
+        grant_item("布衣(男)");
+      } else {
+        grant_item("布衣(女)");
+      }
+    }
+    if (starter_items_changed) {
+      player.refresh_derived_state(item_configs_);
+    }
+    player.mark_birth_items_granted();
+    queue_save_character(dispatch, player);
+  }
+
   dispatch_login_sequence(dispatch, player, config_, item_configs_, magic_configs_,
                           area_state_mask(config_, player.x(), player.y()));
 

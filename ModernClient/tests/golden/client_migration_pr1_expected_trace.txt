@@ -1,0 +1,102 @@
+# PR-1 client migration baseline trace.
+# Labels below are intentionally narrow: they lock the current C++ baseline and
+# the Delphi-backed checkpoints without claiming full behavior equivalence.
+
+# cpp-current-baseline: Protocol replay is applied in the same order that typed
+# client_v1 frames are drained. Runtime deltas during map transition remain a
+# known high-risk boundary for PR-2.
+[protocol.map_transfer]
+client_app_bootstrap_world
+recv_world_clear_objects
+enter_map_transition_pending
+recv_map_change
+set_pending_map_id
+drop_stale_actor_upsert_during_transition
+recv_world_snapshot
+snapshot_clears_map_transition
+apply_runtime_actor_upsert_after_snapshot
+
+# cpp-current-baseline: Current LegacyFrameScheduler order for a renderable
+# frame. This is not a full Delphi AppOnIdle equivalence proof.
+[frame.render_due]
+timer1_network_drain
+capture_ui_input
+process_key_messages
+process_action_messages
+dwin_process
+draw_screen
+dwin_direct_paint
+draw_screen_top
+draw_hint
+draw_moving_item
+flip
+
+# cpp-current-baseline: Current scheduler path when the 30ms render interval
+# has not elapsed.
+[frame.not_render_due]
+timer1_network_drain
+capture_ui_input
+process_key_messages
+process_action_messages
+dwin_process
+scene_run
+
+# delphi-backed: The non-drawable branch must continue to advance PlayScene.Run
+# style scene logic instead of attempting to render.
+[frame.cannot_draw]
+timer1_network_drain
+capture_ui_input
+process_key_messages
+process_action_messages
+dwin_process
+scene_run
+
+# delphi-backed: +GOOD/+FAIL style ActionAck gates are represented here. The
+# special +PWR/+LNG/+WID/+CRS/+FIR flags remain a known gap for PR-3.
+[action.ack]
+action_lock_blocks_until_10000ms
+server_accept_next_action_unlocks_after_timeout
+can_next_action_after_timeout
+action_ack_success_unlocks
+action_ack_fail_unlocks_and_rewinds_self
+fail_lock_blocks_matching_action_for_1000ms
+fail_lock_releases_after_1000ms
+known_gap_plus_pwr_not_covered
+known_gap_plus_lng_not_covered
+known_gap_plus_wid_not_covered
+known_gap_plus_crs_not_covered
+known_gap_plus_fir_not_covered
+
+# delphi-backed: Map row layers and UI overlay passes are ordered after the
+# classic map/object/actor/effect pass. This is a draw-order snapshot, not a
+# pixel golden.
+[render.world_order]
+background_tiles
+middle_tiles
+small_objects
+ground_effects
+large_object
+ground_item
+actor
+actor_overlay
+fly_effect
+overlay_effects
+actor_screen_overlay
+ui_windows_dwin_direct_paint
+top_system_messages_draw_screen_top
+hint_tooltip_draw_hint
+moving_item_cursor
+present
+
+# cpp-current-baseline: UI capture/process trace that blocks world shortcuts and
+# world mouse actions while text focus or consumed UI input is active.
+[ui.input_gate]
+active_menu_key_first
+modal_window_key_blocks_lower_windows
+focused_edit_or_chat_key
+chat_enter_submit_or_open
+chat_escape_cancel
+legacy_shortcut_fallback
+world_shortcut_fallback_sets_action_key
+text_focus_blocks_world_shortcut
+consumed_mouse_clears_world_targets

@@ -105,6 +105,7 @@ set(MIR2_HOST_SOURCES
   src/world/legacy_chat_parser.cpp
   src/world/legacy_event_manager.cpp
   src/world/legacy_frame_driver.cpp
+  src/world/legacy_gm_commands.cpp
   src/world/legacy_item_rules.cpp
   src/world/legacy_map_environment.cpp
   src/world/legacy_magic_runtime.cpp
@@ -225,6 +226,48 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_legacy_chat_commands_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_chat_commands_smoke
     COMMAND mir2_legacy_chat_commands_smoke)
+
+  add_executable(mir2_legacy_gm_command_registry_smoke
+    tests/legacy_gm_command_registry_smoke.cpp)
+  target_link_libraries(mir2_legacy_gm_command_registry_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_gm_command_registry_smoke
+    COMMAND mir2_legacy_gm_command_registry_smoke)
+
+  add_executable(mir2_legacy_gm_ops_smoke
+    tests/legacy_gm_ops_smoke.cpp)
+  target_link_libraries(mir2_legacy_gm_ops_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_gm_ops_smoke
+    COMMAND mir2_legacy_gm_ops_smoke)
+
+  add_executable(mir2_legacy_gm_player_state_smoke
+    tests/legacy_gm_player_state_smoke.cpp)
+  target_link_libraries(mir2_legacy_gm_player_state_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_gm_player_state_smoke
+    COMMAND mir2_legacy_gm_player_state_smoke)
+
+  add_executable(mir2_legacy_gm_quest_marks_smoke
+    tests/legacy_gm_quest_marks_smoke.cpp)
+  target_link_libraries(mir2_legacy_gm_quest_marks_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_gm_quest_marks_smoke
+    COMMAND mir2_legacy_gm_quest_marks_smoke)
+
+  add_executable(mir2_legacy_gm_skill_item_smoke
+    tests/legacy_gm_skill_item_smoke.cpp)
+  target_link_libraries(mir2_legacy_gm_skill_item_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_gm_skill_item_smoke
+    COMMAND mir2_legacy_gm_skill_item_smoke)
+
+  add_executable(mir2_legacy_gm_monster_spawn_smoke
+    tests/legacy_gm_monster_spawn_smoke.cpp)
+  target_link_libraries(mir2_legacy_gm_monster_spawn_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_gm_monster_spawn_smoke
+    COMMAND mir2_legacy_gm_monster_spawn_smoke)
+
+  add_executable(mir2_legacy_gm_guild_castle_reload_smoke
+    tests/legacy_gm_guild_castle_reload_smoke.cpp)
+  target_link_libraries(mir2_legacy_gm_guild_castle_reload_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_gm_guild_castle_reload_smoke
+    COMMAND mir2_legacy_gm_guild_castle_reload_smoke)
 
   add_executable(mir2_client_v1_legacy_chat_equivalence_smoke
     tests/client_v1_legacy_chat_equivalence_smoke.cpp)
@@ -934,6 +977,13 @@ if(BUILD_TESTING)
       mir2_legacy_chat_router_smoke
       mir2_legacy_chat_rules_smoke
       mir2_legacy_chat_commands_smoke
+      mir2_legacy_gm_command_registry_smoke
+      mir2_legacy_gm_ops_smoke
+      mir2_legacy_gm_player_state_smoke
+      mir2_legacy_gm_quest_marks_smoke
+      mir2_legacy_gm_skill_item_smoke
+      mir2_legacy_gm_monster_spawn_smoke
+      mir2_legacy_gm_guild_castle_reload_smoke
       mir2_client_v1_legacy_chat_equivalence_smoke
       mir2_canonical_login_state_smoke
       mir2_canonical_login_error_smoke

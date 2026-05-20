@@ -90,6 +90,8 @@ void test_sys_message_updates_chat_and_top_messages() {
   assert(state.world.sys_messages.front().text == "sys3");
 
   const auto expire_at = state.world.sys_messages.back().started_ms + kLegacySysMessageExpireMs;
+  state.expire_sys_messages(expire_at - 1);
+  assert(!state.world.sys_messages.empty());
   state.expire_sys_messages(expire_at);
   assert(state.world.sys_messages.empty());
 }

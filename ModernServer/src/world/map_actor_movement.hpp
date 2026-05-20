@@ -108,6 +108,7 @@ bool MapActor::try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
   transfer.dir = snapshot.dir;
   transfer.character = snapshot;
   transfer.legacy_buffs = player.legacy_buffs_for_transfer(current_tick);
+  transfer.legacy_name_color = player.legacy_name_color();
 
   queue_packet(dispatch, player.session_id(), make_clear_objects_packet(player.session_id()));
   queue_packet(dispatch, player.session_id(),
@@ -220,6 +221,7 @@ bool MapActor::try_item_map_move(Player& player, std::string target_map_id,
   transfer.dir = snapshot.dir;
   transfer.character = snapshot;
   transfer.legacy_buffs = player.legacy_buffs_for_transfer(current_tick);
+  transfer.legacy_name_color = player.legacy_name_color();
 
   queue_packet(dispatch, player.session_id(), make_clear_objects_packet(player.session_id()));
   queue_packet(dispatch, player.session_id(),

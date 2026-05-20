@@ -1426,6 +1426,7 @@ void ClientV1GameGatewayService::handle_group_create_request(
   }
   std::vector<std::pair<std::uint64_t, client_v1::GroupState>> states;
   std::optional<client_v1::SysMessage> failure;
+  std::optional<std::string> mirror_target;
   {
     std::scoped_lock lock(mutex_);
     auto it = sessions_.find(session_id);
@@ -1445,7 +1446,15 @@ void ClientV1GameGatewayService::handle_group_create_request(
       sessions_[*target_id].group_id = group_id;
       sessions_[*target_id].group_visible = true;
       states = group_broadcast_locked(group_id);
+      mirror_target = sessions_[*target_id].character_name;
     }
+  }
+  if (mirror_target.has_value()) {
+    LogicCommand command;
+    command.kind = LogicCommandKind::group_create;
+    command.session_id = session_id;
+    command.text = *mirror_target;
+    post_logic_command(std::move(command), false);
   }
   for (const auto& [target_session_id, state] : states) {
     send_message(target_session_id, state);
@@ -1462,6 +1471,7 @@ void ClientV1GameGatewayService::handle_group_add_member_request(
   }
   std::vector<std::pair<std::uint64_t, client_v1::GroupState>> states;
   std::optional<client_v1::SysMessage> failure;
+  std::optional<std::string> mirror_target;
   {
     std::scoped_lock lock(mutex_);
     auto it = sessions_.find(session_id);
@@ -1478,7 +1488,15 @@ void ClientV1GameGatewayService::handle_group_add_member_request(
       sessions_[*target_id].group_id = it->second.group_id;
       sessions_[*target_id].group_visible = true;
       states = group_broadcast_locked(it->second.group_id);
+      mirror_target = sessions_[*target_id].character_name;
     }
+  }
+  if (mirror_target.has_value()) {
+    LogicCommand command;
+    command.kind = LogicCommandKind::group_add_member;
+    command.session_id = session_id;
+    command.text = *mirror_target;
+    post_logic_command(std::move(command), false);
   }
   for (const auto& [target_session_id, state] : states) {
     send_message(target_session_id, state);
@@ -1495,6 +1513,7 @@ void ClientV1GameGatewayService::handle_group_remove_member_request(
   }
   std::vector<std::pair<std::uint64_t, client_v1::GroupState>> states;
   std::optional<client_v1::SysMessage> failure;
+  std::optional<std::string> mirror_target;
   {
     std::scoped_lock lock(mutex_);
     auto it = sessions_.find(session_id);
@@ -1512,6 +1531,7 @@ void ClientV1GameGatewayService::handle_group_remove_member_request(
         failure = client_v1::SysMessage{"Group remove failed.", 1};
       } else {
         auto members = group_it->second.members;
+        mirror_target = sessions_[*target_id].character_name;
         group_it->second.members.erase(
             std::remove(group_it->second.members.begin(), group_it->second.members.end(),
                         *target_id),
@@ -1538,6 +1558,13 @@ void ClientV1GameGatewayService::handle_group_remove_member_request(
         }
       }
     }
+  }
+  if (mirror_target.has_value()) {
+    LogicCommand command;
+    command.kind = LogicCommandKind::group_remove_member;
+    command.session_id = session_id;
+    command.text = *mirror_target;
+    post_logic_command(std::move(command), false);
   }
   for (const auto& [target_session_id, state] : states) {
     send_message(target_session_id, state);
@@ -1584,6 +1611,7 @@ void ClientV1GameGatewayService::handle_trade_try_request(
 void ClientV1GameGatewayService::handle_trade_cancel_request(
     std::uint64_t session_id, const client_v1::TradeCancelRequest& /*request*/) {
   std::vector<std::pair<std::uint64_t, client_v1::TradeState>> states;
+  bool should_post = false;
   {
     std::scoped_lock lock(mutex_);
     auto it = sessions_.find(session_id);
@@ -1591,18 +1619,24 @@ void ClientV1GameGatewayService::handle_trade_cancel_request(
       return;
     }
     clear_pending_trade_locked(session_id);
-    const auto peer_id = it->second.trade_peer_session_id;
-    clear_trade_locked(it->second);
-    states.emplace_back(session_id, client_v1::TradeState{});
-    if (auto peer_it = sessions_.find(peer_id); peer_it != sessions_.end()) {
-      clear_trade_locked(peer_it->second);
-      states.emplace_back(peer_id, client_v1::TradeState{});
+    if (it->second.trade_visible) {
+      should_post = true;
+    } else {
+      const auto peer_id = it->second.trade_peer_session_id;
+      clear_trade_locked(it->second);
+      states.emplace_back(session_id, client_v1::TradeState{});
+      if (auto peer_it = sessions_.find(peer_id); peer_it != sessions_.end()) {
+        clear_trade_locked(peer_it->second);
+        states.emplace_back(peer_id, client_v1::TradeState{});
+      }
     }
+  }
+  if (should_post) {
+    post_canonical_command(decode_client_v1_trade_cancel_command(session_id));
   }
   for (const auto& [target_session_id, state] : states) {
     send_message(target_session_id, state);
   }
-  post_canonical_command(decode_client_v1_trade_cancel_command(session_id));
 }
 
 void ClientV1GameGatewayService::handle_trade_add_item_request(

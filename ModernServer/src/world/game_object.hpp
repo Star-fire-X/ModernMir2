@@ -361,6 +361,7 @@ class Player : public GameObject {
   [[nodiscard]] std::int32_t pk_point() const { return character_.pk_point; }
   [[nodiscard]] std::int32_t pk_level() const;
   [[nodiscard]] std::int32_t body_luck_level() const;
+  [[nodiscard]] std::uint8_t legacy_name_color() const { return legacy_name_color_; }
   [[nodiscard]] std::uint64_t death_time_ms() const { return character_.death_time_ms; }
   [[nodiscard]] std::uint8_t quest_mark(std::int32_t index) const;
   [[nodiscard]] std::uint8_t quest_open_unit(std::int32_t index) const;
@@ -448,6 +449,15 @@ class Player : public GameObject {
   void apply_consumable(const ItemConfig& item_config);
   void add_gold(std::int32_t amount);
   void spend_gold(std::int32_t amount);
+  void set_legacy_level(std::int32_t level, std::int32_t max_level);
+  void set_legacy_exp(std::int32_t exp);
+  void set_pk_point(std::int32_t value);
+  void set_body_luck_value(double value);
+  void set_hair(std::int32_t value);
+  void set_job(std::int32_t value);
+  void toggle_sex();
+  void set_legacy_name_color(std::int32_t value);
+  void mark_birth_items_granted();
   void set_guild_membership(std::string guild_name, std::string guild_title);
   void clear_guild_membership();
   bool set_quest_mark(std::int32_t index, std::uint8_t value);
@@ -560,6 +570,7 @@ class Player : public GameObject {
   bool legacy_see_health_gauge_{false};
   bool slave_relax_{false};
   LegacyRepairMode legacy_repair_mode_{LegacyRepairMode::normal};
+  std::uint8_t legacy_name_color_{255};
   LegacyBuffContainer legacy_buffs_{};
   std::int32_t legacy_prepared_sword_magic_id_{0};
   std::uint64_t legacy_prepared_sword_expire_tick_{0};
@@ -612,6 +623,10 @@ struct MonsterSnapshot {
   std::int32_t walk_step{0};
   std::int32_t walk_wait_ms{0};
   std::int32_t attack_speed_ms{0};
+  std::int64_t legacy_run_time_ms{0};
+  std::uint64_t legacy_run_next_tick_ms{0};
+  std::uint64_t legacy_search_time_ms{0};
+  std::uint64_t legacy_search_rate_ms{0};
   std::uint64_t target_actor_id{0};
   std::uint64_t target_focus_time_ms{0};
   std::int32_t target_x{-1};

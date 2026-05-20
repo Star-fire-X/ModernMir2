@@ -674,6 +674,7 @@ CharacterRecord read_character_row(sqlite3_stmt* statement) {
   record.daily_quest = static_cast<std::uint32_t>(std::max<std::int64_t>(0, sqlite3_column_int64(statement, 44)));
   decode_slave_blob(statement, 45, record.slaves);
   record.body_luck = sqlite3_column_double(statement, 46);
+  record.birth_items_granted = sqlite3_column_int(statement, 47) != 0;
   return record;
 }
 
@@ -690,7 +691,7 @@ CharacterRecord make_default_character(const std::string& account_id,
   record.job = 0;
   record.sex = 0;
   record.hair = 0;
-  record.gold = 2000;
+  record.gold = 0;
   record.feature = 0;
   record.status = 0;
 
@@ -699,10 +700,13 @@ CharacterRecord make_default_character(const std::string& account_id,
   record.ability.mp = 15;
   record.ability.max_hp = 15;
   record.ability.max_mp = 15;
+  record.ability.ac = 0;
+  record.ability.mac = 0;
+  record.ability.dc = make_word(1, 2);
+  record.ability.mc = make_word(1, 2);
+  record.ability.sc = make_word(1, 2);
   record.ability.max_exp = 100;
   record.ability.max_weight = 30;
-  record.ability.max_wear_weight = 100;
-  record.ability.max_hand_weight = 100;
 
   record.equipped_items[1].make_index = 100001;
   record.equipped_items[1].index = 1;
@@ -718,6 +722,7 @@ CharacterRecord make_default_character(const std::string& account_id,
   record.magics[0].level = 1;
   record.magics[0].key = 'F';
   record.magics[0].cur_train = 0;
+  record.birth_items_granted = true;
   return record;
 }
 
@@ -770,6 +775,7 @@ void bind_character_fields(sqlite3_stmt* statement, const CharacterRecord& chara
   const auto slave_blob = encode_slave_blob(character.slaves);
   bind_blob_vector(statement, 46, slave_blob);
   sqlite3_bind_double(statement, 47, character.body_luck);
+  sqlite3_bind_int(statement, 48, character.birth_items_granted ? 1 : 0);
 }
 
 AccountRecord make_default_account(const std::string& account_id, const std::string& password) {
@@ -930,6 +936,8 @@ void ensure_characters_columns(sqlite3* database) {
                 "ALTER TABLE characters ADD COLUMN slave_blob BLOB NOT NULL DEFAULT X'';");
   ensure_column(database, "characters", "body_luck",
                 "ALTER TABLE characters ADD COLUMN body_luck REAL NOT NULL DEFAULT 0;");
+  ensure_column(database, "characters", "birth_items_granted",
+                "ALTER TABLE characters ADD COLUMN birth_items_granted INTEGER NOT NULL DEFAULT 0;");
 }
 
 void ensure_merchant_state_columns(sqlite3* database) {
@@ -1191,6 +1199,22 @@ void Repository::save_guild_state(const GuildState& guild_state) {
 }
 
 void Repository::delete_guild(const std::string& guild_name) {
+  static constexpr const char* kClearCharactersSql =
+      "UPDATE characters SET guild_name = '', guild_title = '' WHERE guild_name = ?1;";
+
+  sqlite3_stmt* clear_statement = nullptr;
+  if (sqlite3_prepare_v2(database_, kClearCharactersSql, -1, &clear_statement, nullptr) !=
+      SQLITE_OK) {
+    throw std::runtime_error("Failed to prepare clear_guild_characters statement.");
+  }
+
+  bind_text(clear_statement, 1, guild_name);
+  if (sqlite3_step(clear_statement) != SQLITE_DONE) {
+    finalize_statement(clear_statement);
+    throw std::runtime_error("Failed to execute clear_guild_characters statement.");
+  }
+  finalize_statement(clear_statement);
+
   static constexpr const char* kSql = "DELETE FROM guilds WHERE guild_name = ?1;";
 
   sqlite3_stmt* statement = nullptr;
@@ -1479,7 +1503,7 @@ std::optional<CharacterRecord> Repository::load_character(const std::string& acc
       " max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight, equipped_blob,"
       " bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode, pk_point,"
       " death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob, body_luck FROM characters"
+      " daily_quest, slave_blob, body_luck, birth_items_granted FROM characters"
       " WHERE account_id = ?1 AND character_name = ?2"
       " LIMIT 1;";
 
@@ -1510,7 +1534,7 @@ std::optional<CharacterRecord> Repository::load_character_by_name(
       " max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight, equipped_blob,"
       " bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode, pk_point,"
       " death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob, body_luck FROM characters"
+      " daily_quest, slave_blob, body_luck, birth_items_granted FROM characters"
       " WHERE character_name = ?1"
       " ORDER BY updated_at DESC, account_id ASC"
       " LIMIT 1;";
@@ -1538,7 +1562,7 @@ std::vector<CharacterRecord> Repository::list_characters(const std::string& acco
       " max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight, equipped_blob,"
       " bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode, pk_point,"
       " death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob, body_luck FROM characters WHERE account_id = ?1"
+      " daily_quest, slave_blob, body_luck, birth_items_granted FROM characters WHERE account_id = ?1"
       " ORDER BY updated_at DESC, character_name ASC;";
 
   sqlite3_stmt* statement = nullptr;
@@ -1564,10 +1588,10 @@ bool Repository::create_character(const CharacterRecord& character) {
       " weight, max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight,"
       " equipped_blob, bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode,"
       " pk_point, death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob, body_luck)"
+      " daily_quest, slave_blob, body_luck, birth_items_granted)"
       " VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,"
       " ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36,"
-      " ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47);";
+      " ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48);";
 
   sqlite3_stmt* statement = nullptr;
   if (sqlite3_prepare_v2(database_, kSql, -1, &statement, nullptr) != SQLITE_OK) {
@@ -1607,10 +1631,10 @@ void Repository::save_character(const CharacterRecord& character) {
       " weight, max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight,"
       " equipped_blob, bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode,"
       " pk_point, death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob, body_luck)"
+      " daily_quest, slave_blob, body_luck, birth_items_granted)"
       " VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,"
       " ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36,"
-      " ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47)"
+      " ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48)"
       " ON CONFLICT(account_id, character_name) DO UPDATE SET map_id = excluded.map_id,"
       " x = excluded.x, y = excluded.y, dir = excluded.dir, light = excluded.light, job = excluded.job,"
       " sex = excluded.sex, hair = excluded.hair, gold = excluded.gold,"
@@ -1629,6 +1653,7 @@ void Repository::save_character(const CharacterRecord& character) {
       " quest_open_blob = excluded.quest_open_blob, quest_unit_blob = excluded.quest_unit_blob,"
       " script_param_blob = excluded.script_param_blob, daily_quest = excluded.daily_quest,"
       " slave_blob = excluded.slave_blob, body_luck = excluded.body_luck,"
+      " birth_items_granted = excluded.birth_items_granted,"
       " updated_at = CURRENT_TIMESTAMP;";
 
   sqlite3_stmt* statement = nullptr;

@@ -118,6 +118,41 @@ std::uint32_t next_level_exp(std::uint8_t level) {
   return kNeedExps[index];
 }
 
+template <std::size_t N>
+std::uint8_t legacy_bit_mark(const std::array<std::uint8_t, N>& marks,
+                             std::int32_t index) {
+  if (index <= 0) {
+    return 0;
+  }
+  const auto zero_based = index - 1;
+  const auto byte_index = static_cast<std::size_t>(zero_based / 8);
+  if (byte_index >= marks.size()) {
+    return 0;
+  }
+  const auto bit = static_cast<std::uint8_t>(0x80U >> (zero_based % 8));
+  return (marks[byte_index] & bit) != 0 ? 1 : 0;
+}
+
+template <std::size_t N>
+bool set_legacy_bit_mark(std::array<std::uint8_t, N>& marks,
+                         std::int32_t index, std::uint8_t value) {
+  if (index <= 0) {
+    return false;
+  }
+  const auto zero_based = index - 1;
+  const auto byte_index = static_cast<std::size_t>(zero_based / 8);
+  if (byte_index >= marks.size()) {
+    return false;
+  }
+  const auto bit = static_cast<std::uint8_t>(0x80U >> (zero_based % 8));
+  if (value == 0) {
+    marks[byte_index] = static_cast<std::uint8_t>(marks[byte_index] & ~bit);
+  } else {
+    marks[byte_index] = static_cast<std::uint8_t>(marks[byte_index] | bit);
+  }
+  return true;
+}
+
 std::uint8_t resolve_shape_feature(std::uint8_t sex, const LegacyUserItem& item,
                                    const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
   if (is_empty(item)) {
@@ -625,24 +660,15 @@ std::int32_t Player::body_luck_level() const {
 }
 
 std::uint8_t Player::quest_mark(std::int32_t index) const {
-  if (index < 0 || static_cast<std::size_t>(index) >= character_.quest_marks.size()) {
-    return 0;
-  }
-  return character_.quest_marks[static_cast<std::size_t>(index)];
+  return legacy_bit_mark(character_.quest_marks, index);
 }
 
 std::uint8_t Player::quest_open_unit(std::int32_t index) const {
-  if (index < 0 || static_cast<std::size_t>(index) >= character_.quest_open_units.size()) {
-    return 0;
-  }
-  return character_.quest_open_units[static_cast<std::size_t>(index)];
+  return legacy_bit_mark(character_.quest_open_units, index);
 }
 
 std::uint8_t Player::quest_unit(std::int32_t index) const {
-  if (index < 0 || static_cast<std::size_t>(index) >= character_.quest_units.size()) {
-    return 0;
-  }
-  return character_.quest_units[static_cast<std::size_t>(index)];
+  return legacy_bit_mark(character_.quest_units, index);
 }
 
 std::int32_t Player::script_param(std::int32_t index) const {
@@ -1451,6 +1477,47 @@ void Player::spend_gold(std::int32_t amount) {
   }
 }
 
+void Player::set_legacy_level(std::int32_t level, std::int32_t max_level) {
+  const auto clamped = std::clamp(level, 1, std::max(max_level, 1));
+  character_.ability.level = static_cast<std::uint8_t>(std::clamp(clamped, 1, 255));
+  character_.ability.max_exp = next_level_exp(character_.ability.level);
+  base_ability_.level = character_.ability.level;
+  base_ability_.max_exp = character_.ability.max_exp;
+}
+
+void Player::set_legacy_exp(std::int32_t exp) {
+  character_.ability.exp = static_cast<std::uint32_t>(std::max(exp, 0));
+  base_ability_.exp = character_.ability.exp;
+}
+
+void Player::set_pk_point(std::int32_t value) {
+  character_.pk_point = std::max(value, 0);
+}
+
+void Player::set_body_luck_value(double value) {
+  character_.body_luck = value;
+}
+
+void Player::set_hair(std::int32_t value) {
+  character_.hair = static_cast<std::uint8_t>(std::clamp(value, 0, 255));
+}
+
+void Player::set_job(std::int32_t value) {
+  character_.job = static_cast<std::uint8_t>(std::clamp(value, 0, 2));
+}
+
+void Player::toggle_sex() {
+  character_.sex = character_.sex == 0 ? 1 : 0;
+}
+
+void Player::set_legacy_name_color(std::int32_t value) {
+  legacy_name_color_ = static_cast<std::uint8_t>(std::clamp(value, 0, 255));
+}
+
+void Player::mark_birth_items_granted() {
+  character_.birth_items_granted = true;
+}
+
 void Player::set_guild_membership(std::string guild_name, std::string guild_title) {
   character_.guild_name = std::move(guild_name);
   character_.guild_title = std::move(guild_title);
@@ -1462,27 +1529,15 @@ void Player::clear_guild_membership() {
 }
 
 bool Player::set_quest_mark(std::int32_t index, std::uint8_t value) {
-  if (index < 0 || static_cast<std::size_t>(index) >= character_.quest_marks.size()) {
-    return false;
-  }
-  character_.quest_marks[static_cast<std::size_t>(index)] = value;
-  return true;
+  return set_legacy_bit_mark(character_.quest_marks, index, value);
 }
 
 bool Player::set_quest_open_unit(std::int32_t index, std::uint8_t value) {
-  if (index < 0 || static_cast<std::size_t>(index) >= character_.quest_open_units.size()) {
-    return false;
-  }
-  character_.quest_open_units[static_cast<std::size_t>(index)] = value;
-  return true;
+  return set_legacy_bit_mark(character_.quest_open_units, index, value);
 }
 
 bool Player::set_quest_unit(std::int32_t index, std::uint8_t value) {
-  if (index < 0 || static_cast<std::size_t>(index) >= character_.quest_units.size()) {
-    return false;
-  }
-  character_.quest_units[static_cast<std::size_t>(index)] = value;
-  return true;
+  return set_legacy_bit_mark(character_.quest_units, index, value);
 }
 
 bool Player::set_script_param(std::int32_t index, std::int32_t value) {
@@ -2138,42 +2193,46 @@ MonsterSnapshot Monster::snapshot() const {
                          .walk_step = walk_step_,
                          .walk_wait_ms = walk_wait_ms_,
                          .attack_speed_ms = attack_speed_ms_,
+                         .legacy_run_time_ms = run_time_ms_,
+                         .legacy_run_next_tick_ms = run_next_tick_ms_,
+                         .legacy_search_time_ms = search_time_ms_,
+                         .legacy_search_rate_ms = search_rate_ms_,
                          .target_actor_id = aggro_target_id_,
                          .target_focus_time_ms = target_focus_time_ms_,
                          .target_x = target_x_,
                          .target_y = target_y_,
                          .walk_time_ms = walk_time_ms_,
-                          .hit_time_ms = hit_time_ms_,
-                          .search_enemy_time_ms = search_enemy_time_ms_,
-                          .think_time_ms = think_time_ms_,
-                          .last_hitter_id = last_hitter_id_,
-                          .last_hit_time_ms = last_hit_time_ms_,
-                          .exp_hitter_id = exp_hitter_id_,
-                          .exp_hit_time_ms = exp_hit_time_ms_,
-                          .death_time_ms = death_time_ms_,
-                          .ghost_time_ms = ghost_time_ms_,
-                          .walk_wait_mode = walk_wait_mode_,
-                          .dup_mode = dup_mode_,
-                          .ghosted = ghosted_,
-                          .death_settled = death_settled_,
-                          .chain_shot = chain_shot_,
-                          .chain_shot_count = chain_shot_count_,
-                          .hide_mode = hide_mode_,
-                          .stick_mode = stick_mode_,
-                          .dig_up_range = dig_up_range_,
-                          .dig_down_range = dig_down_range_,
-                          .appear_time_ms = appear_time_ms_,
-                          .child_actor_count = child_actor_ids_.size(),
-                          .summon_limit = summon_limit_,
-                          .master_actor_id = master_actor_id_,
-                          .is_slave = is_slave_,
-                          .slave_exp = slave_exp_,
-                          .slave_make_level = slave_make_level_,
-                          .slave_exp_level = slave_exp_level_,
-                          .master_royalty_time_ms = master_royalty_time_ms_,
-                          .slave_life_time_ms = slave_life_time_ms_,
-                          .no_item = no_item_,
-                          .tameable = tameable_};
+                         .hit_time_ms = hit_time_ms_,
+                         .search_enemy_time_ms = search_enemy_time_ms_,
+                         .think_time_ms = think_time_ms_,
+                         .last_hitter_id = last_hitter_id_,
+                         .last_hit_time_ms = last_hit_time_ms_,
+                         .exp_hitter_id = exp_hitter_id_,
+                         .exp_hit_time_ms = exp_hit_time_ms_,
+                         .death_time_ms = death_time_ms_,
+                         .ghost_time_ms = ghost_time_ms_,
+                         .walk_wait_mode = walk_wait_mode_,
+                         .dup_mode = dup_mode_,
+                         .ghosted = ghosted_,
+                         .death_settled = death_settled_,
+                         .chain_shot = chain_shot_,
+                         .chain_shot_count = chain_shot_count_,
+                         .hide_mode = hide_mode_,
+                         .stick_mode = stick_mode_,
+                         .dig_up_range = dig_up_range_,
+                         .dig_down_range = dig_down_range_,
+                         .appear_time_ms = appear_time_ms_,
+                         .child_actor_count = child_actor_ids_.size(),
+                         .summon_limit = summon_limit_,
+                         .master_actor_id = master_actor_id_,
+                         .is_slave = is_slave_,
+                         .slave_exp = slave_exp_,
+                         .slave_make_level = slave_make_level_,
+                         .slave_exp_level = slave_exp_level_,
+                         .master_royalty_time_ms = master_royalty_time_ms_,
+                         .slave_life_time_ms = slave_life_time_ms_,
+                         .no_item = no_item_,
+                         .tameable = tameable_};
 }
 
 bool Monster::legacy_due(std::uint64_t now_ms) const {
@@ -2737,6 +2796,7 @@ void Monster::initialize_legacy_ai_timers(std::uint64_t now_ms,
   walk_time_ms_ = now_ms >= walk_offset_ms ? now_ms - walk_offset_ms : 0;
   hit_time_ms_ = now_ms >= hit_offset_ms ? now_ms - hit_offset_ms : 0;
   attack_time_ms_ = hit_time_ms_;
+  search_time_ms_ = now_ms;
   search_enemy_time_ms_ = now_ms;
 }
 
