@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <limits>
 
+#include "util/string_utils.hpp"
 #include "world/legacy_item_rules.hpp"
 #include "world/legacy_skill_formula.hpp"
 
@@ -41,7 +42,25 @@ bool matches_item(const LegacyUserItem& item, std::int32_t make_index, std::stri
   if (is_empty(item) || item.make_index != make_index) {
     return false;
   }
-  return expected_name.empty() || item_name(item, item_configs) == expected_name;
+  return expected_name.empty() ||
+         util::lower_copy(item_name(item, item_configs)) == util::lower_copy(expected_name);
+}
+
+template <std::size_t N>
+void compact_legacy_items(std::array<LegacyUserItem, N>& items) {
+  std::size_t write_index = 0;
+  for (std::size_t read_index = 0; read_index < items.size(); ++read_index) {
+    if (is_empty(items[read_index])) {
+      continue;
+    }
+    if (write_index != read_index) {
+      items[write_index] = items[read_index];
+    }
+    ++write_index;
+  }
+  for (; write_index < items.size(); ++write_index) {
+    items[write_index] = LegacyUserItem{};
+  }
 }
 
 std::uint16_t clamp_u16(std::int32_t value) {
@@ -585,6 +604,17 @@ const LegacyUserItem* Player::bag_item(
   return nullptr;
 }
 
+const LegacyUserItem* Player::storage_item(
+    std::int32_t make_index, std::string_view expected_name,
+    const std::unordered_map<std::int32_t, ItemConfig>& item_configs) const {
+  for (const auto& item : character_.storage_items) {
+    if (matches_item(item, make_index, expected_name, item_configs)) {
+      return &item;
+    }
+  }
+  return nullptr;
+}
+
 const LegacyUserItem* Player::equipped_item(std::size_t slot) const {
   if (slot >= character_.equipped_items.size()) {
     return nullptr;
@@ -728,6 +758,7 @@ std::optional<LegacyUserItem> Player::remove_storage_item(
     if (matches_item(item, make_index, expected_name, item_configs)) {
       const auto removed = item;
       item = LegacyUserItem{};
+      compact_legacy_items(character_.storage_items);
       return removed;
     }
   }

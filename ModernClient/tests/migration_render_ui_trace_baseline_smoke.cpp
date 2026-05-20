@@ -110,7 +110,7 @@ std::vector<std::string> run_ui_input_gate_trace() {
   trace.emplace_back("world_shortcut_fallback_sets_action_key");
 
   input = InputState{};
-  context.ui_input = ui::UiInputResult{false, false, true};
+  context.ui_input = ui::UiInputResult{false, true, false};
   input.key_pressed[VK_F1] = true;
   world.action_key = -1;
   scenes.process_key_messages(context);

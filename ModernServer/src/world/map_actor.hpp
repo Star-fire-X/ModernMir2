@@ -60,7 +60,8 @@ class MapActor {
            CastleDialogContext castle_dialog_context = {},
            std::unordered_map<std::string, MonsterDefConfig> monster_defs = {},
            MakeIndexAllocator* make_index_allocator = nullptr,
-           std::string black_stone_name = "BlackStone");
+           std::string black_stone_name = "BlackStone",
+           bool legacy_approval_mode = false);
 
   void enqueue_mail(ActorMail mail);
   void set_legacy_random(LegacyRandom* legacy_random);
@@ -419,6 +420,7 @@ class MapActor {
   std::unordered_map<std::string, MonsterDefConfig> monster_defs_{};
   std::vector<MapQuestConfig> map_quests_{};
   std::string black_stone_name_{"BlackStone"};
+  bool legacy_approval_mode_{false};
   std::shared_ptr<const legacy::MapDocument> movement_map_{};
   LegacyMapEnvironment environment_{};
   CastleDialogContext castle_dialog_context_{};

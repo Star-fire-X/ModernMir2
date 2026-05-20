@@ -97,12 +97,10 @@ std::vector<std::string> run_protocol_trace() {
 
   const auto stale_actor =
       ActorUpsert{WorldActor{2000, "Guard", 332, 270, 0, 0, 0, ActorType::npc}};
-  if (state.world.map_transition_pending) {
-    trace.emplace_back("drop_stale_actor_upsert_during_transition");
-  } else {
-    state.apply(stale_actor);
-  }
+  app.push_protocol_message_for_test(stale_actor);
+  app.pump_protocol_for_test();
   assert(!has_actor(state, 2000));
+  trace.emplace_back("drop_stale_actor_upsert_during_transition");
 
   WorldSnapshot transfer_snapshot;
   transfer_snapshot.map_id = "1";

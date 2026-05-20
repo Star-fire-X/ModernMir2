@@ -203,6 +203,7 @@ constexpr std::size_t kMaxEquipSlots = 13;
 constexpr std::size_t kMaxBagItems = 46;
 constexpr std::size_t kMaxUserMagic = 20;
 constexpr std::size_t kMaxSaveItems = 50;
+constexpr std::size_t kRuntimeMaxStorageItems = 39;
 
 #pragma pack(push, 1)
 

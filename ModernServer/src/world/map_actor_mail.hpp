@@ -1529,6 +1529,36 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                      make_storage_result_packet(requester->session_id(), kSmStorageFail));
         break;
       }
+      if (legacy_approval_mode_) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_storage_result_packet(requester->session_id(), kSmStorageFail));
+        break;
+      }
+      const auto storage_count = static_cast<std::size_t>(std::count_if(
+          requester->character().storage_items.begin(), requester->character().storage_items.end(),
+          [](const LegacyUserItem& item) { return !is_empty(item); }));
+      if (storage_count >= kRuntimeMaxStorageItems) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_storage_result_packet(requester->session_id(), kSmStorageFull));
+        break;
+      }
+      if (mail.payload.empty()) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_storage_result_packet(requester->session_id(), kSmStorageFail));
+        break;
+      }
+      const auto* bag_item = requester->bag_item(mail.item_make_index, mail.payload, item_configs_);
+      if (bag_item == nullptr) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_storage_result_packet(requester->session_id(), kSmStorageFail));
+        break;
+      }
+      const auto* item_config = find_item_config(item_configs_, bag_item->index);
+      if (item_config != nullptr && item_config->std_mode == 51) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_storage_result_packet(requester->session_id(), kSmStorageFail));
+        break;
+      }
       const auto item = requester->remove_bag_item(mail.item_make_index, mail.payload, item_configs_);
       if (!item.has_value()) {
         queue_packet(dispatch, requester->session_id(),
@@ -1571,16 +1601,48 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                           kSmTakeBackStorageItemFail, 0));
         break;
       }
-      const auto item =
-          requester->remove_storage_item(mail.item_make_index, mail.payload, item_configs_);
-      if (!item.has_value()) {
+      if (legacy_approval_mode_) {
         queue_packet(dispatch, requester->session_id(),
                      make_take_back_storage_result_packet(requester->session_id(),
                                                           kSmTakeBackStorageItemFail, 0));
         break;
       }
-      if (!requester->can_add_bag_item(*item, item_configs_) || !requester->add_bag_item(*item)) {
-        static_cast<void>(requester->add_storage_item(*item));
+      if (mail.payload.empty()) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_take_back_storage_result_packet(requester->session_id(),
+                                                          kSmTakeBackStorageItemFail, 0));
+        break;
+      }
+      const auto* storage_item =
+          requester->storage_item(mail.item_make_index, mail.payload, item_configs_);
+      if (storage_item == nullptr) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_take_back_storage_result_packet(requester->session_id(),
+                                                          kSmTakeBackStorageItemFail, 0));
+        break;
+      }
+      if (!requester->has_free_bag_slot()) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_take_back_storage_result_packet(requester->session_id(),
+                                                          kSmTakeBackStorageItemFullBag, 0));
+        break;
+      }
+      if (!requester->can_add_bag_item(*storage_item, item_configs_)) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_take_back_storage_result_packet(requester->session_id(),
+                                                          kSmTakeBackStorageItemFail, 0));
+        break;
+      }
+      const auto removed =
+          requester->remove_storage_item(mail.item_make_index, mail.payload, item_configs_);
+      if (!removed.has_value()) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_take_back_storage_result_packet(requester->session_id(),
+                                                          kSmTakeBackStorageItemFail, 0));
+        break;
+      }
+      if (!requester->add_bag_item(*removed)) {
+        static_cast<void>(requester->add_storage_item(*removed));
         queue_packet(dispatch, requester->session_id(),
                      make_take_back_storage_result_packet(requester->session_id(),
                                                           kSmTakeBackStorageItemFullBag, 0));
@@ -1588,11 +1650,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       requester->refresh_derived_state(item_configs_);
       queue_packet(dispatch, requester->session_id(),
-                   make_add_item_packet(requester->session_id(), *item, item_configs_));
+                   make_add_item_packet(requester->session_id(), *removed, item_configs_));
       queue_packet(dispatch, requester->session_id(),
                    make_take_back_storage_result_packet(requester->session_id(),
                                                         kSmTakeBackStorageItemOk,
-                                                        item->make_index));
+                                                        removed->make_index));
       queue_packet(dispatch, requester->session_id(),
                    make_weight_changed_packet(requester->session_id(), requester->character()));
       queue_save_character(dispatch, *requester);
@@ -1762,7 +1824,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           equipped != nullptr && !is_empty(*equipped)) {
         swapped_item =
             player->remove_equipped_item(static_cast<std::size_t>(mail.item_slot), equipped->make_index,
-                                         {}, item_configs_);
+                                         item_name(*equipped, item_configs_), item_configs_);
       }
 
       if (swapped_item.has_value()) {
@@ -1962,8 +2024,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           item.dura = item.dura_max;
           if (!player->add_bag_item(item)) {
             for (const auto& rollback : unbound_items) {
-              static_cast<void>(
-                  player->remove_bag_item(rollback.make_index, {}, item_configs_));
+              static_cast<void>(player->remove_bag_item(
+                  rollback.make_index, item_name(rollback, item_configs_), item_configs_));
             }
             static_cast<void>(player->add_bag_item(*removed));
             queue_packet(dispatch, player->session_id(),

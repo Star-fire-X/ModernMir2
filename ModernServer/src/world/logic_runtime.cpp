@@ -548,7 +548,8 @@ void LogicRuntime::initialize() {
         map.id, std::make_unique<MapActor>(map, config_.budgets, item_configs_, magic_configs_,
                                            config_.map_quests, castle_dialog_context_,
                                            monster_defs_, &make_index_allocator_,
-                                           config_.runtime.black_stone_name));
+                                           config_.runtime.black_stone_name,
+                                           config_.runtime.legacy_approval_mode));
     map_it->second->set_legacy_random(&legacy_random_);
     if (inserted) {
       map_order_.push_back(map.id);

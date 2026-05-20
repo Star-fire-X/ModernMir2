@@ -320,6 +320,9 @@ class Player : public GameObject {
   [[nodiscard]] const LegacyUserItem* bag_item(
       std::int32_t make_index, std::string_view expected_name,
       const std::unordered_map<std::int32_t, ItemConfig>& item_configs) const;
+  [[nodiscard]] const LegacyUserItem* storage_item(
+      std::int32_t make_index, std::string_view expected_name,
+      const std::unordered_map<std::int32_t, ItemConfig>& item_configs) const;
   [[nodiscard]] const LegacyUserItem* equipped_item(std::size_t slot) const;
   [[nodiscard]] LegacyUserItem* equipped_item_mutable(std::size_t slot);
   [[nodiscard]] const LegacyUseMagicInfo* learned_magic(std::int32_t magic_id) const;
