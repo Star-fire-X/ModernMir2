@@ -1,10 +1,15 @@
+#include "assets/asset_manager.hpp"
 #include "audio/audio_service.hpp"
 #include "audio/audio_backend.hpp"
 #include "audio/sound_constants.hpp"
+#include "render/software_renderer.hpp"
 #include "scene/scenes.hpp"
 
 #include <cassert>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -28,14 +33,39 @@ std::filesystem::path asset_root() {
   return root;
 }
 
+std::vector<std::string> read_draw_layers(const std::filesystem::path& trace_path) {
+  std::ifstream input(trace_path);
+  std::vector<std::string> layers;
+  std::string line;
+  while (std::getline(input, line)) {
+    const auto marker = line.find("draw layer=");
+    if (marker == std::string::npos) {
+      continue;
+    }
+    auto layer = line.substr(marker + 11);
+    if (const auto space = layer.find(' '); space != std::string::npos) {
+      layer = layer.substr(0, space);
+    }
+    layers.push_back(layer);
+  }
+  return layers;
+}
+
 }  // namespace
 
 int main() {
   mir2::client::ClientConfig config;
+  const auto root = asset_root();
+  config.asset_root = root.wstring();
+  const auto trace_path =
+      std::filesystem::temp_directory_path() / "mir2_world_scene_legacy_order_trace.txt";
+  std::filesystem::remove(trace_path);
+  _putenv_s("MIR2_LEGACY_TRACE", "1");
+  _putenv_s("MIR2_LEGACY_TRACE_FILE", trace_path.string().c_str());
   mir2::client::GameStateStore state;
   mir2::client::InputState input;
   mir2::client::AudioService audio(std::make_unique<mir2::client::NullAudioBackend>());
-  assert(audio.initialize(asset_root()));
+  assert(audio.initialize(root));
 
   auto& world = state.world;
   world.self_actor_id = 1;
@@ -175,6 +205,40 @@ int main() {
   scenes.scene_run(context, 0.0F);
   assert(has_sound_id(audio, mir2::client::s_main_theme));
 
+  mir2::client::AssetManager assets;
+  assert(assets.initialize(config.asset_root));
+  mir2::client::SoftwareRenderer renderer;
+  context.assets = &assets;
+  context.renderer = &renderer;
+  std::filesystem::remove(trace_path);
+  scenes.scene_run(context, 0.0F);
+  scenes.render_scene(context);
+  const auto draw_layers = read_draw_layers(trace_path);
+  int actor_last = -1;
+  int fly_last = -1;
+  int actor_overlay_first = -1;
+  int selection_blend_first = -1;
+  for (int index = 0; index < static_cast<int>(draw_layers.size()); ++index) {
+    if (draw_layers[static_cast<std::size_t>(index)] == "actor") {
+      actor_last = index;
+    } else if (draw_layers[static_cast<std::size_t>(index)] == "fly_effect") {
+      fly_last = index;
+    } else if (draw_layers[static_cast<std::size_t>(index)] == "actor_overlay" &&
+               actor_overlay_first < 0) {
+      actor_overlay_first = index;
+    } else if (draw_layers[static_cast<std::size_t>(index)] == "selection_blend" &&
+               selection_blend_first < 0) {
+      selection_blend_first = index;
+    }
+  }
+  assert(actor_last >= 0);
+  assert(fly_last >= 0);
+  assert(actor_overlay_first >= 0);
+  assert(selection_blend_first >= 0);
+  assert(actor_last < actor_overlay_first);
+  assert(fly_last < actor_overlay_first);
+  assert(actor_overlay_first < selection_blend_first);
+
   input = mir2::client::InputState{};
   input.key_pressed[VK_F1] = true;
   context.ui_input = mir2::client::ui::UiInputResult{true, false, false};
@@ -239,6 +303,29 @@ int main() {
   assert(world.pending_pickup_item_id == 0);
   assert(world.action_key == -1);
   assert(world.mouse_down_ms == 0);
+
+  input = mir2::client::InputState{};
+  context.ui_input = mir2::client::ui::UiInputResult{};
+  input.mouse_x = -9999;
+  input.mouse_y = -9999;
+  input.left_pressed = true;
+  input.left_down = true;
+  world.action_locked = true;
+  world.action_lock_started_ms = std::numeric_limits<std::uint64_t>::max();
+  world.focus_actor_id = 0;
+  world.focus_ground_item_id = 0;
+  world.legacy_target_x = -1;
+  world.legacy_target_y = -1;
+  world.legacy_chr_action = mir2::client::LegacyChrAction::none;
+  scenes.process_action_messages(context, 0.016F);
+  assert(world.legacy_target_x < 0);
+  assert(world.legacy_target_y < 0);
+  assert(world.legacy_chr_action == mir2::client::LegacyChrAction::walk);
+  world.action_locked = false;
+  world.action_lock_started_ms = 0;
+  world.legacy_target_x = -1;
+  world.legacy_target_y = -1;
+  world.legacy_chr_action = mir2::client::LegacyChrAction::none;
 
   world.map_id = "3";
   world.width = 400;
