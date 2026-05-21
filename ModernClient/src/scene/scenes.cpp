@@ -7188,7 +7188,6 @@ class WorldScene final : public Scene {
     }
 
     update_legacy_weight_slow(world);
-    server_accept_next_action(world, now_ms);
 
     const auto input_guard =
         context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging;
@@ -7982,8 +7981,128 @@ class WorldScene final : public Scene {
     return true;
   }
 
-  bool try_pickup(ClientContext& context, const ActorState& self, std::uint64_t now_ms) const {
+  static bool actor_alive_at(const WorldViewState& world, const std::uint64_t self_actor_id, int x,
+                             int y) {
+    for (const auto& [actor_id, actor] : world.actors) {
+      if (actor_id == self_actor_id || actor.dead) {
+        continue;
+      }
+      if (actor.x == x && actor.y == y) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static std::pair<int, int> front_position(const ActorState& self, const std::uint8_t dir) {
+    const auto delta = legacy::direction_delta(dir);
+    return {self.x + delta.dx, self.y + delta.dy};
+  }
+
+  static bool target_in_sword_long_attack_range(const WorldViewState& world, const ActorState& self,
+                                                const std::uint8_t dir) {
+    const auto delta = legacy::direction_delta(dir);
+    const auto x = self.x + delta.dx * 2;
+    const auto y = self.y + delta.dy * 2;
+    return actor_alive_at(world, self.actor_id, x, y);
+  }
+
+  static bool target_in_sword_wide_attack_range(const WorldViewState& world, const ActorState& self,
+                                                const std::uint8_t dir) {
+    const auto [fx, fy] = front_position(self, dir);
+    if (!actor_alive_at(world, self.actor_id, fx, fy)) {
+      return false;
+    }
+    for (const auto offset : {1, 2, 7}) {
+      const auto mdir = static_cast<std::uint8_t>((dir + offset) % 8);
+      const auto [rx, ry] = front_position(self, mdir);
+      if (actor_alive_at(world, self.actor_id, rx, ry)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static bool target_in_sword_cross_attack_range(const WorldViewState& world,
+                                                 const ActorState& self,
+                                                 const std::uint8_t dir) {
+    const auto [fx, fy] = front_position(self, dir);
+    if (!actor_alive_at(world, self.actor_id, fx, fy)) {
+      return false;
+    }
+    for (const auto offset : {1, 2, 3, 4, 5, 6, 7}) {
+      const auto mdir = static_cast<std::uint8_t>((dir + offset) % 8);
+      const auto [rx, ry] = front_position(self, mdir);
+      if (actor_alive_at(world, self.actor_id, rx, ry)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static std::uint16_t base_attack_ident(const WorldViewState& world) {
+    if (const auto& weapon = world.equipment[static_cast<std::size_t>(kEquipWeapon)];
+        !item_empty(weapon) && weapon.std_mode == 6U) {
+      return legacy::kCmHeavyHit;
+    }
+    return legacy::kCmHit;
+  }
+
+  static std::uint16_t choose_ground_attack_ident(WorldViewState& world, const ActorState& self,
+                                                  const std::uint8_t dir,
+                                                  const std::uint64_t now_ms) {
+    auto ident = legacy::kCmHit;
+    switch (now_ms % 3U) {
+      case 1U:
+        ident = legacy::kCmHeavyHit;
+        break;
+      case 2U:
+        ident = legacy::kCmBigHit;
+        break;
+      default:
+        ident = legacy::kCmHit;
+        break;
+    }
+    if (world.can_long_hit && target_in_sword_long_attack_range(world, self, dir)) {
+      ident = legacy::kCmLongHit;
+    }
+    if (world.can_wide_hit && world.self_ability_detail.mp >= 3 &&
+        target_in_sword_wide_attack_range(world, self, dir)) {
+      ident = legacy::kCmWideHit;
+    }
+    if (world.can_cross_hit && world.self_ability_detail.mp >= 6 &&
+        target_in_sword_cross_attack_range(world, self, dir)) {
+      ident = legacy::kCmCrossHit;
+    }
+    return ident;
+  }
+
+  static std::uint16_t choose_target_attack_ident(const WorldViewState& world, const ActorState& self,
+                                                  const std::uint8_t dir) {
+    auto ident = base_attack_ident(world);
+    if (world.next_time_fire_hit && world.self_ability_detail.mp >= 7) {
+      return legacy::kCmFireHit;
+    }
+    if (world.next_time_power_hit) {
+      return legacy::kCmPowerHit;
+    }
+    if (world.can_cross_hit && world.self_ability_detail.mp >= 6) {
+      ident = legacy::kCmCrossHit;
+    } else if (world.can_wide_hit && world.self_ability_detail.mp >= 3) {
+      ident = legacy::kCmWideHit;
+    } else if (world.can_long_hit && target_in_sword_long_attack_range(world, self, dir)) {
+      ident = legacy::kCmLongHit;
+    }
+    return ident;
+  }
+
+  bool try_pickup(ClientContext& context, const ActorState& self, std::uint64_t now_ms) {
     auto& world = context.state->world;
+    const auto animation_idle = self_actor_legacy_idle(world, now_ms);
+    if (!server_accept_next_action(world, now_ms) ||
+        !can_next_action(world, self, animation_idle, now_ms)) {
+      return false;
+    }
     if (world.last_pickup_ms != 0 && elapsed_ms(now_ms, world.last_pickup_ms) < 250U) {
       return false;
     }
@@ -7992,7 +8111,7 @@ class WorldScene final : public Scene {
     return true;
   }
 
-  bool process_pending_pickup(ClientContext& context, std::uint64_t now_ms) const {
+  bool process_pending_pickup(ClientContext& context, std::uint64_t now_ms) {
     auto& world = context.state->world;
     if (world.pending_pickup_item_id == 0) {
       return false;
@@ -8013,7 +8132,9 @@ class WorldScene final : public Scene {
       }
       return sent;
     }
-    if (!can_next_action(world, self_it->second, now_ms)) {
+    const auto animation_idle = self_actor_legacy_idle(world, now_ms);
+    if (!server_accept_next_action(world, now_ms) ||
+        !can_next_action(world, self_it->second, animation_idle, now_ms)) {
       return false;
     }
     world.legacy_target_x = item_it->second.x;
@@ -8027,16 +8148,19 @@ class WorldScene final : public Scene {
     auto self_it = world.actors.find(world.self_actor_id);
     const auto animation_idle = self_actor_legacy_idle(world, now_ms);
     if (self_it == world.actors.end() || !server_accept_next_action(world, now_ms) ||
-        !can_next_action(world, self_it->second, animation_idle, now_ms) ||
-        !can_next_hit(world, self_it->second, now_ms)) {
+        !can_next_action(world, self_it->second, animation_idle, now_ms)) {
       return false;
     }
     const auto dir = direction_between(self_it->second.x, self_it->second.y, x, y,
                                        self_it->second.dir);
-    if (!is_unlock_action(world, legacy::kCmHit, dir, now_ms)) {
+    const auto attack_ident = choose_ground_attack_ident(world, self_it->second, dir, now_ms);
+    if (!is_unlock_action(world, attack_ident, dir, now_ms)) {
       return false;
     }
-    send_attack(context, self_it->second.x, self_it->second.y, dir, 0, 0);
+    if (!can_next_hit(world, self_it->second, now_ms)) {
+      return false;
+    }
+    send_attack(context, self_it->second.x, self_it->second.y, dir, 0, attack_ident);
     world.latest_hit_ms = now_ms;
     world.last_attack_ms = now_ms;
     return true;
@@ -8064,24 +8188,36 @@ class WorldScene final : public Scene {
     const auto& target = target_it->second;
     const auto distance = std::max(std::abs(target.x - self.x), std::abs(target.y - self.y));
     const auto dir = direction_between(self.x, self.y, target.x, target.y, self.dir);
-    if (distance > 1) {
+    const auto delta = legacy::direction_delta(dir);
+    const auto target_at_long_hit_cell = target.x == self.x + delta.dx * 2 &&
+                                         target.y == self.y + delta.dy * 2;
+    const auto can_target_long_hit = world.can_long_hit && target_at_long_hit_cell;
+    if (distance > 1 && !can_target_long_hit) {
       chase_target(context, self, target, dir);
       return process_pending_move(context, now_ms);
     }
 
     const auto animation_idle = self_actor_legacy_idle(world, now_ms);
     if (!server_accept_next_action(world, now_ms) ||
-        !can_next_action(world, self, animation_idle, now_ms) ||
-        !can_next_hit(world, self, now_ms)) {
+        !can_next_action(world, self, animation_idle, now_ms)) {
       world.target_actor_id = target_actor_id;
       return false;
     }
-
-    if (!is_unlock_action(world, legacy::kCmHit, dir, now_ms)) {
+    const auto attack_ident = choose_target_attack_ident(world, self, dir);
+    if (!is_unlock_action(world, attack_ident, dir, now_ms)) {
       return false;
     }
-    send_attack(context, self.x, self.y, dir, target_actor_id, 0);
+    if (!can_next_hit(world, self, now_ms)) {
+      world.target_actor_id = target_actor_id;
+      return false;
+    }
+    send_attack(context, self.x, self.y, dir, target_actor_id, attack_ident);
     world.latest_hit_ms = now_ms;
+    if (attack_ident == legacy::kCmFireHit) {
+      world.next_time_fire_hit = false;
+    } else if (attack_ident == legacy::kCmPowerHit) {
+      world.next_time_power_hit = false;
+    }
     world.last_attack_ms = now_ms;
     return true;
   }
@@ -8128,7 +8264,8 @@ class WorldScene final : public Scene {
       return false;
     }
     const auto animation_idle = self_actor_legacy_idle(world, input.tick);
-    if (!can_next_action(world, self_it->second, animation_idle, input.tick)) {
+    if (!server_accept_next_action(world, input.tick) ||
+        !can_next_action(world, self_it->second, animation_idle, input.tick)) {
       return false;
     }
     const auto width = map_ != nullptr ? map_->width : world.width;

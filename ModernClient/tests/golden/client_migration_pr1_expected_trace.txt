@@ -55,7 +55,7 @@ scene_run
 # special +PWR/+LNG/+WID/+CRS/+FIR flags remain a known gap for PR-3.
 [action.ack]
 action_lock_blocks_until_10000ms
-server_accept_next_action_unlocks_after_timeout
+server_accept_next_action_clears_timeout_but_denies_same_call
 can_next_action_after_timeout
 action_ack_success_unlocks
 action_ack_fail_unlocks_and_rewinds_self
