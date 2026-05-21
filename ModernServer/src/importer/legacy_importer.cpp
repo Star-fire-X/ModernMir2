@@ -98,6 +98,9 @@ std::vector<std::string> split_legacy_fields(std::string_view line) {
       quoted = !quoted;
       continue;
     }
+    if (!quoted && ch == ';') {
+      break;
+    }
     if (!quoted && std::isspace(static_cast<unsigned char>(ch)) != 0) {
       if (!current.empty()) {
         tokens.push_back(std::move(current));
@@ -137,6 +140,31 @@ std::optional<std::int32_t> parse_int32(std::string_view text) {
   return std::nullopt;
 }
 
+std::string legacy_name_key(std::string name) {
+  return util::lower_copy(ascii_safe(std::move(name)));
+}
+
+std::size_t position_after_fields(std::string_view line, std::size_t field_count) {
+  std::size_t pos = 0;
+  for (std::size_t field = 0; field < field_count; ++field) {
+    while (pos < line.size() &&
+           std::isspace(static_cast<unsigned char>(line[pos])) != 0) {
+      ++pos;
+    }
+    if (pos >= line.size()) {
+      return std::string_view::npos;
+    }
+    while (pos < line.size() &&
+           std::isspace(static_cast<unsigned char>(line[pos])) == 0) {
+      ++pos;
+    }
+  }
+  while (pos < line.size() && std::isspace(static_cast<unsigned char>(line[pos])) != 0) {
+    ++pos;
+  }
+  return pos;
+}
+
 struct LegacyMonGenRecord {
   std::string map_id;
   std::string x;
@@ -148,22 +176,11 @@ struct LegacyMonGenRecord {
   std::string small_zen_rate = "0";
 };
 
-std::optional<LegacyMonGenRecord> parse_mongen_record(std::string_view line) {
+std::optional<LegacyMonGenRecord> parse_mongen_record(
+    std::string_view line,
+    const std::set<std::string>& known_monster_names) {
   const auto tokens = split_legacy_fields(line);
   if (tokens.size() < 4) {
-    return std::nullopt;
-  }
-
-  std::size_t tail_start = tokens.size();
-  std::size_t numeric_tail_count = 0;
-  while (tail_start > 4 && numeric_tail_count < 4 &&
-         parse_int32(tokens[tail_start - 1]).has_value()) {
-    --tail_start;
-    ++numeric_tail_count;
-  }
-
-  auto name = join_tokens(tokens, 3, tail_start);
-  if (name.empty()) {
     return std::nullopt;
   }
 
@@ -171,6 +188,80 @@ std::optional<LegacyMonGenRecord> parse_mongen_record(std::string_view line) {
   record.map_id = tokens[0];
   record.x = tokens[1];
   record.y = tokens[2];
+
+  const auto name_pos = position_after_fields(line, 3);
+  if (name_pos != std::string_view::npos && name_pos < line.size() && line[name_pos] == '"') {
+    std::string name;
+    std::size_t index = name_pos + 1;
+    for (; index < line.size(); ++index) {
+      if (line[index] == '"') {
+        ++index;
+        break;
+      }
+      name.push_back(line[index]);
+    }
+    if (name.empty()) {
+      return std::nullopt;
+    }
+    record.name = std::move(name);
+    const auto tail_tokens = split_legacy_fields(line.substr(index));
+    const std::size_t tail_count = std::min<std::size_t>(tail_tokens.size(), 4);
+    if (tail_count > 0 && parse_int32(tail_tokens[0]).has_value()) {
+      record.area = tail_tokens[0];
+    }
+    if (tail_count > 1 && parse_int32(tail_tokens[1]).has_value()) {
+      record.count = tail_tokens[1];
+    }
+    if (tail_count > 2 && parse_int32(tail_tokens[2]).has_value()) {
+      record.zen_minutes = tail_tokens[2];
+    }
+    if (tail_count > 3 && parse_int32(tail_tokens[3]).has_value()) {
+      record.small_zen_rate = tail_tokens[3];
+    }
+    return record;
+  }
+
+  std::size_t tail_start = tokens.size();
+  std::size_t numeric_tail_count = 0;
+  bool matched_known_name = false;
+  const auto max_tail = std::min<std::size_t>(tokens.size() - 4, 4);
+  for (std::size_t tail_count = 0; tail_count <= max_tail; ++tail_count) {
+    const auto candidate_tail_start = tokens.size() - tail_count;
+    auto numeric_tail = true;
+    for (std::size_t index = candidate_tail_start; index < tokens.size(); ++index) {
+      numeric_tail = numeric_tail && parse_int32(tokens[index]).has_value();
+    }
+    if (!numeric_tail) {
+      continue;
+    }
+    const auto candidate_name = join_tokens(tokens, 3, candidate_tail_start);
+    if (!candidate_name.empty() &&
+        known_monster_names.find(legacy_name_key(candidate_name)) != known_monster_names.end()) {
+      tail_start = candidate_tail_start;
+      numeric_tail_count = tail_count;
+      matched_known_name = true;
+      break;
+    }
+  }
+  if (!matched_known_name) {
+    std::size_t run_start = tokens.size();
+    while (run_start > 4 && parse_int32(tokens[run_start - 1]).has_value()) {
+      --run_start;
+    }
+    const auto numeric_run_count = tokens.size() - run_start;
+    numeric_tail_count = std::min<std::size_t>(numeric_run_count, 4);
+    if (numeric_tail_count > 0) {
+      tail_start = tokens.size() - numeric_tail_count;
+    } else {
+      tail_start = tokens.size();
+    }
+  }
+
+  auto name = join_tokens(tokens, 3, tail_start);
+  if (name.empty()) {
+    return std::nullopt;
+  }
+
   record.name = std::move(name);
   if (numeric_tail_count > 0) {
     record.area = tokens[tail_start];
@@ -185,6 +276,124 @@ std::optional<LegacyMonGenRecord> parse_mongen_record(std::string_view line) {
     record.small_zen_rate = tokens[tail_start + 3];
   }
   return record;
+}
+
+std::filesystem::path legacy_makeitem_path(const std::filesystem::path& legacy_root) {
+  for (const auto& candidate : {
+      legacy_root / "Envir" / "MakeItem.txt",
+      legacy_root / "Envir" / "MakeItem.TXT",
+      legacy_root / "MakeItem.txt",
+  }) {
+    if (std::filesystem::exists(candidate)) {
+      return candidate;
+    }
+  }
+  return {};
+}
+
+std::optional<std::string> parse_toml_name_field(std::string_view line) {
+  const auto name_pos = line.find("name");
+  if (name_pos == std::string_view::npos) {
+    return std::nullopt;
+  }
+  const auto equals_pos = line.find('=', name_pos);
+  if (equals_pos == std::string_view::npos) {
+    return std::nullopt;
+  }
+  const auto quote_pos = line.find('"', equals_pos);
+  if (quote_pos == std::string_view::npos) {
+    return std::nullopt;
+  }
+  std::string value;
+  bool escaped = false;
+  for (std::size_t index = quote_pos + 1; index < line.size(); ++index) {
+    const auto ch = line[index];
+    if (escaped) {
+      value.push_back(ch);
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"') {
+      return value;
+    }
+    value.push_back(ch);
+  }
+  return std::nullopt;
+}
+
+std::set<std::string> load_imported_item_names(const std::filesystem::path& output_root) {
+  std::set<std::string> names;
+  for (const auto& line : read_lines(output_root / "items" / "imported_items.toml")) {
+    const auto name = parse_toml_name_field(line);
+    if (name.has_value() && !name->empty()) {
+      names.insert(legacy_name_key(*name));
+    }
+  }
+  return names;
+}
+
+std::set<std::string> load_legacy_makeitem_names(const std::filesystem::path& legacy_root) {
+  std::set<std::string> names;
+  for (const auto& line : read_lines(legacy_makeitem_path(legacy_root))) {
+    if (line.empty() || util::starts_with(line, ";")) {
+      continue;
+    }
+    const auto tokens = split_legacy_fields(line);
+    if (tokens.empty()) {
+      continue;
+    }
+    const auto item_name = join_tokens(tokens, 0, tokens.size());
+    if (!item_name.empty()) {
+      names.insert(legacy_name_key(item_name));
+    }
+  }
+  return names;
+}
+
+std::set<std::string> load_imported_monster_names(const std::filesystem::path& output_root) {
+  std::set<std::string> names;
+  for (const auto& line : read_lines(output_root / "monsters" / "imported_monsters.toml")) {
+    const auto name = parse_toml_name_field(line);
+    if (name.has_value() && !name->empty()) {
+      names.insert(legacy_name_key(*name));
+    }
+  }
+  return names;
+}
+
+std::vector<std::string> load_legacy_monitem_monster_name_values(
+    const std::filesystem::path& legacy_root) {
+  std::vector<std::string> names;
+  const auto directory = legacy_root / "Envir" / "MonItems";
+  if (!std::filesystem::exists(directory)) {
+    return names;
+  }
+  std::vector<std::filesystem::path> paths;
+  for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+    if (entry.is_regular_file() &&
+        util::lower_copy(entry.path().extension().string()) == ".txt") {
+      paths.push_back(entry.path());
+    }
+  }
+  std::sort(paths.begin(), paths.end(), [](const auto& lhs, const auto& rhs) {
+    return lhs.generic_string() < rhs.generic_string();
+  });
+  for (const auto& path : paths) {
+    names.push_back(path.stem().string());
+  }
+  return names;
+}
+
+std::set<std::string> load_legacy_monitem_monster_names(const std::filesystem::path& legacy_root) {
+  std::set<std::string> names;
+  for (const auto& name : load_legacy_monitem_monster_name_values(legacy_root)) {
+    names.insert(legacy_name_key(name));
+  }
+  return names;
 }
 
 std::filesystem::path first_existing_path(std::initializer_list<std::filesystem::path> paths) {
@@ -506,6 +715,9 @@ LegacyImportReport import_maps_and_spawns(const std::filesystem::path& legacy_ro
                        std::ios::binary | std::ios::trunc);
   spawns << "spawns = [\n";
   bool first = true;
+  auto known_monster_names = load_imported_monster_names(output_root);
+  const auto drop_monster_names = load_legacy_monitem_monster_names(legacy_root);
+  known_monster_names.insert(drop_monster_names.begin(), drop_monster_names.end());
   const auto mongen_path = first_existing_path({
       legacy_root / "Envir" / "MonGen.txt",
       legacy_root / "Envir" / "mongen.txt",
@@ -518,7 +730,7 @@ LegacyImportReport import_maps_and_spawns(const std::filesystem::path& legacy_ro
     if (line.empty() || util::starts_with(line, ";")) {
       continue;
     }
-    const auto record = parse_mongen_record(line);
+    const auto record = parse_mongen_record(line, known_monster_names);
     if (!record.has_value()) {
       continue;
     }
@@ -742,19 +954,24 @@ std::size_t import_items_from_makeitem(const std::filesystem::path& legacy_root,
   std::size_t id = 1;
   std::size_t count = 0;
 
-  for (const auto& line : read_lines(legacy_root / "Envir" / "MakeItem.txt")) {
+  const auto makeitem_path = legacy_makeitem_path(legacy_root);
+  for (const auto& line : read_lines(makeitem_path)) {
     if (line.empty() || util::starts_with(line, ";")) {
       continue;
     }
-    const auto tokens = split_ws(line);
+    const auto tokens = split_legacy_fields(line);
     if (tokens.empty()) {
+      continue;
+    }
+    const auto item_name = join_tokens(tokens, 0, tokens.size());
+    if (item_name.empty()) {
       continue;
     }
     if (!first) {
       items << ",\n";
     }
     first = false;
-    items << "  { id = " << id++ << ", name = " << quote(tokens[0])
+    items << "  { id = " << id++ << ", name = " << quote(item_name)
           << ", weight = 1, price = 0, std_mode = 0, shape = 0, looks = " << count + 1
           << ", dura_max = 1000, equip_slot = -1, hp_add = 0, mp_add = 0 }";
     ++count;
@@ -778,6 +995,9 @@ std::size_t import_monitems(const std::filesystem::path& legacy_root,
   drops << "monster_drops = [\n";
   bool first = true;
   std::size_t count = 0;
+  auto known_item_names = load_imported_item_names(output_root);
+  const auto makeitem_names = load_legacy_makeitem_names(legacy_root);
+  known_item_names.insert(makeitem_names.begin(), makeitem_names.end());
   if (!std::filesystem::exists(directory)) {
     drops << "\n]\n";
     return 0;
@@ -824,8 +1044,18 @@ std::size_t import_monitems(const std::filesystem::path& legacy_root,
       auto count_text = std::string("1");
       if (tokens.size() > item_start + 1) {
         if (const auto count_value = parse_int32(tokens.back()); count_value.has_value()) {
-          count_text = tokens.back();
-          item_end = tokens.size() - 1;
+          const auto full_name = join_tokens(tokens, item_start, tokens.size());
+          const auto count_candidate_name = join_tokens(tokens, item_start, tokens.size() - 1);
+          const auto full_key = legacy_name_key(full_name);
+          const auto count_candidate_key = legacy_name_key(count_candidate_name);
+          const auto full_known = known_item_names.find(full_key) != known_item_names.end();
+          const auto count_candidate_known =
+              known_item_names.find(count_candidate_key) != known_item_names.end() ||
+              count_candidate_key == "gold";
+          if (!full_known && count_candidate_known) {
+            count_text = tokens.back();
+            item_end = tokens.size() - 1;
+          }
         }
       }
       const auto item_name = join_tokens(tokens, item_start, item_end);
@@ -953,6 +1183,32 @@ void write_report(const std::filesystem::path& output_root, const LegacyImportRe
   }
 }
 
+std::size_t write_fallback_monster_defs(const std::filesystem::path& legacy_root,
+                                        const std::filesystem::path& output_root) {
+  std::vector<std::string> names{"Deer", "Oma"};
+  std::set<std::string> seen;
+  for (const auto& name : names) {
+    seen.insert(legacy_name_key(name));
+  }
+  for (const auto& name : load_legacy_monitem_monster_name_values(legacy_root)) {
+    if (seen.insert(legacy_name_key(name)).second) {
+      names.push_back(name);
+    }
+  }
+
+  std::ofstream monsters(output_root / "monsters" / "imported_monsters.toml",
+                         std::ios::binary | std::ios::trunc);
+  monsters << "monsters = [\n";
+  for (std::size_t index = 0; index < names.size(); ++index) {
+    if (index > 0) {
+      monsters << ",\n";
+    }
+    monsters << "  { name = " << quote(names[index]) << " }";
+  }
+  monsters << "\n]\n";
+  return names.size();
+}
+
 }  // namespace
 
 LegacyImportReport LegacyImporter::import_tree(const std::filesystem::path& legacy_root,
@@ -961,11 +1217,10 @@ LegacyImportReport LegacyImporter::import_tree(const std::filesystem::path& lega
   const auto setup = parse_ini(legacy_root / "!SetUp.txt");
 
   write_server_files(setup, output_root);
-  auto report = import_maps_and_spawns(legacy_root, output_root, setup);
+  LegacyImportReport report;
   report.npc_count = import_npcs(legacy_root, output_root);
   report.map_quest_count = import_map_quests(legacy_root, output_root);
   report.item_count = import_items_from_makeitem(legacy_root, output_root);
-  report.monster_drop_count = import_monitems(legacy_root, output_root);
 
 #ifdef MIR2_ENABLE_ODBC
   report.item_count = import_table_as_toml(
@@ -998,6 +1253,11 @@ LegacyImportReport LegacyImporter::import_tree(const std::filesystem::path& lega
        "exp", "hp", "mp", "ac", "mac", "dc", "dc_max", "mc", "sc", "agility",
        "accurate", "walk_speed_ms", "walk_step", "walk_wait_ms", "attack_speed_ms"},
       report.warnings);
+  if (report.monster_count == 0) {
+    report.monster_count = write_fallback_monster_defs(legacy_root, output_root);
+    report.warnings.push_back(
+        "ODBC Monster import returned no rows, MonItems monster names were used as placeholder monster definitions.");
+  }
 #else
   {
     std::ofstream monsters(output_root / "monsters" / "imported_monsters.toml",
@@ -1018,6 +1278,13 @@ LegacyImportReport LegacyImporter::import_tree(const std::filesystem::path& lega
   }
   report.warnings.push_back("ODBC support was not enabled, Data.mdb import used placeholder magic data.");
 #endif
+
+  auto map_report = import_maps_and_spawns(legacy_root, output_root, setup);
+  report.map_count = map_report.map_count;
+  report.spawn_count = map_report.spawn_count;
+  report.warnings.insert(report.warnings.end(), map_report.warnings.begin(),
+                         map_report.warnings.end());
+  report.monster_drop_count = import_monitems(legacy_root, output_root);
 
   write_report(output_root, report);
   return report;
