@@ -25,6 +25,7 @@
 // ============================================================
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -86,6 +87,17 @@ struct MapCell {
   std::uint8_t area{0};       ///< 区域编号（0-6，选择对应的 Objects 归档）
   std::uint8_t light{0};      ///< 光照值（影响周围亮度的计算方式）
 };
+
+static_assert(sizeof(MapCell) == 12, "MapCell must match Delphi TMapInfo size");
+static_assert(offsetof(MapCell, bk_img) == 0, "MapCell::bk_img offset must match TMapInfo");
+static_assert(offsetof(MapCell, mid_img) == 2, "MapCell::mid_img offset must match TMapInfo");
+static_assert(offsetof(MapCell, fr_img) == 4, "MapCell::fr_img offset must match TMapInfo");
+static_assert(offsetof(MapCell, door_index) == 6, "MapCell::door_index offset must match TMapInfo");
+static_assert(offsetof(MapCell, door_offset) == 7, "MapCell::door_offset offset must match TMapInfo");
+static_assert(offsetof(MapCell, ani_frame) == 8, "MapCell::ani_frame offset must match TMapInfo");
+static_assert(offsetof(MapCell, ani_tick) == 9, "MapCell::ani_tick offset must match TMapInfo");
+static_assert(offsetof(MapCell, area) == 10, "MapCell::area offset must match TMapInfo");
+static_assert(offsetof(MapCell, light) == 11, "MapCell::light offset must match TMapInfo");
 
 /// 地图文档：从 .map 文件解析的地图数据
 /// 列优先存储（与经典客户端一致），提供碰撞检测
