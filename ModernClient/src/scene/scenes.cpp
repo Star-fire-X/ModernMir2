@@ -7870,7 +7870,7 @@ class WorldScene final : public Scene {
 
   bool process_pending_move(ClientContext& context, std::uint64_t now_ms) {
     auto& world = context.state->world;
-    if (world.legacy_target_x < 0 || world.legacy_chr_action == LegacyChrAction::none) {
+    if (world.legacy_chr_action == LegacyChrAction::none) {
       return false;
     }
     auto self_it = world.actors.find(world.self_actor_id);
@@ -8131,6 +8131,11 @@ class WorldScene final : public Scene {
     if (!can_next_action(world, self_it->second, animation_idle, input.tick)) {
       return false;
     }
+    const auto width = map_ != nullptr ? map_->width : world.width;
+    const auto height = map_ != nullptr ? map_->height : world.height;
+    if (!legacy::in_bounds(width, height, input.map_x, input.map_y)) {
+      return false;
+    }
     send_spell(context, self_it->second, input.map_x, input.map_y,
                world.focus_actor_id != 0 ? world.focus_actor_id : world.target_actor_id, magic_id);
     world.action_key = -1;
@@ -8340,14 +8345,6 @@ class WorldScene final : public Scene {
       animation_.effects().render_overlay_for_actor(actor_id, *pose, *context.assets, *context.renderer,
                                                     viewport);
     };
-
-    const auto& world = context.state->world;
-    if (!world.actor_draw_order.empty()) {
-      for (const auto actor_id : world.actor_draw_order) {
-        draw_overlay(actor_id, animation_.pose_for(actor_id));
-      }
-      return;
-    }
 
     const auto actors = collect_row_actor_draws(context, viewport);
     for (const auto& actor : actors) {
