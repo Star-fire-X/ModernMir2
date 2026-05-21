@@ -44,6 +44,15 @@ const mir2::MonsterDropConfig* find_drop(const mir2::HostConfig& config,
   return nullptr;
 }
 
+const mir2::ItemConfig* find_item(const mir2::HostConfig& config, const std::string& name) {
+  for (const auto& item : config.items) {
+    if (item.name == name) {
+      return &item;
+    }
+  }
+  return nullptr;
+}
+
 }  // namespace
 
 int main() {
@@ -62,23 +71,43 @@ int main() {
   write_text(legacy / "Envir" / "MapInfo.txt", "[0 Test 0]\n");
   write_text(legacy / "Envir" / "MonGen.txt",
              "0 30 31 Oma 8 5 2 100\n"
-             "0 40 41 \"Cave Maggot\" 4 2 3 50\n"
-             "0 50 51 Red Boar King 6 3 4 25\n");
+             "0 40 41 \"Cave Maggot\" 4 2 3 50 ; inline comment\n"
+             "0 50 51 Red Boar King 6 3 4 25\n"
+             "0 60 61 Red Boar 2 6 3 4 25\n"
+             "0 70 71 Oma2 5 2\n"
+             "0 80 81 Blue Boar King 6 3\n"
+             "0 90 91 \"Red Boar 3\" 7 4\n"
+             "0 100 101 Stone Golem 6 3\n"
+             "0 110 111 Lost Mob 4 6 3\n"
+             "0 120 121 Mob 2 6 3\n"
+             "0 130 131 Dark Lord 2 7 4 25\n"
+             "0 140 141 Red Boar 2 6 3\n");
   write_text(legacy / "Envir" / "MonItems" / "Cave Maggot.txt",
              "1/3 \"Healing Potion\"\n"
-             "2 5 Strong Oil 4\n");
+             "2 5 Strong Oil 4\n"
+             "1/2 Healing Potion 2\n"
+             "1/4 \"Mana Potion\" 2 ; inline comment\n"
+             "1/5 Odd\001Name 3\n"
+             "1/6 Blue Potion 3\n");
   write_text(legacy / "Envir" / "MonItems" / "Oma.txt",
              "1/2 WoodenSword 2\n"
              "1/1 Gold 10\n");
-  write_text(legacy / "Envir" / "MakeItem.txt",
+  write_text(legacy / "Envir" / "MonItems" / "Red Boar King.txt", "");
+  write_text(legacy / "Envir" / "MonItems" / "Red Boar 2.txt", "");
+  write_text(legacy / "Envir" / "MonItems" / "Blue Boar King.txt", "");
+  write_text(legacy / "Envir" / "MonItems" / "Red Boar 3.txt", "");
+  write_text(legacy / "MakeItem.txt",
              "WoodenSword\n"
-             "Healing Potion\n"
-             "Strong Oil\n");
+             "\"Healing Potion\"\n"
+             "Healing Potion 2\n"
+             "\"Mana Potion\" ; inline comment\n"
+             "Strong Oil\n"
+             "Odd\001Name\n");
 
   mir2::LegacyImporter importer;
   const auto report = importer.import_tree(legacy, output);
-  assert(report.spawn_count == 3);
-  assert(report.monster_drop_count == 4);
+  assert(report.spawn_count == 12);
+  assert(report.monster_drop_count == 8);
 
   write_text(output / "monsters" / "custom_defs.toml",
              "monsters = [\n"
@@ -123,7 +152,105 @@ int main() {
   assert(unquoted_spawn->zen_time_ms == 240000);
   assert(unquoted_spawn->small_zen_rate == 25);
   assert(unquoted_spawn->legacy_group);
+  const auto* numeric_spawn = find_spawn(config, "Red Boar 2");
+  assert(numeric_spawn != nullptr);
+  assert(numeric_spawn->map_id == "0");
+  assert(numeric_spawn->x == 60 && numeric_spawn->y == 61);
+  assert(numeric_spawn->area == 6);
+  assert(numeric_spawn->count == 3);
+  assert(numeric_spawn->zen_time_ms == 240000);
+  assert(numeric_spawn->small_zen_rate == 25);
+  assert(numeric_spawn->legacy_group);
+  const auto* partial_spawn = find_spawn(config, "Oma2");
+  assert(partial_spawn != nullptr);
+  assert(partial_spawn->map_id == "0");
+  assert(partial_spawn->x == 70 && partial_spawn->y == 71);
+  assert(partial_spawn->area == 5);
+  assert(partial_spawn->count == 2);
+  assert(partial_spawn->zen_time_ms == 60000);
+  assert(partial_spawn->small_zen_rate == 0);
+  assert(partial_spawn->legacy_group);
+  const auto* spaced_partial_spawn = find_spawn(config, "Blue Boar King");
+  assert(spaced_partial_spawn != nullptr);
+  assert(spaced_partial_spawn->map_id == "0");
+  assert(spaced_partial_spawn->x == 80 && spaced_partial_spawn->y == 81);
+  assert(spaced_partial_spawn->area == 6);
+  assert(spaced_partial_spawn->count == 3);
+  assert(spaced_partial_spawn->zen_time_ms == 60000);
+  assert(spaced_partial_spawn->small_zen_rate == 0);
+  assert(spaced_partial_spawn->legacy_group);
+  const auto* numeric_partial_spawn = find_spawn(config, "Red Boar 3");
+  assert(numeric_partial_spawn != nullptr);
+  assert(numeric_partial_spawn->map_id == "0");
+  assert(numeric_partial_spawn->x == 90 && numeric_partial_spawn->y == 91);
+  assert(numeric_partial_spawn->area == 7);
+  assert(numeric_partial_spawn->count == 4);
+  assert(numeric_partial_spawn->zen_time_ms == 60000);
+  assert(numeric_partial_spawn->small_zen_rate == 0);
+  assert(numeric_partial_spawn->legacy_group);
+  const auto* no_drop_multiword_spawn = find_spawn(config, "Stone Golem");
+  assert(no_drop_multiword_spawn != nullptr);
+  assert(no_drop_multiword_spawn->map_id == "0");
+  assert(no_drop_multiword_spawn->x == 100 && no_drop_multiword_spawn->y == 101);
+  assert(no_drop_multiword_spawn->area == 6);
+  assert(no_drop_multiword_spawn->count == 3);
+  assert(no_drop_multiword_spawn->zen_time_ms == 60000);
+  assert(no_drop_multiword_spawn->small_zen_rate == 0);
+  assert(no_drop_multiword_spawn->legacy_group);
+  const auto* no_drop_numeric_spawn = find_spawn(config, "Lost Mob");
+  assert(no_drop_numeric_spawn != nullptr);
+  assert(no_drop_numeric_spawn->map_id == "0");
+  assert(no_drop_numeric_spawn->x == 110 && no_drop_numeric_spawn->y == 111);
+  assert(no_drop_numeric_spawn->area == 4);
+  assert(no_drop_numeric_spawn->count == 6);
+  assert(no_drop_numeric_spawn->zen_time_ms == 180000);
+  assert(no_drop_numeric_spawn->small_zen_rate == 0);
+  assert(no_drop_numeric_spawn->legacy_group);
+  const auto* single_word_numeric_spawn = find_spawn(config, "Mob");
+  assert(single_word_numeric_spawn != nullptr);
+  assert(single_word_numeric_spawn->map_id == "0");
+  assert(single_word_numeric_spawn->x == 120 && single_word_numeric_spawn->y == 121);
+  assert(single_word_numeric_spawn->area == 2);
+  assert(single_word_numeric_spawn->count == 6);
+  assert(single_word_numeric_spawn->zen_time_ms == 180000);
+  assert(single_word_numeric_spawn->small_zen_rate == 0);
+  assert(single_word_numeric_spawn->legacy_group);
+  const auto* rightmost_tail_spawn = find_spawn(config, "Dark Lord");
+  assert(rightmost_tail_spawn != nullptr);
+  assert(rightmost_tail_spawn->map_id == "0");
+  assert(rightmost_tail_spawn->x == 130 && rightmost_tail_spawn->y == 131);
+  assert(rightmost_tail_spawn->area == 2);
+  assert(rightmost_tail_spawn->count == 7);
+  assert(rightmost_tail_spawn->zen_time_ms == 240000);
+  assert(rightmost_tail_spawn->small_zen_rate == 25);
+  assert(rightmost_tail_spawn->legacy_group);
+  const auto* known_numeric_short_tail_spawn = find_spawn(config, "Red Boar 2");
+  assert(known_numeric_short_tail_spawn != nullptr);
+  assert(known_numeric_short_tail_spawn->map_id == "0");
+  assert(known_numeric_short_tail_spawn->x == 60 && known_numeric_short_tail_spawn->y == 61);
+  assert(known_numeric_short_tail_spawn->area == 6);
+  assert(known_numeric_short_tail_spawn->count == 3);
+  assert(known_numeric_short_tail_spawn->zen_time_ms == 240000);
+  assert(known_numeric_short_tail_spawn->small_zen_rate == 25);
+  assert(known_numeric_short_tail_spawn->legacy_group);
+  const mir2::SpawnConfig* known_numeric_second_spawn = nullptr;
+  for (const auto& candidate : config.spawns) {
+    if (candidate.name == "Red Boar 2" && candidate.x == 140 && candidate.y == 141) {
+      known_numeric_second_spawn = &candidate;
+      break;
+    }
+  }
+  assert(known_numeric_second_spawn != nullptr);
+  assert(known_numeric_second_spawn->area == 6);
+  assert(known_numeric_second_spawn->count == 3);
+  assert(known_numeric_second_spawn->zen_time_ms == 60000);
+  assert(known_numeric_second_spawn->small_zen_rate == 0);
+  assert(known_numeric_second_spawn->legacy_group);
 
+  assert(find_item(config, "Healing Potion") != nullptr);
+  assert(find_item(config, "Healing Potion 2") != nullptr);
+  assert(find_item(config, "Mana Potion") != nullptr);
+  assert(find_item(config, "Odd_Name") != nullptr);
   assert(!config.monster_drops.empty());
   assert(config.monster_drops.front().monster_name == "Cave Maggot");
   const auto* potion_drop = find_drop(config, "Cave Maggot", "Healing Potion");
@@ -136,6 +263,26 @@ int main() {
   assert(oil_drop->sel_point == 1);
   assert(oil_drop->max_point == 5);
   assert(oil_drop->count == 4);
+  const auto* numeric_item_drop = find_drop(config, "Cave Maggot", "Healing Potion 2");
+  assert(numeric_item_drop != nullptr);
+  assert(numeric_item_drop->sel_point == 0);
+  assert(numeric_item_drop->max_point == 2);
+  assert(numeric_item_drop->count == 1);
+  const auto* mana_drop = find_drop(config, "Cave Maggot", "Mana Potion");
+  assert(mana_drop != nullptr);
+  assert(mana_drop->sel_point == 0);
+  assert(mana_drop->max_point == 4);
+  assert(mana_drop->count == 2);
+  const auto* normalized_drop = find_drop(config, "Cave Maggot", "Odd_Name");
+  assert(normalized_drop != nullptr);
+  assert(normalized_drop->sel_point == 0);
+  assert(normalized_drop->max_point == 5);
+  assert(normalized_drop->count == 3);
+  const auto* unknown_item_drop = find_drop(config, "Cave Maggot", "Blue Potion 3");
+  assert(unknown_item_drop != nullptr);
+  assert(unknown_item_drop->sel_point == 0);
+  assert(unknown_item_drop->max_point == 6);
+  assert(unknown_item_drop->count == 1);
   const auto* sword_drop = find_drop(config, "Oma", "WoodenSword");
   assert(sword_drop != nullptr);
   assert(sword_drop->sel_point == 0);
