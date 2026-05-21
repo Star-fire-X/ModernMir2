@@ -137,6 +137,20 @@ LRESULT CALLBACK Win32Window::WindowProc(HWND hwnd, UINT message, WPARAM wparam,
 // 实例窗口过程：处理各类 Win32 消息并更新 InputState
 // 消息处理顺序：窗口尺寸 -> 鼠标 -> 键盘 -> 文本 -> 编辑框 -> 关闭
 LRESULT Win32Window::handle_message(UINT message, WPARAM wparam, LPARAM lparam) {
+  const auto append_event = [&](const LegacyInputEventKind kind) {
+    LegacyInputEvent event;
+    event.kind = kind;
+    event.sequence = static_cast<std::uint32_t>(input_.events.size());
+    event.mouse_x = input_.mouse_x;
+    event.mouse_y = input_.mouse_y;
+    event.shift = input_.key_down[VK_SHIFT] || (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    event.ctrl = input_.key_down[VK_CONTROL] || (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    event.alt = input_.key_down[VK_MENU] || (GetKeyState(VK_MENU) & 0x8000) != 0;
+    event.left_down = input_.left_down;
+    event.right_down = input_.right_down;
+    input_.events.push_back(event);
+  };
+
   switch (message) {
     case WM_SIZE:
       // 窗口尺寸变化时更新缓存并设置 resized_ 标志
@@ -150,6 +164,7 @@ LRESULT Win32Window::handle_message(UINT message, WPARAM wparam, LPARAM lparam) 
     case WM_MOUSEMOVE:
       input_.mouse_x = GET_X_LPARAM(lparam);
       input_.mouse_y = GET_Y_LPARAM(lparam);
+      append_event(LegacyInputEventKind::mouse_move);
       return 0;
     case WM_LBUTTONDOWN:
       SetCapture(hwnd_);  // 捕获鼠标，确保 LBUTTONUP 时能收到消息
@@ -157,6 +172,7 @@ LRESULT Win32Window::handle_message(UINT message, WPARAM wparam, LPARAM lparam) 
       input_.left_pressed = true;
       input_.mouse_x = GET_X_LPARAM(lparam);
       input_.mouse_y = GET_Y_LPARAM(lparam);
+      append_event(LegacyInputEventKind::left_down);
       return 0;
     case WM_LBUTTONUP:
       ReleaseCapture();   // 释放鼠标捕获
@@ -164,6 +180,7 @@ LRESULT Win32Window::handle_message(UINT message, WPARAM wparam, LPARAM lparam) 
       input_.left_released = true;
       input_.mouse_x = GET_X_LPARAM(lparam);
       input_.mouse_y = GET_Y_LPARAM(lparam);
+      append_event(LegacyInputEventKind::left_up);
       return 0;
     case WM_RBUTTONDOWN:
       SetCapture(hwnd_);
@@ -171,6 +188,7 @@ LRESULT Win32Window::handle_message(UINT message, WPARAM wparam, LPARAM lparam) 
       input_.right_pressed = true;
       input_.mouse_x = GET_X_LPARAM(lparam);
       input_.mouse_y = GET_Y_LPARAM(lparam);
+      append_event(LegacyInputEventKind::right_down);
       return 0;
     case WM_RBUTTONUP:
       ReleaseCapture();
@@ -178,12 +196,28 @@ LRESULT Win32Window::handle_message(UINT message, WPARAM wparam, LPARAM lparam) 
       input_.right_released = true;
       input_.mouse_x = GET_X_LPARAM(lparam);
       input_.mouse_y = GET_Y_LPARAM(lparam);
+      append_event(LegacyInputEventKind::right_up);
       return 0;
 
     // === 键盘消息 ===
     case WM_KEYDOWN:
       // 仅当该键之前未按下时才设置 pressed 标志
       // 避免 Windows 键盘重复（repeat）导致的重复触发
+      {
+        LegacyInputEvent event;
+        event.kind = LegacyInputEventKind::key_down;
+        event.sequence = static_cast<std::uint32_t>(input_.events.size());
+        event.key = static_cast<std::uint16_t>(wparam);
+        event.mouse_x = input_.mouse_x;
+        event.mouse_y = input_.mouse_y;
+        event.shift = input_.key_down[VK_SHIFT] || (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        event.ctrl = input_.key_down[VK_CONTROL] || (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        event.alt = input_.key_down[VK_MENU] || (GetKeyState(VK_MENU) & 0x8000) != 0;
+        event.repeat = (lparam & (1L << 30)) != 0;
+        event.left_down = input_.left_down;
+        event.right_down = input_.right_down;
+        input_.events.push_back(event);
+      }
       if (wparam < input_.key_down.size()) {
         if (!input_.key_down[wparam]) {
           input_.key_pressed[wparam] = true;
@@ -201,6 +235,20 @@ LRESULT Win32Window::handle_message(UINT message, WPARAM wparam, LPARAM lparam) 
       if (wparam < input_.key_down.size()) {
         input_.key_down[wparam] = false;
       }
+      {
+        LegacyInputEvent event;
+        event.kind = LegacyInputEventKind::key_up;
+        event.sequence = static_cast<std::uint32_t>(input_.events.size());
+        event.key = static_cast<std::uint16_t>(wparam);
+        event.mouse_x = input_.mouse_x;
+        event.mouse_y = input_.mouse_y;
+        event.shift = input_.key_down[VK_SHIFT] || (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        event.ctrl = input_.key_down[VK_CONTROL] || (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        event.alt = input_.key_down[VK_MENU] || (GetKeyState(VK_MENU) & 0x8000) != 0;
+        event.left_down = input_.left_down;
+        event.right_down = input_.right_down;
+        input_.events.push_back(event);
+      }
       return 0;
 
     // === 文本输入 ===
@@ -209,6 +257,18 @@ LRESULT Win32Window::handle_message(UINT message, WPARAM wparam, LPARAM lparam) 
       // 这些字符由 WM_KEYDOWN 直接处理
       if (wparam >= 32 && wparam != 127) {
         input_.text_input.push_back(static_cast<wchar_t>(wparam));
+        LegacyInputEvent event;
+        event.kind = LegacyInputEventKind::char_input;
+        event.sequence = static_cast<std::uint32_t>(input_.events.size());
+        event.character = static_cast<wchar_t>(wparam);
+        event.mouse_x = input_.mouse_x;
+        event.mouse_y = input_.mouse_y;
+        event.shift = input_.key_down[VK_SHIFT] || (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        event.ctrl = input_.key_down[VK_CONTROL] || (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        event.alt = input_.key_down[VK_MENU] || (GetKeyState(VK_MENU) & 0x8000) != 0;
+        event.left_down = input_.left_down;
+        event.right_down = input_.right_down;
+        input_.events.push_back(event);
       }
       return 0;
 

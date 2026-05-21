@@ -49,6 +49,7 @@ std::vector<std::string> run_trace(const bool force_render_due, const bool can_d
   scheduler.run_frame(
       0.0F,
       mir2::client::LegacyFrameScheduler::Hooks{
+          [&] { push(calls, "legacy_input_dispatch"); },
           [&] {
             push(calls, "timer1_network_drain");
             push(calls, "decode_packets_in_buffer_order");

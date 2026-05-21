@@ -19,7 +19,9 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <string>
+#include <vector>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -32,6 +34,32 @@
 #include <windows.h>
 
 namespace mir2::client {
+
+enum class LegacyInputEventKind {
+  mouse_move,
+  left_down,
+  left_up,
+  right_down,
+  right_up,
+  key_down,
+  key_up,
+  char_input
+};
+
+struct LegacyInputEvent {
+  LegacyInputEventKind kind{LegacyInputEventKind::mouse_move};
+  std::uint32_t sequence{0};
+  int mouse_x{0};
+  int mouse_y{0};
+  std::uint16_t key{0};
+  wchar_t character{0};
+  bool shift{false};
+  bool ctrl{false};
+  bool alt{false};
+  bool repeat{false};
+  bool left_down{false};
+  bool right_down{false};
+};
 
 /// 每帧输入状态：包含鼠标位置/按键、键盘状态、文本输入
 /// begin_frame() 清除瞬态标志（按下/释放/文本），帧间持续状态保留
@@ -50,6 +78,7 @@ struct InputState {
   std::wstring text_input{};            ///< 本帧输入的文本（WM_CHAR 消息累积）
   bool backspace_pressed{false};        ///< 退格键按下（瞬态）
   bool enter_pressed{false};            ///< 回车键按下（瞬态）
+  std::vector<LegacyInputEvent> events{}; ///< 本帧 Win32/VCL 顺序输入事件
 
   /// 清零所有瞬态标志，每帧开始时调用
   /// 必须在窗口消息泵送之前调用，确保新帧从空白瞬态开始
@@ -62,6 +91,7 @@ struct InputState {
     text_input.clear();
     backspace_pressed = false;
     enter_pressed = false;
+    events.clear();
   }
 };
 
