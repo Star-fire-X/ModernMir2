@@ -16,6 +16,7 @@ void test_render_due_order() {
   scheduler.run_frame(
       0.0F,
       mir2::client::LegacyFrameScheduler::Hooks{
+          [&] { push(calls, "legacy_input_dispatch"); },
           [&] { push(calls, "timer1_network_drain"); },
           [&] { push(calls, "capture_ui_input"); },
           [&] { push(calls, "process_key_messages"); },
@@ -31,7 +32,7 @@ void test_render_due_order() {
           [] { return true; }});
 
   const std::vector<std::string> expected{
-      "timer1_network_drain", "capture_ui_input", "process_key_messages",
+      "legacy_input_dispatch", "timer1_network_drain", "capture_ui_input", "process_key_messages",
       "process_action_messages", "dwin_process", "draw_screen",
       "dwin_direct_paint", "draw_screen_top", "draw_hint", "draw_moving_item", "flip"};
   assert(calls == expected);
@@ -44,6 +45,7 @@ void test_non_render_runs_scene() {
   scheduler.run_frame(
       0.0F,
       mir2::client::LegacyFrameScheduler::Hooks{
+          [&] { push(calls, "legacy_input_dispatch"); },
           [&] { push(calls, "timer1_network_drain"); },
           [&] { push(calls, "capture_ui_input"); },
           [&] { push(calls, "process_key_messages"); },
@@ -59,7 +61,7 @@ void test_non_render_runs_scene() {
           [] { return true; }});
 
   const std::vector<std::string> expected{
-      "timer1_network_drain", "capture_ui_input", "process_key_messages",
+      "legacy_input_dispatch", "timer1_network_drain", "capture_ui_input", "process_key_messages",
       "process_action_messages", "dwin_process", "scene_run"};
   assert(calls == expected);
 }
@@ -72,6 +74,7 @@ void test_can_draw_false_runs_scene() {
   scheduler.run_frame(
       0.0F,
       mir2::client::LegacyFrameScheduler::Hooks{
+          [&] { push(calls, "legacy_input_dispatch"); },
           [&] { push(calls, "timer1_network_drain"); },
           [&] { push(calls, "capture_ui_input"); },
           [&] { push(calls, "process_key_messages"); },
@@ -87,8 +90,70 @@ void test_can_draw_false_runs_scene() {
           [] { return false; }});
 
   const std::vector<std::string> expected{
-      "timer1_network_drain", "capture_ui_input", "process_key_messages",
+      "legacy_input_dispatch", "timer1_network_drain", "process_key_messages",
+      "process_action_messages", "scene_run", "capture_ui_input", "process_key_messages",
       "process_action_messages", "dwin_process", "scene_run"};
+  assert(calls == expected);
+}
+
+void test_network_ack_unlocks_same_frame_action() {
+  mir2::client::LegacyFrameScheduler scheduler;
+  bool action_locked = true;
+  bool action_sent = false;
+
+  scheduler.run_frame(
+      0.0F,
+      mir2::client::LegacyFrameScheduler::Hooks{
+          [] {},
+          [&] { action_locked = false; },
+          [] {},
+          [] {},
+          [&] {
+            assert(!action_locked);
+            action_sent = true;
+          },
+          [] {},
+          [] {},
+          [] {},
+          [] {},
+          [] {},
+          [] {},
+          [] {},
+          [] {},
+          [] { return true; }});
+
+  assert(action_sent);
+}
+
+void test_modal_paints_inside_direct_paint_layer() {
+  mir2::client::LegacyFrameScheduler scheduler;
+  scheduler.force_render_due_for_test();
+  std::vector<std::string> calls;
+
+  scheduler.run_frame(
+      0.0F,
+      mir2::client::LegacyFrameScheduler::Hooks{
+          [] {},
+          [] {},
+          [] {},
+          [] {},
+          [] {},
+          [] {},
+          [] {},
+          [&] { push(calls, "draw_screen"); },
+          [&] {
+            push(calls, "dwin_direct_paint");
+            push(calls, "modal_ui");
+          },
+          [&] { push(calls, "draw_screen_top"); },
+          [&] { push(calls, "draw_hint"); },
+          [&] { push(calls, "draw_moving_item"); },
+          [&] { push(calls, "flip"); },
+          [] { return true; }});
+
+  const std::vector<std::string> expected{
+      "draw_screen", "dwin_direct_paint", "modal_ui", "draw_screen_top",
+      "draw_hint", "draw_moving_item", "flip"};
   assert(calls == expected);
 }
 
@@ -98,5 +163,7 @@ int main() {
   test_render_due_order();
   test_non_render_runs_scene();
   test_can_draw_false_runs_scene();
+  test_network_ack_unlocks_same_frame_action();
+  test_modal_paints_inside_direct_paint_layer();
   return 0;
 }

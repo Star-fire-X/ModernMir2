@@ -19,6 +19,7 @@ apply_runtime_actor_upsert_after_snapshot
 # cpp-current-baseline: Current LegacyFrameScheduler order for a renderable
 # frame. This is not a full Delphi AppOnIdle equivalence proof.
 [frame.render_due]
+legacy_input_dispatch
 timer1_network_drain
 capture_ui_input
 process_key_messages
@@ -34,6 +35,7 @@ flip
 # cpp-current-baseline: Current scheduler path when the 30ms render interval
 # has not elapsed.
 [frame.not_render_due]
+legacy_input_dispatch
 timer1_network_drain
 capture_ui_input
 process_key_messages
@@ -44,7 +46,11 @@ scene_run
 # delphi-backed: The non-drawable branch must continue to advance PlayScene.Run
 # style scene logic instead of attempting to render.
 [frame.cannot_draw]
+legacy_input_dispatch
 timer1_network_drain
+process_key_messages
+process_action_messages
+scene_run
 capture_ui_input
 process_key_messages
 process_action_messages

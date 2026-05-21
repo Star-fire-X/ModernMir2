@@ -141,6 +141,75 @@ void legacy_ui_lifecycle_trace(const legacy_ui_lifecycle::LegacyUiLifecycleTrace
   legacy_trace(legacy_ui_lifecycle::legacy_ui_lifecycle_trace_label(label));
 }
 
+InputState input_for_legacy_event(const InputState& source, const LegacyInputEvent& event) {
+  auto input = source;
+  input.left_pressed = false;
+  input.left_released = false;
+  input.right_pressed = false;
+  input.right_released = false;
+  input.key_pressed.fill(false);
+  input.text_input.clear();
+  input.backspace_pressed = false;
+  input.enter_pressed = false;
+  input.events.clear();
+  input.mouse_x = event.mouse_x;
+  input.mouse_y = event.mouse_y;
+  input.left_down = event.left_down;
+  input.right_down = event.right_down;
+  input.key_down[VK_SHIFT] = event.shift;
+  input.key_down[VK_CONTROL] = event.ctrl;
+  input.key_down[VK_MENU] = event.alt;
+
+  switch (event.kind) {
+    case LegacyInputEventKind::left_down:
+      input.left_pressed = true;
+      input.left_down = true;
+      break;
+    case LegacyInputEventKind::left_up:
+      input.left_released = true;
+      input.left_down = false;
+      break;
+    case LegacyInputEventKind::right_down:
+      input.right_pressed = true;
+      input.right_down = true;
+      break;
+    case LegacyInputEventKind::right_up:
+      input.right_released = true;
+      input.right_down = false;
+      break;
+    case LegacyInputEventKind::key_down:
+      if (event.key < input.key_pressed.size()) {
+        input.key_pressed[event.key] = true;
+        input.key_down[event.key] = true;
+      }
+      if (event.key == VK_BACK) {
+        input.backspace_pressed = true;
+      } else if (event.key == VK_RETURN) {
+        input.enter_pressed = true;
+      }
+      break;
+    case LegacyInputEventKind::key_up:
+      if (event.key < input.key_down.size()) {
+        input.key_down[event.key] = false;
+      }
+      break;
+    case LegacyInputEventKind::char_input:
+      if (event.character != 0) {
+        input.text_input.push_back(event.character);
+      }
+      break;
+    case LegacyInputEventKind::mouse_move:
+      break;
+  }
+  return input;
+}
+
+void merge_ui_input(ui::UiInputResult& merged, const ui::UiInputResult& next) {
+  merged.consumed = merged.consumed || next.consumed;
+  merged.text_focus = merged.text_focus || next.text_focus;
+  merged.dragging = merged.dragging || next.dragging;
+}
+
 void legacy_trace_map_layer(
     const legacy::LegacyMapDrawLayer layer,
     const int row = std::numeric_limits<int>::min()) {
@@ -7138,13 +7207,80 @@ class WorldScene final : public Scene {
     scene_run(context, delta_seconds);
   }
 
+  void dispatch_legacy_input_events(ClientContext& context) override {
+    if (context.input == nullptr || context.input->events.empty()) {
+      return;
+    }
+    sync_map(context);
+    legacy_hud_.sync(context);
+    ui_.set_asset_manager(context.assets);
+
+    ui::UiInputResult merged;
+    for (const auto& event : context.input->events) {
+      auto event_input = input_for_legacy_event(*context.input, event);
+      const auto* previous_input = context.input;
+      context.input = &event_input;
+      auto result = ui_.capture_input(event_input);
+      ui_.process_queued_events(event_input);
+      context.ui_input = result;
+      merge_ui_input(merged, result);
+
+      const auto input_guard = result.consumed || result.text_focus || result.dragging;
+      if (!input_guard && !legacy_hud_.blocks_world_input()) {
+        auto& world = context.state->world;
+        if (!legacy_hud_.handle_shortcuts(context, ui_)) {
+          if (world.self_actor_id != 0) {
+            auto self_it = world.actors.find(world.self_actor_id);
+            if (self_it != world.actors.end()) {
+              const auto now_ms = detail::monotonic_ms();
+              for (int index = 0; index < 8; ++index) {
+                if (event_input.key_pressed[VK_F1 + index] &&
+                    magic_for_slot(world, index) != 0) {
+                  world.action_key = index;
+                }
+              }
+              if (event_input.key_pressed['R']) {
+                if (context.app != nullptr) {
+                  context.app->request_reselect_character();
+                }
+              } else if (event_input.key_pressed[VK_ESCAPE]) {
+                world.legacy_target_x = -1;
+                world.legacy_target_y = -1;
+                world.legacy_chr_action = LegacyChrAction::none;
+                world.target_actor_id = 0;
+                world.action_key = -1;
+              } else {
+                const auto legacy_input = make_legacy_input(context, self_it->second, now_ms);
+                world.focus_actor_id = focused_actor_at(context, legacy_input);
+                world.focus_ground_item_id =
+                    focused_ground_item_at(context, legacy_input.map_x, legacy_input.map_y);
+                clear_invalid_targets(world);
+                collect_keyboard_ops(context, legacy_input, self_it->second);
+                collect_mouse_ops(context, legacy_input, self_it->second);
+              }
+            }
+          }
+        }
+      }
+      context.input = previous_input;
+    }
+    context.ui_input = merged;
+    context.legacy_input_dispatched = true;
+  }
+
   void capture_ui_input(ClientContext& context) override {
+    if (context.legacy_input_dispatched) {
+      return;
+    }
     sync_map(context);
     legacy_hud_.sync(context);
     Scene::capture_ui_input(context);
   }
 
   void process_key_messages(ClientContext& context) override {
+    if (context.legacy_input_dispatched) {
+      return;
+    }
     auto& world = context.state->world;
     const auto now_ms = detail::monotonic_ms();
     const auto input_guard =
@@ -7191,7 +7327,7 @@ class WorldScene final : public Scene {
 
     const auto input_guard =
         context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging;
-    if (input_guard) {
+    if (!context.legacy_input_dispatched && input_guard) {
       world.focus_actor_id = 0;
       world.focus_ground_item_id = 0;
       world.legacy_target_x = -1;
@@ -7206,59 +7342,67 @@ class WorldScene final : public Scene {
     }
 
     const auto legacy_input = make_legacy_input(context, it->second, now_ms);
-    world.focus_actor_id = focused_actor_at(context, legacy_input);
-    world.focus_ground_item_id = focused_ground_item_at(context, legacy_input.map_x,
-                                                        legacy_input.map_y);
     clear_invalid_targets(world);
-    if (legacy_trace_enabled() &&
-        (input.left_pressed || input.right_pressed || input.left_released ||
-         input.right_released || input.key_pressed[VK_LEFT] || input.key_pressed[VK_RIGHT] ||
-         input.key_pressed[VK_UP] || input.key_pressed[VK_DOWN])) {
-      std::ostringstream out;
-      out << "world_input now=" << now_ms << " mouse=" << legacy_input.mouse_x << ','
-          << legacy_input.mouse_y << " map=" << legacy_input.map_x << ',' << legacy_input.map_y
-          << " left_pressed=" << input.left_pressed << " right_pressed=" << input.right_pressed
-          << " left_released=" << input.left_released
-          << " focus_actor=" << world.focus_actor_id
-          << " focus_ground=" << world.focus_ground_item_id
-          << " ui_consumed=" << context.ui_input.consumed
-          << " text_focus=" << context.ui_input.text_focus
-          << " dragging=" << context.ui_input.dragging
-          << " moving_item=" << world.moving_item.active;
-      legacy_trace(out.str());
+    if (!context.legacy_input_dispatched) {
+      world.focus_actor_id = focused_actor_at(context, legacy_input);
+      world.focus_ground_item_id = focused_ground_item_at(context, legacy_input.map_x,
+                                                          legacy_input.map_y);
+      clear_invalid_targets(world);
+      if (legacy_trace_enabled() &&
+          (input.left_pressed || input.right_pressed || input.left_released ||
+           input.right_released || input.key_pressed[VK_LEFT] || input.key_pressed[VK_RIGHT] ||
+           input.key_pressed[VK_UP] || input.key_pressed[VK_DOWN])) {
+        std::ostringstream out;
+        out << "world_input now=" << now_ms << " mouse=" << legacy_input.mouse_x << ','
+            << legacy_input.mouse_y << " map=" << legacy_input.map_x << ',' << legacy_input.map_y
+            << " left_pressed=" << input.left_pressed << " right_pressed=" << input.right_pressed
+            << " left_released=" << input.left_released
+            << " focus_actor=" << world.focus_actor_id
+            << " focus_ground=" << world.focus_ground_item_id
+            << " ui_consumed=" << context.ui_input.consumed
+            << " text_focus=" << context.ui_input.text_focus
+            << " dragging=" << context.ui_input.dragging
+            << " moving_item=" << world.moving_item.active;
+        legacy_trace(out.str());
+      }
+
+      if (legacy_hud_.blocks_world_input()) {
+        world.legacy_target_x = -1;
+        world.legacy_target_y = -1;
+        world.legacy_chr_action = LegacyChrAction::none;
+        world.target_actor_id = 0;
+        world.action_key = -1;
+        return;
+      }
+
+      if (input.key_pressed['R']) {
+        context.app->request_reselect_character();
+        return;
+      }
+      if (input.key_pressed[VK_ESCAPE]) {
+        world.legacy_target_x = -1;
+        world.legacy_target_y = -1;
+        world.legacy_chr_action = LegacyChrAction::none;
+        world.target_actor_id = 0;
+        world.action_key = -1;
+        return;
+      }
+
+      collect_keyboard_ops(context, legacy_input, it->second);
+      collect_mouse_ops(context, legacy_input, it->second);
+
+      if (debug_arrow_move_enabled()) {
+        if (handle_debug_arrow_move(context, it->second)) {
+          return;
+        }
+      }
     }
 
-    if (legacy_hud_.blocks_world_input()) {
-      world.legacy_target_x = -1;
-      world.legacy_target_y = -1;
-      world.legacy_chr_action = LegacyChrAction::none;
-      world.target_actor_id = 0;
-      world.action_key = -1;
-      return;
-    }
-
-    if (input.key_pressed['R']) {
-      context.app->request_reselect_character();
-      return;
-    }
-    if (input.key_pressed[VK_ESCAPE]) {
-      world.legacy_target_x = -1;
-      world.legacy_target_y = -1;
-      world.legacy_chr_action = LegacyChrAction::none;
-      world.target_actor_id = 0;
-      world.action_key = -1;
-      return;
-    }
-
-    collect_keyboard_ops(context, legacy_input, it->second);
-    collect_mouse_ops(context, legacy_input, it->second);
-
-    if (debug_arrow_move_enabled()) {
+    if (context.legacy_input_dispatched && debug_arrow_move_enabled()) {
       if (handle_debug_arrow_move(context, it->second)) {
         return;
       }
     }
-
     if (process_pending_magic(context, legacy_input)) {
       return;
     }
@@ -7274,7 +7418,9 @@ class WorldScene final : public Scene {
   }
 
   void dwin_process(ClientContext& context) override {
-    ui_.process_queued_events(*context.input);
+    if (!context.legacy_input_dispatched) {
+      ui_.process_queued_events(*context.input);
+    }
     legacy_hud_.process_pending_actions(context);
   }
 
@@ -8833,7 +8979,26 @@ class WorldScene final : public Scene {
 
 }  // namespace
 
+void Scene::dispatch_legacy_input_events(ClientContext& context) {
+  if (context.input == nullptr || context.input->events.empty()) {
+    return;
+  }
+  ui_tree().set_asset_manager(context.assets);
+  ui::UiInputResult merged;
+  for (const auto& event : context.input->events) {
+    auto event_input = input_for_legacy_event(*context.input, event);
+    const auto result = ui_tree().capture_input(event_input);
+    ui_tree().process_queued_events(event_input);
+    merge_ui_input(merged, result);
+  }
+  context.ui_input = merged;
+  context.legacy_input_dispatched = true;
+}
+
 void Scene::capture_ui_input(ClientContext& context) {
+  if (context.legacy_input_dispatched) {
+    return;
+  }
   if (context.input == nullptr) {
     context.ui_input = {};
     return;
@@ -8847,6 +9012,9 @@ void Scene::process_key_messages(ClientContext& /*context*/) {}
 void Scene::process_action_messages(ClientContext& /*context*/, float /*delta_seconds*/) {}
 
 void Scene::dwin_process(ClientContext& context) {
+  if (context.legacy_input_dispatched) {
+    return;
+  }
   if (context.input != nullptr) {
     ui_tree().process_queued_events(*context.input);
   }
@@ -8902,6 +9070,12 @@ void SceneManager::update(ClientContext& context, float delta_seconds) {
     process_action_messages(context, delta_seconds);
     dwin_process(context);
     scene_run(context, delta_seconds);
+  }
+}
+
+void SceneManager::dispatch_legacy_input_events(ClientContext& context) {
+  if (current_scene_ != nullptr) {
+    current_scene_->dispatch_legacy_input_events(context);
   }
 }
 
