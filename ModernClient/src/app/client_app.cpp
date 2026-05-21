@@ -570,6 +570,7 @@ void ClientApp::capture_ui_input(ClientContext& context) {
   modal_ui_.set_trace_callback([](const std::string_view label) { legacy_trace(label); });
   context.ui_input = modal_ui_.capture_input(mapped_input_);
   context.ui_input.consumed = true;
+  context.ui_input.app_modal_visible = true;
 }
 
 void ClientApp::dwin_process(ClientContext& context) {
@@ -2603,7 +2604,7 @@ void ClientApp::show_confirm_modal(const std::wstring& title, const std::wstring
   modal_ui_.clear();
   modal_confirm_action_ = std::move(on_confirm);
   modal_has_cancel_ = true;
-  modal_enter_confirms_ = true;
+  modal_enter_confirms_ = false;
   const auto layout = legacy_auth_ui::legacy_message_modal_layout(
       sprite_rect(assets_.get_frame(ArchiveId::prguse, kMessageDialogIndex), 0, 0, 360, 180));
   auto* root = modal_ui_.set_root<ui::UiNode>(RectI{0, 0, kNativeClientWidth, kNativeClientHeight});
@@ -2693,6 +2694,17 @@ void ClientApp::process_modal_input(const InputState& input) {
   if (!state_.modal.visible) {
     return;
   }
+  if (input.key_pressed[VK_ESCAPE] && modal_has_cancel_) {
+    state_.hide_modal();
+    modal_ui_.clear();
+    modal_confirm_action_ = {};
+    modal_has_cancel_ = false;
+    modal_enter_confirms_ = true;
+    if (state_.login.login_state == LoginState::lsCloseAll) {
+      state_.login.login_state = LoginState::lsLogin;
+    }
+    return;
+  }
   if (modal_enter_confirms_ &&
       (input.key_pressed[VK_RETURN] || input.enter_pressed)) {
     const auto trace_modal_ok = !modal_confirm_action_ && !modal_has_cancel_;
@@ -2706,17 +2718,6 @@ void ClientApp::process_modal_input(const InputState& input) {
     modal_enter_confirms_ = true;
     if (on_confirm) {
       on_confirm();
-    }
-    return;
-  }
-  if (input.key_pressed[VK_ESCAPE] && modal_has_cancel_) {
-    state_.hide_modal();
-    modal_ui_.clear();
-    modal_confirm_action_ = {};
-    modal_has_cancel_ = false;
-    modal_enter_confirms_ = true;
-    if (state_.login.login_state == LoginState::lsCloseAll) {
-      state_.login.login_state = LoginState::lsLogin;
     }
     return;
   }

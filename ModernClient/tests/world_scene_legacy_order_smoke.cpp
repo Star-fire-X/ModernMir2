@@ -309,8 +309,9 @@ int main() {
       true, mir2::client::MovingItemSource::bag, 6, potion};
   world.bag_items[6] = mir2::client_v1::ItemState{};
   input = mir2::client::InputState{};
-  context.ui_input = mir2::client::ui::UiInputResult{};
-  input.key_pressed[VK_F9] = true;
+  input.mouse_x = 799;
+  input.mouse_y = 599;
+  input.key_pressed[VK_ESCAPE] = true;
   scenes.capture_ui_input(context);
   scenes.process_key_messages(context);
   assert(!world.moving_item.active);
@@ -394,6 +395,13 @@ int main() {
 
   input = mir2::client::InputState{};
   input.key_pressed[VK_F1] = true;
+  context.ui_input = mir2::client::ui::UiInputResult{true, false, false, false, true};
+  world.action_key = -1;
+  scenes.process_key_messages(context);
+  assert(world.action_key == 0);
+
+  input = mir2::client::InputState{};
+  input.key_pressed[VK_F1] = true;
   context.ui_input = mir2::client::ui::UiInputResult{false, true, false};
   world.action_key = -1;
   scenes.process_key_messages(context);
@@ -402,6 +410,13 @@ int main() {
   input = mir2::client::InputState{};
   input.key_pressed[VK_F1] = true;
   context.ui_input = mir2::client::ui::UiInputResult{false, false, true};
+  world.action_key = -1;
+  scenes.process_key_messages(context);
+  assert(world.action_key == -1);
+
+  input = mir2::client::InputState{};
+  input.key_pressed[VK_F1] = true;
+  context.ui_input = mir2::client::ui::UiInputResult{false, false, false, true};
   world.action_key = -1;
   scenes.process_key_messages(context);
   assert(world.action_key == -1);

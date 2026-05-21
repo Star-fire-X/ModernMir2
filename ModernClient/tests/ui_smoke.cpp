@@ -47,6 +47,33 @@ class CaptureProbe final : public ui::UiNode {
   int ups{0};
 };
 
+class PointerEventProbe final : public ui::UiNode {
+ public:
+  explicit PointerEventProbe(const RectI bounds) : ui::UiNode(bounds) {}
+
+  bool on_mouse_wheel(ui::UiTree& /*tree*/, const InputState& /*input*/,
+                      const int wheel_delta) override {
+    ++wheel_hits;
+    last_wheel_delta = wheel_delta;
+    return true;
+  }
+
+  bool on_double_click(ui::UiTree& /*tree*/, const InputState& /*input*/,
+                       const ui::UiMouseButton button) override {
+    if (button == ui::UiMouseButton::left) {
+      ++left_double_hits;
+    } else if (button == ui::UiMouseButton::right) {
+      ++right_double_hits;
+    }
+    return true;
+  }
+
+  int wheel_hits{0};
+  int last_wheel_delta{0};
+  int left_double_hits{0};
+  int right_double_hits{0};
+};
+
 std::shared_ptr<SpriteFrame> make_two_pixel_frame() {
   auto frame = std::make_shared<SpriteFrame>();
   frame->width = 2;
@@ -255,7 +282,7 @@ void test_window_drag_clamps_and_brings_to_front() {
   assert(tree.captured() == nullptr);
 }
 
-void test_non_floating_window_click_does_not_bring_to_front() {
+void test_non_floating_window_click_brings_to_front() {
   ui::UiTree tree;
   auto* root = tree.set_root<ui::UiNode>(RectI{0, 0, 800, 600});
   auto* first = root->emplace_child<ui::Window>(RectI{0, 0, 50, 50});
@@ -270,9 +297,93 @@ void test_non_floating_window_click_does_not_bring_to_front() {
   press.left_down = true;
   const auto result = tree.update(press);
   assert(result.consumed);
-  assert(root->hit_test(35, 5) == second);
+  assert(root->hit_test(35, 5) == first);
   assert(tree.focused() == first);
   assert(tree.captured() == nullptr);
+}
+
+void test_wheel_and_double_click_dispatch_priority() {
+  ui::UiTree tree;
+  auto* root = tree.set_root<ui::UiNode>(RectI{0, 0, 200, 100});
+  auto* normal = root->emplace_child<PointerEventProbe>(RectI{0, 0, 20, 20});
+  auto* capture = root->emplace_child<PointerEventProbe>(RectI{40, 0, 20, 20});
+  auto* modal = root->emplace_child<PointerEventProbe>(RectI{80, 0, 20, 20});
+  auto* menu = root->emplace_child<PointerEventProbe>(RectI{120, 0, 20, 20});
+
+  tree.set_capture(capture);
+  InputState wheel{};
+  wheel.mouse_x = 5;
+  wheel.mouse_y = 5;
+  wheel.wheel_scrolled = true;
+  wheel.wheel_delta = 120;
+  auto result = tree.update(wheel);
+  assert(result.consumed);
+  assert(capture->wheel_hits == 1);
+  assert(normal->wheel_hits == 0);
+
+  tree.show_modal(modal);
+  wheel.wheel_delta = -120;
+  result = tree.update(wheel);
+  assert(result.consumed);
+  assert(modal->wheel_hits == 1);
+  assert(capture->wheel_hits == 1);
+
+  tree.show_active_menu(menu);
+  wheel.wheel_delta = 240;
+  result = tree.update(wheel);
+  assert(result.consumed);
+  assert(menu->wheel_hits == 1);
+  assert(menu->last_wheel_delta == 240);
+
+  InputState left_double{};
+  left_double.mouse_x = 5;
+  left_double.mouse_y = 5;
+  left_double.left_double_click = true;
+  left_double.left_pressed = true;
+  left_double.left_down = true;
+  result = tree.update(left_double);
+  assert(result.consumed);
+  assert(menu->left_double_hits == 1);
+
+  tree.close_active_menu(menu);
+  tree.close_modal(modal);
+  InputState right_double{};
+  right_double.mouse_x = 5;
+  right_double.mouse_y = 5;
+  right_double.right_double_click = true;
+  right_double.right_pressed = true;
+  right_double.right_down = true;
+  result = tree.update(right_double);
+  assert(result.consumed);
+  assert(capture->right_double_hits == 1);
+}
+
+void test_hover_hit_consumes_ui_input() {
+  ui::UiTree tree;
+  auto* root = tree.set_root<ui::UiNode>(RectI{0, 0, 100, 100});
+  root->emplace_child<ui::Window>(RectI{0, 0, 40, 40});
+
+  InputState hover_ui{};
+  hover_ui.mouse_x = 10;
+  hover_ui.mouse_y = 10;
+  auto result = tree.capture_input(hover_ui);
+  assert(result.consumed);
+  assert(result.hover_consumed);
+
+  InputState hover_with_key{};
+  hover_with_key.mouse_x = 10;
+  hover_with_key.mouse_y = 10;
+  hover_with_key.key_pressed[VK_F1] = true;
+  result = tree.capture_input(hover_with_key);
+  assert(result.consumed);
+  assert(result.hover_consumed);
+
+  InputState hover_background{};
+  hover_background.mouse_x = 80;
+  hover_background.mouse_y = 80;
+  result = tree.capture_input(hover_background);
+  assert(!result.consumed);
+  assert(!result.hover_consumed);
 }
 
 void test_grid_cell_select_and_double_click() {
@@ -374,8 +485,10 @@ int main() {
   test_modal_root_consumes_clicks();
   test_three_button_confirm_yes_only();
   test_window_drag_clamps_and_brings_to_front();
-  test_non_floating_window_click_does_not_bring_to_front();
+  test_non_floating_window_click_brings_to_front();
   test_grid_cell_select_and_double_click();
+  test_wheel_and_double_click_dispatch_priority();
+  test_hover_hit_consumes_ui_input();
   test_tooltip_clamps_to_screen();
   test_tooltip_multiline_sizes_height();
   test_overlay_layer_order_keeps_modal_on_top();

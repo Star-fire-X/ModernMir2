@@ -73,6 +73,10 @@ struct InputState {
   bool right_down{false};      ///< 右键持续按下
   bool right_pressed{false};   ///< 右键刚按下（瞬态）
   bool right_released{false};  ///< 右键刚释放（瞬态）
+  int wheel_delta{0};          ///< 鼠标滚轮增量（瞬态，单位为 WHEEL_DELTA 的倍数）
+  bool wheel_scrolled{false};  ///< 本帧是否发生滚轮事件（瞬态）
+  bool left_double_click{false};   ///< 左键双击边沿（瞬态）
+  bool right_double_click{false};  ///< 右键双击边沿（瞬态）
   std::array<bool, 256> key_down{};     ///< 键盘键持续按下（数组索引为虚拟键码）
   std::array<bool, 256> key_pressed{};  ///< 键盘键刚按下（瞬态，仅首次触发）
   std::wstring text_input{};            ///< 本帧输入的文本（WM_CHAR 消息累积）
@@ -87,6 +91,10 @@ struct InputState {
     left_released = false;
     right_pressed = false;
     right_released = false;
+    wheel_delta = 0;
+    wheel_scrolled = false;
+    left_double_click = false;
+    right_double_click = false;
     key_pressed.fill(false);
     text_input.clear();
     backspace_pressed = false;
