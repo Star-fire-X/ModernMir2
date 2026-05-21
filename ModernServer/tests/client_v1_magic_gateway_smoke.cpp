@@ -80,6 +80,11 @@ mir2::LegacyPacket make_actor_death_packet(std::uint64_t session_id) {
       session_id, 0, 0, mir2::make_default_message(mir2::kSmDeath, 42, 12, 13, 2));
 }
 
+mir2::LegacyPacket make_actor_alive_packet(std::uint64_t session_id) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmAlive, 42, 14, 15, 3));
+}
+
 mir2::LegacyPacket make_actor_hide_packet(std::uint64_t session_id, std::uint16_t ident) {
   return mir2::make_legacy_game_packet(
       session_id, 0, 0, mir2::make_default_message(ident, 77, 12, 13, 0));
@@ -183,10 +188,9 @@ int main() {
   messages.clear();
   service.translate_legacy_packet_for_test(kSessionId, make_actor_walk_packet(kSessionId),
                                            messages);
-  assert(messages.size() == 3);
+  assert(messages.size() == 2);
   assert(std::holds_alternative<mir2::client_v1::ActorUpsert>(messages[0]));
-  assert(std::holds_alternative<mir2::client_v1::ActorStateDelta>(messages[1]));
-  const auto* walk = std::get_if<mir2::client_v1::ActorAction>(&messages[2]);
+  const auto* walk = std::get_if<mir2::client_v1::ActorAction>(&messages[1]);
   assert(walk != nullptr);
   assert(walk->legacy_ident == mir2::kSmWalk);
 
@@ -208,6 +212,22 @@ int main() {
   const auto* death = std::get_if<mir2::client_v1::ActorDeath>(&messages.front());
   assert(death != nullptr);
   assert(death->legacy_ident == mir2::kSmDeath);
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_actor_alive_packet(kSessionId),
+                                           messages);
+  assert(messages.size() == 2);
+  const auto* alive_upsert = std::get_if<mir2::client_v1::ActorUpsert>(&messages[0]);
+  assert(alive_upsert != nullptr);
+  assert(alive_upsert->actor.x == 14 && alive_upsert->actor.y == 15 &&
+         alive_upsert->actor.dir == 3);
+  const auto* alive = std::get_if<mir2::client_v1::ActorAction>(&messages[1]);
+  assert(alive != nullptr);
+  assert(alive->legacy_ident == mir2::kSmAlive);
+  assert(alive->x == 14 && alive->y == 15 && alive->dir == 3);
+  character = service.session_character_for_test(kSessionId);
+  assert(character.has_value());
+  assert(character->x == 14 && character->y == 15 && character->dir == 3);
 
   messages.clear();
   service.translate_legacy_packet_for_test(

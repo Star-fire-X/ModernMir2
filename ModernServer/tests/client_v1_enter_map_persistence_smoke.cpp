@@ -232,11 +232,7 @@ int main() {
       game_sequence);
   const auto move_ack = game_reader.wait_for_matching<mir2::client_v1::ActionAck>(
       [](const mir2::client_v1::ActionAck& ack) { return ack.ok; });
-  const auto move_delta = game_reader.wait_for_matching<mir2::client_v1::ActorStateDelta>(
-      [&](const mir2::client_v1::ActorStateDelta& delta) {
-        return delta.actor_id == enter_world->self_actor_id && delta.x == 331 && delta.y == 271;
-      });
-  if (!move_ack.has_value() || !move_delta.has_value()) {
+  if (!move_ack.has_value()) {
     stop_runtime();
     return fail("move");
   }

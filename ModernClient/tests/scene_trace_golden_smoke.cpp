@@ -88,26 +88,40 @@ std::vector<std::string> run_map_transfer_trace() {
   std::vector<std::string> calls;
   push(calls, "recv_clear_objects");
   state.apply(WorldClearObjects{});
-  assert(state.world.actors.empty());
-  assert(state.world.ground_items.empty());
-  assert(!state.map_door_open(12, 13));
-  push(calls, "clear_dynamic_map_objects");
   assert(state.world.map_transition_pending);
+  assert(!state.world.actors.empty());
+  assert(!state.world.ground_items.empty());
+  assert(state.map_door_open(12, 13));
   push(calls, "enter_map_transition_pending");
+  push(calls, "preserve_dynamic_map_objects_until_self_ready");
 
   push(calls, "recv_change_map");
+  state.world.actors[1000].action_started_ms = mir2::client::detail::monotonic_ms();
+  state.world.actors[1000].action_duration_ms = 1000;
   state.apply(MapChange{"1"});
-  assert(state.world.map_id == "1");
+  assert(state.world.map_id == "0");
+  assert(state.world.map_change_waiting);
+  assert(state.world.pending_map_id == "1");
   push(calls, "set_pending_map_id");
+  push(calls, "wait_self_action_before_map_apply");
 
   const auto stale_actor = ActorUpsert{
       WorldActor{2000, "Guard", 332, 270, 0, 0, 0, ActorType::npc}};
-  if (state.world.map_transition_pending) {
-    push(calls, "drop_stale_runtime_deltas");
+  if (state.world.map_change_waiting) {
+    push(calls, "defer_runtime_deltas_during_map_wait");
   } else {
     state.apply(stale_actor);
   }
-  assert(state.world.actors.find(stale_actor.actor.actor_id) == state.world.actors.end());
+  assert(state.world.actors.find(stale_actor.actor.actor_id) != state.world.actors.end());
+
+  state.world.actors[1000].action_started_ms = 0;
+  assert(state.finish_pending_map_transition_if_ready(mir2::client::detail::monotonic_ms()));
+  assert(state.world.map_id == "1");
+  assert(state.world.actors.empty());
+  assert(state.world.ground_items.empty());
+  assert(!state.map_door_open(12, 13));
+  push(calls, "apply_map_after_self_action");
+  push(calls, "clear_dynamic_map_objects");
 
   push(calls, "recv_world_snapshot");
   state.apply(WorldSnapshot{"1", 500, 400, 1000,

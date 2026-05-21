@@ -119,11 +119,14 @@ clear_pending_messages
 
 [play.map_transfer]
 recv_clear_objects
-clear_dynamic_map_objects
 enter_map_transition_pending
+preserve_dynamic_map_objects_until_self_ready
 recv_change_map
 set_pending_map_id
-drop_stale_runtime_deltas
+wait_self_action_before_map_apply
+defer_runtime_deltas_during_map_wait
+apply_map_after_self_action
+clear_dynamic_map_objects
 recv_world_snapshot
 apply_new_map_snapshot
 resume_runtime_deltas

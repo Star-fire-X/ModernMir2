@@ -30,6 +30,7 @@ int main() {
 
   state.apply(ActorAction{1000, ActorActionKind::hit, 330, 270, 2, 2000, 0,
                           mir2::legacy::kSmHit, 0, false, 0});
+  state.process_legacy_actor_queues(1100);
   state.world.actors[1000].action_started_ms = 1100;
   animations.sync_world(state.world, 1100);
   animations.update(state.world, 1100);
@@ -40,6 +41,7 @@ int main() {
 
   state.apply(ActorVitals{2000, 7, 12, -1, -1, 5, 1000, false});
   state.apply(ActorAction{2000, ActorActionKind::struck, 0, 0, 0, 1000, 5, 31, 0, false, 0});
+  state.process_legacy_actor_queues(1200);
   state.world.actors[2000].action_started_ms = 1200;
   animations.sync_world(state.world, 1200);
   animations.update(state.world, 1200);
@@ -49,11 +51,14 @@ int main() {
   assert(animations.pose_for(2000).has_value());
 
   state.apply(MagicList{{MagicEntry{1, 1, 0, 0, 1000, "Fireball", 1, 900, 1}}});
+  state.world.actors[1000].action_started_ms = 0;
   state.apply(ActorAction{1000, ActorActionKind::spell, 333, 271, 3, 2000, 0, 0, 1,
                           true, 1});
+  state.process_legacy_actor_queues(1300);
   state.world.actors[1000].action_started_ms = 1300;
   state.world.actors[1000].legacy_pending_actions.clear();
   state.apply(ActorMagicFire{1000, 2000, 333, 271, 1, 1});
+  state.process_legacy_actor_queues(1301);
   animations.reset(1300);
   animations.sync_world(state.world, 1300);
   animations.update(state.world, 1300);
@@ -73,8 +78,10 @@ int main() {
   assert(saw_spell_effect);
 
   state.apply(ActorDeath{2000, 332, 271, 4});
-  animations.sync_world(state.world, 1400);
-  animations.update(state.world, 1400);
+  state.world.actors[2000].action_started_ms = 0;
+  state.process_legacy_actor_queues(1411);
+  animations.sync_world(state.world, 1411);
+  animations.update(state.world, 1411);
   assert(state.world.actors[2000].dead);
   assert(state.world.actors[2000].hp == 0);
   const auto death_pose = animations.pose_for(2000);

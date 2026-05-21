@@ -47,7 +47,7 @@ void test_actor_draw_order_tracks_delphi_actor_list() {
 
   store.apply(mir2::client_v1::ActorUpsert{actor(10, 11, 10)});
   assert((store.world.actor_draw_order == std::vector<std::uint64_t>{30, 10, 20}));
-  assert(store.world.actors.at(10).x == 11);
+  assert(store.world.actors.at(10).x == 10);
 
   store.apply(mir2::client_v1::ActorUpsert{actor(40, 12, 10)});
   assert((store.world.actor_draw_order == std::vector<std::uint64_t>{30, 10, 20, 40}));

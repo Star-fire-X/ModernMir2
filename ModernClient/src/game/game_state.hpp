@@ -24,6 +24,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -53,6 +54,7 @@ inline std::uint64_t monotonic_ms() {
 namespace legacy_sm {
 
 constexpr std::uint16_t kTurn = 10;
+constexpr std::uint16_t kAlive = 27;
 constexpr std::uint16_t kDeath = 32;
 constexpr std::uint16_t kNowDeath = 34;
 constexpr std::uint16_t kStruck = 31;
@@ -93,6 +95,29 @@ struct ClientConfig {
 /// 角色（Actor）运行时状态
 /// 包含坐标、动作、血量等所有与服务端同步的动态数据
 /// 坐标以瓦片（tile）为单位，与经典客户端的 MapUnit 坐标一致
+struct LegacyActorMessage {
+  enum class Kind {
+    action,
+    magic_fire,
+    magic_fire_fail,
+    death
+  };
+
+  Kind kind{Kind::action};
+  std::uint64_t actor_id{0};
+  client_v1::ActorActionKind action_kind{client_v1::ActorActionKind::turn};
+  std::uint16_t legacy_ident{0};
+  int x{0};
+  int y{0};
+  std::uint8_t dir{0};
+  std::uint64_t target_actor_id{0};
+  int value{0};
+  std::uint16_t magic_id{0};
+  bool magic{false};
+  int magic_effect{0};
+  int magic_effect_type{-1};
+};
+
 struct ActorState {
   std::uint64_t actor_id{0};
   std::string name{};
@@ -124,6 +149,7 @@ struct ActorState {
   std::uint8_t legacy_old_dir{0};
   bool legacy_has_old_position{false};
   std::uint64_t legacy_event_sequence{0};
+  std::deque<LegacyActorMessage> legacy_action_queue{};
   std::vector<ActorState> legacy_pending_actions{};
   bool dead{false};
   bool skeleton{false};                ///< 死亡后是否已变为骨架
@@ -420,6 +446,9 @@ struct WorldViewState {
   int width{800};   ///< 地图宽度（瓦片数）
   int height{600};  ///< 地图高度（瓦片数）
   bool map_transition_pending{false};
+  bool map_clear_waiting_for_change{false};
+  bool map_change_waiting{false};
+  std::string pending_map_id{};
   std::uint64_t self_actor_id{0};                                 ///< 自己的 actor_id
   std::unordered_map<std::uint64_t, ActorState> actors{};         ///< 所有在线角色（key = actor_id）
   std::unordered_map<std::uint64_t, client_v1::GroundItemState> ground_items{};  ///< 地面物品
@@ -756,6 +785,7 @@ struct GameStateStore {
 
   void record_legacy_actor_event(ActorState& actor) {
     auto event = actor;
+    event.legacy_action_queue.clear();
     event.legacy_pending_actions.clear();
     event.pending_remove = false;
     event.legacy_event_sequence = ++legacy_actor_event_sequence;
@@ -765,6 +795,14 @@ struct GameStateStore {
                                          actor.legacy_pending_actions.end() - 32);
     }
     actor.legacy_event_sequence = event.legacy_event_sequence;
+  }
+
+  void enqueue_legacy_actor_message(ActorState& actor, LegacyActorMessage message) {
+    actor.actor_id = message.actor_id;
+    actor.legacy_action_queue.push_back(std::move(message));
+    if (actor.legacy_action_queue.size() > 64U) {
+      actor.legacy_action_queue.pop_front();
+    }
   }
 
   /// 根据动作类型返回动画持续时间（毫秒）
@@ -794,6 +832,126 @@ struct GameStateStore {
       case client_v1::ActorActionKind::turn:
       default:
         return 200;    // 转身/待机
+    }
+  }
+
+  void start_legacy_actor_action(ActorState& actor, const LegacyActorMessage& message,
+                                 const std::uint64_t now_ms) {
+    const auto legacy_ident =
+        message.action_kind == client_v1::ActorActionKind::hit
+            ? legacy::normalize_attack_ident_to_sm(message.legacy_ident)
+            : message.legacy_ident;
+    actor.current_action = message.action_kind;
+    actor.legacy_action_ident = legacy_ident;
+    actor.magic_id = message.magic_id;
+    actor.action_target_actor_id = message.target_actor_id;
+    actor.action_target_x = message.x;
+    actor.action_target_y = message.y;
+    actor.action_magic = message.magic;
+    actor.action_magic_effect = message.magic_effect;
+    actor.action_magic_effect_type = -1;
+    actor.action_magic_failed = false;
+    if (message.action_kind == client_v1::ActorActionKind::spell && message.magic_id != 0) {
+      apply_magic_metadata(actor, message.magic_id);
+    }
+    actor.action_started_ms = now_ms;
+    actor.action_duration_ms = action_duration_ms(message.action_kind, legacy_ident);
+    const auto forced_move = message.action_kind == client_v1::ActorActionKind::rush ||
+                             message.action_kind == client_v1::ActorActionKind::rush_kung ||
+                             message.action_kind == client_v1::ActorActionKind::backstep ||
+                             message.action_kind == client_v1::ActorActionKind::knockback;
+    if (forced_move) {
+      if (actor.x != message.x || actor.y != message.y ||
+          message.action_kind == client_v1::ActorActionKind::rush_kung) {
+        actor.from_x = actor.x;
+        actor.from_y = actor.y;
+      }
+      actor.running = message.action_kind == client_v1::ActorActionKind::rush ||
+                      message.action_kind == client_v1::ActorActionKind::rush_kung;
+      actor.move_started_ms = actor.action_started_ms;
+      actor.move_duration_ms = 0;
+      if (message.action_kind == client_v1::ActorActionKind::rush_kung) {
+        actor.action_target_x = message.x;
+        actor.action_target_y = message.y;
+      } else if (message.x != 0 || message.y != 0) {
+        actor.x = message.x;
+        actor.y = message.y;
+      }
+    } else if (message.action_kind != client_v1::ActorActionKind::spell &&
+               (message.x != 0 || message.y != 0)) {
+      if (message.action_kind == client_v1::ActorActionKind::walk ||
+          message.action_kind == client_v1::ActorActionKind::run) {
+        if (actor.x != message.x || actor.y != message.y || actor.move_started_ms == 0) {
+          actor.from_x = actor.x;
+          actor.from_y = actor.y;
+        }
+        actor.running = message.action_kind == client_v1::ActorActionKind::run;
+        actor.move_started_ms = actor.action_started_ms;
+      }
+      actor.x = message.x;
+      actor.y = message.y;
+    }
+    if (message.dir < 8) {
+      actor.dir = message.dir;
+    }
+    if (legacy_ident == legacy_sm::kAlive) {
+      actor.dead = false;
+      actor.skeleton = false;
+    }
+    record_legacy_actor_event(actor);
+    if (message.action_kind == client_v1::ActorActionKind::struck) {
+      actor.last_damage = message.value;
+      actor.last_hitter_id = message.target_actor_id;
+      actor.last_damage_magic = message.magic;
+      if (actor.actor_id == world.self_actor_id) {
+        world.latest_struck_ms = actor.action_started_ms;
+      }
+    }
+  }
+
+  void apply_legacy_actor_message(ActorState& actor, const LegacyActorMessage& message,
+                                  const std::uint64_t now_ms) {
+    switch (message.kind) {
+      case LegacyActorMessage::Kind::action:
+        start_legacy_actor_action(actor, message, now_ms);
+        break;
+      case LegacyActorMessage::Kind::magic_fire:
+        actor.action_target_actor_id = message.target_actor_id;
+        actor.action_target_x = message.x;
+        actor.action_target_y = message.y;
+        actor.action_magic = true;
+        actor.action_magic_effect = message.magic_effect;
+        actor.action_magic_effect_type =
+            legacy_visual_effect_type(actor.magic_id, message.magic_effect_type);
+        actor.action_magic_failed = false;
+        record_legacy_actor_event(actor);
+        break;
+      case LegacyActorMessage::Kind::magic_fire_fail:
+        actor.action_magic = false;
+        actor.action_magic_effect = 0;
+        actor.action_magic_effect_type = -1;
+        actor.action_magic_failed = true;
+        record_legacy_actor_event(actor);
+        break;
+      case LegacyActorMessage::Kind::death:
+        if (message.x != 0 || message.y != 0) {
+          actor.x = message.x;
+          actor.y = message.y;
+        }
+        if (message.dir < 8) {
+          actor.dir = message.dir;
+        }
+        actor.dead = true;
+        actor.skeleton = false;
+        actor.hp = 0;
+        actor.current_action = client_v1::ActorActionKind::turn;
+        actor.legacy_action_ident =
+            message.legacy_ident != 0 ? message.legacy_ident : legacy_sm::kDeath;
+        actor.action_started_ms = now_ms;
+        actor.action_duration_ms =
+            action_duration_ms(client_v1::ActorActionKind::turn, actor.legacy_action_ident);
+        record_legacy_actor_event(actor);
+        break;
     }
   }
 
@@ -884,6 +1042,46 @@ struct GameStateStore {
     for (const auto actor_id : removals) {
       erase_actor(actor_id);
     }
+  }
+
+  void process_legacy_actor_queues(const std::uint64_t now_ms) {
+    for (auto& [actor_id, actor] : world.actors) {
+      (void)actor_id;
+      if (actor.legacy_action_queue.empty()) {
+        continue;
+      }
+      const auto hurry = actor.legacy_action_queue.front().kind ==
+                             LegacyActorMessage::Kind::magic_fire ||
+                         actor.legacy_action_queue.front().kind ==
+                             LegacyActorMessage::Kind::magic_fire_fail;
+      if (!hurry && actor_action_animating(actor, now_ms)) {
+        continue;
+      }
+      auto message = actor.legacy_action_queue.front();
+      actor.legacy_action_queue.pop_front();
+      apply_legacy_actor_message(actor, message, now_ms);
+      while (!actor.legacy_action_queue.empty() &&
+             (actor.legacy_action_queue.front().kind == LegacyActorMessage::Kind::magic_fire ||
+              actor.legacy_action_queue.front().kind ==
+                  LegacyActorMessage::Kind::magic_fire_fail)) {
+        message = actor.legacy_action_queue.front();
+        actor.legacy_action_queue.pop_front();
+        apply_legacy_actor_message(actor, message, now_ms);
+      }
+    }
+  }
+
+  [[nodiscard]] bool self_actor_action_finished(const std::uint64_t now_ms) const {
+    const auto it = world.actors.find(world.self_actor_id);
+    if (it == world.actors.end()) {
+      return true;
+    }
+    return it->second.legacy_action_queue.empty() && !actor_action_animating(it->second, now_ms);
+  }
+
+  [[nodiscard]] bool should_defer_runtime_for_map_transition(
+      const std::uint64_t /*now_ms*/) const {
+    return world.map_transition_pending;
   }
 
   void apply_actor_feature_changed(const std::uint64_t actor_id, const std::int32_t feature) {
@@ -1141,7 +1339,6 @@ struct GameStateStore {
   }
 
   void clear_map_objects_for_transition() {
-    world.self_actor_id = 0;
     world.actors.clear();
     world.ground_items.clear();
     world.map_doors.clear();
@@ -1173,7 +1370,25 @@ struct GameStateStore {
     world.legacy_chr_action = LegacyChrAction::none;
     world.action_key = -1;
     world.mouse_down_ms = 0;
+  }
+
+  void complete_map_transition(const std::string& map_id) {
+    clear_map_objects_for_transition();
+    if (!map_id.empty()) {
+      world.map_id = map_id;
+    }
     world.map_transition_pending = true;
+    world.map_clear_waiting_for_change = false;
+    world.map_change_waiting = false;
+    world.pending_map_id.clear();
+  }
+
+  bool finish_pending_map_transition_if_ready(const std::uint64_t now_ms) {
+    if (!world.map_change_waiting || !self_actor_action_finished(now_ms)) {
+      return false;
+    }
+    complete_map_transition(world.pending_map_id);
+    return true;
   }
 
   void clear_waiting_item() {
@@ -1327,16 +1542,21 @@ struct GameStateStore {
                                                 actor.status, actor.actor_type};
       world.actor_draw_order.push_back(actor.actor_id);
     }
+    world.map_clear_waiting_for_change = false;
   }
 
   void apply(const client_v1::WorldClearObjects& /*message*/) {
-    clear_map_objects_for_transition();
+    world.map_transition_pending = true;
+    world.map_clear_waiting_for_change = true;
   }
 
   void apply(const client_v1::MapChange& message) {
-    clear_map_objects_for_transition();
-    if (!message.map_id.empty()) {
-      world.map_id = message.map_id;
+    world.map_transition_pending = true;
+    world.map_clear_waiting_for_change = false;
+    world.map_change_waiting = true;
+    world.pending_map_id = message.map_id;
+    if (self_actor_action_finished(detail::monotonic_ms())) {
+      complete_map_transition(world.pending_map_id);
     }
   }
 
@@ -1389,17 +1609,17 @@ struct GameStateStore {
   void apply(const client_v1::ActorUpsert& message) {
     const auto inserted = world.actors.find(message.actor.actor_id) == world.actors.end();
     auto& actor = world.actors[message.actor.actor_id];
-    const auto previous_x = actor.actor_id == 0 ? message.actor.x : actor.x;
-    const auto previous_y = actor.actor_id == 0 ? message.actor.y : actor.y;
     actor.actor_id = message.actor.actor_id;
     if (!message.actor.name.empty()) {
       actor.name = message.actor.name;
     }
-    actor.x = message.actor.x;
-    actor.y = message.actor.y;
-    actor.from_x = previous_x;
-    actor.from_y = previous_y;
-    actor.dir = message.actor.dir;
+    if (inserted) {
+      actor.x = message.actor.x;
+      actor.y = message.actor.y;
+      actor.from_x = message.actor.x;
+      actor.from_y = message.actor.y;
+      actor.dir = message.actor.dir;
+    }
     actor.feature = message.actor.feature;
     actor.status = message.actor.status;
     actor.actor_type = message.actor.actor_type;
@@ -1435,93 +1655,47 @@ struct GameStateStore {
         message.kind == client_v1::ActorActionKind::hit
             ? legacy::normalize_attack_ident_to_sm(message.legacy_ident)
             : message.legacy_ident;
-    actor.actor_id = message.actor_id;
-    actor.current_action = message.kind;
-    actor.legacy_action_ident = legacy_ident;
-    actor.magic_id = message.magic_id;
-    actor.action_target_actor_id = message.target_actor_id;
-    actor.action_target_x = message.x;
-    actor.action_target_y = message.y;
-    actor.action_magic = message.magic;
-    actor.action_magic_effect = message.magic_effect;
-    actor.action_magic_effect_type = -1;
-    actor.action_magic_failed = false;
-    if (message.kind == client_v1::ActorActionKind::spell && message.magic_id != 0) {
-      apply_magic_metadata(actor, message.magic_id);
-    }
-    actor.action_started_ms = detail::monotonic_ms();
-    actor.action_duration_ms = action_duration_ms(message.kind, legacy_ident);
-    const auto forced_move = message.kind == client_v1::ActorActionKind::rush ||
-                             message.kind == client_v1::ActorActionKind::rush_kung ||
-                             message.kind == client_v1::ActorActionKind::backstep ||
-                             message.kind == client_v1::ActorActionKind::knockback;
-    if (forced_move) {
-      if (actor.x != message.x || actor.y != message.y ||
-          message.kind == client_v1::ActorActionKind::rush_kung) {
-        actor.from_x = actor.x;
-        actor.from_y = actor.y;
-      }
-      actor.running = message.kind == client_v1::ActorActionKind::rush ||
-                      message.kind == client_v1::ActorActionKind::rush_kung;
-      actor.move_started_ms = actor.action_started_ms;
-      actor.move_duration_ms = 0;
-      if (message.kind == client_v1::ActorActionKind::rush_kung) {
-        actor.action_target_x = message.x;
-        actor.action_target_y = message.y;
-      } else if (message.x != 0 || message.y != 0) {
-        actor.x = message.x;
-        actor.y = message.y;
-      }
-    } else if (message.kind != client_v1::ActorActionKind::spell && (message.x != 0 || message.y != 0)) {
-      if (message.kind == client_v1::ActorActionKind::walk ||
-          message.kind == client_v1::ActorActionKind::run) {
-        if (actor.x != message.x || actor.y != message.y || actor.move_started_ms == 0) {
-          actor.from_x = actor.x;
-          actor.from_y = actor.y;
-        }
-        actor.running = message.kind == client_v1::ActorActionKind::run;
-        actor.move_started_ms = actor.action_started_ms;
-      }
-      actor.x = message.x;
-      actor.y = message.y;
-    }
-    if (message.dir < 8) {
-      actor.dir = message.dir;
-    }
-    record_legacy_actor_event(actor);
-    // 受击动作时记录伤害信息
-    if (message.kind == client_v1::ActorActionKind::struck) {
-      actor.last_damage = message.value;
-      actor.last_hitter_id = message.target_actor_id;
-      actor.last_damage_magic = message.magic;
-      if (message.actor_id == world.self_actor_id) {
-        world.latest_struck_ms = actor.action_started_ms;
-      }
-    }
+    enqueue_legacy_actor_message(
+        actor, LegacyActorMessage{LegacyActorMessage::Kind::action,
+                                  message.actor_id,
+                                  message.kind,
+                                  legacy_ident,
+                                  message.x,
+                                  message.y,
+                                  message.dir,
+                                  message.target_actor_id,
+                                  message.value,
+                                  message.magic_id,
+                                  message.magic,
+                                  message.magic_effect,
+                                  -1});
   }
 
   void apply(const client_v1::ActorMagicFire& message) {
     auto& actor = world.actors[message.actor_id];
-    actor.actor_id = message.actor_id;
-    actor.action_target_actor_id = message.target_actor_id;
-    actor.action_target_x = message.x;
-    actor.action_target_y = message.y;
-    actor.action_magic = true;
-    actor.action_magic_effect = message.effect;
-    actor.action_magic_effect_type =
-        legacy_visual_effect_type(actor.magic_id, message.effect_type);
-    actor.action_magic_failed = false;
-    record_legacy_actor_event(actor);
+    enqueue_legacy_actor_message(
+        actor, LegacyActorMessage{LegacyActorMessage::Kind::magic_fire,
+                                  message.actor_id,
+                                  client_v1::ActorActionKind::turn,
+                                  message.legacy_ident,
+                                  message.x,
+                                  message.y,
+                                  0,
+                                  message.target_actor_id,
+                                  0,
+                                  0,
+                                  true,
+                                  message.effect,
+                                  message.effect_type});
   }
 
   void apply(const client_v1::ActorMagicFireFail& message) {
     auto& actor = world.actors[message.actor_id];
-    actor.actor_id = message.actor_id;
-    actor.action_magic = false;
-    actor.action_magic_effect = 0;
-    actor.action_magic_effect_type = -1;
-    actor.action_magic_failed = true;
-    record_legacy_actor_event(actor);
+    enqueue_legacy_actor_message(
+        actor, LegacyActorMessage{LegacyActorMessage::Kind::magic_fire_fail,
+                                  message.actor_id,
+                                  client_v1::ActorActionKind::turn,
+                                  message.legacy_ident});
   }
 
   /// 应用角色属性（血量/蓝量）更新消息
@@ -1565,19 +1739,16 @@ struct GameStateStore {
   /// 应用角色死亡消息
   void apply(const client_v1::ActorDeath& message) {
     auto& actor = world.actors[message.actor_id];
-    actor.actor_id = message.actor_id;
-    actor.x = message.x;
-    actor.y = message.y;
-    actor.dir = message.dir;
-    actor.dead = true;
-    actor.skeleton = false;
     actor.hp = 0;
-    actor.current_action = client_v1::ActorActionKind::turn;
-    actor.legacy_action_ident =
-        message.legacy_ident != 0 ? message.legacy_ident : legacy_sm::kDeath;
-    actor.action_started_ms = detail::monotonic_ms();
-    actor.action_duration_ms = action_duration_ms(client_v1::ActorActionKind::turn, 0);
-    record_legacy_actor_event(actor);
+    enqueue_legacy_actor_message(
+        actor, LegacyActorMessage{LegacyActorMessage::Kind::death,
+                                  message.actor_id,
+                                  client_v1::ActorActionKind::turn,
+                                  message.legacy_ident != 0 ? message.legacy_ident
+                                                            : legacy_sm::kDeath,
+                                  message.x,
+                                  message.y,
+                                  message.dir});
   }
 
   /// 应用魔法列表消息
