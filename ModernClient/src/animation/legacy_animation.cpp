@@ -2644,6 +2644,12 @@ std::optional<ActorRenderPose> LegacyActorAnimation::pose_for(const ActorState& 
   }
   const auto race = legacy_race_feature(actor.feature);
   const auto profile = legacy_special_actor_profile_for(race, appearance);
+  if (profile == LegacySpecialActorProfile::castle_door) {
+    pose.down_draw_level = (pose.dead || actor.dir >= 3) ? 2 : 1;
+  } else if (profile == LegacySpecialActorProfile::skeleton_oma && pose.dead &&
+             ((appearance >= 30 && appearance <= 34) || appearance == 151)) {
+    pose.down_draw_level = 1;
+  }
   const auto local_frame = motion_kind_ == MotionKind::action ? render_frame - start_frame_ : 0;
   const auto dir = static_cast<int>(pose.dir);
   const auto actor_archive = pose.body_archive;

@@ -7334,6 +7334,7 @@ class WorldScene final : public Scene {
       animation_.effects().render_ground(*context.assets, *context.renderer, viewport);
     }
     render_world_rows(context, viewport);
+    render_actor_effect_overlays_after_rows(context, viewport);
     legacy_trace_map_layer(legacy::LegacyMapDrawLayer::selection_blend);
     render_actor_selection_blend_pass(context, viewport);
     legacy_trace_map_layer(legacy::LegacyMapDrawLayer::debug_overlay);
@@ -7417,11 +7418,8 @@ class WorldScene final : public Scene {
   }
 
   std::pair<int, int> screen_to_map_tile(ClientContext& context, const ActorState& self) const {
-    return legacy::legacy_mouse_to_map_clamped(viewport_for_self(self), context.input->mouse_x,
-                                               context.input->mouse_y, context.state->world.width,
-                                               context.state->world.height,
-                                               map_ != nullptr ? map_->width : 0,
-                                               map_ != nullptr ? map_->height : 0);
+    return legacy::legacy_mouse_to_map(viewport_for_self(self), context.input->mouse_x,
+                                       context.input->mouse_y);
   }
 
   std::uint64_t focused_actor_at(ClientContext& context, const LegacyInputFrame& input) const {
@@ -8313,11 +8311,6 @@ class WorldScene final : public Scene {
           }
           legacy_trace_map_layer(legacy::LegacyMapDrawLayer::actor, y);
           render_actor(context, it->pose, viewport, it->actor_id == context.state->world.self_actor_id);
-          if (context.assets != nullptr) {
-            legacy_trace_map_layer(legacy::LegacyMapDrawLayer::actor_overlay, y);
-            animation_.effects().render_overlay_for_actor(it->actor_id, it->pose, *context.assets,
-                                                          *context.renderer, viewport);
-          }
         }
       }
 
@@ -8325,6 +8318,40 @@ class WorldScene final : public Scene {
         legacy_trace_map_layer(legacy::LegacyMapDrawLayer::fly_effect, y);
         animation_.effects().render_fly(*context.assets, *context.renderer, viewport, y);
       }
+    }
+  }
+
+  void render_actor_effect_overlays_after_rows(
+      ClientContext& context, const legacy::LegacyMapViewport& viewport) {
+    if (context.assets == nullptr) {
+      return;
+    }
+    const auto bounds = legacy::legacy_map_render_bounds(viewport);
+    const auto within_visible_rows = [&](const ActorRenderPose& pose) {
+      const auto draw_row = legacy::legacy_actor_draw_row(pose.ry, pose.down_draw_level);
+      return draw_row >= bounds.visible_top && draw_row <= bounds.visible_bottom;
+    };
+
+    auto draw_overlay = [&](const std::uint64_t actor_id, const std::optional<ActorRenderPose>& pose) {
+      if (!pose.has_value() || !pose->visible || !within_visible_rows(*pose)) {
+        return;
+      }
+      legacy_trace_map_layer(legacy::LegacyMapDrawLayer::actor_overlay);
+      animation_.effects().render_overlay_for_actor(actor_id, *pose, *context.assets, *context.renderer,
+                                                    viewport);
+    };
+
+    const auto& world = context.state->world;
+    if (!world.actor_draw_order.empty()) {
+      for (const auto actor_id : world.actor_draw_order) {
+        draw_overlay(actor_id, animation_.pose_for(actor_id));
+      }
+      return;
+    }
+
+    const auto actors = collect_row_actor_draws(context, viewport);
+    for (const auto& actor : actors) {
+      draw_overlay(actor.actor_id, std::optional<ActorRenderPose>{actor.pose});
     }
   }
 

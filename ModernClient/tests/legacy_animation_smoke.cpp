@@ -272,6 +272,49 @@ int main() {
   assert(animations.is_actor_legacy_idle(1));
   assert(!animations.is_actor_legacy_idle(999));
 
+  auto down_draw_level_for = [](ActorState sample_actor) {
+    WorldViewState sample_world;
+    sample_world.self_actor_id = sample_actor.actor_id;
+    sample_world.actors[sample_actor.actor_id] = sample_actor;
+    AnimationManager sample_animations;
+    sample_animations.reset(16000);
+    sample_animations.sync_world(sample_world, 16000);
+    const auto sample_pose = sample_animations.pose_for(sample_actor.actor_id);
+    assert(sample_pose.has_value());
+    return sample_pose->down_draw_level;
+  };
+
+  ActorState castle_door_actor;
+  castle_door_actor.actor_id = 2001;
+  castle_door_actor.actor_type = mir2::client_v1::ActorType::monster;
+  castle_door_actor.x = 30;
+  castle_door_actor.y = 30;
+  castle_door_actor.from_x = 30;
+  castle_door_actor.from_y = 30;
+  castle_door_actor.dir = 2;
+  castle_door_actor.feature = make_legacy_feature(99, 0, 0, 0);
+  assert(down_draw_level_for(castle_door_actor) == 1);
+  castle_door_actor.dir = 3;
+  assert(down_draw_level_for(castle_door_actor) == 2);
+  castle_door_actor.dead = true;
+  castle_door_actor.dir = 0;
+  assert(down_draw_level_for(castle_door_actor) == 2);
+
+  ActorState skeleton_actor;
+  skeleton_actor.actor_id = 2002;
+  skeleton_actor.actor_type = mir2::client_v1::ActorType::monster;
+  skeleton_actor.x = 32;
+  skeleton_actor.y = 32;
+  skeleton_actor.from_x = 32;
+  skeleton_actor.from_y = 32;
+  skeleton_actor.feature = make_legacy_feature(14, 0, 0, 30);
+  skeleton_actor.dead = true;
+  assert(down_draw_level_for(skeleton_actor) == 1);
+  skeleton_actor.feature = make_legacy_feature(14, 0, 0, 151);
+  assert(down_draw_level_for(skeleton_actor) == 1);
+  skeleton_actor.feature = make_legacy_feature(14, 0, 0, 35);
+  assert(down_draw_level_for(skeleton_actor) == 0);
+
   auto idle_actor = actor;
   WorldViewState idle_world;
   idle_world.self_actor_id = 1;
