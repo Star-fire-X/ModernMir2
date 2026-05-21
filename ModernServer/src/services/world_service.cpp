@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <filesystem>
 #include <iterator>
 #include <limits>
 #include <optional>
@@ -410,7 +411,12 @@ LegacyPacket make_out_of_connection_packet(std::uint64_t session_id) {
 void WorldService::start(HostContext& context) {
   context_ = &context;
   endpoint_ = context.bus->register_endpoint(name(), context.config.runtime.default_queue_capacity);
-  runtime_ = std::make_unique<LogicRuntime>(context.config);
+  auto runtime_config = context.config;
+  if (runtime_config.runtime.legacy_admin_list.is_relative()) {
+    runtime_config.runtime.legacy_admin_list =
+        context.root_dir / runtime_config.runtime.legacy_admin_list;
+  }
+  runtime_ = std::make_unique<LogicRuntime>(std::move(runtime_config));
   runtime_->initialize();
   PersistRequest merchant_request;
   merchant_request.kind = PersistRequestKind::load_merchant_states;
@@ -552,6 +558,7 @@ void WorldService::run() {
       frame_ingress.messages.swap(pending_ingress.messages);
       const auto now_ms = static_cast<std::uint64_t>(
           std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count());
+      current_frame_now_ms_ = now_ms;
       LegacyFrameCallbacks callbacks;
       callbacks.run_socket_run = [this, now_ms]() -> RuntimeDispatch {
         return run_legacy_socket_stage(now_ms);
@@ -856,6 +863,7 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
       auto command = to_logic_command(*canonical.command);
       command.gateway = event.gateway.empty() ? "game_gateway" : event.gateway;
       command.session_seq = event.session_seq;
+      command.timestamp_ms = current_frame_now_ms_;
       session_gateways_[event.session_id] = command.gateway;
       return runtime_->route_logic_command(command);
     }
@@ -896,6 +904,7 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
       command.session_seq = event.session_seq;
       command.x = *x;
       command.y = *y;
+      command.timestamp_ms = current_frame_now_ms_;
       return runtime_->route_logic_command(command);
     }
 
@@ -911,6 +920,7 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
       command.session_id = event.session_id;
       command.session_seq = event.session_seq;
       command.x = *x;
+      command.timestamp_ms = current_frame_now_ms_;
       return runtime_->route_logic_command(command);
     }
   }
@@ -935,6 +945,7 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
     command.kind = LogicCommandKind::logout;
     command.gateway = event.gateway.empty() ? "game_gateway" : event.gateway;
     command.session_id = event.session_id;
+    command.timestamp_ms = current_frame_now_ms_;
     auto dispatch = runtime_->route_logic_command(command);
     session_gateways_.erase(event.session_id);
     return dispatch;
@@ -971,8 +982,12 @@ RuntimeDispatch WorldService::handle_logic_command(const LogicCommand& command) 
       session_actions_this_frame_.insert(command.session_id);
     }
 
-    auto dispatch = runtime_->route_logic_command(command);
-    if (command.kind == LogicCommandKind::logout) {
+    auto routed = command;
+    if (routed.timestamp_ms == 0) {
+      routed.timestamp_ms = current_frame_now_ms_;
+    }
+    auto dispatch = runtime_->route_logic_command(routed);
+    if (routed.kind == LogicCommandKind::logout) {
       session_gateways_.erase(command.session_id);
     }
     return dispatch;

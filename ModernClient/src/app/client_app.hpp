@@ -23,6 +23,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "app/legacy_frame_scheduler.hpp"
 #include "assets/asset_manager.hpp"
@@ -107,24 +108,35 @@ class ClientApp {
   void request_guild_update_notice(const client_v1::GuildUpdateNoticeRequest& request);
   void request_guild_update_grade(const client_v1::GuildUpdateGradeRequest& request);
   void request_minimap(const client_v1::MiniMapRequest& request);
+  void request_revive();
   void request_close();
   void show_info_modal(const std::wstring& title, const std::wstring& message);
   [[nodiscard]] HWND window_handle() const { return window_.handle(); }
 
+#ifdef MIR2_CLIENT_TESTING
+  void set_config_for_test(const ClientConfig& config);
+  void enable_protocol_test_mode_for_test();
+  void complete_connect_for_test();
+  template <typename T>
+  void push_protocol_message_for_test(const T& message) {
+    protocol_.push_message_for_test(message);
+  }
+  void push_protocol_disconnect_for_test(std::string reason);
+  void pump_protocol_for_test();
+  [[nodiscard]] GameStateStore& state_for_test() { return state_; }
+  [[nodiscard]] const GameStateStore& state_for_test() const { return state_; }
+  [[nodiscard]] SceneId current_scene_for_test() const { return scenes_.current_id(); }
+  [[nodiscard]] std::vector<client_v1::Frame> drain_sent_frames_for_test();
+  [[nodiscard]] const std::vector<ProtocolClient::ConnectAttempt>& connect_attempts_for_test()
+      const;
+#endif
+
  private:
-  /// 当前正在进行的连接类型
-  /// 传奇客户端的网络层分为多个独立的网关连接：
-  /// 登录网关(LoginGate)、角色网关(SelGate)、游戏网关(RunGate)。
-  /// 客户端根据当前所处阶段连接到不同的网关，每个阶段发送
-  /// 的第一个消息包类型不同。此枚举跟踪当前正在建立的连接
-  /// 属于哪个阶段，以便连接建立后发送正确的初始化包。
+  /// 注册/改密仍沿用旧的待连接标记；主登录链路由 AuthFlowPhase 驱动。
   enum class PendingConnect {
     none,            ///< 无待建立的连接
-    login,           ///< 正在连接到登录网关（将发送 LoginRequest）
     create_account,  ///< 正在连接到注册网关（将发送 CreateAccountRequest）
-    change_password, ///< 正在连接到修改密码网关
-    select_character,///< 正在连接到角色网关（将发送 CharacterListRequest）
-    game             ///< 正在连接到游戏网关（将发送 EnterWorldRequest）
+    change_password  ///< 正在连接到修改密码网关
   };
 
   /// 循环定时器，每隔 interval_seconds 触发一次回调

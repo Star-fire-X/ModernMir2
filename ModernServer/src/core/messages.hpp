@@ -75,6 +75,7 @@ struct CharacterRecord {
   std::uint32_t daily_quest{0};
   std::array<CharacterSlaveRecord, kMaxLegacySlaves> slaves{};
   double body_luck{0.0};
+  bool birth_items_granted{true};
 };
 
 struct LegacyWeaponUpgradeRecord {
@@ -182,6 +183,9 @@ enum class LogicCommandKind {
   trade_remove_item,
   trade_set_gold,
   trade_accept,
+  group_create,
+  group_add_member,
+  group_remove_member,
   logout,
   raw_packet
 };
@@ -209,6 +213,7 @@ struct LogicCommand {
   std::int32_t client_version{0};
   std::int32_t client_checksum{0};
   bool start_new{false};
+  std::uint64_t timestamp_ms{0};
 };
 
 enum class ActorMailKind {
@@ -253,7 +258,8 @@ enum class ActorMailKind {
   persistence_loaded,
   legacy_delayed_effect,
   legacy_magic_lvexp,
-  say
+  say,
+  legacy_chat_delivery
 };
 
 enum class LegacyDelayedEffectKind {
@@ -265,6 +271,17 @@ enum class LegacyDelayedEffectKind {
   open_health,
   make_poison,
   transparent
+};
+
+enum class LegacyChatDeliveryKind {
+  none,
+  normal,
+  whisper,
+  guild,
+  group,
+  shout,
+  shout_direct,
+  system
 };
 
 struct LegacyBuffTransferState {
@@ -339,6 +356,10 @@ struct ActorMail {
   std::uint64_t slave_life_time_ms{0};
   bool monster_no_item{false};
   bool monster_tameable{true};
+  bool monster_has_target_xy{false};
+  std::int32_t monster_target_x{0};
+  std::int32_t monster_target_y{0};
+  std::uint8_t legacy_name_color{255};
   bool legacy_space_move_show2{false};
   std::uint32_t respawn_ms{0};
   std::uint8_t dir{0};
@@ -355,6 +376,7 @@ struct ActorMail {
   std::int32_t poison_level{0};
   std::uint64_t duration_ticks{0};
   std::vector<LegacyBuffTransferState> legacy_buffs{};
+  LegacyChatDeliveryKind legacy_chat_kind{LegacyChatDeliveryKind::none};
   CharacterRecord character{};
   LegacyDefaultMessage game_message{};
   std::string payload{};

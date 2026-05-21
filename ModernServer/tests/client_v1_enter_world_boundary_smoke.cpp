@@ -45,7 +45,7 @@ mir2::CharacterRecord make_character() {
   character.job = 1;
   character.sex = 0;
   character.hair = 2;
-  character.gold = 2000;
+  character.gold = 0;
   character.ability.level = 1;
   character.ability.hp = 15;
   character.ability.max_hp = 15;
@@ -311,7 +311,7 @@ int main() {
   }
 
   const auto ability = reader.wait_for_message<mir2::client_v1::SelfAbility>();
-  if (!ability.has_value() || ability->level != 1 || ability->gold != 2000) {
+  if (!ability.has_value() || ability->level != 1 || ability->gold != 0) {
     stop_services();
     return fail("self ability");
   }

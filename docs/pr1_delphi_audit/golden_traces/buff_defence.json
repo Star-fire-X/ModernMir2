@@ -1,0 +1,22 @@
+{
+  "flow": "buff_defence",
+  "description": "CM_SPELL(14/15)→SM_SPELL→SM_MAGICFIRE(ground)→半径3友方BUFF",
+  "delphi_source": "Magic.pas:878-904, ObjBase.pas:7266+ MagMakeDefenceArea",
+  "stages": [
+    {"stage":"client_send","message_type":"CM_SPELL","message_id":3017,"fields":{"magic_id":"14(幽灵盾) or 15(神圣战甲术)"}},
+    {"stage":"item_check","action":"CanUseBujuk(user,1) → 消耗1护身符","delphi_line":"Magic.pas:878/896"},
+    {"stage":"calc_power","formula":"GetAttackPower(GetPower13(60)+5*LoByte(SC), 5*(HiByte(SC)-LoByte(SC))+1)"},
+    {"stage":"apply","action":"MagMakeDefenceArea(xx,yy,3,pwr,is_magic)","delphi_line":"ObjBase.pas:7266+",
+      "sub_stages":[
+        {"action":"area_effect","range":"半径3 → 7×7区域","target":"友方"},
+        {"action":"apply_buff","magic_14":"魔法防御提升(BoMag:=TRUE)","magic_15":"物理防御提升(BoMag:=FALSE)"},
+        {"action":"duration","formula":"GetPower13(60)+5*LoByte(SC) seconds"}
+      ]},
+    {"stage":"broadcast","messages":[
+      {"type":"SM_SPELL(17)","receivers":"all_visible"},
+      {"type":"SM_MAGICFIRE(638)","effect":"mtGroundEffect, EffectBase[14]=1500/EffectBase[8]=20"}
+    ]},
+    {"stage":"training","formula":"TrainSkill(magic_id, 1+Random(3))"}
+  ],
+  "cplusplus_mapping": "map_actor_mail.hpp:3535, game_object.hpp:418-421 activate_legacy_defence_up/activate_legacy_magic_defence_up"
+}

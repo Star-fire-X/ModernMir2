@@ -62,6 +62,13 @@ using ProtocolEvent = std::variant<ConnectedEvent, DisconnectedEvent, ProtocolFr
 ///   5. 事件中有 client_v1::Message 时由 handle_protocol_events() 分发
 class ProtocolClient {
  public:
+#ifdef MIR2_CLIENT_TESTING
+  struct ConnectAttempt {
+    std::string host{};
+    std::uint16_t port{0};
+  };
+#endif
+
   ProtocolClient();
   ~ProtocolClient();
 
@@ -81,6 +88,12 @@ class ProtocolClient {
     if (state_ == State::disconnected) {
       return;
     }
+#ifdef MIR2_CLIENT_TESTING
+    if (test_mode_) {
+      sent_frames_.push_back(client_v1::make_frame(message, next_sequence_++));
+      return;
+    }
+#endif
     // make_frame 将消息包装成帧结构，encode_frame 添加长度前缀
     outbound_frames_.push_back(
         client_v1::encode_frame(client_v1::make_frame(message, next_sequence_++)));
@@ -91,6 +104,20 @@ class ProtocolClient {
   [[nodiscard]] bool connected() const { return state_ == State::connected; }
   /// 是否正在连接中（非阻塞 connect 尚未完成）
   [[nodiscard]] bool connecting() const { return state_ == State::connecting; }
+
+#ifdef MIR2_CLIENT_TESTING
+  void enable_test_mode_for_test();
+  void complete_connect_for_test();
+  template <typename T>
+  void push_message_for_test(const T& message) {
+    events_.push_back(ProtocolFrameEvent{client_v1::make_frame(message, 0)});
+  }
+  void push_disconnected_for_test(std::string reason);
+  [[nodiscard]] std::vector<client_v1::Frame> drain_sent_frames_for_test();
+  [[nodiscard]] const std::vector<ConnectAttempt>& connect_attempts_for_test() const {
+    return connect_attempts_;
+  }
+#endif
 
  private:
   /// 连接状态枚举
@@ -113,6 +140,11 @@ class ProtocolClient {
   std::size_t current_write_offset_{0};        ///< 当前发送帧的已发送字节偏移
   std::vector<ProtocolEvent> events_{};        ///< 待主循环处理的事件队列
   bool winsock_ready_{false};                  ///< WSAStartup 是否成功初始化
+#ifdef MIR2_CLIENT_TESTING
+  bool test_mode_{false};
+  std::vector<ConnectAttempt> connect_attempts_{};
+  std::vector<client_v1::Frame> sent_frames_{};
+#endif
 };
 
 }  // namespace mir2::client

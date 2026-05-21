@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "assets/asset_manager.hpp"
+#include "scene/character_select_state.hpp"
 
 namespace {
 
@@ -44,6 +45,22 @@ struct GoldenFrame {
   int height{0};
   std::uint64_t hash{0};
 };
+
+void assert_visible_frame(mir2::client::AssetManager& assets,
+                          const mir2::client::ArchiveId archive,
+                          const int index,
+                          const char* label) {
+  const auto frame = assets.get_frame(archive, index);
+  if (frame == nullptr || frame->empty() || !has_visible_pixel(*frame)) {
+    std::cerr << "missing_" << label << "_frame=" << index << '\n';
+    std::exit(1);
+  }
+  if (frame->pixels.size() !=
+      static_cast<std::size_t>(frame->width) * static_cast<std::size_t>(frame->height)) {
+    std::cerr << "bad_" << label << "_pixel_count=" << index << '\n';
+    std::exit(1);
+  }
+}
 
 std::uint64_t frame_hash(const mir2::client::SpriteFrame& frame) {
   auto hash = 1469598103934665603ULL;
@@ -144,6 +161,25 @@ int main() {
         frame_hash(*frame) != expected.hash) {
       std::cerr << "golden_prguse_mismatch=" << expected.index << '\n';
       return 1;
+    }
+  }
+  for (const auto index : {2, 4, 5}) {
+    assert_visible_frame(assets, mir2::client::ArchiveId::prguse2, index, "prguse2");
+  }
+  assert_visible_frame(assets, mir2::client::ArchiveId::chr_sel, 22, "chrsel");
+  for (int frame = 0; frame < mir2::client::kCharacterSelectEffectFrameCount; ++frame) {
+    assert_visible_frame(assets, mir2::client::ArchiveId::chr_sel, 4 + frame, "chrsel_effect");
+  }
+  for (int sex = 0; sex < 2; ++sex) {
+    for (int job = 0; job < 3; ++job) {
+      for (int frame = 0; frame < mir2::client::kCharacterSelectSelectedFrameCount; ++frame) {
+        assert_visible_frame(assets, mir2::client::ArchiveId::chr_sel,
+                             40 + job * 40 + frame + sex * 120, "chrsel_idle");
+      }
+      for (int frame = 0; frame < mir2::client::kCharacterSelectFreezeFrameCount; ++frame) {
+        assert_visible_frame(assets, mir2::client::ArchiveId::chr_sel,
+                             60 + job * 40 + frame + sex * 120, "chrsel_freeze");
+      }
     }
   }
   const auto magic_icon = assets.get_frame(mir2::client::ArchiveId::mag_icon, 0);

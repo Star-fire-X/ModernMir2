@@ -22,8 +22,9 @@
 #include "shared/legacy/action_ids.hpp"
 #include "shared/legacy/movement_rules.hpp"
 #include "util/string_utils.hpp"
-#include "world/legacy_magic_runtime.hpp"
+#include "world/legacy_chat_parser.hpp"
 #include "world/legacy_item_rules.hpp"
+#include "world/legacy_magic_runtime.hpp"
 #include "world/legacy_skill_formula.hpp"
 
 namespace mir2 {
@@ -1222,7 +1223,8 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
                    CastleDialogContext castle_dialog_context,
                    std::unordered_map<std::string, MonsterDefConfig> monster_defs,
                    MakeIndexAllocator* make_index_allocator,
-                   std::string black_stone_name)
+                   std::string black_stone_name,
+                   bool legacy_approval_mode)
     : config_(std::move(config)),
       budgets_(std::move(budgets)),
       item_configs_(std::move(item_configs)),
@@ -1230,6 +1232,7 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
       monster_defs_(std::move(monster_defs)),
       map_quests_(std::move(map_quests)),
       black_stone_name_(std::move(black_stone_name)),
+      legacy_approval_mode_(legacy_approval_mode),
       castle_dialog_context_(std::move(castle_dialog_context)),
       make_index_allocator_(make_index_allocator) {
   movement_map_ = legacy::decode_map_file(config_.source_map);
@@ -1497,6 +1500,7 @@ RuntimeDispatch MapActor::legacy_space_move_player(
   transfer.dir = snapshot.dir;
   transfer.character = snapshot;
   transfer.legacy_buffs = player->legacy_buffs_for_transfer(current_tick);
+  transfer.legacy_name_color = player->legacy_name_color();
   transfer.legacy_space_move_show2 = show2;
 
   queue_packet(dispatch, player->session_id(), make_clear_objects_packet(player->session_id()));
@@ -1666,8 +1670,8 @@ RuntimeDispatch MapActor::legacy_process_monster(std::uint64_t actor_id,
     monster->mark_legacy_search_time(now_ms);
   }
   if (run_due) {
-    handle_monster_ai(*monster, dispatch, current_tick, now_ms);
     monster->mark_legacy_run_time(now_ms);
+    handle_monster_ai(*monster, dispatch, current_tick, now_ms);
   }
   if (!monster->is_dead() &&
       handle_monster_status_effects(*monster, dispatch, current_tick, now_ms)) {
@@ -2884,7 +2888,8 @@ bool MapActor::handle_weapon_upgrade_start(Player& player, Npc& npc,
     }
   }
 
-  auto removed_weapon = player.remove_equipped_item(kEquipWeapon, weapon->make_index, {},
+  auto removed_weapon = player.remove_equipped_item(kEquipWeapon, weapon->make_index,
+                                                   item_name(*weapon, item_configs_),
                                                    item_configs_);
   if (!removed_weapon.has_value()) {
     queue_system_notice(dispatch, player, "Weapon upgrade failed.");
@@ -3400,6 +3405,7 @@ bool MapActor::try_legacy_revival(Player& player, RuntimeDispatch& dispatch,
                                  current_tick, now_ms);
 }
 
+#include "world/map_actor_gm.hpp"
 #include "world/map_actor_npc.hpp"
 void MapActor::add_legacy_trace(RuntimeDispatch& dispatch,
                                 std::string stage,

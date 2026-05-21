@@ -197,12 +197,12 @@ void GatewayServiceBase::bus_loop() {
           }
         }
         if (session != nullptr) {
+          const auto delay_ms = session_event->delay_ms >= 0 ? session_event->delay_ms : 0;
           if (session_event->kind == SessionEventKind::send_packet_and_close) {
-            const auto delay_ms = session_event->delay_ms >= 0 ? session_event->delay_ms : 0;
             session->deliver_and_close(session_event->packet, std::chrono::milliseconds(delay_ms),
                                        session_event->reason);
           } else {
-            session->deliver(session_event->packet);
+            session->deliver(session_event->packet, std::chrono::milliseconds(delay_ms));
           }
         }
       } else if (session_event->kind == SessionEventKind::force_disconnect &&

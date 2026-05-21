@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -44,6 +45,8 @@ class ClientV1GatewayServiceBase : public Module, public ClientV1SessionOwner {
                                    const std::string& reason) = 0;
 
   void send_message(std::uint64_t session_id, const client_v1::Message& message);
+  void send_message(std::uint64_t session_id, const client_v1::Message& message,
+                    std::chrono::milliseconds delay);
   void disconnect(std::uint64_t session_id, std::uint16_t code, const std::string& reason);
   [[nodiscard]] HostContext& context() const { return *context_; }
 

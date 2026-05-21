@@ -23,8 +23,9 @@ target_include_directories(modern_client_headers
     ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
-add_library(modern_client_core STATIC
+set(MODERN_CLIENT_CORE_SOURCES
   src/app/client_app.cpp
+  src/app/startup_resource_check.cpp
   src/audio/direct_sound_audio_backend.cpp
   src/audio/audio_id_mapping.cpp
   src/audio/legacy_audio_cue_tracker.cpp
@@ -43,10 +44,30 @@ add_library(modern_client_core STATIC
   src/scene/legacy_play_ui.cpp
   src/scene/legacy_inventory_ui.cpp
   src/scene/legacy_magic_npc_ui.cpp
+  src/scene/legacy_trade_group_guild_ui.cpp
+  src/scene/legacy_ui_lifecycle.cpp
   src/scene/scenes.cpp
 )
 
+add_library(modern_client_core STATIC ${MODERN_CLIENT_CORE_SOURCES})
+
 target_link_libraries(modern_client_core
+  PUBLIC
+    modern_client_headers
+    d3d11
+    dxgi
+    d3dcompiler
+    gdi32
+    user32
+    ws2_32
+    dsound
+    dxguid
+    winmm
+)
+
+add_library(modern_client_test_core STATIC ${MODERN_CLIENT_CORE_SOURCES})
+target_compile_definitions(modern_client_test_core PUBLIC MIR2_CLIENT_TESTING)
+target_link_libraries(modern_client_test_core
   PUBLIC
     modern_client_headers
     d3d11
@@ -75,9 +96,18 @@ function(add_modern_client_core_smoke target source)
   add_test(NAME ${target} COMMAND ${target})
 endfunction()
 
+function(add_modern_client_test_core_smoke target source)
+  add_executable(${target} ${source})
+  target_link_libraries(${target} PRIVATE modern_client_test_core)
+  add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
 add_modern_client_core_smoke(modern_client_asset_smoke tests/asset_smoke.cpp)
+add_modern_client_core_smoke(modern_client_startup_resource_check_smoke tests/startup_resource_check_smoke.cpp)
 add_modern_client_header_smoke(modern_client_protocol_map_smoke tests/protocol_map_smoke.cpp)
 add_modern_client_header_smoke(modern_client_flow_smoke tests/client_flow_smoke.cpp)
+add_modern_client_header_smoke(modern_client_auth_error_text_smoke tests/auth_error_text_smoke.cpp)
+add_modern_client_test_core_smoke(modern_client_auth_gate_flow_smoke tests/auth_gate_flow_smoke.cpp)
 add_modern_client_header_smoke(modern_client_text_encoding_smoke tests/text_encoding_smoke.cpp)
 add_modern_client_header_smoke(modern_client_item_pending_smoke tests/item_pending_smoke.cpp)
 add_modern_client_header_smoke(modern_client_character_select_smoke tests/character_select_smoke.cpp)
@@ -96,6 +126,18 @@ add_modern_client_header_smoke(modern_client_frame_order_smoke tests/client_app_
 add_modern_client_header_smoke(modern_client_scene_trace_golden_smoke tests/scene_trace_golden_smoke.cpp)
 target_compile_definitions(modern_client_scene_trace_golden_smoke
   PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_test_core_smoke(modern_client_migration_protocol_replay_baseline_smoke tests/migration_protocol_replay_baseline_smoke.cpp)
+target_compile_definitions(modern_client_migration_protocol_replay_baseline_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_header_smoke(modern_client_migration_frame_trace_baseline_smoke tests/migration_frame_trace_baseline_smoke.cpp)
+target_compile_definitions(modern_client_migration_frame_trace_baseline_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_header_smoke(modern_client_migration_action_trace_baseline_smoke tests/migration_action_trace_baseline_smoke.cpp)
+target_compile_definitions(modern_client_migration_action_trace_baseline_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_core_smoke(modern_client_migration_render_ui_trace_baseline_smoke tests/migration_render_ui_trace_baseline_smoke.cpp)
+target_compile_definitions(modern_client_migration_render_ui_trace_baseline_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 add_modern_client_header_smoke(modern_client_legacy_ui_expected_trace_smoke tests/legacy_ui_expected_trace_smoke.cpp)
 target_compile_definitions(modern_client_legacy_ui_expected_trace_smoke
   PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
@@ -112,6 +154,30 @@ add_modern_client_core_smoke(modern_client_legacy_auth_ui_trace_smoke tests/lega
 target_compile_definitions(modern_client_legacy_auth_ui_trace_smoke
   PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 add_modern_client_core_smoke(modern_client_legacy_auth_ui_layout_smoke tests/legacy_auth_ui_layout_smoke.cpp)
+add_modern_client_header_smoke(modern_client_delphi_auth_trace_contract_smoke tests/delphi_auth_trace_contract_smoke.cpp)
+target_compile_definitions(modern_client_delphi_auth_trace_contract_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_header_smoke(modern_client_delphi_ui_manifest_smoke tests/delphi_ui_manifest_smoke.cpp)
+target_compile_definitions(modern_client_delphi_ui_manifest_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_core_smoke(modern_client_auth_ui_manifest_contract_smoke tests/auth_ui_manifest_contract_smoke.cpp)
+target_compile_definitions(modern_client_auth_ui_manifest_contract_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_core_smoke(modern_client_auth_ui_screenshot_golden_smoke tests/auth_ui_screenshot_golden_smoke.cpp)
+target_compile_definitions(modern_client_auth_ui_screenshot_golden_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_header_smoke(modern_client_auth_animation_frame_smoke tests/auth_animation_frame_smoke.cpp)
+target_compile_definitions(modern_client_auth_animation_frame_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_core_smoke(modern_client_auth_animation_real_asset_frame_smoke tests/auth_animation_real_asset_frame_smoke.cpp)
+target_compile_definitions(modern_client_auth_animation_real_asset_frame_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_header_smoke(modern_client_auth_modal_focus_audio_matrix_smoke tests/auth_modal_focus_audio_matrix_smoke.cpp)
+target_compile_definitions(modern_client_auth_modal_focus_audio_matrix_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_core_smoke(modern_client_auth_ui_real_asset_screenshot_smoke tests/auth_ui_real_asset_screenshot_smoke.cpp)
+target_compile_definitions(modern_client_auth_ui_real_asset_screenshot_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 add_modern_client_core_smoke(modern_client_legacy_play_ui_trace_smoke tests/legacy_play_ui_trace_smoke.cpp)
 target_compile_definitions(modern_client_legacy_play_ui_trace_smoke
   PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
@@ -124,6 +190,17 @@ add_modern_client_core_smoke(modern_client_legacy_magic_npc_ui_trace_smoke tests
 target_compile_definitions(modern_client_legacy_magic_npc_ui_trace_smoke
   PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 add_modern_client_core_smoke(modern_client_legacy_magic_npc_ui_layout_smoke tests/legacy_magic_npc_ui_layout_smoke.cpp)
+add_modern_client_core_smoke(modern_client_legacy_trade_group_guild_ui_trace_smoke tests/legacy_trade_group_guild_ui_trace_smoke.cpp)
+target_compile_definitions(modern_client_legacy_trade_group_guild_ui_trace_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_core_smoke(modern_client_legacy_trade_group_guild_ui_layout_smoke tests/legacy_trade_group_guild_ui_layout_smoke.cpp)
+add_modern_client_core_smoke(modern_client_legacy_ui_lifecycle_trace_smoke tests/legacy_ui_lifecycle_trace_smoke.cpp)
+target_compile_definitions(modern_client_legacy_ui_lifecycle_trace_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_core_smoke(modern_client_legacy_ui_golden_image_smoke tests/legacy_ui_golden_image_smoke.cpp)
+target_compile_definitions(modern_client_legacy_ui_golden_image_smoke
+  PRIVATE MIR2_CLIENT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_modern_client_core_smoke(modern_client_legacy_ui_lifecycle_fuzz_smoke tests/legacy_ui_lifecycle_fuzz_smoke.cpp)
 add_modern_client_header_smoke(modern_client_scene_state_fuzz_smoke tests/scene_state_fuzz_smoke.cpp)
 add_modern_client_core_smoke(modern_client_ui_capture_process_order_smoke tests/ui_capture_process_order_smoke.cpp)
 add_modern_client_core_smoke(modern_client_world_scene_legacy_order_smoke tests/world_scene_legacy_order_smoke.cpp)
@@ -143,8 +220,11 @@ add_custom_target(modern_client_ci_phase2_fast
   DEPENDS
     modern_mir2_client
     modern_client_asset_smoke
+    modern_client_startup_resource_check_smoke
     modern_client_protocol_map_smoke
     modern_client_flow_smoke
+    modern_client_auth_error_text_smoke
+    modern_client_auth_gate_flow_smoke
     modern_client_text_encoding_smoke
     modern_client_movement_smoke
     modern_client_movement_action_gate_smoke
@@ -153,24 +233,40 @@ add_custom_target(modern_client_ci_phase2_fast
     modern_client_item_pending_smoke
     modern_client_frame_order_smoke
     modern_client_scene_trace_golden_smoke
+    modern_client_migration_protocol_replay_baseline_smoke
+    modern_client_migration_frame_trace_baseline_smoke
+    modern_client_migration_action_trace_baseline_smoke
+    modern_client_migration_render_ui_trace_baseline_smoke
     modern_client_legacy_ui_expected_trace_smoke
     modern_client_legacy_ui_manager_smoke
     modern_client_legacy_ui_paint_layers_smoke
     modern_client_legacy_ui_input_trace_smoke
     modern_client_legacy_auth_ui_trace_smoke
     modern_client_legacy_auth_ui_layout_smoke
+    modern_client_delphi_auth_trace_contract_smoke
+    modern_client_delphi_ui_manifest_smoke
+    modern_client_auth_ui_manifest_contract_smoke
+    modern_client_auth_ui_screenshot_golden_smoke
+    modern_client_auth_animation_frame_smoke
+    modern_client_auth_modal_focus_audio_matrix_smoke
     modern_client_legacy_play_ui_trace_smoke
     modern_client_legacy_play_ui_layout_smoke
     modern_client_legacy_inventory_ui_trace_smoke
     modern_client_legacy_inventory_ui_layout_smoke
     modern_client_legacy_magic_npc_ui_trace_smoke
     modern_client_legacy_magic_npc_ui_layout_smoke
+    modern_client_legacy_trade_group_guild_ui_trace_smoke
+    modern_client_legacy_trade_group_guild_ui_layout_smoke
+    modern_client_legacy_ui_lifecycle_trace_smoke
+    modern_client_legacy_ui_golden_image_smoke
+    modern_client_legacy_ui_lifecycle_fuzz_smoke
     modern_client_scene_state_fuzz_smoke
     modern_client_ui_capture_process_order_smoke
     modern_client_world_scene_legacy_order_smoke
     modern_client_inventory_ui_smoke
     modern_client_chat_magic_ui_smoke
     modern_client_trade_group_guild_ui_smoke
+    modern_client_ui_smoke
     modern_client_character_select_smoke
     modern_client_legacy_animation_smoke
     modern_client_legacy_animation_replay_golden_smoke

@@ -10,6 +10,15 @@ int main() {
   self.actor_id = 1;
   world.latest_hit_ms = 1000;
 
+  assert(legacy_next_hit_delay_ms(0, 0, false) == 1400);
+  assert(legacy_next_hit_delay_ms(1, 0, false) == 1386);
+  assert(legacy_next_hit_delay_ms(30, 0, false) == 1030);
+  assert(legacy_next_hit_delay_ms(40, 5, false) == 730);
+  assert(legacy_next_hit_delay_ms(30, 10, false) == 600);
+  assert(legacy_next_hit_delay_ms(40, 99, false) == 600);
+  assert(legacy_next_hit_delay_ms(1, -1, false) == 1446);
+  assert(legacy_next_hit_delay_ms(0, 0, true) == 2900);
+
   world.self_ability_detail.level = 0;
   world.self_ability_detail.speed = 0;
   world.attack_slow = false;
@@ -24,6 +33,16 @@ int main() {
   world.self_ability_detail.level = 30;
   world.self_ability_detail.speed = 10;
   assert(!can_next_hit(world, self, 1599));
+  assert(can_next_hit(world, self, 1601));
+
+  world.self_ability_detail.level = 1;
+  world.self_ability_detail.speed = -1;
+  assert(!can_next_hit(world, self, 2446));
+  assert(can_next_hit(world, self, 2447));
+
+  world.self_ability_detail.level = 40;
+  world.self_ability_detail.speed = 99;
+  assert(!can_next_hit(world, self, 1600));
   assert(can_next_hit(world, self, 1601));
 
   world.self_ability_detail.level = 0;

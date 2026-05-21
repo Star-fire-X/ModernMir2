@@ -63,8 +63,20 @@ int main() {
   const auto config = loader.load(root);
   assert(!config.runtime.enable_legacy_gateways);
   assert(config.runtime.enable_client_v1_gateways);
+  assert(!config.runtime.legacy_approval_mode);
   assert(config.runtime.io_threads == 2);
   assert(config.budgets.player_input_budget_per_tick == 2);
+
+  write_text(root / "server.toml",
+             "log_dir = \"logs\"\n"
+             "data_dir = \"data\"\n"
+             "status_file = \"runtime/status.json\"\n"
+             "io_threads = 2\n"
+             "enable_legacy_gateways = false\n"
+             "enable_client_v1_gateways = true\n"
+             "legacy_approval_mode = true\n");
+  const auto approval_config = loader.load(root);
+  assert(approval_config.runtime.legacy_approval_mode);
 
   std::filesystem::remove_all(root, ignored);
   return 0;

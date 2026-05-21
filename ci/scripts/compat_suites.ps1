@@ -45,6 +45,18 @@ function Get-CiBuildTargets {
     "mir2_legacy_protocol_command_golden_smoke",
     "mir2_canonical_legacy_command_smoke",
     "mir2_legacy_string_semantics_smoke",
+    "mir2_legacy_chat_parser_smoke",
+    "mir2_legacy_chat_router_smoke",
+    "mir2_legacy_chat_rules_smoke",
+    "mir2_legacy_chat_commands_smoke",
+    "mir2_legacy_gm_command_registry_smoke",
+    "mir2_legacy_gm_ops_smoke",
+    "mir2_legacy_gm_player_state_smoke",
+    "mir2_legacy_gm_quest_marks_smoke",
+    "mir2_legacy_gm_skill_item_smoke",
+    "mir2_legacy_gm_monster_spawn_smoke",
+    "mir2_legacy_gm_guild_castle_reload_smoke",
+    "mir2_client_v1_legacy_chat_equivalence_smoke",
     "mir2_client_v1_protocol_smoke",
     "mir2_movement_blocking_legacy_smoke",
     "mir2_combat_smoke",
@@ -56,6 +68,7 @@ function Get-CiBuildTargets {
     "mir2_player_movement_smoke",
     "mir2_visibility_delta_smoke",
     "mir2_monster_legacy_combat_damage_smoke",
+    "mir2_attack_protocol_golden_smoke",
     "mir2_skill_formula_golden_smoke",
     "mir2_skill_protocol_golden_smoke",
     "mir2_skill_status_poison_buff_hide_shield_smoke",
@@ -182,16 +195,61 @@ function Get-CiBuildTargets {
   $clientPhase1 = @(
     "modern_mir2_client",
     "modern_client_asset_smoke",
+    "modern_client_startup_resource_check_smoke",
     "modern_client_protocol_map_smoke",
     "modern_client_flow_smoke",
+    "modern_client_auth_gate_flow_smoke",
     "modern_client_text_encoding_smoke",
     "modern_client_movement_smoke"
   )
 
   $clientPhase2 = Join-Unique -Values ($clientPhase1 + @(
+    "modern_client_movement_action_gate_smoke",
+    "modern_client_legacy_move_decision_smoke",
+    "modern_client_legacy_attack_timing_smoke",
     "modern_client_item_pending_smoke",
+    "modern_client_frame_order_smoke",
+    "modern_client_scene_trace_golden_smoke",
+    "modern_client_migration_protocol_replay_baseline_smoke",
+    "modern_client_migration_frame_trace_baseline_smoke",
+    "modern_client_migration_action_trace_baseline_smoke",
+    "modern_client_migration_render_ui_trace_baseline_smoke",
+    "modern_client_legacy_ui_expected_trace_smoke",
+    "modern_client_legacy_ui_manager_smoke",
+    "modern_client_legacy_ui_paint_layers_smoke",
+    "modern_client_legacy_ui_input_trace_smoke",
+    "modern_client_legacy_auth_ui_trace_smoke",
+    "modern_client_legacy_auth_ui_layout_smoke",
+    "modern_client_delphi_auth_trace_contract_smoke",
+    "modern_client_delphi_ui_manifest_smoke",
+    "modern_client_auth_ui_manifest_contract_smoke",
+    "modern_client_auth_ui_screenshot_golden_smoke",
+    "modern_client_auth_animation_frame_smoke",
+    "modern_client_auth_modal_focus_audio_matrix_smoke",
+    "modern_client_legacy_play_ui_trace_smoke",
+    "modern_client_legacy_play_ui_layout_smoke",
+    "modern_client_legacy_inventory_ui_trace_smoke",
+    "modern_client_legacy_inventory_ui_layout_smoke",
+    "modern_client_legacy_magic_npc_ui_trace_smoke",
+    "modern_client_legacy_magic_npc_ui_layout_smoke",
+    "modern_client_legacy_trade_group_guild_ui_trace_smoke",
+    "modern_client_legacy_trade_group_guild_ui_layout_smoke",
+    "modern_client_legacy_ui_lifecycle_trace_smoke",
+    "modern_client_legacy_ui_golden_image_smoke",
+    "modern_client_legacy_ui_lifecycle_fuzz_smoke",
+    "modern_client_scene_state_fuzz_smoke",
+    "modern_client_ui_capture_process_order_smoke",
+    "modern_client_world_scene_legacy_order_smoke",
+    "modern_client_inventory_ui_smoke",
+    "modern_client_chat_magic_ui_smoke",
+    "modern_client_trade_group_guild_ui_smoke",
+    "modern_client_ui_smoke",
     "modern_client_character_select_smoke",
-    "modern_client_legacy_animation_smoke"
+    "modern_client_legacy_animation_smoke",
+    "modern_client_legacy_animation_replay_golden_smoke",
+    "modern_client_legacy_actor_event_semantics_smoke",
+    "modern_client_world_render_smoke",
+    "modern_client_combat_presentation_smoke"
   ))
 
   $clientPhase3 = Join-Unique -Values ($clientPhase2 + @(
@@ -204,7 +262,9 @@ function Get-CiBuildTargets {
     "modern_client_scene_audio_smoke",
     "modern_client_audio_service_smoke",
     "modern_client_legacy_sound_rules_smoke",
-    "modern_client_legacy_audio_cue_tracker_smoke"
+    "modern_client_legacy_audio_cue_tracker_smoke",
+    "modern_client_auth_animation_real_asset_frame_smoke",
+    "modern_client_auth_ui_real_asset_screenshot_smoke"
   ))
 
   if ($ProjectName -eq "ModernServer") {
@@ -243,9 +303,11 @@ function Get-CiTestNames {
 
   if ($ProjectName -eq "ModernClient") {
     $localResourceTests = @(Get-LocalResourceTestNames)
+    $ciExcludedTests = @("modern_client_world_scene_legacy_order_smoke")
     return @($targets | Where-Object {
       $_ -ne "modern_mir2_client" -and
-      ($localResourceTests -notcontains $_)
+      ($localResourceTests -notcontains $_) -and
+      ($ciExcludedTests -notcontains $_)
     })
   }
 
@@ -384,6 +446,11 @@ function Get-CiQuarantinedTests {
     },
     [pscustomobject]@{
       Project = "ModernClient"
+      Test = "modern_client_world_scene_legacy_order_smoke"
+      Reason = "Hard-codes F:\mir2\Legend of Mir for WorldScene audio setup; keep outside CI and AssetRoot runner until fixture support exists."
+    },
+    [pscustomobject]@{
+      Project = "ModernClient"
       Test = "modern_client_audio_mapping_smoke"
       Reason = "Requires real Wav resources; run with ci/scripts/run_local_resource_tests.ps1 instead."
     },
@@ -406,6 +473,16 @@ function Get-CiQuarantinedTests {
       Project = "ModernClient"
       Test = "modern_client_legacy_audio_cue_tracker_smoke"
       Reason = "Requires real Wav resources; run with ci/scripts/run_local_resource_tests.ps1 instead."
+    },
+    [pscustomobject]@{
+      Project = "ModernClient"
+      Test = "modern_client_auth_animation_real_asset_frame_smoke"
+      Reason = "Requires real ChrSel resources; run with ci/scripts/run_local_resource_tests.ps1 instead."
+    },
+    [pscustomobject]@{
+      Project = "ModernClient"
+      Test = "modern_client_auth_ui_real_asset_screenshot_smoke"
+      Reason = "Requires real Prguse/Prguse2 assets; run with ci/scripts/run_local_resource_tests.ps1 instead."
     }
   )
 }
@@ -418,6 +495,8 @@ function Get-LocalResourceTestNames {
     "modern_client_wav_reader_smoke",
     "modern_client_audio_service_smoke",
     "modern_client_scene_audio_smoke",
-    "modern_client_legacy_audio_cue_tracker_smoke"
+    "modern_client_legacy_audio_cue_tracker_smoke",
+    "modern_client_auth_animation_real_asset_frame_smoke",
+    "modern_client_auth_ui_real_asset_screenshot_smoke"
   )
 }

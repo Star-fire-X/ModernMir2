@@ -58,6 +58,11 @@ constexpr std::uint16_t kSmNewMap = 51;
 constexpr std::uint16_t kSmAbility = 52;
 constexpr std::uint16_t kSmHealthSpellChanged = 53;
 constexpr std::uint16_t kSmMapDescription = 54;
+constexpr std::uint16_t kSmSysMessage = 100;
+constexpr std::uint16_t kSmGroupMessage = 101;
+constexpr std::uint16_t kSmCry = 102;
+constexpr std::uint16_t kSmWhisper = 103;
+constexpr std::uint16_t kSmGuildMessage = 104;
 constexpr std::uint16_t kSmAddItem = 200;
 constexpr std::uint16_t kSmBagItems = 201;
 constexpr std::uint16_t kSmDelItem = 202;
@@ -198,6 +203,7 @@ constexpr std::size_t kMaxEquipSlots = 13;
 constexpr std::size_t kMaxBagItems = 46;
 constexpr std::size_t kMaxUserMagic = 20;
 constexpr std::size_t kMaxSaveItems = 50;
+constexpr std::size_t kRuntimeMaxStorageItems = 39;
 
 #pragma pack(push, 1)
 

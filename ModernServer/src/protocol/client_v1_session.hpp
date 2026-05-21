@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <deque>
 #include <memory>
 #include <string>
@@ -29,6 +30,7 @@ class ClientV1Session : public std::enable_shared_from_this<ClientV1Session> {
 
   void start(std::uint64_t session_id);
   void send(const client_v1::Message& message);
+  void send(const client_v1::Message& message, std::chrono::milliseconds delay);
   void send_disconnect_and_close(std::uint16_t code, std::string reason);
   void close(std::string reason);
 

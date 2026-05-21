@@ -131,6 +131,10 @@ int main() {
   assert(snapshot->walk_step == 2);
   assert(snapshot->walk_wait_ms == 11);
   assert(snapshot->attack_speed_ms == 200);
+  assert(snapshot->legacy_run_time_ms == 0);
+  assert(snapshot->legacy_run_next_tick_ms == 250);
+  assert(snapshot->legacy_search_time_ms == 1000);
+  assert(snapshot->legacy_search_rate_ms >= 1500);
 
   mir2::LogicCommand enter;
   enter.kind = mir2::LogicCommandKind::enter_world;

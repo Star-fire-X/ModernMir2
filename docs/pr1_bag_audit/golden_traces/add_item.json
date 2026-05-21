@@ -1,0 +1,13 @@
+{
+  "name": "add_item",
+  "source": "static_delphi_review",
+  "description": "Visible server-side AddItem appends to ItemList and sends one TClientItem.",
+  "events": [
+    {"seq": 1, "actor": "server", "action": "CanAddItem checks ItemList.Count < MAXBAGITEM"},
+    {"seq": 2, "actor": "server", "action": "ItemList.Add(pu)"},
+    {"seq": 3, "actor": "server", "message": "RM_WEIGHTCHANGED"},
+    {"seq": 4, "direction": "server_to_client", "message": "SM_ADDITEM", "series": 1, "body": "TClientItem"},
+    {"seq": 5, "actor": "client", "action": "ClientGetAddItem; AddItemBag(TClientItem)"}
+  ],
+  "identity": "TClientItem.MakeIndex plus TClientItem.S.Name"
+}

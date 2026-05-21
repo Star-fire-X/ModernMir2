@@ -60,16 +60,25 @@ int main() {
              "HomeY=30\n");
   write_text(legacy / "Envir" / "StartPoint.txt", "0 30 30\n");
   write_text(legacy / "Envir" / "MapInfo.txt", "[0 Test 0]\n");
-  write_text(legacy / "Envir" / "MonGen.txt", "0 30 31 Oma 8 5 2 100\n");
+  write_text(legacy / "Envir" / "MonGen.txt",
+             "0 30 31 Oma 8 5 2 100\n"
+             "0 40 41 \"Cave Maggot\" 4 2 3 50\n"
+             "0 50 51 Red Boar King 6 3 4 25\n");
+  write_text(legacy / "Envir" / "MonItems" / "Cave Maggot.txt",
+             "1/3 \"Healing Potion\"\n"
+             "2 5 Strong Oil 4\n");
   write_text(legacy / "Envir" / "MonItems" / "Oma.txt",
              "1/2 WoodenSword 2\n"
              "1/1 Gold 10\n");
-  write_text(legacy / "Envir" / "MakeItem.txt", "WoodenSword\n");
+  write_text(legacy / "Envir" / "MakeItem.txt",
+             "WoodenSword\n"
+             "Healing Potion\n"
+             "Strong Oil\n");
 
   mir2::LegacyImporter importer;
   const auto report = importer.import_tree(legacy, output);
-  assert(report.spawn_count == 1);
-  assert(report.monster_drop_count == 2);
+  assert(report.spawn_count == 3);
+  assert(report.monster_drop_count == 4);
 
   write_text(output / "monsters" / "custom_defs.toml",
              "monsters = [\n"
@@ -77,7 +86,12 @@ int main() {
              " level = 7, undead = true, cool_eye = 1, exp = 88, hp = 99, mp = 5,"
              " ac = 2, mac = 3, dc = 4, dc_max = 9, mc = 6, sc = 7, agility = 8,"
              " accurate = 9, walk_speed_ms = 450, walk_step = 2, walk_wait_ms = 50,"
-             " attack_speed_ms = 700, ai_profile = \"aggressive\" }\n"
+             " attack_speed_ms = 700, ai_profile = \"aggressive\" },\n"
+             "  { name = \"LowSpeedMob\", race_server = 81, walk_speed_ms = 1,"
+             " attack_speed_ms = 1 },\n"
+             "  { name = \"AliasMob\", race = 82, race_img = 30, img_index = 4,"
+             " lv = 9, undead = 1, dcmax = 12, walk_spd = 1, walk_wait = 25,"
+             " attack_spd = 1 }\n"
              "]\n");
 
   mir2::ConfigLoader loader;
@@ -91,7 +105,37 @@ int main() {
   assert(spawn->zen_time_ms == 120000);
   assert(spawn->small_zen_rate == 100);
   assert(spawn->legacy_group);
+  const auto* quoted_spawn = find_spawn(config, "Cave Maggot");
+  assert(quoted_spawn != nullptr);
+  assert(quoted_spawn->map_id == "0");
+  assert(quoted_spawn->x == 40 && quoted_spawn->y == 41);
+  assert(quoted_spawn->area == 4);
+  assert(quoted_spawn->count == 2);
+  assert(quoted_spawn->zen_time_ms == 180000);
+  assert(quoted_spawn->small_zen_rate == 50);
+  assert(quoted_spawn->legacy_group);
+  const auto* unquoted_spawn = find_spawn(config, "Red Boar King");
+  assert(unquoted_spawn != nullptr);
+  assert(unquoted_spawn->map_id == "0");
+  assert(unquoted_spawn->x == 50 && unquoted_spawn->y == 51);
+  assert(unquoted_spawn->area == 6);
+  assert(unquoted_spawn->count == 3);
+  assert(unquoted_spawn->zen_time_ms == 240000);
+  assert(unquoted_spawn->small_zen_rate == 25);
+  assert(unquoted_spawn->legacy_group);
 
+  assert(!config.monster_drops.empty());
+  assert(config.monster_drops.front().monster_name == "Cave Maggot");
+  const auto* potion_drop = find_drop(config, "Cave Maggot", "Healing Potion");
+  assert(potion_drop != nullptr);
+  assert(potion_drop->sel_point == 0);
+  assert(potion_drop->max_point == 3);
+  assert(potion_drop->count == 1);
+  const auto* oil_drop = find_drop(config, "Cave Maggot", "Strong Oil");
+  assert(oil_drop != nullptr);
+  assert(oil_drop->sel_point == 1);
+  assert(oil_drop->max_point == 5);
+  assert(oil_drop->count == 4);
   const auto* sword_drop = find_drop(config, "Oma", "WoodenSword");
   assert(sword_drop != nullptr);
   assert(sword_drop->sel_point == 0);
@@ -114,6 +158,22 @@ int main() {
   assert(custom->walk_wait_ms == 50);
   assert(custom->attack_speed_ms == 700);
   assert(custom->ai_profile == mir2::MonsterAiProfile::aggressive);
+
+  const auto* low_speed = find_monster(config, "LowSpeedMob");
+  assert(low_speed != nullptr);
+  assert(low_speed->walk_speed_ms == 200);
+  assert(low_speed->attack_speed_ms == 200);
+  const auto* alias = find_monster(config, "AliasMob");
+  assert(alias != nullptr);
+  assert(alias->race_server == 82);
+  assert(alias->race_image == 30);
+  assert(alias->appearance == 4);
+  assert(alias->level == 9);
+  assert(alias->undead);
+  assert(alias->dc_max == 12);
+  assert(alias->walk_speed_ms == 200);
+  assert(alias->walk_wait_ms == 25);
+  assert(alias->attack_speed_ms == 200);
 
   std::filesystem::remove_all(root, ignored);
   return 0;

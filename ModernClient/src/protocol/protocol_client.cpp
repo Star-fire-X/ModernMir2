@@ -36,6 +36,15 @@ ProtocolClient::~ProtocolClient() {
 //   2. 进入 connecting 状态（等待 select 指示完成）
 // 两种情况下均返回 true
 bool ProtocolClient::connect(const std::string& host, std::uint16_t port) {
+#ifdef MIR2_CLIENT_TESTING
+  if (test_mode_) {
+    disconnect();
+    connect_attempts_.push_back(ConnectAttempt{host, port});
+    state_ = State::connecting;
+    return true;
+  }
+#endif
+
   disconnect();  // 断开已有的连接，清理状态
 
   if (!winsock_ready_) {
@@ -105,6 +114,12 @@ void ProtocolClient::disconnect(const std::string& reason) {
 // 处理顺序：异步连接完成 -> 接收数据 -> 发送数据
 // 必须在主循环中每帧调用，以实现低延迟网络通信
 void ProtocolClient::poll() {
+#ifdef MIR2_CLIENT_TESTING
+  if (test_mode_) {
+    return;
+  }
+#endif
+
   if (socket_ == INVALID_SOCKET) {
     return;
   }
@@ -235,5 +250,37 @@ void ProtocolClient::handle_writable() {
 void ProtocolClient::push_disconnect(std::string reason) {
   events_.push_back(DisconnectedEvent{std::move(reason)});
 }
+
+#ifdef MIR2_CLIENT_TESTING
+void ProtocolClient::enable_test_mode_for_test() {
+  disconnect();
+  test_mode_ = true;
+  connect_attempts_.clear();
+  sent_frames_.clear();
+  events_.clear();
+}
+
+void ProtocolClient::complete_connect_for_test() {
+  if (!test_mode_ || state_ != State::connecting) {
+    return;
+  }
+  state_ = State::connected;
+  events_.push_back(ConnectedEvent{});
+}
+
+void ProtocolClient::push_disconnected_for_test(std::string reason) {
+  if (!test_mode_) {
+    return;
+  }
+  state_ = State::disconnected;
+  events_.push_back(DisconnectedEvent{std::move(reason)});
+}
+
+std::vector<client_v1::Frame> ProtocolClient::drain_sent_frames_for_test() {
+  auto frames = std::move(sent_frames_);
+  sent_frames_.clear();
+  return frames;
+}
+#endif
 
 }  // namespace mir2::client

@@ -25,6 +25,7 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -186,7 +187,8 @@ enum class PendingItemActionKind {
   use,
   equip,
   unequip,
-  drop
+  drop,
+  trade_add
 };
 
 struct PendingItemActionState {
@@ -314,6 +316,69 @@ enum class LoginState {
   lsCloseAll     ///< 关闭客户端
 };
 
+enum class LoginPendingFocus {
+  none,
+  account,
+  password
+};
+
+enum class AuthFlowPhase {
+  EditingLogin,
+  ConnectingLoginGate,
+  WaitingLoginResult,
+  WaitingServerList,
+  BrowsingServers,
+  WaitingServerSelection,
+  ConnectingCharacterGate,
+  QueryingCharacters,
+  BrowsingCharacters,
+  WaitingStartPlay,
+  ConnectingRunGate,
+  EnteringWorld,
+  ViewingLoginNotice,
+  WaitingWorldSnapshot,
+  InGame,
+  Disconnected,
+};
+
+[[nodiscard]] inline std::string_view auth_flow_phase_name(const AuthFlowPhase phase) {
+  switch (phase) {
+    case AuthFlowPhase::EditingLogin:
+      return "EditingLogin";
+    case AuthFlowPhase::ConnectingLoginGate:
+      return "ConnectingLoginGate";
+    case AuthFlowPhase::WaitingLoginResult:
+      return "WaitingLoginResult";
+    case AuthFlowPhase::WaitingServerList:
+      return "WaitingServerList";
+    case AuthFlowPhase::BrowsingServers:
+      return "BrowsingServers";
+    case AuthFlowPhase::WaitingServerSelection:
+      return "WaitingServerSelection";
+    case AuthFlowPhase::ConnectingCharacterGate:
+      return "ConnectingCharacterGate";
+    case AuthFlowPhase::QueryingCharacters:
+      return "QueryingCharacters";
+    case AuthFlowPhase::BrowsingCharacters:
+      return "BrowsingCharacters";
+    case AuthFlowPhase::WaitingStartPlay:
+      return "WaitingStartPlay";
+    case AuthFlowPhase::ConnectingRunGate:
+      return "ConnectingRunGate";
+    case AuthFlowPhase::EnteringWorld:
+      return "EnteringWorld";
+    case AuthFlowPhase::ViewingLoginNotice:
+      return "ViewingLoginNotice";
+    case AuthFlowPhase::WaitingWorldSnapshot:
+      return "WaitingWorldSnapshot";
+    case AuthFlowPhase::InGame:
+      return "InGame";
+    case AuthFlowPhase::Disconnected:
+      return "Disconnected";
+  }
+  return "Unknown";
+}
+
 /// 登录界面状态
 /// 包含账号名、密码、资料、状态提示等
 struct LoginViewState {
@@ -324,6 +389,7 @@ struct LoginViewState {
   LoginState login_state{LoginState::lsLogin};
   std::wstring status{};  ///< 状态文本（显示在界面底部的提示信息）
   bool request_pending{false};
+  LoginPendingFocus pending_focus{LoginPendingFocus::none};
 };
 
 /// 游戏大厅状态（选服/选角）
@@ -443,6 +509,7 @@ inline bool server_accept_next_action(WorldViewState& world, const std::uint64_t
   }
   if (elapsed_ms(now, world.action_lock_started_ms) > 10000U) {
     world.action_locked = false;
+    return true;
   }
   return false;
 }
@@ -507,19 +574,27 @@ inline bool can_next_action(const WorldViewState& world, const ActorState& self,
   return !actor_action_animating(self, now);
 }
 
+inline std::int32_t legacy_next_hit_delay_ms(const std::int32_t level,
+                                             const std::int32_t hit_speed,
+                                             const bool attack_slow) {
+  auto level_fast = std::min(370, level * 14);
+  level_fast = std::min(800, level_fast + hit_speed * 60);
+  auto next_hit = 1400 - level_fast;
+  if (attack_slow) {
+    next_hit += 1500;
+  }
+  return std::max(0, next_hit);
+}
+
 /// 检查角色是否可以发起下一次攻击
 inline bool can_next_hit(const WorldViewState& world, const ActorState& self,
                          const std::uint64_t now) {
   if (self.dead) {
     return false;
   }
-  auto level_fast = std::min(370, static_cast<int>(world.self_ability_detail.level) * 14);
-  level_fast = std::min(800, level_fast + static_cast<int>(world.self_ability_detail.speed) * 60);
-  auto next_hit = 1400 - level_fast;
-  if (world.attack_slow) {
-    next_hit += 1500;
-  }
-  next_hit = std::max(0, next_hit);
+  const auto next_hit = legacy_next_hit_delay_ms(
+      static_cast<std::int32_t>(world.self_ability_detail.level),
+      world.self_ability_detail.speed, world.attack_slow);
   return world.latest_hit_ms == 0 ||
          elapsed_ms(now, world.latest_hit_ms) > static_cast<std::uint64_t>(next_hit);
 }
@@ -627,6 +702,7 @@ struct GameStateStore {
   std::uint64_t pending_self_actor_id{0};  ///< 进入世界后自己的 actor_id
   int pending_spawn_x{0};                  ///< 角色出生 X 坐标
   int pending_spawn_y{0};                  ///< 角色出生 Y 坐标
+  AuthFlowPhase auth_phase{AuthFlowPhase::EditingLogin};
 
   [[nodiscard]] const MagicShortcutState* magic_for_id(const std::uint16_t magic_id) const {
     const auto it = std::find_if(world.magics.begin(), world.magics.end(),
@@ -898,6 +974,7 @@ struct GameStateStore {
     const auto& bag_item = world.bag_items[static_cast<std::size_t>(slot)];
     switch (pending.kind) {
       case PendingItemActionKind::equip:
+      case PendingItemActionKind::trade_add:
       case PendingItemActionKind::drop:
         if (pending.source == MovingItemSource::bag && slot == pending.source_slot &&
             !same_item_identity(bag_item, pending.item)) {
@@ -922,6 +999,7 @@ struct GameStateStore {
     const auto pending = world.pending_item_action;
     switch (pending.kind) {
       case PendingItemActionKind::equip:
+      case PendingItemActionKind::trade_add:
       case PendingItemActionKind::drop:
         if (pending.source == MovingItemSource::bag && valid_bag_slot(pending.source_slot) &&
             !same_item_identity(world.bag_items[static_cast<std::size_t>(pending.source_slot)],
@@ -965,6 +1043,7 @@ struct GameStateStore {
         }
         return;
       case PendingItemActionKind::drop:
+      case PendingItemActionKind::trade_add:
       case PendingItemActionKind::use:
       case PendingItemActionKind::none:
         return;
@@ -1618,6 +1697,10 @@ struct GameStateStore {
 
   /// 应用交易状态
   void apply(const client_v1::TradeState& message) {
+    if (!message.visible && world.pending_item_action.active &&
+        world.pending_item_action.kind == PendingItemActionKind::trade_add) {
+      restore_pending_item_action();
+    }
     world.trade.visible = message.visible;
     world.trade.remote_name = message.remote_name;
     world.trade.local_items = message.local_items;

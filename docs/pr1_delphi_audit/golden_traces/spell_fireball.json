@@ -1,0 +1,114 @@
+{
+  "flow": "spell_fireball",
+  "description": "CM_SPELL(magic_id=1) → SM_SPELL → SM_MAGICFIRE → RM_DELAYMAGIC(600ms) → RM_MAGSTRUCK/RM_STRUCK_MAG → SM_STRUCK → HP变化",
+  "delphi_source": {
+    "client": "ClMain.pas:1797-1873 UseMagic",
+    "server_entry": "ObjBase.pas:12112 CM_SPELL → SpellXY(1, tx, ty, targ)",
+    "spell_dispatch": "Magic.pas:441 SpellNow → 548-570 (case 1/5)",
+    "mag_helper": "Magic.pas:55-58 MPow, Magic.pas:449-453 GetPower",
+    "delayed_damage": "ObjBase.pas:7437-7462 RM_MAGSTRUCK → SendRefMsg(RM_STRUCK_MAG)"
+  },
+  "stages": [
+    {
+      "stage": "client_pre_check",
+      "checks": {
+        "mp": "spell + defSpell <= MP",
+        "cooldown": "非剑术技能: GetTickCount - LatestMagicTime > 500ms",
+        "pk_delay": "vs human: additional 300-1400ms"
+      }
+    },
+    {
+      "stage": "client_send",
+      "message_type": "CM_SPELL",
+      "message_id": 3017,
+      "fields": {"magic_id": 1, "target_id": "<target>", "x": "<x>", "y": "<y>", "dir": "<dir>"},
+      "side_effect": "ActionLock:=TRUE; ServerMagicCode:=0; MagicDelayTime:=200+DelayTime"
+    },
+    {
+      "stage": "server_spellxy",
+      "action": "SpellXY(1, tx, ty, targ)",
+      "delphi_line": "ObjBase.pas:9405",
+      "sub_stages": [
+        {"action": "speedhack_check", "formula": "GetTickCount - LatestSpellTime >= LatestSpellDelay", "delphi_line": "ObjBase.pas:9418-9421"},
+        {"action": "GetMagic(magid=1) → spell_config", "delphi_line": "ObjBase.pas:9428"},
+        {"action": "非剑术 → DoSpell", "delphi_line": "ObjBase.pas:9538"}
+      ]
+    },
+    {
+      "stage": "server_spellnow_entry",
+      "action": "SpellNow(1)",
+      "delphi_line": "Magic.pas:441",
+      "sub_stages": [
+        {"action": "broadcast_spell_action", "message_type": "SM_SPELL", "message_id": 17, "delphi_line": "Magic.pas:537", "receivers": "all_visible_players"}
+      ]
+    },
+    {
+      "stage": "server_spellnow_case_1",
+      "action": "Fireball branch",
+      "delphi_line": "Magic.pas:548-570",
+      "sub_stages": [
+        {"action": "check_target_range", "functions": ["MagCanHitTarget(user.CX, user.CY, target)", "IsProperTarget(target)"], "delphi_line": "Magic.pas:550-551"},
+        {"action": "anti_magic_check", "formula": "target.AntiMagic <= Random(10)", "delphi_line": "Magic.pas:552", "random_calls": [{"call": "Random(10)", "range": "[0, 9]"}]},
+        {"action": "range_check", "formula": "abs(target.CX-xx)<=1 AND abs(target.CY-yy)<=1", "delphi_line": "Magic.pas:552"},
+        {"action": "calc_power", "formula": "GetAttackPower(GetPower(MPow(pum)) + LoByte(WAbil.MC), ShortInt(HiByte(WAbil.MC)-LoByte(WAbil.MC))+1)", "delphi_line": "Magic.pas:554-557",
+          "random_calls": [
+            {"call": "MPow: Random(MaxPower-MinPower)", "range": "[0, MaxPower-MinPower-1]"},
+            {"call": "GetAttackPower internals (2x Random)"}
+          ]},
+        {"action": "send_delay_magic", "message_type": "RM_DELAYMAGIC", "delay_ms": 600, "delphi_line": "Magic.pas:563",
+          "fields": {"power": "<pwr>", "pos": "MakeLong(xx,yy)", "mode": 2, "target": "<target>"}},
+        {"action": "train_flag", "condition": "target.RaceServer >= RC_ANIMAL", "effect": "train:=TRUE"}
+      ]
+    },
+    {
+      "stage": "server_spellnow_post",
+      "action": "Post-processing",
+      "delphi_line": "Magic.pas:983-998",
+      "sub_stages": [
+        {"action": "send_magic_fire", "message_type": "SM_MAGICFIRE", "message_id": 638, "condition": "NOT nofire AND needfire", "fields": {"effect_type": "<EffectType>", "effect": "<Effect>", "pos": "MakeLong(xx,yy)"}},
+        {"action": "skill_training", "condition": "pum.Level<3 AND train AND Abil.Level >= NeedLevel", "formula": "TrainSkill(pum, 1+Random(3))", "random_calls": [{"call": "Random(3)", "range": "[0, 2]"}]},
+        {"action": "magic_lvexp_msg", "message_type": "RM_MAGIC_LVEXP", "delay_ms": 1000, "condition": "NOT levelup"}
+      ]
+    },
+    {
+      "stage": "server_delayed_damage",
+      "action": "600ms later: RM_DELAYMAGIC fires",
+      "sub_stages": [
+        {"action": "target.SendMsg(self, RM_MAGSTRUCK, 0, magpwr, 0, 0, '')", "delphi_line": "ObjBase.pas:7437"},
+        {"action": "GetMagStruckDamage → StruckDamage → HealthSpellChanged", "delphi_line": "ObjBase.pas:7448-7457"},
+        {"action": "SendRefMsg(RM_STRUCK_MAG, ...) immediately", "message_type": "SM_STRUCK", "message_id": 31, "extra_delay_ms": 0, "delphi_line": "ObjBase.pas:7458, ObjBase.pas:12572-12614", "fields": {"magic_hit_flag": "lTag2=1"}}
+      ]
+    },
+    {
+      "stage": "client_receive_spell",
+      "action": "收到 SM_SPELL (17)",
+      "handlers": [
+        {"action": "UseMagicSpell → actor.ReadyAction(SM_SPELL)", "delphi_line": "ClMain.pas:1875-1893, Actor.pas:1161-1176"},
+        {"action": "CalcActorFrame → ActSpell: 6f×60ms=360ms", "delphi_line": "Actor.pas:2703-2739"},
+        {"action": "stall at SpellFrame-2, waiting for SM_MAGICFIRE or timeout"}
+      ]
+    },
+    {
+      "stage": "client_receive_magicfire",
+      "action": "收到 SM_MAGICFIRE (638)",
+      "handlers": [
+        {"action": "UseMagicFire → ProcHurryMsg → CurMagic.ServerMagicCode := msg data", "delphi_line": "ClMain.pas:1895-1909, Actor.pas:1281-1293"},
+        {"action": "NewMagic → TMagicEff (mtFly, EffectBase[1])", "delphi_line": "PlayScn.pas:892+"},
+        {"action": "Projectile flies 900ms with 50ms frame advancement → explosion on arrival"}
+      ]
+    },
+    {
+      "stage": "client_receive_struck",
+      "action": "收到 SM_STRUCK (31) [after RM_DELAYMAGIC 600ms; no extra 200ms struck delay]",
+      "handlers": [
+        {"action": "ReadyAction(SM_STRUCK) → ActStruck: 3f×70ms=210ms"}
+      ]
+    }
+  ],
+  "cplusplus_mapping": {
+    "spell_dispatch": "map_actor_mail.hpp:3116 (anti-magic + delayed hit)",
+    "anti_magic": "legacy_skill_formula.cpp:121 legacy_anti_magic_pass",
+    "magic_damage": "legacy_skill_formula.cpp:103 legacy_mag_struck_damage",
+    "fireball_power": "map_actor.cpp:1028 legacy_fireball_power"
+  }
+}

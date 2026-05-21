@@ -55,6 +55,15 @@ void test_login_trace(const std::map<std::string, std::vector<std::string>>& sec
          sections.at("auth.login.submit"));
 }
 
+void test_login_failure_trace(const std::map<std::string, std::vector<std::string>>& sections) {
+  assert(labels({auth::LegacyAuthUiTraceLabel::send_login,
+                 auth::LegacyAuthUiTraceLabel::recv_login_failure,
+                 auth::LegacyAuthUiTraceLabel::show_login_error_modal,
+                 auth::LegacyAuthUiTraceLabel::modal_ok,
+                 auth::LegacyAuthUiTraceLabel::focus_login_password}) ==
+         sections.at("auth.login.failure"));
+}
+
 void test_server_select_trace(const std::map<std::string, std::vector<std::string>>& sections) {
   assert(labels({auth::LegacyAuthUiTraceLabel::click_server_select,
                  auth::LegacyAuthUiTraceLabel::send_select_server,
@@ -74,6 +83,13 @@ void test_character_start_trace(const std::map<std::string, std::vector<std::str
                  auth::LegacyAuthUiTraceLabel::connect_game_gateway,
                  auth::LegacyAuthUiTraceLabel::show_login_notice_or_loading}) ==
          sections.at("auth.character_select.start"));
+}
+
+void test_login_notice_trace(const std::map<std::string, std::vector<std::string>>& sections) {
+  assert(labels({auth::LegacyAuthUiTraceLabel::show_login_notice_or_loading,
+                 auth::LegacyAuthUiTraceLabel::login_notice_ok,
+                 auth::LegacyAuthUiTraceLabel::waiting_world_snapshot}) ==
+         sections.at("auth.login_notice.accept"));
 }
 
 void test_character_create_trace(const std::map<std::string, std::vector<std::string>>& sections) {
@@ -106,8 +122,10 @@ int main() {
       read_trace_sections(source_dir / "tests" / "golden" / "legacy_auth_ui_expected_trace.txt");
 
   test_login_trace(sections);
+  test_login_failure_trace(sections);
   test_server_select_trace(sections);
   test_character_start_trace(sections);
+  test_login_notice_trace(sections);
   test_character_create_trace(sections);
   test_character_delete_trace(sections);
   return 0;

@@ -10,6 +10,14 @@ std::string_view legacy_auth_ui_trace_label(const LegacyAuthUiTraceLabel label) 
       return "password_enter_send_login";
     case LegacyAuthUiTraceLabel::send_login:
       return "send_login";
+    case LegacyAuthUiTraceLabel::recv_login_failure:
+      return "recv_login_failure";
+    case LegacyAuthUiTraceLabel::show_login_error_modal:
+      return "show_login_error_modal";
+    case LegacyAuthUiTraceLabel::modal_ok:
+      return "modal_ok";
+    case LegacyAuthUiTraceLabel::focus_login_password:
+      return "focus_login_password";
     case LegacyAuthUiTraceLabel::recv_login_success:
       return "recv_login_success";
     case LegacyAuthUiTraceLabel::recv_server_list:
@@ -42,6 +50,10 @@ std::string_view legacy_auth_ui_trace_label(const LegacyAuthUiTraceLabel label) 
       return "connect_game_gateway";
     case LegacyAuthUiTraceLabel::show_login_notice_or_loading:
       return "show_login_notice_or_loading";
+    case LegacyAuthUiTraceLabel::login_notice_ok:
+      return "login_notice_ok";
+    case LegacyAuthUiTraceLabel::waiting_world_snapshot:
+      return "waiting_world_snapshot";
     case LegacyAuthUiTraceLabel::open_create_character_dialog:
       return "open_create_character_dialog";
     case LegacyAuthUiTraceLabel::focus_create_character_name:
@@ -65,7 +77,16 @@ std::string_view legacy_auth_ui_trace_label(const LegacyAuthUiTraceLabel label) 
 }
 
 RectI LegacyServerSelectLayout::server_button(const std::size_t index) const {
-  return RectI{dialog.x + 63, dialog.y + row_top + static_cast<int>(index) * row_gap, 180, 34};
+  if (index < 8) {
+    const auto x = dialog_uses_prguse2 ? 25 : 63;
+    return RectI{dialog.x + x, dialog.y + row_top + static_cast<int>(index) * row_gap, 180, 34};
+  }
+  if (index < 16) {
+    return RectI{dialog.x + 195, dialog.y + row_top + static_cast<int>(index - 8) * row_gap,
+                 180, 34};
+  }
+  return RectI{dialog.x + 365, dialog.y + row_top + static_cast<int>(index - 16) * row_gap,
+               180, 34};
 }
 
 RectI legacy_centered_rect(const RectI sprite_template) {
@@ -88,9 +109,34 @@ LegacyLoginLayout legacy_login_layout(const RectI dialog_template) {
 LegacyServerSelectLayout legacy_server_select_layout(const RectI dialog_template,
                                                      const std::size_t visible_count) {
   LegacyServerSelectLayout layout;
+  const auto count = visible_count > 24 ? 24 : visible_count;
+  layout.row_gap = 42;
+  layout.dialog_sprite_index = count <= 8 ? 256 : (count <= 16 ? 4 : 5);
+  layout.dialog_uses_prguse2 = count > 8;
   layout.dialog = legacy_centered_rect(dialog_template);
-  layout.close_button = RectI{layout.dialog.x + 244, layout.dialog.y + 30, 24, 24};
-  layout.row_top = 235 - static_cast<int>(42 * visible_count) / 2;
+  if (count <= 8) {
+    layout.close_button = RectI{layout.dialog.x + 244, layout.dialog.y + 30, 24, 24};
+    layout.row_top = 235 - static_cast<int>(layout.row_gap * count) / 2;
+  } else if (count <= 16) {
+    layout.close_button = RectI{layout.dialog.x + 348, layout.dialog.y + 31, 24, 24};
+    layout.row_top = 235 - (static_cast<int>(layout.row_gap) * 16 / 2) / 2;
+  } else {
+    layout.close_button = RectI{layout.dialog.x + 527, layout.dialog.y + 35, 24, 24};
+    layout.row_top = 235 - static_cast<int>(layout.row_gap) * 8 / 2;
+  }
+  return layout;
+}
+
+LegacyMessageModalLayout legacy_message_modal_layout(const RectI dialog_template) {
+  LegacyMessageModalLayout layout;
+  layout.dialog = legacy_centered_rect(dialog_template);
+  layout.title_origin = RectI{layout.dialog.x + 39, layout.dialog.y + 20, 0, 0};
+  layout.text_origin = RectI{layout.dialog.x + 39, layout.dialog.y + 38, 0, 0};
+  layout.ok_button = RectI{layout.dialog.x + (layout.dialog.w - 88) / 2, layout.dialog.y + 126,
+                           88, 28};
+  layout.yes_button = RectI{layout.dialog.x + 104, layout.dialog.y + 126, 88, 28};
+  layout.no_button = RectI{layout.dialog.x + 136, layout.dialog.y + 126, 88, 28};
+  layout.cancel_button = RectI{layout.dialog.x + 210, layout.dialog.y + 126, 88, 28};
   return layout;
 }
 

@@ -1,0 +1,5 @@
+# Known ModernClient deltas against Delphi auth animation facts
+login_door_runtime=not_implemented; Delphi plays ChrSel[23..32] at 152,96 after LoginGate success, while ModernClient currently jumps to later auth scenes without rendering the door sequence.
+door_fade_runtime=not_implemented; Delphi sets DoFadeOut+DoFadeIn and clamps FadeIndex 29->1 before stSelectChr, while ModernClient has no matching auth fade runtime.
+character_select_timing=modern_update_before_render; Delphi draws the current selected-character frame before incrementing counters, while ModernClient updates CharacterSelectVisualState before rendering.
+character_select_effect_after_frame_17=modern_wraps; Delphi keeps increasing EffIndex after ChrSel[17] request, while ModernClient wraps effect_frame modulo 14.

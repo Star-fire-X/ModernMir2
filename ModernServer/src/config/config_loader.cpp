@@ -684,6 +684,7 @@ void load_maps(const std::filesystem::path& directory, HostConfig& config,
     map.need_level = value_or<int>(table, "need_level", value_or<int>(table, "level", 0));
     map.mine_map = value_or<int>(table, "mine_map", value_or<int>(table, "mine", 0));
     map.back_map = value_or<std::string>(table, "back_map", {});
+    map.quiz_zone = value_or<bool>(table, "quiz_zone", value_or<bool>(table, "quiz", false));
     map.allow_pk = value_or<bool>(table, "allow_pk", !map.law_full);
     if (auto safe_zones = table["safe_zones"].as_array()) {
       for (const auto& zone_node : *safe_zones) {
@@ -832,6 +833,7 @@ void load_monsters(const std::filesystem::path& directory, HostConfig& config) {
         monster.walk_speed_ms =
             value_or<int>(monster_table, "walk_speed_ms",
                           value_or<int>(monster_table, "walk_spd", monster.walk_speed_ms));
+        monster.walk_speed_ms = std::max(monster.walk_speed_ms, 200);
         monster.walk_step = value_or<int>(monster_table, "walk_step", monster.walk_step);
         monster.walk_wait_ms =
             value_or<int>(monster_table, "walk_wait_ms",
@@ -839,6 +841,7 @@ void load_monsters(const std::filesystem::path& directory, HostConfig& config) {
         monster.attack_speed_ms =
             value_or<int>(monster_table, "attack_speed_ms",
                           value_or<int>(monster_table, "attack_spd", monster.attack_speed_ms));
+        monster.attack_speed_ms = std::max(monster.attack_speed_ms, 200);
         monster.ai_profile =
             monster_ai_profile_or(monster_table, "ai_profile", monster.ai_profile);
         if (!monster.name.empty()) {
@@ -1135,6 +1138,7 @@ HostConfig ConfigLoader::load(const std::filesystem::path& root) const {
   config.runtime.log_dir = path_or(server, "log_dir", "logs");
   config.runtime.data_dir = path_or(server, "data_dir", "data");
   config.runtime.asset_root = path_or(server, "asset_root", root / ".." / ".." / "Legend of Mir");
+  config.runtime.legacy_admin_list = path_or(server, "legacy_admin_list", "Envir/AdminList.txt");
   config.runtime.status_file = path_or(server, "status_file", "runtime/status.json");
   config.runtime.default_queue_capacity =
       value_or<std::size_t>(server, "default_queue_capacity", 4096);
@@ -1142,6 +1146,8 @@ HostConfig ConfigLoader::load(const std::filesystem::path& root) const {
   config.runtime.enable_legacy_gateways = value_or<bool>(server, "enable_legacy_gateways", true);
   config.runtime.enable_client_v1_gateways =
       value_or<bool>(server, "enable_client_v1_gateways", true);
+  config.runtime.legacy_approval_mode =
+      value_or<bool>(server, "legacy_approval_mode", false);
   config.runtime.backpressure_threshold =
       value_or<std::size_t>(server, "backpressure_threshold", 3072);
   config.runtime.disconnect_threshold =

@@ -26,14 +26,17 @@
 
 #include "app/client_app.hpp"
 
+#include "app/auth_error_text.hpp"
+#include "app/startup_resource_check.hpp"
 #include "scene/legacy_auth_ui.hpp"
 #include "scene/legacy_inventory_ui.hpp"
 #include "scene/legacy_magic_npc_ui.hpp"
 #include "scene/legacy_play_ui.hpp"
+#include "scene/legacy_trade_group_guild_ui.hpp"
+#include "scene/legacy_ui_lifecycle.hpp"
 #include "ui/legacy_ui.hpp"
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <fstream>
 #include <filesystem>
@@ -153,6 +156,15 @@ void legacy_magic_npc_trace(const legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabe
   legacy_trace(legacy_magic_npc_ui::legacy_magic_npc_ui_trace_label(label));
 }
 
+void legacy_trade_group_guild_trace(
+    const legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel label) {
+  legacy_trace(legacy_trade_group_guild_ui::legacy_trade_group_guild_ui_trace_label(label));
+}
+
+void legacy_ui_lifecycle_trace(const legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel label) {
+  legacy_trace(legacy_ui_lifecycle::legacy_ui_lifecycle_trace_label(label));
+}
+
 /// 在软件渲染器上绘制精灵帧
 void draw_sprite(SoftwareRenderer& renderer, const std::shared_ptr<const SpriteFrame>& frame,
                  const int x, const int y) {
@@ -248,24 +260,6 @@ std::wstring resolve_default_asset_root() {
   return {};
 }
 
-std::vector<int> missing_required_prguse_frames(AssetManager& assets) {
-  constexpr std::array kRequiredFrames{
-      1,   3,   4,   5,   6,   7,   8,   9,   10,  11,  15,  16,
-      17,  18,  19,  26,  29,  128, 130, 132, 134, 136, 138, 140,
-      229, 230, 232, 234, 236, 238, 240, 242, 244, 246, 248, 249,
-      250, 251, 252, 253, 254, 255, 360, 361, 363, 365, 367, 370,
-      371, 372, 373, 376, 377, 382, 383, 385, 386, 387, 388, 392,
-      393, 396, 398};
-  std::vector<int> missing;
-  for (const auto index : kRequiredFrames) {
-    const auto frame = assets.get_frame(ArchiveId::prguse, index);
-    if (frame == nullptr || frame->empty()) {
-      missing.push_back(index);
-    }
-  }
-  return missing;
-}
-
 }  // namespace
 
 // 默认构造，所有子系统在其各自的默认构造函数中初始化为空状态
@@ -292,11 +286,33 @@ bool ClientApp::initialize() {
   if (!renderer_.initialize(window_.handle(), kNativeClientWidth, kNativeClientHeight)) {
     return false;
   }
-  // 加载资源管理器（WIL/WIX/地图文件索引）
-  if (!assets_.initialize(config_.asset_root)) {
+
+  const auto show_startup_resource_failure =
+      [this](const StartupResourceCheckResult& result) {
+        const auto report = format_startup_resource_report(result, config_.asset_root);
+        OutputDebugStringW((report + L"\n").c_str());
+        MessageBoxW(window_.handle(), report.c_str(), L"Resource Check", MB_OK | MB_ICONERROR);
+      };
+
+  const auto root_check = check_startup_asset_root(config_.asset_root);
+  if (!root_check.ok()) {
+    show_startup_resource_failure(root_check);
     return false;
   }
-  const auto missing_frames = missing_required_prguse_frames(assets_);
+
+  // 加载资源管理器（WIL/WIX/地图文件索引）
+  if (!assets_.initialize(config_.asset_root)) {
+    StartupResourceCheckResult result;
+    result.fatal_issues.push_back(StartupResourceIssue{
+        StartupResourceSeverity::fatal, {}, -1, L"asset_root could not be initialized"});
+    show_startup_resource_failure(result);
+    return false;
+  }
+  const auto auth_resource_check = check_startup_auth_resources(assets_);
+  if (!auth_resource_check.ok()) {
+    show_startup_resource_failure(auth_resource_check);
+    return false;
+  }
   // 初始化音频服务并加载 Delphi sound.lst；音频失败不阻塞客户端启动。
   audio_.initialize(config_.asset_root, window_.handle());
   audio_.apply_settings(config_.audio);
@@ -305,15 +321,6 @@ bool ClientApp::initialize() {
   refresh_mapped_input();
   ClientContext context{this, &config_, &state_, &assets_, &audio_, &renderer_, &mapped_input_};
   scenes_.initialize(context);
-  if (!missing_frames.empty()) {
-    std::wstringstream message;
-    message << L"Missing Prguse frames:";
-    for (const auto index : missing_frames) {
-      message << L" " << index;
-    }
-    OutputDebugStringW((message.str() + L"\n").c_str());
-    show_modal(L"Resource Check", message.str());
-  }
   return true;
 }
 
@@ -424,6 +431,34 @@ void ClientApp::refresh_mapped_input() {
   mapped_input_.mouse_y = logical_point.y;
 }
 
+#ifdef MIR2_CLIENT_TESTING
+void ClientApp::set_config_for_test(const ClientConfig& config) { config_ = config; }
+
+void ClientApp::enable_protocol_test_mode_for_test() {
+  protocol_.enable_test_mode_for_test();
+}
+
+void ClientApp::complete_connect_for_test() { protocol_.complete_connect_for_test(); }
+
+void ClientApp::push_protocol_disconnect_for_test(std::string reason) {
+  protocol_.push_disconnected_for_test(std::move(reason));
+}
+
+void ClientApp::pump_protocol_for_test() {
+  ClientContext context{this, &config_, &state_, &assets_, &audio_, &renderer_, &mapped_input_};
+  handle_protocol_events(context);
+  flush_scene_change_if_pending(context);
+}
+
+std::vector<client_v1::Frame> ClientApp::drain_sent_frames_for_test() {
+  return protocol_.drain_sent_frames_for_test();
+}
+
+const std::vector<ProtocolClient::ConnectAttempt>& ClientApp::connect_attempts_for_test() const {
+  return protocol_.connect_attempts_for_test();
+}
+#endif
+
 // 请求切换到指定场景（延迟执行，在当前帧更新完毕后生效）
 void ClientApp::request_scene_change(SceneId id) {
   requested_scene_ = id;
@@ -476,6 +511,7 @@ void ClientApp::request_login(const std::string& account_id, const std::string& 
   state_.login.account_id = legacy_byte_payload(account_id);
   state_.login.password = legacy_byte_payload(password);
   state_.login.login_state = LoginState::lsLogin;
+  state_.login.pending_focus = LoginPendingFocus::none;
   state_.login_notice = LoginNoticeViewState{};
   // 清除可能残留的上次登录记录
   state_.enter_world_token.clear();
@@ -490,13 +526,15 @@ void ClientApp::request_login(const std::string& account_id, const std::string& 
   state_.pending_spawn_y = 0;
   state_.lobby.characters.clear();
   state_.connection_phase = GameStateStore::ConnectionPhase::login;
-  pending_connect_ = PendingConnect::login;
+  state_.auth_phase = AuthFlowPhase::ConnectingLoginGate;
+  pending_connect_ = PendingConnect::none;
   // 设置 5 秒超时提示
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for login gateway..."); });
   if (!protocol_.connect(config_.login_host, config_.login_port)) {
     state_.login.request_pending = false;
     pending_connect_ = PendingConnect::none;
+    state_.auth_phase = AuthFlowPhase::EditingLogin;
     cancel_one_shot_timer(wait_msg_timer_);
     state_.login.status = L"Login gateway connection failed.";
     show_modal(L"Connection Failed", L"Unable to connect to login gateway.");
@@ -599,6 +637,7 @@ void ClientApp::request_select_server(const std::string& server_name) {
   state_.connection_phase = GameStateStore::ConnectionPhase::login;
   state_.login.status = L"Selecting server...";
   state_.lobby.server_select_pending = true;
+  state_.auth_phase = AuthFlowPhase::WaitingServerSelection;
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for server selection..."); });
   legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_select_server);
@@ -613,6 +652,7 @@ void ClientApp::request_character_list() {
   state_.lobby.character_list_pending = true;
   state_.connection_phase = GameStateStore::ConnectionPhase::select_character;
   state_.login.status = L"Requesting character list...";
+  state_.auth_phase = AuthFlowPhase::QueryingCharacters;
   schedule_one_shot_timer(sel_chr_wait_timer_, 5.0f,
                           [this] { sel_chr_wait_timer_tick(L"Still waiting for character list..."); });
   legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_query_character);
@@ -674,6 +714,7 @@ void ClientApp::request_selected_character_enter() {
   state_.selected_character = legacy_byte_payload(
       state_.lobby.characters[static_cast<std::size_t>(state_.lobby.selected_index)].name);
   state_.lobby.enter_character_pending = true;
+  state_.auth_phase = AuthFlowPhase::WaitingStartPlay;
   schedule_one_shot_timer(sel_chr_wait_timer_, 5.0f,
                           [this] { sel_chr_wait_timer_tick(L"Still waiting for character entry..."); });
   legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_select_character);
@@ -682,11 +723,17 @@ void ClientApp::request_selected_character_enter() {
 
 // 确认登录公告：向服务端发送 LoginNoticeOk，然后切换到加载场景等待世界快照
 void ClientApp::acknowledge_login_notice() {
+  if (state_.auth_phase != AuthFlowPhase::ViewingLoginNotice) {
+    return;
+  }
+  legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::login_notice_ok);
   state_.login.status = L"Login notice accepted. Waiting for world...";
   state_.login_notice = LoginNoticeViewState{};
   if (protocol_.connected()) {
     protocol_.send(client_v1::LoginNoticeOk{});
   }
+  state_.auth_phase = AuthFlowPhase::EnteringWorld;
+  legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::waiting_world_snapshot);
   schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                           [this] { wait_msg_timer_tick(L"Still waiting for world snapshot..."); });
   request_scene_change(SceneId::loading);
@@ -1045,6 +1092,8 @@ void ClientApp::request_storage_withdraw(const client_v1::StorageWithdrawRequest
 }
 
 void ClientApp::request_group_mode(const client_v1::GroupModeRequest& request) {
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_group_mode);
   protocol_.send(request);
 }
 
@@ -1052,6 +1101,8 @@ void ClientApp::request_group_create(const client_v1::GroupCreateRequest& reques
   if (request.target_name.empty()) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_create_group);
   protocol_.send(request);
 }
 
@@ -1059,6 +1110,8 @@ void ClientApp::request_group_add(const client_v1::GroupAddMemberRequest& reques
   if (request.target_name.empty()) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_add_group_member);
   protocol_.send(request);
 }
 
@@ -1066,16 +1119,22 @@ void ClientApp::request_group_remove(const client_v1::GroupRemoveMemberRequest& 
   if (request.target_name.empty()) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_remove_group_member);
   protocol_.send(request);
 }
 
 void ClientApp::request_trade_try(const client_v1::TradeTryRequest& request) {
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_trade_try);
   auto legacy_request = request;
   legacy_request.target_name = legacy_byte_payload(std::move(legacy_request.target_name));
   protocol_.send(legacy_request);
 }
 
 void ClientApp::request_trade_cancel(const client_v1::TradeCancelRequest& request) {
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_trade_cancel);
   protocol_.send(request);
 }
 
@@ -1083,6 +1142,8 @@ void ClientApp::request_trade_add_item(const client_v1::TradeAddItemRequest& req
   if (request.item_make_index == 0 || request.name.empty()) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_trade_add_item);
   auto legacy_request = request;
   legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
   protocol_.send(legacy_request);
@@ -1092,6 +1153,8 @@ void ClientApp::request_trade_remove_item(const client_v1::TradeRemoveItemReques
   if (request.item_make_index == 0 || request.name.empty()) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_trade_remove_item);
   auto legacy_request = request;
   legacy_request.name = legacy_byte_payload(std::move(legacy_request.name));
   protocol_.send(legacy_request);
@@ -1101,22 +1164,32 @@ void ClientApp::request_trade_gold(const client_v1::TradeSetGoldRequest& request
   if (request.gold < 0) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_trade_gold);
   protocol_.send(request);
 }
 
 void ClientApp::request_trade_accept(const client_v1::TradeAcceptRequest& request) {
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_trade_accept);
   protocol_.send(request);
 }
 
 void ClientApp::request_guild_open(const client_v1::GuildOpenRequest& request) {
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_guild_open);
   protocol_.send(request);
 }
 
 void ClientApp::request_guild_home(const client_v1::GuildHomeRequest& request) {
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_guild_home);
   protocol_.send(request);
 }
 
 void ClientApp::request_guild_members(const client_v1::GuildMemberListRequest& request) {
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_guild_members);
   protocol_.send(request);
 }
 
@@ -1124,6 +1197,8 @@ void ClientApp::request_guild_add(const client_v1::GuildAddMemberRequest& reques
   if (request.name.empty()) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_guild_add);
   protocol_.send(request);
 }
 
@@ -1131,6 +1206,8 @@ void ClientApp::request_guild_remove(const client_v1::GuildRemoveMemberRequest& 
   if (request.name.empty()) {
     return;
   }
+  legacy_trade_group_guild_trace(
+      legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::send_guild_remove);
   protocol_.send(request);
 }
 
@@ -1151,6 +1228,12 @@ void ClientApp::request_guild_update_grade(const client_v1::GuildUpdateGradeRequ
 // 请求当前地图的小地图缩略图
 void ClientApp::request_minimap(const client_v1::MiniMapRequest& request) {
   protocol_.send(request);
+}
+
+void ClientApp::request_revive() {
+  legacy_ui_lifecycle_trace(
+      legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::send_revive_request);
+  protocol_.send(client_v1::ReviveRequest{});
 }
 
 // 请求关闭：委托给 handle_close_request 弹出退出确认
@@ -1266,7 +1349,7 @@ void ClientApp::handle_auto_character_list() {
 
 // 核心协议事件分发器：在每一帧的 network poll 之后调用
 // 处理三种类型的事件：
-//   1. ConnectedEvent —— 连接建立后根据 pending_connect_ 发送对应的首个请求
+//   1. ConnectedEvent —— 连接建立后根据 auth_phase 发送主链路首个请求
 //   2. DisconnectedEvent —— 连接断开处理（游戏中断线弹出重连确认）
 //   3. ProtocolFrameEvent —— 协议帧，按 MessageId 解码后分发
 void ClientApp::handle_protocol_events(ClientContext& context) {
@@ -1276,20 +1359,24 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
       // 发送客户端握手包（协议版本、构建号、资源修订号）
       protocol_.send(client_v1::ClientHello{client_v1::kProtocolVersion, config_.client_build,
                                             config_.resource_revision, 0});
-      // 根据连接类型发送对应的首个业务请求
-      if (pending_connect_ == PendingConnect::login) {
-        legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_login);
-        protocol_.send(client_v1::LoginRequest{state_.login.account_id, state_.login.password});
-      } else if (pending_connect_ == PendingConnect::create_account) {
+      // 注册/改密保留旧分支；登录主链路由 auth_phase 驱动。
+      if (pending_connect_ == PendingConnect::create_account) {
         protocol_.send(pending_create_account_);
+        pending_connect_ = PendingConnect::none;
       } else if (pending_connect_ == PendingConnect::change_password) {
         protocol_.send(pending_change_password_);
-      } else if (pending_connect_ == PendingConnect::select_character) {
+        pending_connect_ = PendingConnect::none;
+      } else if (state_.auth_phase == AuthFlowPhase::ConnectingLoginGate) {
+        state_.auth_phase = AuthFlowPhase::WaitingLoginResult;
+        legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::send_login);
+        protocol_.send(client_v1::LoginRequest{state_.login.account_id, state_.login.password});
+      } else if (state_.auth_phase == AuthFlowPhase::ConnectingCharacterGate) {
         request_character_list();
-      } else if (pending_connect_ == PendingConnect::game) {
+      } else if (state_.auth_phase == AuthFlowPhase::ConnectingRunGate) {
+        state_.auth_phase = AuthFlowPhase::EnteringWorld;
         protocol_.send(
             client_v1::EnterWorldRequest{state_.enter_world_token, config_.client_build,
-                                         config_.resource_revision});
+                                          config_.resource_revision});
         schedule_one_shot_timer(wait_msg_timer_, 5.0f,
                                 [this] { wait_msg_timer_tick(L"Still waiting for world entry..."); });
       }
@@ -1307,15 +1394,20 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
       state_.lobby.delete_character_pending = false;
       state_.lobby.enter_character_pending = false;
       state_.clear_play_scene_state();
+      legacy_ui_lifecycle_trace(
+          legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::disconnect_clears_play_ui);
       // 客户端主动发起的断开（reason="client_disconnect"）不弹提示
       if (!disconnected->reason.empty() && disconnected->reason != "client_disconnect") {
+        state_.auth_phase = AuthFlowPhase::Disconnected;
         // 游戏中意外掉线：弹出重连确认框
+        const auto message =
+            legacy_auth_error_message(AuthErrorContext::disconnect, 0, disconnected->reason);
         if (state_.connection_phase == GameStateStore::ConnectionPhase::play &&
             !state_.login.account_id.empty() && !state_.login.password.empty()) {
-          show_confirm_modal(L"Disconnected", widen(disconnected->reason) + L". Reconnect?",
+          show_confirm_modal(L"Disconnected", message + L". Reconnect?",
                              [this] { request_reconnect(); });
         } else {
-          show_modal(L"Disconnected", widen(disconnected->reason));
+          show_modal(L"Disconnected", message);
         }
       }
       flush_scene_change_if_pending(context);
@@ -1346,6 +1438,8 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             << " map_transition=" << state_.world.map_transition_pending;
         legacy_trace(out.str());
       }
+      legacy_ui_lifecycle_trace(
+          legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::drop_unreachable_world_message);
       return true;
     };
 
@@ -1360,9 +1454,11 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
               state_.login.login_state = LoginState::lsLogin;
               state_.login.needs_account_update = false;
               state_.login.status = L"Authenticated. Waiting for server list...";
+              state_.auth_phase = AuthFlowPhase::WaitingServerList;
             } else {
               state_.login.request_pending = false;
               state_.login.needs_account_update = false;
+              state_.auth_phase = AuthFlowPhase::EditingLogin;
               // 自动播放模式：账号不存在（code=-4）时自动创建
               if (config_.auto_play.enabled && config_.auto_play.create_account &&
                   !auto_account_create_requested_ && value.code == -4) {
@@ -1376,7 +1472,12 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
                 return;
               }
               state_.login.status = L"Login failed";
-              show_modal(L"Login Failed", widen(value.error_message));
+              state_.login.pending_focus = LoginPendingFocus::password;
+              legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_login_failure);
+              legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::show_login_error_modal);
+              show_modal(L"Login Failed",
+                         legacy_auth_error_message(AuthErrorContext::login, value.code,
+                                                   value.error_message));
             }
 
           // 服务端要求补充账号资料（如 SSN、生日等）
@@ -1387,6 +1488,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.login.needs_account_update = true;
             state_.login.login_state = LoginState::lsNewid;
             state_.login.status = L"Account details required.";
+            state_.auth_phase = AuthFlowPhase::EditingLogin;
             if (config_.auto_play.enabled) {
               protocol_.send(client_v1::UpdateAccountRequest{
                   legacy_byte_payload(value.account_id), legacy_byte_payload(state_.login.password),
@@ -1402,6 +1504,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.login.needs_account_update = false;
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_server_list);
             state_.apply(value);
+            state_.auth_phase = AuthFlowPhase::BrowsingServers;
             if (state_.lobby.servers.empty()) {
               show_modal(L"Server List", L"No game servers are available.");
               return;
@@ -1433,7 +1536,10 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           } else if constexpr (std::is_same_v<T, client_v1::SelectServerResult>) {
             if (!value.success) {
               state_.lobby.server_select_pending = false;
-              show_modal(L"Select Server Failed", widen(value.error_message));
+              state_.auth_phase = AuthFlowPhase::BrowsingServers;
+              show_modal(L"Select Server Failed",
+                         legacy_auth_error_message(AuthErrorContext::select_server, 0,
+                                                   value.error_message));
               return;
             }
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_select_server_ok);
@@ -1442,17 +1548,19 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
                 state_.pending_character_port == 0) {
               state_.lobby.server_select_pending = false;
               pending_connect_ = PendingConnect::none;
+              state_.auth_phase = AuthFlowPhase::BrowsingServers;
               state_.login.status = L"Server selection returned an invalid character gateway.";
               show_modal(L"Select Server Failed", L"Character gateway details were missing.");
               return;
             }
             state_.login.status = L"Connecting character gateway...";
-            pending_connect_ = PendingConnect::select_character;
+            state_.auth_phase = AuthFlowPhase::ConnectingCharacterGate;
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::connect_character_gateway);
             if (!protocol_.connect(value.address, value.port)) {
               state_.lobby.server_select_pending = false;
               state_.lobby.character_list_pending = false;
               pending_connect_ = PendingConnect::none;
+              state_.auth_phase = AuthFlowPhase::BrowsingServers;
               cancel_one_shot_timer(sel_chr_wait_timer_);
               state_.login.status = L"Character gateway connection failed.";
               show_modal(L"Connection Failed", L"Unable to connect to character gateway.");
@@ -1466,6 +1574,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_query_character);
             state_.apply(value);
             state_.connection_phase = GameStateStore::ConnectionPhase::select_character;
+            state_.auth_phase = AuthFlowPhase::BrowsingCharacters;
             state_.login.status = L"Character list received.";
             const auto character_refresh_trace_pending =
                 pending_character_refresh_trace_ != PendingCharacterRefreshTrace::none;
@@ -1499,7 +1608,10 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           } else if constexpr (std::is_same_v<T, client_v1::SelectCharacterResult>) {
             state_.lobby.enter_character_pending = false;
             if (!value.success) {
-              show_modal(L"Character Select Failed", widen(value.error_message));
+              state_.auth_phase = AuthFlowPhase::BrowsingCharacters;
+              show_modal(L"Character Select Failed",
+                         legacy_auth_error_message(AuthErrorContext::select_character, 0,
+                                                   value.error_message));
               return;
             }
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_start_play);
@@ -1509,12 +1621,13 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             request_scene_change(SceneId::loading);
             state_.connection_phase = GameStateStore::ConnectionPhase::play;
             state_.login.status = L"Connecting game gateway...";
-            pending_connect_ = PendingConnect::game;
+            state_.auth_phase = AuthFlowPhase::ConnectingRunGate;
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::connect_game_gateway);
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::show_login_notice_or_loading);
             if (!protocol_.connect(value.address, value.port)) {
               state_.lobby.enter_character_pending = false;
               pending_connect_ = PendingConnect::none;
+              state_.auth_phase = AuthFlowPhase::BrowsingCharacters;
               cancel_one_shot_timer(wait_msg_timer_);
               state_.login.status = L"Game gateway connection failed.";
               show_modal(L"Connection Failed", L"Unable to connect to world gateway.");
@@ -1523,7 +1636,10 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           // 进入世界结果：保存角色出生坐标和 actor_id
           } else if constexpr (std::is_same_v<T, client_v1::EnterWorldResult>) {
             if (!value.success) {
-              show_modal(L"Enter World Failed", widen(value.error_message));
+              state_.auth_phase = AuthFlowPhase::BrowsingCharacters;
+              show_modal(L"Enter World Failed",
+                         legacy_auth_error_message(AuthErrorContext::enter_world, 0,
+                                                   value.error_message));
               return;
             }
             state_.pending_self_actor_id = value.self_actor_id;
@@ -1532,6 +1648,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.pending_spawn_y = value.y;
             state_.connection_phase = GameStateStore::ConnectionPhase::play;
             state_.login.status = L"World admission accepted.";
+            state_.auth_phase = AuthFlowPhase::WaitingWorldSnapshot;
 
           // 世界快照：客户端收到完整的初始世界状态，切换到世界场景
           } else if constexpr (std::is_same_v<T, client_v1::WorldSnapshot>) {
@@ -1539,6 +1656,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             login_replay_active_ = false;
             login_replay_enter_selected_ = false;
             state_.login_notice = LoginNoticeViewState{};
+            state_.auth_phase = AuthFlowPhase::InGame;
             request_scene_change(SceneId::world);
 
           // ---- 以下为世界运行时的增量更新消息 ----
@@ -1643,6 +1761,12 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
               return;
             }
             state_.apply(value);                    // 角色死亡状态
+            if (value.actor_id == state_.world.self_actor_id) {
+              legacy_ui_lifecycle_trace(
+                  legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::show_revive_prompt);
+              show_confirm_modal(L"Revive", L"You are dead. Revive at safe zone?",
+                                 [this] { request_revive(); });
+            }
           } else if constexpr (std::is_same_v<T, client_v1::MagicList>) {
             legacy_magic_npc_trace(
                 legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::recv_magic_list_fifo);
@@ -1838,17 +1962,45 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             legacy_magic_npc_trace(
                 legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::refresh_storage_or_bag);
           } else if constexpr (std::is_same_v<T, client_v1::GroupState>) {
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    recv_group_state_fifo);
             state_.apply(value);                    // 组队窗口状态
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    refresh_group_window);
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    refresh_group_members);
           } else if constexpr (std::is_same_v<T, client_v1::TradeState>) {
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    recv_trade_state_fifo);
             state_.apply(value);                    // 交易窗口状态
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    refresh_trade_items);
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    refresh_trade_accept);
           } else if constexpr (std::is_same_v<T, client_v1::GuildState>) {
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    recv_guild_state_fifo);
             state_.apply(value);                    // 行会窗口状态
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    refresh_guild_lines);
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    refresh_guild_members);
 
           // ---- 通知/公告类消息 ----
           } else if constexpr (std::is_same_v<T, client_v1::LoginNotice>) {
             state_.login_notice.title = value.title;
             state_.login_notice.text = value.text;
             state_.login.status = L"Login notice received.";
+            state_.auth_phase = AuthFlowPhase::ViewingLoginNotice;
             request_scene_change(SceneId::login_notice);
           } else if constexpr (std::is_same_v<T, client_v1::SysMessage>) {
             legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::recv_sys_message_fifo);
@@ -1857,6 +2009,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             legacy_play_trace(legacy_play_ui::LegacyPlayUiTraceLabel::append_top_sys_message);
             legacy_inventory_trace(
                 legacy_inventory_ui::LegacyInventoryUiTraceLabel::append_system_message);
+            legacy_trade_group_guild_trace(
+                legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
+                    append_system_message);
           } else if constexpr (std::is_same_v<T, client_v1::Notice>) {
             show_modal(widen(value.title), widen(value.text));  // 弹出公告对话框
           } else if constexpr (std::is_same_v<T, client_v1::DisconnectReason>) {
@@ -1867,9 +2022,14 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.lobby.delete_character_pending = false;
             state_.lobby.enter_character_pending = false;
             state_.clear_play_scene_state();
+            legacy_ui_lifecycle_trace(
+                legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::disconnect_clears_play_ui);
             state_.connection_phase = GameStateStore::ConnectionPhase::login;
+            state_.auth_phase = AuthFlowPhase::EditingLogin;
             request_scene_change(SceneId::login);
-            show_modal(L"Disconnected", widen(value.text));     // 服务端发起的断开原因
+            show_modal(L"Disconnected",
+                       legacy_auth_error_message(AuthErrorContext::disconnect, value.code,
+                                                 value.text));  // 服务端发起的断开原因
 
           // ---- 心跳应答 ----
           } else if constexpr (std::is_same_v<T, client_v1::Pong>) {
@@ -1882,7 +2042,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
               state_.login.login_state = LoginState::lsNewidRetry;
               state_.login.status = L"Account creation failed. Please retry.";
               request_scene_change(SceneId::login);
-              show_modal(L"Create Account Failed", widen(value.error_message));
+              show_modal(L"Create Account Failed",
+                         legacy_auth_error_message(AuthErrorContext::create_account, value.code,
+                                                   value.error_message, state_.login.account_id));
               return;
             }
             state_.login.login_state = LoginState::lsLogin;
@@ -1895,6 +2057,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             // 自动模式：创建成功后立即用刚注册的账号登录
             state_.login.status = L"Autoplay account ready. Logging in...";
             state_.login.request_pending = true;
+            state_.auth_phase = AuthFlowPhase::WaitingLoginResult;
             protocol_.send(client_v1::LoginRequest{
                 legacy_byte_payload(config_.auto_play.account_id),
                 legacy_byte_payload(config_.auto_play.password)});
@@ -1905,17 +2068,22 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
               state_.login.needs_account_update = true;
               state_.login.login_state = LoginState::lsNewid;
               state_.login.status = L"Account update failed.";
-              show_modal(L"Update Account Failed", widen(value.error_message));
+              show_modal(L"Update Account Failed",
+                         legacy_auth_error_message(AuthErrorContext::update_account, value.code,
+                                                   value.error_message));
               return;
             }
             state_.login.needs_account_update = false;
             state_.login.login_state = LoginState::lsLogin;
             state_.login.status = L"Account details updated. Waiting for server list...";
+            state_.auth_phase = AuthFlowPhase::WaitingServerList;
 
           } else if constexpr (std::is_same_v<T, client_v1::ChangePasswordResult>) {
             state_.login.request_pending = false;
             if (!value.success) {
-              show_modal(L"Operation Failed", widen(value.error_message));
+              show_modal(L"Operation Failed",
+                         legacy_auth_error_message(AuthErrorContext::change_password, value.code,
+                                                   value.error_message));
               state_.login.status = L"Password change failed.";
               state_.login.login_state = LoginState::lsChgpw;
               return;
@@ -1929,7 +2097,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             if (!value.success) {
               pending_character_refresh_trace_ = PendingCharacterRefreshTrace::none;
               state_.login.status = L"Character creation failed. Please retry.";
-              show_modal(L"Create Character Failed", widen(value.error_message));
+              show_modal(L"Create Character Failed",
+                         legacy_auth_error_message(AuthErrorContext::create_character, value.code,
+                                                   value.error_message));
               return;
             }
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_new_character_success);
@@ -1941,7 +2111,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.lobby.delete_character_pending = false;
             if (!value.success) {
               pending_character_refresh_trace_ = PendingCharacterRefreshTrace::none;
-              show_modal(L"Delete Character Failed", widen(value.error_message));
+              show_modal(L"Delete Character Failed",
+                         legacy_auth_error_message(AuthErrorContext::delete_character, value.code,
+                                                   value.error_message));
               return;
             }
             legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::recv_delete_character_success);
@@ -2288,6 +2460,8 @@ void ClientApp::begin_login_replay(const bool enter_selected_character) {
         state_.lobby.characters[static_cast<std::size_t>(state_.lobby.selected_index)].name;
   }
   state_.clear_play_scene_state();  // 清空世界状态
+  legacy_ui_lifecycle_trace(
+      legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::disconnect_clears_play_ui);
   state_.connection_phase = enter_selected_character
                                 ? GameStateStore::ConnectionPhase::login
                                 : GameStateStore::ConnectionPhase::reselect_character;
@@ -2304,17 +2478,16 @@ void ClientApp::show_modal(const std::wstring& title, const std::wstring& messag
   modal_confirm_action_ = {};
   modal_has_cancel_ = false;
   modal_enter_confirms_ = true;
-  // 计算对话框居中位置
-  const auto dialog_rect =
-      centered_rect(assets_.get_frame(ArchiveId::prguse, kMessageDialogIndex),
-                    kNativeClientWidth, kNativeClientHeight, 360, 180);
+  const auto layout = legacy_auth_ui::legacy_message_modal_layout(
+      sprite_rect(assets_.get_frame(ArchiveId::prguse, kMessageDialogIndex), 0, 0, 360, 180));
   // 创建全屏根节点（用于屏蔽点击穿透）
   auto* root = modal_ui_.set_root<ui::UiNode>(RectI{0, 0, kNativeClientWidth, kNativeClientHeight});
   // 添加"确定"按钮
-  auto* button = add_modal_button(root, assets_, kMessageOkButtonIndex,
-                                  dialog_rect.x + (dialog_rect.w - 88) / 2,
-                                  dialog_rect.y + 126);
+  auto* button =
+      add_modal_button(root, assets_, kMessageOkButtonIndex, layout.ok_button.x,
+                       layout.ok_button.y);
   button->on_click = [this] {
+    legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::modal_ok);
     state_.hide_modal();
     modal_ui_.clear();
     modal_confirm_action_ = {};
@@ -2336,14 +2509,13 @@ void ClientApp::show_confirm_modal(const std::wstring& title, const std::wstring
   modal_confirm_action_ = std::move(on_confirm);
   modal_has_cancel_ = true;
   modal_enter_confirms_ = true;
-  const auto dialog_rect =
-      centered_rect(assets_.get_frame(ArchiveId::prguse, kMessageDialogIndex),
-                    kNativeClientWidth, kNativeClientHeight, 360, 180);
+  const auto layout = legacy_auth_ui::legacy_message_modal_layout(
+      sprite_rect(assets_.get_frame(ArchiveId::prguse, kMessageDialogIndex), 0, 0, 360, 180));
   auto* root = modal_ui_.set_root<ui::UiNode>(RectI{0, 0, kNativeClientWidth, kNativeClientHeight});
   // "是"按钮
   auto* ok_button =
-      add_modal_button(root, assets_, kMessageYesButtonIndex, dialog_rect.x + 104,
-                       dialog_rect.y + 126);
+      add_modal_button(root, assets_, kMessageYesButtonIndex, layout.yes_button.x,
+                       layout.yes_button.y);
   ok_button->on_click = [this] {
     auto on_confirm = std::move(modal_confirm_action_);
     state_.hide_modal();
@@ -2356,8 +2528,8 @@ void ClientApp::show_confirm_modal(const std::wstring& title, const std::wstring
   };
   // "取消"按钮：如果是在 lsCloseAll（退出确认）状态下取消，恢复登录状态
   auto* cancel_button =
-      add_modal_button(root, assets_, kMessageCancelButtonIndex, dialog_rect.x + 210,
-                       dialog_rect.y + 126);
+      add_modal_button(root, assets_, kMessageCancelButtonIndex, layout.cancel_button.x,
+                       layout.cancel_button.y);
   cancel_button->on_click = [this] {
     state_.hide_modal();
     modal_ui_.clear();
@@ -2424,7 +2596,11 @@ void ClientApp::process_modal_input() {
   }
   if (modal_enter_confirms_ &&
       (mapped_input_.key_pressed[VK_RETURN] || mapped_input_.enter_pressed)) {
+    const auto trace_modal_ok = !modal_confirm_action_ && !modal_has_cancel_;
     auto on_confirm = std::move(modal_confirm_action_);
+    if (trace_modal_ok) {
+      legacy_auth_trace(legacy_auth_ui::LegacyAuthUiTraceLabel::modal_ok);
+    }
     state_.hide_modal();
     modal_ui_.clear();
     modal_has_cancel_ = false;
@@ -2454,18 +2630,22 @@ void ClientApp::render_modal() {
     return;
   }
   const auto dialog_frame = assets_.get_frame(ArchiveId::prguse, kMessageDialogIndex);
+  const auto layout = legacy_auth_ui::legacy_message_modal_layout(
+      sprite_rect(dialog_frame, 0, 0, 360, 180));
   const auto dialog_rect =
-      centered_rect(dialog_frame, renderer_.logical_width(), renderer_.logical_height(), 360, 180);
+      centered_rect(dialog_frame, renderer_.logical_width(), renderer_.logical_height(),
+                    layout.dialog.w, layout.dialog.h);
   draw_sprite(renderer_, dialog_frame, dialog_rect.x, dialog_rect.y);
   if (!state_.modal.title.empty()) {
     const auto title_x =
         dialog_rect.x + std::max(39, (dialog_rect.w - renderer_.measure_text_width(state_.modal.title)) / 2);
     draw_legacy_bold_text(renderer_, title_x, dialog_rect.y + 20, state_.modal.title, 0xFFFFFFFFU);
   }
-  auto y = dialog_rect.y + 38;
+  auto y = dialog_rect.y + (layout.text_origin.y - layout.dialog.y);
   for (const auto& line : split_modal_lines(state_.modal.message)) {
     if (!line.empty()) {
-      draw_legacy_bold_text(renderer_, dialog_rect.x + 39, y, line, 0xFFFFFFFFU);
+      draw_legacy_bold_text(renderer_, dialog_rect.x + (layout.text_origin.x - layout.dialog.x),
+                            y, line, 0xFFFFFFFFU);
     }
     y += 14;
   }

@@ -45,6 +45,7 @@ bool check_core_bytes() {
 
 bool check_validation() {
   const auto gbk = bytes({0xB0, 0xA1});
+  const auto gbk_name = gbk + gbk;
   const auto utf8 = bytes({0xE4, 0xB8, 0xAD});
 
   if (!mir2::is_valid_legacy_account_id("alpha") ||
@@ -61,8 +62,17 @@ bool check_validation() {
          !mir2::is_valid_legacy_character_name("Ab") &&
          !mir2::is_valid_legacy_character_name("abcdefghijklmnop") &&
          !mir2::is_valid_legacy_character_name("Name-With-Dash") &&
-         !mir2::is_valid_legacy_character_name(gbk) &&
-         !mir2::is_valid_legacy_character_name(utf8);
+         !mir2::is_valid_legacy_character_name("Name With Space") &&
+         !mir2::is_valid_legacy_character_name("Name/Slash") &&
+         !mir2::is_valid_legacy_character_name("Name@At") &&
+         !mir2::is_valid_legacy_character_name("Name.period") &&
+         !mir2::is_valid_legacy_character_name("Name<Bad") &&
+         !mir2::is_valid_legacy_character_name("Name>Bad") &&
+         !mir2::is_valid_legacy_character_name(std::string("A\0b", 3)) &&
+         !mir2::is_valid_legacy_character_name("A\tb") &&
+         !mir2::is_valid_legacy_character_name(bytes({0x41, 0x7F, 0x42})) &&
+         mir2::is_valid_legacy_character_name(gbk_name) &&
+         mir2::is_valid_legacy_character_name(utf8);
 }
 
 bool check_codec_and_canonical_text() {

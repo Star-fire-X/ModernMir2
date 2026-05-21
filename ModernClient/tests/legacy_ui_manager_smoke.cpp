@@ -114,19 +114,34 @@ void test_destroy_clears_focus_capture_modal_and_children() {
   ui::LegacyUiManager manager;
   auto* window = manager.add_window<ui::LegacyWindow>(RectI{20, 20, 100, 100});
   auto* button = manager.add_control<ui::LegacyButton>(*window, RectI{5, 5, 40, 20});
+  int clicks = 0;
+  button->on_click = [&clicks] { ++clicks; };
 
   manager.show_modal(*window);
+  manager.show_active_menu(*button);
   manager.set_focus(button);
   manager.set_capture(button);
+  InputState press{};
+  press.mouse_x = 30;
+  press.mouse_y = 30;
+  press.left_pressed = true;
+  press.left_down = true;
+  manager.capture_input(press);
   assert(manager.tree().modal() == window);
+  assert(manager.tree().active_menu() == button);
   assert(manager.tree().focused() == button);
   assert(manager.tree().captured() == button);
+  assert(manager.tree().hovered() == button);
 
   manager.destroy_window(*window);
   assert(manager.tree().modal() == nullptr);
+  assert(manager.tree().active_menu() == nullptr);
   assert(manager.tree().focused() == nullptr);
   assert(manager.tree().captured() == nullptr);
+  assert(manager.tree().hovered() == nullptr);
   assert(manager.root().children().empty());
+  manager.process_queued_events(press);
+  assert(clicks == 0);
 }
 
 void test_legacy_control_aliases_compile_and_join_tree() {

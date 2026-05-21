@@ -1,5 +1,6 @@
 #include <cassert>
 #include <string>
+#include <string_view>
 
 #include "game/game_state.hpp"
 #include "shared/legacy/action_ids.hpp"
@@ -9,40 +10,112 @@ int main() {
   using namespace mir2::client_v1;
 
   GameStateStore state;
+  assert(state.auth_phase == AuthFlowPhase::EditingLogin);
+  assert(state.login.pending_focus == LoginPendingFocus::none);
+  struct PhaseNameExpectation {
+    AuthFlowPhase phase;
+    std::string_view name;
+  };
+  constexpr PhaseNameExpectation kPhaseNames[] = {
+      {AuthFlowPhase::EditingLogin, "EditingLogin"},
+      {AuthFlowPhase::ConnectingLoginGate, "ConnectingLoginGate"},
+      {AuthFlowPhase::WaitingLoginResult, "WaitingLoginResult"},
+      {AuthFlowPhase::WaitingServerList, "WaitingServerList"},
+      {AuthFlowPhase::BrowsingServers, "BrowsingServers"},
+      {AuthFlowPhase::WaitingServerSelection, "WaitingServerSelection"},
+      {AuthFlowPhase::ConnectingCharacterGate, "ConnectingCharacterGate"},
+      {AuthFlowPhase::QueryingCharacters, "QueryingCharacters"},
+      {AuthFlowPhase::BrowsingCharacters, "BrowsingCharacters"},
+      {AuthFlowPhase::WaitingStartPlay, "WaitingStartPlay"},
+      {AuthFlowPhase::ConnectingRunGate, "ConnectingRunGate"},
+      {AuthFlowPhase::EnteringWorld, "EnteringWorld"},
+      {AuthFlowPhase::ViewingLoginNotice, "ViewingLoginNotice"},
+      {AuthFlowPhase::WaitingWorldSnapshot, "WaitingWorldSnapshot"},
+      {AuthFlowPhase::InGame, "InGame"},
+      {AuthFlowPhase::Disconnected, "Disconnected"},
+  };
+  for (const auto& expected : kPhaseNames) {
+    assert(auth_flow_phase_name(expected.phase) == expected.name);
+  }
+
   state.login.account_id = "guest";
   state.login.password = "pass";
   state.connection_phase = GameStateStore::ConnectionPhase::login;
+  state.auth_phase = AuthFlowPhase::ConnectingLoginGate;
+  assert(state.auth_phase == AuthFlowPhase::ConnectingLoginGate);
+  assert(state.connection_phase == GameStateStore::ConnectionPhase::login);
+  state.auth_phase = AuthFlowPhase::WaitingLoginResult;
 
   LoginResult login_result{true, 0, "guest", "Guest", ""};
   assert(login_result.success);
   assert(login_result.account_id == "guest");
+  state.auth_phase = AuthFlowPhase::WaitingServerList;
+  assert(state.auth_phase == AuthFlowPhase::WaitingServerList);
+
+  LoginResult failed_login{false, -1, "guest", "", "login_failed"};
+  assert(!failed_login.success);
+  state.login.password = "pass";
+  state.auth_phase = AuthFlowPhase::EditingLogin;
+  state.login.pending_focus = LoginPendingFocus::password;
+  assert(state.auth_phase == AuthFlowPhase::EditingLogin);
+  assert(state.login.pending_focus == LoginPendingFocus::password);
+  assert(state.login.password == "pass");
+  state.login.pending_focus = LoginPendingFocus::none;
 
   state.apply(ServerList{{ServerEntry{"ModernServer", "127.0.0.1", 5600}}});
+  state.auth_phase = AuthFlowPhase::BrowsingServers;
   assert(state.lobby.selected_server_name == "ModernServer");
+  assert(state.auth_phase == AuthFlowPhase::BrowsingServers);
 
+  state.auth_phase = AuthFlowPhase::WaitingServerSelection;
   state.apply(SelectServerResult{true, "ModernServer", "127.0.0.1", 5600, "lobby-token", ""});
+  state.auth_phase = AuthFlowPhase::ConnectingCharacterGate;
   assert(state.connection_phase == GameStateStore::ConnectionPhase::select_character);
   assert(state.pending_lobby_token == "lobby-token");
+  assert(state.auth_phase == AuthFlowPhase::ConnectingCharacterGate);
 
   CharacterList characters;
   characters.characters.push_back(CharacterSummary{"Hero", 1, 0, 0, 1, "0"});
   characters.selected_name = "Hero";
+  state.auth_phase = AuthFlowPhase::QueryingCharacters;
   state.apply(characters);
+  state.auth_phase = AuthFlowPhase::BrowsingCharacters;
   assert(state.lobby.selected_index == 0);
+  assert(state.auth_phase == AuthFlowPhase::BrowsingCharacters);
 
   state.selected_character = "Hero";
+  state.auth_phase = AuthFlowPhase::EnteringWorld;
   state.login_notice = LoginNoticeViewState{"Welcome", "Notice text"};
+  state.auth_phase = AuthFlowPhase::ViewingLoginNotice;
   assert(state.login_notice.title == "Welcome");
+  assert(state.auth_phase == AuthFlowPhase::ViewingLoginNotice);
+  auto notice_ok_count = 0;
+  auto acknowledge_notice = [&] {
+    if (state.auth_phase != AuthFlowPhase::ViewingLoginNotice) {
+      return;
+    }
+    ++notice_ok_count;
+    state.login_notice = LoginNoticeViewState{};
+    state.auth_phase = AuthFlowPhase::EnteringWorld;
+  };
+  acknowledge_notice();
+  acknowledge_notice();
+  assert(notice_ok_count == 1);
+  assert(state.auth_phase == AuthFlowPhase::EnteringWorld);
 
+  state.auth_phase = AuthFlowPhase::WaitingStartPlay;
   SelectCharacterResult select_character{true, "Hero", "world-token", "127.0.0.1", 5602, ""};
   state.enter_world_token = select_character.enter_world_token;
   state.pending_game_host = select_character.address;
   state.pending_game_port = select_character.port;
   state.connection_phase = GameStateStore::ConnectionPhase::play;
+  state.auth_phase = AuthFlowPhase::ConnectingRunGate;
   assert(state.enter_world_token == "world-token");
   assert(state.pending_game_host == "127.0.0.1");
   assert(state.pending_game_port == 5602);
+  assert(state.auth_phase == AuthFlowPhase::ConnectingRunGate);
 
+  state.auth_phase = AuthFlowPhase::EnteringWorld;
   EnterWorldResult enter;
   enter.success = true;
   enter.self_actor_id = 1000;
@@ -54,9 +127,11 @@ int main() {
   state.selected_character = enter.character_name;
   state.pending_spawn_x = enter.x;
   state.pending_spawn_y = enter.y;
+  state.auth_phase = AuthFlowPhase::WaitingWorldSnapshot;
   assert(state.pending_self_actor_id == 1000);
   assert(state.pending_spawn_x == 330);
   assert(state.pending_spawn_y == 270);
+  assert(state.auth_phase == AuthFlowPhase::WaitingWorldSnapshot);
 
   WorldSnapshot snapshot;
   snapshot.map_id = enter.map_id;
@@ -71,6 +146,7 @@ int main() {
   state.world.legacy_chr_action = LegacyChrAction::walk;
   state.apply(snapshot);
   state.connection_phase = GameStateStore::ConnectionPhase::play;
+  state.auth_phase = AuthFlowPhase::InGame;
 
   assert(state.world.self_actor_id == 1000);
   assert(state.world.actors.size() == 1);
@@ -78,6 +154,7 @@ int main() {
   assert(state.world.legacy_target_x == -1);
   assert(state.world.legacy_chr_action == LegacyChrAction::none);
   assert(state.connection_phase == GameStateStore::ConnectionPhase::play);
+  assert(state.auth_phase == AuthFlowPhase::InGame);
 
   state.apply(ActorUpsert{
       WorldActor{2000, "Hen", 332, 271, 4, 0, 0, ActorType::monster}});
@@ -509,5 +586,10 @@ int main() {
   state.world.action_locked = true;
   state.apply(ActionAck{true, 1234});
   assert(!state.world.action_locked);
+
+  state.auth_phase = AuthFlowPhase::Disconnected;
+  assert(state.auth_phase == AuthFlowPhase::Disconnected);
+  state.auth_phase = AuthFlowPhase::EditingLogin;
+  assert(state.auth_phase == AuthFlowPhase::EditingLogin);
   return 0;
 }

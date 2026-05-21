@@ -1,0 +1,78 @@
+{
+  "flow": "attack_longhit",
+  "description": "刺杀剑术: CM_LONGHIT/queued sword skill -> SM_LONGHIT -> distance-2 line target -> struck",
+  "delphi_source": {
+    "sword_toggle": "ObjBase.pas:9438-9450 SWD_LONGHIT",
+    "client_attack": "ClMain.pas:2174-2221 AttackTarget",
+    "server_entry": "ObjBase.pas:9302 HitXY",
+    "targeting": "ObjBase.pas:5270-5284 SwordLongAttack",
+    "motion": "ObjBase.pas:5687-5692 HitMotion"
+  },
+  "stages": [
+    {
+      "stage": "prepare_or_toggle",
+      "message_type": "CM_SPELL",
+      "message_id": 3017,
+      "fields": {
+        "magic_id": 12
+      },
+      "action": "Enable long-hit sword mode when learned."
+    },
+    {
+      "stage": "client_send",
+      "message_type": "CM_LONGHIT",
+      "message_id": 3019,
+      "fields": {
+        "x": "<attacker_x>",
+        "y": "<attacker_y>",
+        "dir": "<dir>",
+        "feature": 0,
+        "state": 0
+      },
+      "note": "Target is resolved from the tile two cells ahead; client does not send target coordinates."
+    },
+    {
+      "stage": "server_targeting",
+      "action": "SwordLongAttack checks the tile one and two cells ahead in facing direction.",
+      "delphi_line": "ObjBase.pas:5270-5284",
+      "range": 2,
+      "line_requirement": "target must be on attack direction line"
+    },
+    {
+      "stage": "server_motion",
+      "message_type": "SM_LONGHIT",
+      "message_id": 19,
+      "delphi_line": "ObjBase.pas:5687-5692"
+    },
+    {
+      "stage": "server_main_target_damage",
+      "message_type": "SM_STRUCK",
+      "message_id": 31,
+      "delay_ms": 200,
+      "condition": "adjacent main target exists and the normal _Attack hit check passes",
+      "delphi_line": "ObjBase.pas:5432-5449",
+      "fields": {
+        "damage": "<main_target_damage>",
+        "hp": "<main_target_hp>"
+      },
+      "note": "Long-hit mode still runs the normal main-target path after the range-2 DirectAttack path."
+    },
+    {
+      "stage": "server_range2_directattack_damage",
+      "message_type": "SM_STRUCK",
+      "message_id": 31,
+      "delay_ms": 500,
+      "condition": "range-2 line target exists and DirectAttack hit check passes",
+      "delphi_line": "ObjBase.pas:5261-5265, ObjBase.pas:5270-5284",
+      "fields": {
+        "damage": "<secondary_damage>",
+        "hp": "<range2_target_hp>"
+      },
+      "note": "DirectAttack queues visible struck after 500ms; non-human targets also receive immediate internal RM_STRUCK for AI reaction."
+    }
+  ],
+  "cplusplus_mapping": {
+    "targeting": "target_in_attack_line + resolve_attack_range(kCmLongHit)",
+    "known_pr5_risk": "Invalid long-hit attempts must not consume the next valid long-hit cadence before target validation."
+  }
+}

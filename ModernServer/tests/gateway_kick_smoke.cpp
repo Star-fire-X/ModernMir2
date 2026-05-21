@@ -160,6 +160,35 @@ int main() {
     return 1;
   }
 
+  const auto delayed_packet = mir2::make_legacy_game_packet(
+      connected_event->session_id, 0, 0,
+      mir2::make_default_message(mir2::kSmHit, 123, 10, 10, 0));
+  if (!bus.post("game_gateway",
+                mir2::SessionEvent{mir2::SessionEventKind::send_packet,
+                                   "game_gateway",
+                                   connected_event->session_id,
+                                   {},
+                                   delayed_packet,
+                                   {},
+                                   200})) {
+    stop_services();
+    return 1;
+  }
+
+  const auto early_hit =
+      wait_for_socket_packet(socket, mir2::kSmHit, std::chrono::milliseconds(75));
+  if (early_hit.has_value()) {
+    stop_services();
+    return 1;
+  }
+
+  const auto delayed_hit =
+      wait_for_socket_packet(socket, mir2::kSmHit, std::chrono::milliseconds(3000));
+  if (!delayed_hit.has_value() || delayed_hit->message.recog != 123) {
+    stop_services();
+    return 1;
+  }
+
   const auto kick_packet = mir2::make_legacy_game_packet(
       connected_event->session_id, 0, 0,
       mir2::make_default_message(mir2::kSmOutOfConnection, 0, 0, 0, 0));

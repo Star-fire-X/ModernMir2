@@ -1,0 +1,71 @@
+{
+  "flow": "spell_failure",
+  "description": "普通技能入口成功但 SpellNow 分支失败: MP 已扣, SM_SPELL 已广播; fireball target/range/anti-magic failure still emits normal SM_MAGICFIRE with no delayed effect, while nofire failures emit SM_MAGICFIRE_FAIL.",
+  "delphi_source": {
+    "mp_cost": "ObjBase.pas:7106-7128 DoSpell",
+    "spell_entry": "Magic.pas:534-537 SpellNow entry",
+    "fireball_branch": "Magic.pas:548-570 case 1/5",
+    "post": "Magic.pas:983-998 magic fire / fail post-processing"
+  },
+  "stages": [
+    {
+      "stage": "server_dospell",
+      "action": "GetSpellPoint -> DamageSpell -> HealthSpellChanged before SpellNow",
+      "delphi_line": "ObjBase.pas:7121-7128",
+      "messages": [
+        {
+          "type": "SM_HEALTHSPELLCHANGED",
+          "id": 53
+        }
+      ]
+    },
+    {
+      "stage": "server_spellnow_entry",
+      "action": "broadcast spell action before branch validation",
+      "message_type": "SM_SPELL",
+      "message_id": 17,
+      "delphi_line": "Magic.pas:537"
+    },
+    {
+      "stage": "server_fireball_branch_no_effect",
+      "examples": [
+        "target missing",
+        "target out of range",
+        "anti magic rejected"
+      ],
+      "message_type": "SM_MAGICFIRE",
+      "message_id": 638,
+      "condition": "case 1/5 leaves nofire=false and needfire=true; SpellNow post-processing sends normal magic fire",
+      "delphi_line": "Magic.pas:548-570, Magic.pas:983-988",
+      "side_effect": "No delayed damage/heal is queued."
+    },
+    {
+      "stage": "server_nofire_fail_visual",
+      "message_type": "SM_MAGICFIRE_FAIL",
+      "message_id": 639,
+      "condition": "DoSpell returns false because nofire remains TRUE, then SpellXY sends RM_MAGICFIRE_FAIL",
+      "delphi_line": "Magic.pas:983-998, ObjBase.pas:9538-9539",
+      "examples": [
+        "required bujuk/poison powder missing",
+        "target validation fails inside a nofire branch"
+      ]
+    },
+    {
+      "stage": "expected_absence",
+      "messages_not_sent": [
+        {
+          "type": "SM_STRUCK",
+          "id": 31
+        },
+        {
+          "type": "SM_MAGIC_LVEXP",
+          "id": 640
+        }
+      ]
+    }
+  ],
+  "cplusplus_mapping": {
+    "spell_dispatch": "map_actor_mail.hpp case ActorMailKind::spell",
+    "pr_owner": "PR6/PR7"
+  }
+}

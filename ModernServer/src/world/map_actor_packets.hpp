@@ -326,6 +326,45 @@ LegacyPacket make_hear_packet(std::uint64_t session_id, std::uint64_t actor_id,
       legacy_encode_string(message));
 }
 
+LegacyPacket make_legacy_chat_packet(std::uint64_t session_id,
+                                      LegacyChatDeliveryKind kind,
+                                      std::uint64_t recog_actor_id,
+                                      const std::string& message) {
+  std::uint16_t ident = kSmHear;
+  std::uint16_t color = make_word(0, 255);
+  std::int32_t recog = static_cast<std::int32_t>(recog_actor_id);
+  switch (kind) {
+    case LegacyChatDeliveryKind::whisper:
+      ident = kSmWhisper;
+      color = make_word(252, 255);
+      break;
+    case LegacyChatDeliveryKind::guild:
+      ident = kSmGuildMessage;
+      color = make_word(212, 255);
+      break;
+    case LegacyChatDeliveryKind::group:
+      ident = kSmSysMessage;
+      color = make_word(196, 255);
+      break;
+    case LegacyChatDeliveryKind::shout:
+    case LegacyChatDeliveryKind::shout_direct:
+      recog = 0;
+      color = make_word(0, 151);
+      break;
+    case LegacyChatDeliveryKind::system:
+      ident = kSmSysMessage;
+      color = make_word(255, 56);
+      break;
+    case LegacyChatDeliveryKind::normal:
+    case LegacyChatDeliveryKind::none:
+      break;
+  }
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(ident, recog, color, 0, 1),
+      legacy_encode_string(message));
+}
+
 LegacyPacket make_system_notice_packet(std::uint64_t session_id, const std::string& message) {
   return make_hear_packet(session_id, 0, message);
 }

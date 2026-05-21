@@ -11,6 +11,10 @@ enum class LegacyAuthUiTraceLabel {
   account_enter_focus_password,
   password_enter_send_login,
   send_login,
+  recv_login_failure,
+  show_login_error_modal,
+  modal_ok,
+  focus_login_password,
   recv_login_success,
   recv_server_list,
   show_server_select,
@@ -27,6 +31,8 @@ enum class LegacyAuthUiTraceLabel {
   recv_start_play,
   connect_game_gateway,
   show_login_notice_or_loading,
+  login_notice_ok,
+  waiting_world_snapshot,
   open_create_character_dialog,
   focus_create_character_name,
   send_new_character,
@@ -55,8 +61,20 @@ struct LegacyServerSelectLayout {
   RectI close_button{};
   int row_top{0};
   int row_gap{42};
+  int dialog_sprite_index{256};
+  bool dialog_uses_prguse2{false};
 
   [[nodiscard]] RectI server_button(std::size_t index) const;
+};
+
+struct LegacyMessageModalLayout {
+  RectI dialog{};
+  RectI title_origin{};
+  RectI text_origin{};
+  RectI ok_button{};
+  RectI yes_button{};
+  RectI no_button{};
+  RectI cancel_button{};
 };
 
 struct LegacyCharacterSelectLayout {
@@ -92,6 +110,7 @@ struct LegacyCreateCharacterLayout {
 [[nodiscard]] LegacyLoginLayout legacy_login_layout(RectI dialog_template);
 [[nodiscard]] LegacyServerSelectLayout legacy_server_select_layout(RectI dialog_template,
                                                                    std::size_t visible_count);
+[[nodiscard]] LegacyMessageModalLayout legacy_message_modal_layout(RectI dialog_template);
 [[nodiscard]] LegacyCharacterSelectLayout legacy_character_select_layout();
 [[nodiscard]] LegacyCreateCharacterLayout legacy_create_character_layout(
     RectI dialog_template, RectI job_button_template, RectI sex_button_template,
