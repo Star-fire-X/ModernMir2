@@ -58,11 +58,12 @@ std::vector<std::string> run_action_trace() {
   assert(!can_next_action(world, self, 11000));
   push(trace, "action_lock_blocks_until_10000ms");
 
-  assert(server_accept_next_action(world, 11001));
+  assert(!server_accept_next_action(world, 11001));
   assert(!world.action_locked);
-  push(trace, "server_accept_next_action_unlocks_after_timeout");
+  push(trace, "server_accept_next_action_clears_timeout_but_denies_same_call");
 
-  assert(can_next_action(world, self, 11001));
+  assert(server_accept_next_action(world, 11002));
+  assert(can_next_action(world, self, 11002));
   push(trace, "can_next_action_after_timeout");
 
   GameStateStore state;

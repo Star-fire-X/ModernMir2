@@ -764,6 +764,7 @@ void ClientApp::request_action(const client_v1::ActionIntent& intent) {
   const auto now_ms = detail::monotonic_ms();
   state_.world.action_locked = true;
   state_.world.action_lock_started_ms = now_ms;
+  state_.world.action_lock_timeout_cleared_ms = 0;
   const auto sent_ident = [&] {
     switch (intent.kind) {
       case client_v1::WorldActionKind::walk:
@@ -836,10 +837,18 @@ void ClientApp::request_spell(const client_v1::SpellIntent& intent) {
   const auto now_ms = detail::monotonic_ms();
   state_.world.action_locked = true;
   state_.world.action_lock_started_ms = now_ms;
+  state_.world.action_lock_timeout_cleared_ms = 0;
   state_.world.last_sent_action_ident = 3017U;
   state_.world.last_sent_action_dir = intent.dir;
   state_.world.latest_spell_ms = state_.world.action_lock_started_ms;
-  state_.world.magic_pk_delay_ms = 300;  // 魔法攻击最小间隔 300ms
+  state_.world.magic_pk_delay_ms = 0;
+  if (intent.target_actor_id != 0) {
+    if (const auto it = state_.world.actors.find(intent.target_actor_id);
+        it != state_.world.actors.end() &&
+        it->second.actor_type == client_v1::ActorType::player) {
+      state_.world.magic_pk_delay_ms = 300U + (now_ms % 1100U);
+    }
+  }
   if (legacy_trace_enabled()) {
     std::ostringstream out;
     out << "request_spell now=" << now_ms << " magic=" << intent.magic_id << " x=" << intent.x
