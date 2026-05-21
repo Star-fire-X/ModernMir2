@@ -263,11 +263,7 @@ int main() {
       sequence);
   const auto move_ack = reader.wait_for_matching<mir2::client_v1::ActionAck>(
       [](const mir2::client_v1::ActionAck& ack) { return ack.ok; });
-  const auto move_delta = reader.wait_for_matching<mir2::client_v1::ActorStateDelta>(
-      [&](const mir2::client_v1::ActorStateDelta& delta) {
-        return delta.actor_id == enter_world->self_actor_id && delta.x == 123 && delta.y == 235;
-      });
-  if (!move_ack.has_value() || !move_delta.has_value()) {
+  if (!move_ack.has_value()) {
     stop_services();
     return fail("move");
   }

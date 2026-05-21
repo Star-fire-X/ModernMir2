@@ -40,6 +40,7 @@
 #include <chrono>
 #include <fstream>
 #include <filesystem>
+#include <iterator>
 #include <memory>
 #include <sstream>
 #include <string_view>
@@ -365,6 +366,11 @@ int ClientApp::run() {
               handle_protocol_events(context);
               flush_scene_change_if_pending(context);
               run_timers(delta);
+              if (!deferred_protocol_events_.empty() &&
+                  !state_.should_defer_runtime_for_map_transition(detail::monotonic_ms())) {
+                handle_protocol_events(context);
+                flush_scene_change_if_pending(context);
+              }
             },
             [this, &context] { capture_ui_input(context); },
             [this, &context] { scenes_.process_key_messages(context); },
@@ -1449,7 +1455,69 @@ void ClientApp::handle_auto_character_list() {
 //   2. DisconnectedEvent —— 连接断开处理（游戏中断线弹出重连确认）
 //   3. ProtocolFrameEvent —— 协议帧，按 MessageId 解码后分发
 void ClientApp::handle_protocol_events(ClientContext& context) {
-  for (auto& event : protocol_.drain_events()) {
+  auto deferred_events = std::move(deferred_protocol_events_);
+  deferred_protocol_events_.clear();
+  auto fresh_events = protocol_.drain_events();
+  std::vector<ProtocolEvent> combined;
+  combined.insert(combined.end(), std::make_move_iterator(deferred_events.begin()),
+                  std::make_move_iterator(deferred_events.end()));
+  combined.insert(combined.end(), std::make_move_iterator(fresh_events.begin()),
+                  std::make_move_iterator(fresh_events.end()));
+  const auto is_world_snapshot = [](const ProtocolEvent& event) {
+    const auto* frame = std::get_if<ProtocolFrameEvent>(&event);
+    return frame != nullptr && frame->frame.message_id == client_v1::MessageId::world_snapshot;
+  };
+  const auto is_transition_runtime = [](const ProtocolEvent& event) {
+    const auto* frame = std::get_if<ProtocolFrameEvent>(&event);
+    if (frame == nullptr) {
+      return false;
+    }
+    switch (frame->frame.message_id) {
+      case client_v1::MessageId::map_door_state:
+      case client_v1::MessageId::actor_state_delta:
+      case client_v1::MessageId::actor_upsert:
+      case client_v1::MessageId::actor_remove:
+      case client_v1::MessageId::actor_action:
+      case client_v1::MessageId::actor_magic_fire:
+      case client_v1::MessageId::actor_magic_fire_fail:
+      case client_v1::MessageId::actor_vitals:
+      case client_v1::MessageId::actor_death:
+      case client_v1::MessageId::ground_item_add:
+      case client_v1::MessageId::ground_item_remove:
+        return true;
+      default:
+        return false;
+    }
+  };
+  std::vector<ProtocolEvent> events;
+  const auto snapshot = state_.world.map_transition_pending
+                            ? std::find_if(combined.begin(), combined.end(), is_world_snapshot)
+                            : combined.end();
+  if (snapshot != combined.end()) {
+    for (auto it = combined.begin(); it != snapshot; ++it) {
+      if (!is_transition_runtime(*it)) {
+        events.push_back(std::move(*it));
+      }
+    }
+    events.push_back(std::move(*snapshot));
+    for (auto it = combined.begin(); it != snapshot; ++it) {
+      if (is_transition_runtime(*it)) {
+        events.push_back(std::move(*it));
+      }
+    }
+    for (auto it = std::next(snapshot); it != combined.end(); ++it) {
+      events.push_back(std::move(*it));
+    }
+  } else {
+    events = std::move(combined);
+  }
+  for (std::size_t event_index = 0; event_index < events.size(); ++event_index) {
+    auto& event = events[event_index];
+    auto defer_current_and_remaining = [&] {
+      for (auto i = event_index; i < events.size(); ++i) {
+        deferred_protocol_events_.push_back(std::move(events[i]));
+      }
+    };
     // ---- 连接建立事件 ----
     if (std::holds_alternative<ConnectedEvent>(event)) {
       // 发送客户端握手包（协议版本、构建号、资源修订号）
@@ -1518,13 +1586,26 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
     // 收到有效消息就取消网络等待定时器
     cancel_network_wait_timers();
 
-    const auto drop_world_runtime_if_inactive = [this](const std::string_view message_name,
-                                                       const bool allow_map_transition = false) {
+    bool deferred_for_map_transition = false;
+    const auto drop_world_runtime_if_inactive = [this, &deferred_for_map_transition](
+                                                   const std::string_view message_name,
+                                                   const bool allow_map_transition = false) {
       if (state_.connection_phase == GameStateStore::ConnectionPhase::play &&
           scenes_.current_id() == SceneId::world) {
-        if (!state_.world.map_transition_pending || allow_map_transition) {
+        if (allow_map_transition || !state_.world.map_transition_pending) {
           return false;
         }
+        if (state_.should_defer_runtime_for_map_transition(detail::monotonic_ms())) {
+          if (legacy_trace_enabled()) {
+            std::ostringstream out;
+            out << "defer_world_runtime message=" << message_name
+                << " map_transition=" << state_.world.map_transition_pending;
+            legacy_trace(out.str());
+          }
+          deferred_for_map_transition = true;
+          return true;
+        }
+        return false;
       }
       if (legacy_trace_enabled()) {
         std::ostringstream out;
@@ -1753,7 +1834,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             login_replay_enter_selected_ = false;
             state_.login_notice = LoginNoticeViewState{};
             state_.auth_phase = AuthFlowPhase::InGame;
-            request_scene_change(SceneId::world);
+            if (scenes_.current_id() != SceneId::world) {
+              request_scene_change(SceneId::world);
+            }
 
           // ---- 以下为世界运行时的增量更新消息 ----
           } else if constexpr (std::is_same_v<T, client_v1::WorldClearObjects>) {
@@ -2401,6 +2484,10 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
     if (!decoded) {
       protocol_.disconnect("protocol_decode_error");
     }
+    if (deferred_for_map_transition) {
+      defer_current_and_remaining();
+      break;
+    }
     flush_scene_change_if_pending(context);
   }
 }
@@ -2410,7 +2497,10 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
 //          -> 每分钟任务 -> 外挂检测 -> 心跳发送
 void ClientApp::run_timers(const float delta_seconds) {
   timer1_tick();  // 兼容 Delph Timer1，目前为空
-  state_.prune_pending_actor_removals(detail::monotonic_ms());
+  const auto now_ms = detail::monotonic_ms();
+  state_.process_legacy_actor_queues(now_ms);
+  state_.finish_pending_map_transition_if_ready(now_ms);
+  state_.prune_pending_actor_removals(now_ms);
   run_repeating_timer(mouse_timer_, delta_seconds, [this] { mouse_timer_tick(); });
   run_one_shot_timer(wait_msg_timer_, delta_seconds);    // 网络等待超时提示
   run_one_shot_timer(sel_chr_wait_timer_, delta_seconds); // 选角等待超时提示
