@@ -69,6 +69,8 @@ struct UiInputResult {
   bool consumed{false};     ///< 输入已被 UI 消费（场景不应再处理）
   bool text_focus{false};   ///< 当前有编辑框获得焦点
   bool dragging{false};     ///< 正在拖拽中
+  bool app_modal_visible{false};  ///< 应用级模态可见（阻断世界输入）
+  bool hover_consumed{false};     ///< 仅由悬停命中触发的消费（不应阻断键盘快捷键）
 };
 
 /// 鼠标按键枚举
@@ -152,6 +154,10 @@ class UiNode {
   virtual bool on_mouse_down(UiTree& tree, const InputState& input, UiMouseButton button);
   /// 鼠标释放事件处理
   virtual bool on_mouse_up(UiTree& tree, const InputState& input, UiMouseButton button);
+  /// 鼠标滚轮事件处理
+  virtual bool on_mouse_wheel(UiTree& tree, const InputState& input, int wheel_delta);
+  /// 鼠标双击事件处理
+  virtual bool on_double_click(UiTree& tree, const InputState& input, UiMouseButton button);
   /// 键盘按键事件处理
   virtual bool on_key_down(int virtual_key) {
     (void)virtual_key;
@@ -480,8 +486,14 @@ class UiTree {
   bool dispatch_mouse_down(UiNode* target, const InputState& input, UiMouseButton button);
   /// 分发鼠标释放事件
   bool dispatch_mouse_up(UiNode* target, const InputState& input, UiMouseButton button);
+  /// 分发鼠标滚轮事件
+  bool dispatch_mouse_wheel(UiNode* target, const InputState& input, int wheel_delta);
+  /// 分发鼠标双击事件
+  bool dispatch_double_click(UiNode* target, const InputState& input, UiMouseButton button);
   /// 分发键盘事件（按键 + 文本输入 + 退格/回车）
   bool dispatch_keyboard(const InputState& input, UiInputResult& result);
+  /// 被动指针事件（wheel/double-click）目标分发优先级：menu → modal → capture → normal
+  [[nodiscard]] UiNode* passive_pointer_target(int x, int y) const;
 
   std::unique_ptr<UiNode> root_{};  ///< 根节点
   AssetManager* assets_{nullptr};   ///< 资源管理器指针

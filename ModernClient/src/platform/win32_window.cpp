@@ -47,6 +47,7 @@ bool Win32Window::create(const std::wstring& title, int width, int height) {
   // 注册窗口类：指定窗口过程、光标、背景画刷
   WNDCLASSEXW window_class{};
   window_class.cbSize = sizeof(window_class);
+  window_class.style = CS_DBLCLKS;
   window_class.hInstance = instance_;
   window_class.lpfnWndProc = &Win32Window::WindowProc;
   window_class.lpszClassName = kWindowClassName;
@@ -174,6 +175,14 @@ LRESULT Win32Window::handle_message(UINT message, WPARAM wparam, LPARAM lparam) 
       input_.mouse_y = GET_Y_LPARAM(lparam);
       append_event(LegacyInputEventKind::left_down);
       return 0;
+    case WM_LBUTTONDBLCLK:
+      SetCapture(hwnd_);
+      input_.left_down = true;
+      input_.left_pressed = true;
+      input_.left_double_click = true;
+      input_.mouse_x = GET_X_LPARAM(lparam);
+      input_.mouse_y = GET_Y_LPARAM(lparam);
+      return 0;
     case WM_LBUTTONUP:
       ReleaseCapture();   // 释放鼠标捕获
       input_.left_down = false;
@@ -190,6 +199,14 @@ LRESULT Win32Window::handle_message(UINT message, WPARAM wparam, LPARAM lparam) 
       input_.mouse_y = GET_Y_LPARAM(lparam);
       append_event(LegacyInputEventKind::right_down);
       return 0;
+    case WM_RBUTTONDBLCLK:
+      SetCapture(hwnd_);
+      input_.right_down = true;
+      input_.right_pressed = true;
+      input_.right_double_click = true;
+      input_.mouse_x = GET_X_LPARAM(lparam);
+      input_.mouse_y = GET_Y_LPARAM(lparam);
+      return 0;
     case WM_RBUTTONUP:
       ReleaseCapture();
       input_.right_down = false;
@@ -198,6 +215,15 @@ LRESULT Win32Window::handle_message(UINT message, WPARAM wparam, LPARAM lparam) 
       input_.mouse_y = GET_Y_LPARAM(lparam);
       append_event(LegacyInputEventKind::right_up);
       return 0;
+    case WM_MOUSEWHEEL: {
+      POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+      ScreenToClient(hwnd_, &point);
+      input_.mouse_x = point.x;
+      input_.mouse_y = point.y;
+      input_.wheel_delta += GET_WHEEL_DELTA_WPARAM(wparam);
+      input_.wheel_scrolled = true;
+      return 0;
+    }
 
     // === 键盘消息 ===
     case WM_KEYDOWN:

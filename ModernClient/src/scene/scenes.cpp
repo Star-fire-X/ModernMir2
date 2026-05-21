@@ -3371,9 +3371,9 @@ class LegacyHud final {
         }
         if (!was_visible) {
           legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::show_shop_menu);
+          tree_->bring_to_front(merchant_menu_);
         }
         move_bag_for_npc_dialog();
-        tree_->bring_to_front(merchant_menu_);
       } else if (!shop.visible) {
         merchant_selected_index_ = -1;
       }
@@ -3395,8 +3395,8 @@ class LegacyHud final {
       if (show) {
         if (!was_visible) {
           legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::show_sell_dialog);
+          tree_->bring_to_front(merchant_sell_dialog_);
         }
-        tree_->bring_to_front(merchant_sell_dialog_);
       }
     }
   }
@@ -3419,6 +3419,7 @@ class LegacyHud final {
         if (!was_visible) {
           legacy_magic_npc_trace(
               legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::show_storage_menu);
+          tree_->bring_to_front(storage_window_);
         }
         const auto max_page =
             std::max(0, (static_cast<int>(world.storage.items.size()) + 4) / 5 - 1);
@@ -3431,7 +3432,6 @@ class LegacyHud final {
           move_bag_for_npc_dialog();
           tree_->bring_to_front(item_bag_);
         }
-        tree_->bring_to_front(storage_window_);
       } else {
         storage_page_ = 0;
       }
@@ -3442,9 +3442,12 @@ class LegacyHud final {
       tree_->bring_to_front(item_bag_);
     }
     if (repair_dialog_ != nullptr) {
+      const auto was_visible = repair_dialog_->visible;
       repair_dialog_->set_visible(*tree_, world.repair.dialog_visible);
       if (world.repair.dialog_visible) {
-        tree_->bring_to_front(repair_dialog_);
+        if (!was_visible) {
+          tree_->bring_to_front(repair_dialog_);
+        }
       }
     }
     if (group_window_ != nullptr) {
@@ -3454,8 +3457,8 @@ class LegacyHud final {
         if (!was_visible) {
           legacy_trade_group_guild_trace(
               legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::show_group_window);
+          tree_->bring_to_front(group_window_);
         }
-        tree_->bring_to_front(group_window_);
       }
     }
     if (trade_remote_window_ != nullptr) {
@@ -3466,8 +3469,8 @@ class LegacyHud final {
           legacy_trade_group_guild_trace(
               legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
                   show_trade_remote_window);
+          tree_->bring_to_front(trade_remote_window_);
         }
-        tree_->bring_to_front(trade_remote_window_);
       }
     }
     if (trade_window_ != nullptr) {
@@ -3478,8 +3481,8 @@ class LegacyHud final {
           legacy_trade_group_guild_trace(
               legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
                   show_trade_local_window);
+          tree_->bring_to_front(trade_window_);
         }
-        tree_->bring_to_front(trade_window_);
       } else if (was_visible) {
         legacy_trade_group_guild_trace(
             legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::hide_trade_windows);
@@ -3492,8 +3495,8 @@ class LegacyHud final {
         if (!was_visible) {
           legacy_trade_group_guild_trace(
               legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::show_guild_window);
+          tree_->bring_to_front(guild_window_);
         }
-        tree_->bring_to_front(guild_window_);
       }
     }
   }
@@ -3502,8 +3505,9 @@ class LegacyHud final {
     if (state_ == nullptr || minimap_ == nullptr || tree_ == nullptr) {
       return;
     }
+    const auto was_visible = minimap_->visible;
     minimap_->set_visible(*tree_, state_->world.minimap.visible);
-    if (minimap_->visible) {
+    if (minimap_->visible && !was_visible) {
       tree_->bring_to_front(minimap_);
     }
   }
@@ -3564,8 +3568,8 @@ class LegacyHud final {
       if (!was_visible) {
         legacy_magic_npc_trace(
             legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::show_merchant_dialog);
+        tree_->bring_to_front(npc_dialog_);
       }
-      tree_->bring_to_front(npc_dialog_);
     } else {
       npc_dialog_->visible = true;
     }
@@ -7283,8 +7287,16 @@ class WorldScene final : public Scene {
     }
     auto& world = context.state->world;
     const auto now_ms = detail::monotonic_ms();
+    const auto escape_pressed = context.input != nullptr && context.input->key_pressed[VK_ESCAPE];
+    const auto key_consumed =
+        context.ui_input.consumed && !context.ui_input.hover_consumed;
     const auto input_guard =
-        context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging;
+        key_consumed || context.ui_input.text_focus || context.ui_input.dragging ||
+        context.ui_input.app_modal_visible;
+    const auto allow_guarded_escape = escape_pressed && !context.ui_input.app_modal_visible;
+    if (input_guard && !allow_guarded_escape) {
+      return;
+    }
     if (legacy_hud_.handle_shortcuts(context, ui_)) {
       return;
     }
@@ -7326,7 +7338,8 @@ class WorldScene final : public Scene {
     update_legacy_weight_slow(world);
 
     const auto input_guard =
-        context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging;
+        context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging ||
+        context.ui_input.app_modal_visible;
     if (!context.legacy_input_dispatched && input_guard) {
       world.focus_actor_id = 0;
       world.focus_ground_item_id = 0;
@@ -7362,6 +7375,7 @@ class WorldScene final : public Scene {
             << " ui_consumed=" << context.ui_input.consumed
             << " text_focus=" << context.ui_input.text_focus
             << " dragging=" << context.ui_input.dragging
+            << " app_modal_visible=" << context.ui_input.app_modal_visible
             << " moving_item=" << world.moving_item.active;
         legacy_trace(out.str());
       }
