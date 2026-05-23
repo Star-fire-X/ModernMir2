@@ -795,10 +795,30 @@ struct GameStateStore {
   ConnectionPhase connection_phase{ConnectionPhase::login};
   std::uint64_t legacy_actor_event_sequence{0};
 
+  static bool legacy_actor_message_is_hurry(const LegacyActorMessage& message) {
+    return message.kind == LegacyActorMessage::Kind::magic_fire ||
+           message.kind == LegacyActorMessage::Kind::magic_fire_fail;
+  }
+
+  static bool legacy_actor_message_is_death(const LegacyActorMessage& message) {
+    return message.kind == LegacyActorMessage::Kind::death;
+  }
+
+  static void clear_pending_death_messages(ActorState& actor) {
+    actor.legacy_action_queue.erase(
+        std::remove_if(actor.legacy_action_queue.begin(),
+                       actor.legacy_action_queue.end(),
+                       [](const LegacyActorMessage& message) {
+                         return legacy_actor_message_is_death(message);
+                       }),
+        actor.legacy_action_queue.end());
+  }
+
   static void revive_actor(ActorState& actor) {
     actor.dead = false;
     actor.skeleton = false;
     actor.legacy_pending_actions.clear();
+    clear_pending_death_messages(actor);
     actor.current_action = client_v1::ActorActionKind::turn;
     actor.legacy_action_ident = legacy_sm::kTurn;
     actor.legacy_death_mode = LegacyDeathMode::instant_corpse;
@@ -1088,10 +1108,7 @@ struct GameStateStore {
       if (actor.legacy_action_queue.empty()) {
         continue;
       }
-      const auto hurry = actor.legacy_action_queue.front().kind ==
-                             LegacyActorMessage::Kind::magic_fire ||
-                         actor.legacy_action_queue.front().kind ==
-                             LegacyActorMessage::Kind::magic_fire_fail;
+      const auto hurry = legacy_actor_message_is_hurry(actor.legacy_action_queue.front());
       if (!hurry && actor_action_animating(actor, now_ms)) {
         continue;
       }
@@ -1099,9 +1116,7 @@ struct GameStateStore {
       actor.legacy_action_queue.pop_front();
       apply_legacy_actor_message(actor, message, now_ms);
       while (!actor.legacy_action_queue.empty() &&
-             (actor.legacy_action_queue.front().kind == LegacyActorMessage::Kind::magic_fire ||
-              actor.legacy_action_queue.front().kind ==
-                  LegacyActorMessage::Kind::magic_fire_fail)) {
+             legacy_actor_message_is_hurry(actor.legacy_action_queue.front())) {
         message = actor.legacy_action_queue.front();
         actor.legacy_action_queue.pop_front();
         apply_legacy_actor_message(actor, message, now_ms);
@@ -1764,6 +1779,9 @@ struct GameStateStore {
     actor.last_damage = message.damage;
     actor.last_hitter_id = message.source_actor_id;
     actor.last_damage_magic = message.magic;
+    if (message.hp > 0) {
+      clear_pending_death_messages(actor);
+    }
     if (actor.dead && actor.hp > 0) {
       revive_actor(actor);
       record_legacy_actor_event(actor);
