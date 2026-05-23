@@ -387,6 +387,60 @@ int main() {
   assert(struck_pose->body_index ==
          appearance.body_offset +
              legacy_frame_index(legacy_human_action_info(LegacyHumanAction::struck), 2, 0));
+  assert(struck_pose->overlay_count == 1);
+  assert(struck_pose->overlays[0].archive == ArchiveId::magic);
+  assert(struck_pose->overlays[0].frame_index == 800);
+
+  WorldViewState death_mode_world;
+  death_mode_world.self_actor_id = 1;
+  auto death_mode_actor = actor;
+  death_mode_world.actors[1] = death_mode_actor;
+  AnimationManager death_mode_animations;
+  death_mode_animations.reset(9000);
+  death_mode_animations.update(death_mode_world, 9000);
+
+  death_mode_actor.dead = true;
+  death_mode_actor.legacy_death_mode = LegacyDeathMode::instant_corpse;
+  death_mode_actor.legacy_action_ident = legacy_sm::kDeath;
+  death_mode_actor.action_started_ms = 9100;
+  death_mode_world.actors[1] = death_mode_actor;
+  death_mode_animations.update(death_mode_world, 9100);
+  auto death_pose = death_mode_animations.pose_for(1);
+  assert(death_pose.has_value());
+  assert(death_pose->dead);
+  assert(death_mode_animations.is_actor_legacy_idle(1));
+  const auto death_action = legacy_human_action_info(LegacyHumanAction::die);
+  assert(death_pose->body_index ==
+         appearance.body_offset +
+             legacy_frame_index(death_action, 2, std::max(0, death_action.frame - 1)));
+
+  death_mode_animations.reset(9200);
+  death_mode_actor = actor;
+  death_mode_world.actors[1] = death_mode_actor;
+  death_mode_animations.update(death_mode_world, 9200);
+  death_mode_actor.dead = true;
+  death_mode_actor.legacy_death_mode = LegacyDeathMode::play_death_anim;
+  death_mode_actor.legacy_action_ident = mir2::legacy::kSmNowDeath;
+  death_mode_actor.action_started_ms = 9300;
+  death_mode_world.actors[1] = death_mode_actor;
+  death_mode_animations.update(death_mode_world, 9300);
+  death_pose = death_mode_animations.pose_for(1);
+  assert(death_pose.has_value());
+  assert(death_pose->dead);
+  assert(!death_mode_animations.is_actor_legacy_idle(1));
+  assert(death_pose->body_index ==
+         appearance.body_offset +
+             legacy_frame_index(death_action, 2, 0));
+
+  death_mode_actor.dead = false;
+  death_mode_actor.hp = 10;
+  death_mode_actor.legacy_action_ident = legacy_sm::kTurn;
+  death_mode_world.actors[1] = death_mode_actor;
+  death_mode_animations.update(death_mode_world, 9361);
+  death_pose = death_mode_animations.pose_for(1);
+  assert(death_pose.has_value());
+  assert(!death_pose->dead);
+  assert(death_mode_animations.is_actor_legacy_idle(1));
 
   WorldViewState monster_world;
   monster_world.self_actor_id = 10;
@@ -888,10 +942,15 @@ int main() {
   world.actors[1].action_magic_effect = 3;
   world.actors[1].action_magic_effect_type = -1;
   animations.update(world, 2600);
+  auto saw_spell_overlay = false;
   for (std::uint64_t now = 2661; now <= 3149; now += 61) {
     animations.update(world, now);
+    if (const auto spell_pose = animations.pose_for(1); spell_pose.has_value()) {
+      saw_spell_overlay = saw_spell_overlay || spell_pose->overlay_count > 0;
+    }
     assert(animations.effects().fly_count() == 0);
   }
+  assert(saw_spell_overlay);
   world.actors[1].action_magic_effect_type = 1;
   animations.update(world, 3210);
   assert(animations.effects().fly_count() == 1);
@@ -925,6 +984,21 @@ int main() {
   assert(pose->body_index ==
          appearance.body_offset +
              legacy_frame_index(legacy_human_action_info(LegacyHumanAction::spell), 2, 1));
+
+  animations.reset(7000);
+  world.actors[1] = actor;
+  world.actors[1].current_action = mir2::client_v1::ActorActionKind::hit;
+  world.actors[1].legacy_action_ident = mir2::legacy::kSmHit;
+  world.actors[1].action_started_ms = 7000;
+  world.action_locked = true;
+  animations.update(world, 7000);
+  for (std::uint64_t now = 7086; now <= 7600; now += 86) {
+    animations.update(world, now);
+  }
+  assert(!animations.is_actor_legacy_idle(1));
+  world.action_locked = false;
+  animations.update(world, 7700);
+  assert(animations.is_actor_legacy_idle(1));
 
   animations.reset(3000);
   world.actors[1] = actor;

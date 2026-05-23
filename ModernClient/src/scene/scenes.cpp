@@ -155,6 +155,46 @@ void legacy_trace_map_layer(
   legacy_trace(out.str());
 }
 
+const char* anim_trace_actor_type_name(const client_v1::ActorType type) {
+  switch (type) {
+    case client_v1::ActorType::player:
+      return "player";
+    case client_v1::ActorType::monster:
+      return "monster";
+    case client_v1::ActorType::npc:
+      return "npc";
+    default:
+      return "unknown";
+  }
+}
+
+const char* anim_trace_action_name(const client_v1::ActorActionKind kind) {
+  switch (kind) {
+    case client_v1::ActorActionKind::turn:
+      return "turn";
+    case client_v1::ActorActionKind::walk:
+      return "walk";
+    case client_v1::ActorActionKind::run:
+      return "run";
+    case client_v1::ActorActionKind::hit:
+      return "hit";
+    case client_v1::ActorActionKind::spell:
+      return "spell";
+    case client_v1::ActorActionKind::struck:
+      return "struck";
+    case client_v1::ActorActionKind::rush:
+      return "rush";
+    case client_v1::ActorActionKind::rush_kung:
+      return "rush_kung";
+    case client_v1::ActorActionKind::backstep:
+      return "backstep";
+    case client_v1::ActorActionKind::knockback:
+      return "knockback";
+    default:
+      return "unknown";
+  }
+}
+
 std::wstring trim_copy(const std::wstring& text) {
   const auto first = std::find_if_not(text.begin(), text.end(), [](const wchar_t ch) {
     return std::iswspace(ch) != 0;
@@ -7331,7 +7371,9 @@ class WorldScene final : public Scene {
     render_small_objects(context, viewport);
     if (context.assets != nullptr) {
       legacy_trace_map_layer(legacy::LegacyMapDrawLayer::ground_effects);
-      animation_.effects().render_ground(*context.assets, *context.renderer, viewport);
+      animation_.effects().render_ground(*context.assets, *context.renderer, viewport,
+                                         animation_.trace_frame_index(),
+                                         animation_.trace_now_ms());
     }
     render_world_rows(context, viewport);
     legacy_trace_map_layer(legacy::LegacyMapDrawLayer::selection_blend);
@@ -7340,7 +7382,9 @@ class WorldScene final : public Scene {
     render_map_debug_overlay(context, viewport);
     if (context.assets != nullptr) {
       legacy_trace_map_layer(legacy::LegacyMapDrawLayer::overlay_effects);
-      animation_.effects().render_overlay(*context.assets, *context.renderer, viewport);
+      animation_.effects().render_overlay(*context.assets, *context.renderer, viewport,
+                                          animation_.trace_frame_index(),
+                                          animation_.trace_now_ms());
     }
     legacy_trace_map_layer(legacy::LegacyMapDrawLayer::actor_screen_overlay);
     render_actor_overlays_after_scene(context, viewport);
@@ -8311,19 +8355,44 @@ class WorldScene final : public Scene {
           if (it->actor == nullptr) {
             continue;
           }
+          if (legacy_anim_trace_enabled()) {
+            LegacyAnimTraceRecord trace;
+            trace.frame_index = animation_.trace_frame_index();
+            trace.now_ms = animation_.trace_now_ms();
+            trace.stage = "render";
+            trace.reason = "render_actor";
+            trace.actor_id = it->actor_id;
+            trace.actor_type = anim_trace_actor_type_name(it->actor->actor_type);
+            trace.action_state = anim_trace_action_name(it->actor->current_action);
+            trace.direction = static_cast<int>(it->pose.dir);
+            trace.logical_x = it->pose.rx;
+            trace.logical_y = it->pose.ry;
+            trace.render_offset_x = it->pose.shift_x;
+            trace.render_offset_y = it->pose.shift_y;
+            trace.animation_start_time = it->actor->action_started_ms;
+            trace.animation_frame_index = it->pose.current_frame;
+            trace.animation_frame_interval = -1;
+            trace.render_layer = "actor";
+            trace.same_frame_visible = animation_.actor_state_changed_this_frame(it->actor_id);
+            legacy_anim_trace_record(trace);
+          }
           legacy_trace_map_layer(legacy::LegacyMapDrawLayer::actor, y);
           render_actor(context, it->pose, viewport, it->actor_id == context.state->world.self_actor_id);
           if (context.assets != nullptr) {
             legacy_trace_map_layer(legacy::LegacyMapDrawLayer::actor_overlay, y);
             animation_.effects().render_overlay_for_actor(it->actor_id, it->pose, *context.assets,
-                                                          *context.renderer, viewport);
+                                                          *context.renderer, viewport,
+                                                          animation_.trace_frame_index(),
+                                                          animation_.trace_now_ms());
           }
         }
       }
 
       if (context.assets != nullptr) {
         legacy_trace_map_layer(legacy::LegacyMapDrawLayer::fly_effect, y);
-        animation_.effects().render_fly(*context.assets, *context.renderer, viewport, y);
+        animation_.effects().render_fly(*context.assets, *context.renderer, viewport, y,
+                                        animation_.trace_frame_index(),
+                                        animation_.trace_now_ms());
       }
     }
   }

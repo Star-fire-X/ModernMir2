@@ -27,6 +27,8 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -227,6 +229,41 @@ struct LegacyMagicAudioCue {
   LegacyMagicAudioCuePhase phase{LegacyMagicAudioCuePhase::fire};
 };
 
+/// 动画语义对齐最小 trace 记录。
+/// 该结构保证 Delphi/C++ 双端可输出同一字段集合，便于 replay 对比。
+struct LegacyAnimTraceRecord {
+  std::uint64_t frame_index{0};
+  std::uint64_t now_ms{0};
+  std::string stage{"none"};
+  std::string reason{"none"};
+  std::uint64_t actor_id{0};
+  std::string actor_type{"none"};
+  std::string action_state{"none"};
+  int direction{-1};
+  int logical_x{-1};
+  int logical_y{-1};
+  int render_offset_x{0};
+  int render_offset_y{0};
+  std::uint64_t animation_start_time{0};
+  int animation_frame_index{-1};
+  int animation_frame_interval{-1};
+  bool action_finished{false};
+  std::uint64_t effect_id{0};
+  std::string effect_type{"none"};
+  std::uint64_t effect_owner{0};
+  std::uint64_t effect_target{0};
+  int effect_x{-1};
+  int effect_y{-1};
+  int effect_frame_index{-1};
+  std::int64_t effect_create_frame{-1};
+  std::int64_t effect_destroy_frame{-1};
+  std::string render_layer{"none"};
+  bool same_frame_visible{false};
+};
+
+[[nodiscard]] bool legacy_anim_trace_enabled();
+void legacy_anim_trace_record(const LegacyAnimTraceRecord& record);
+
 /// 旧版魔法类型枚举：定义魔法效果的表现形式
 /// 每种魔法根据此类型决定其精灵动画的播放方式
 enum class LegacyMagicType : std::uint8_t {
@@ -378,16 +415,19 @@ class LegacyAnimationClock {
 class LegacyActorAnimation {
  public:
   /// 与服务端角色状态同步（检测新动作/新移动）
-  void sync_actor(const ActorState& actor, std::uint64_t now_ms, bool self_actor = false);
+  void sync_actor(const ActorState& actor, std::uint64_t now_ms, bool self_actor = false,
+                  std::uint64_t trace_frame_index = 0);
   /// 更新动画帧（根据时钟 tick 推进帧序号）
   void update(const ActorState& actor, const LegacyAnimationClock& clock,
-              std::uint64_t now_ms);
+              std::uint64_t now_ms, bool wait_server_accept = false,
+              std::uint64_t trace_frame_index = 0);
 
   /// 获取当前角色的渲染姿态（精灵帧索引、坐标偏移等）
   [[nodiscard]] std::optional<ActorRenderPose> pose_for(const ActorState& actor) const;
   [[nodiscard]] std::uint64_t actor_id() const { return actor_id_; }
   [[nodiscard]] bool is_legacy_idle() const;
   [[nodiscard]] std::optional<std::uint64_t> spell_effect_ready_started_ms() const;
+  [[nodiscard]] std::uint64_t last_state_change_frame() const { return last_state_change_frame_; }
   [[nodiscard]] std::vector<LegacySpecialEffectEvent> drain_special_effect_events();
   void mark_spell_effect_spawned(std::uint64_t action_started_ms);
 
@@ -414,10 +454,17 @@ class LegacyActorAnimation {
                     MotionKind kind, int move_step, std::uint64_t now_ms);
   void begin_motion(const ActorState& actor, const ResolvedAction& resolved,
                     MotionKind kind, int move_step, std::uint64_t now_ms);
-  void queue_or_begin(const ActorState& actor, bool is_move, std::uint64_t now_ms);
-  void finish_motion(const ActorState& actor, std::uint64_t now_ms);
+  void queue_or_begin(const ActorState& actor, bool is_move, std::uint64_t now_ms,
+                      bool hurry = false);
+  void finish_motion(const ActorState& actor, std::uint64_t now_ms,
+                     std::uint64_t trace_frame_index);
   void setup_spell_runtime(const ActorState& actor, std::uint64_t now_ms);
   [[nodiscard]] bool spell_magic_ready(const ActorState& actor, std::uint64_t now_ms) const;
+  [[nodiscard]] bool should_hold_for_server_ack(const ActorState& actor,
+                                                bool wait_server_accept) const;
+  void trace_actor_state(const ActorState& actor, std::uint64_t trace_frame_index,
+                         std::uint64_t now_ms, std::string_view stage,
+                         std::string_view reason, bool action_finished = false) const;
   void refresh_default_frame(const ActorState& actor, std::uint64_t now_ms);
   void reset_default_frame(const ActorState& actor, std::uint64_t now_ms);
   [[nodiscard]] const LegacyActionInfo& stand_action_for(const ActorState& actor) const;
@@ -457,6 +504,7 @@ class LegacyActorAnimation {
   int move_return_x_{0};
   int move_return_y_{0};
   std::uint64_t frame_started_ms_{0};    ///< 当前帧开始时间
+  std::uint64_t motion_started_ms_{0};   ///< 当前动作/移动开始时间
   std::uint64_t default_frame_time_ms_{0}; ///< 待机帧切换时间
   std::uint64_t smooth_move_time_ms_{0};  ///< 移动结束时间（用于从移动平滑过渡到待机）
   std::uint64_t war_mode_time_ms_{0};     ///< 战斗模式开始时间
@@ -476,6 +524,7 @@ class LegacyActorAnimation {
   std::vector<LegacySpecialEffectEvent> special_effect_events_{};
   std::uint64_t last_special_event_action_started_ms_{0};
   int last_special_event_local_frame_{-1};
+  std::uint64_t last_state_change_frame_{0};
 
   int xx_{0};             ///< 当前 X 坐标（内部副本，用于检测坐标变化）
   int yy_{0};             ///< 当前 Y 坐标
@@ -541,6 +590,8 @@ class LegacyEffectManager {
     int ready_distance{15};
     int fly_frame_offset{10};
     int fly_frame_stride{10};
+    std::uint64_t trace_effect_id{0};
+    std::uint64_t trace_create_frame{0};
 
     /// 计算当前帧在精灵表中的实际绝对索引
     [[nodiscard]] int draw_frame_index() const;
@@ -563,6 +614,7 @@ class LegacyEffectManager {
     LegacyMagicType magic_type{LegacyMagicType::fly};  ///< 魔法类型
     bool repetition{true};     ///< 是否循环
     std::uint64_t now_ms{0};   ///< 当前时间
+    std::uint64_t trace_frame_index{0};
     std::uint64_t next_frame_ms{50};  ///< 帧间隔（毫秒）
     int frame_count{0};
     int explosion_frame_count{0};
@@ -586,19 +638,26 @@ class LegacyEffectManager {
                                    int y, std::uint64_t now_ms,
                                    std::uint64_t next_frame_ms, bool blend);
   void del_magic(int server_magic_id);
-  void update(std::uint64_t now_ms);
+  void update(std::uint64_t now_ms, std::uint64_t trace_frame_index = 0);
   void update(std::uint64_t now_ms,
-              const std::unordered_map<std::uint64_t, ActorRenderPose>& actor_poses);
+              const std::unordered_map<std::uint64_t, ActorRenderPose>& actor_poses,
+              std::uint64_t trace_frame_index = 0);
   [[nodiscard]] std::vector<LegacyMagicAudioCue> drain_magic_audio_cues();
   void render_ground(AssetManager& assets, SoftwareRenderer& renderer,
-                     const legacy::LegacyMapViewport& viewport) const;
+                     const legacy::LegacyMapViewport& viewport, std::uint64_t trace_frame_index = 0,
+                     std::uint64_t now_ms = 0) const;
   void render_fly(AssetManager& assets, SoftwareRenderer& renderer,
-                  const legacy::LegacyMapViewport& viewport, int row) const;
+                  const legacy::LegacyMapViewport& viewport, int row,
+                  std::uint64_t trace_frame_index = 0, std::uint64_t now_ms = 0) const;
   void render_overlay_for_actor(std::uint64_t actor_id, const ActorRenderPose& pose,
                                 AssetManager& assets, SoftwareRenderer& renderer,
-                                const legacy::LegacyMapViewport& viewport) const;
+                                const legacy::LegacyMapViewport& viewport,
+                                std::uint64_t trace_frame_index = 0,
+                                std::uint64_t now_ms = 0) const;
   void render_overlay(AssetManager& assets, SoftwareRenderer& renderer,
-                      const legacy::LegacyMapViewport& viewport) const;
+                      const legacy::LegacyMapViewport& viewport,
+                      std::uint64_t trace_frame_index = 0,
+                      std::uint64_t now_ms = 0) const;
 
   [[nodiscard]] std::size_t ground_count() const { return ground_effects_.size(); }
   [[nodiscard]] std::size_t overlay_count() const {
@@ -620,6 +679,7 @@ class LegacyEffectManager {
   std::vector<Effect> overlay_effects_{};     ///< 叠加特效列表（UI 层特效）
   std::vector<Effect> fly_effects_{};         ///< 飞行魔法特效列表（弹道）
   std::vector<LegacyMagicAudioCue> magic_audio_cues_{};
+  std::uint64_t next_trace_effect_id_{1};
 };
 
 /// 动画管理器：整合动画时钟、角色动画和特效管理
@@ -644,6 +704,9 @@ class AnimationManager {
   [[nodiscard]] bool map_object_blend(const MapCell& cell) const;
   [[nodiscard]] const LegacyAnimationClock& clock() const { return clock_; }
   [[nodiscard]] LegacyEffectManager& effects() { return effects_; }
+  [[nodiscard]] std::uint64_t trace_frame_index() const { return trace_frame_index_; }
+  [[nodiscard]] std::uint64_t trace_now_ms() const { return trace_now_ms_; }
+  [[nodiscard]] bool actor_state_changed_this_frame(std::uint64_t actor_id) const;
 
  private:
   /// 检查并生成法术特效：当角色开始施法时创建对应的魔法效果
@@ -662,6 +725,8 @@ class AnimationManager {
   std::unordered_map<std::uint64_t, std::uint64_t> spell_effect_started_ms_{};  ///< 上次生成法术特效的时间（防重复生成）
   std::unordered_map<std::uint64_t, std::uint64_t> special_effect_started_ms_{};
   std::vector<LegacyMagicAudioCue> magic_audio_cues_{};
+  std::uint64_t trace_frame_index_{0};
+  std::uint64_t trace_now_ms_{0};
 };
 
 }  // namespace mir2::client
