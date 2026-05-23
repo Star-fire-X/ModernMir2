@@ -308,7 +308,7 @@ bool check_fixture_hygiene(const std::filesystem::path& golden_root) {
          constants.find("\"TClientItem\": 84") != std::string::npos &&
          constants.find("\"MAXBAGITEM\": 46") != std::string::npos &&
          sequences.find("\"schema_version\": 1") != std::string::npos &&
-         sequences.find("\"status\": \"pending_target\"") != std::string::npos &&
+         sequences.find("\"status\": \"active\"") != std::string::npos &&
          sequences.find("take_on_uses_resolved_tlist_bagindex") != std::string::npos;
 }
 

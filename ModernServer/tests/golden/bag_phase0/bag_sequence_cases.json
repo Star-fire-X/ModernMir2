@@ -1,59 +1,73 @@
 {
   "schema_version": 1,
-  "description": "Pending Delphi bag sequence targets recorded by PR-1. These are documentation-backed targets for later implementation PRs, not active PR-2 behavior requirements.",
+  "description": "Active Delphi bag sequence targets implemented by PR-4.",
   "cases": [
     {
       "name": "eat_consumable_deletes_instance_then_eat_ok",
-      "status": "pending_target",
+      "status": "active",
       "trace": [
         {"seq":1,"direction":"client_to_server","message":"CM_EAT","identity":"MakeIndex+Name"},
         {"seq":2,"direction":"server_internal","message":"EatItem succeeds"},
         {"seq":3,"direction":"server_internal","message":"ItemList.Delete compacts"},
-        {"seq":4,"direction":"server_to_client","message":"SM_WEIGHTCHANGED"},
-        {"seq":5,"direction":"server_to_client","message":"SM_EAT_OK"}
+        {"seq":4,"direction":"server_to_client","message":"SM_DELITEM"},
+        {"seq":5,"direction":"server_to_client","message":"SM_HEALTHSPELLCHANGED"},
+        {"seq":6,"direction":"server_to_client","message":"SM_WEIGHTCHANGED"},
+        {"seq":7,"direction":"server_to_client","message":"SM_EAT_OK"}
       ]
     },
     {
       "name": "drop_item_creates_ground_before_bag_delete",
-      "status": "pending_target",
+      "status": "active",
       "trace": [
         {"seq":1,"direction":"client_to_server","message":"CM_DROPITEM","identity":"MakeIndex+Name"},
         {"seq":2,"direction":"server_internal","message":"DropItemDown"},
         {"seq":3,"direction":"server_to_visible","message":"RM_ITEMSHOW/SM_ITEMSHOW"},
         {"seq":4,"direction":"server_internal","message":"ItemList.Delete compacts on success"},
-        {"seq":5,"direction":"server_to_client","message":"SM_WEIGHTCHANGED"},
-        {"seq":6,"direction":"server_to_client","message":"SM_DROPITEM_SUCCESS"}
+        {"seq":5,"direction":"server_to_client","message":"SM_DELITEM"},
+        {"seq":6,"direction":"server_to_client","message":"SM_WEIGHTCHANGED"},
+        {"seq":7,"direction":"server_to_client","message":"SM_DROPITEM_SUCCESS"}
       ]
     },
     {
-      "name": "pickup_readds_ground_item_on_weight_failure",
-      "status": "pending_target",
+      "name": "pickup_keeps_ground_item_on_weight_failure",
+      "status": "active",
+      "trace": [
+        {"seq":1,"direction":"client_to_server","message":"CM_PICKUP","identity":"Current position"},
+        {"seq":2,"direction":"server_internal","message":"Weight check fails"},
+        {"seq":3,"direction":"server_internal","message":"Ground item remains visible and pickable"}
+      ]
+    },
+    {
+      "name": "pickup_deletes_ground_before_add_item_message",
+      "status": "active",
       "trace": [
         {"seq":1,"direction":"client_to_server","message":"CM_PICKUP","identity":"Current position"},
         {"seq":2,"direction":"server_internal","message":"DeleteFromMap succeeds"},
-        {"seq":3,"direction":"server_internal","message":"Weight check fails"},
-        {"seq":4,"direction":"server_internal","message":"AddToMap restores original ground item"}
+        {"seq":3,"direction":"server_internal","message":"AddItem appends to compact bag"},
+        {"seq":4,"direction":"server_to_client","message":"SM_ITEMHIDE"},
+        {"seq":5,"direction":"server_to_client","message":"SM_ADDITEM"},
+        {"seq":6,"direction":"server_to_client","message":"SM_WEIGHTCHANGED"}
       ]
     },
     {
       "name": "take_on_uses_resolved_tlist_bagindex",
-      "status": "pending_target",
+      "status": "active",
       "trace": [
         {"seq":1,"direction":"client_to_server","message":"CM_TAKEONITEM","identity":"MakeIndex+Name+Slot"},
         {"seq":2,"direction":"server_internal","message":"Resolve MakeIndex+Name to current ItemList index"},
         {"seq":3,"direction":"server_internal","message":"UseItems[slot] = target item"},
         {"seq":4,"direction":"server_internal","message":"DelItemIndex compacts ItemList"},
-        {"seq":5,"direction":"server_to_client","message":"SM_ABILITY/SM_SUBABILITY/SM_TAKEON_OK/FeatureChanged"}
+        {"seq":5,"direction":"server_to_client","message":"SM_DELITEM/SM_UPDATEITEM/SM_SENDUSEITEMS/SM_ABILITY/SM_SUBABILITY/SM_TAKEON_OK/SM_WEIGHTCHANGED"}
       ]
     },
     {
       "name": "take_off_adds_bag_item_before_clearing_equipment",
-      "status": "pending_target",
+      "status": "active",
       "trace": [
         {"seq":1,"direction":"client_to_server","message":"CM_TAKEOFFITEM","identity":"MakeIndex+Name+Slot"},
-        {"seq":2,"direction":"server_internal","message":"AddItem appends and WeightChanged"},
+        {"seq":2,"direction":"server_internal","message":"AddItem appends equipped item"},
         {"seq":3,"direction":"server_internal","message":"UseItems[slot].Index = 0"},
-        {"seq":4,"direction":"server_to_client","message":"SM_TAKEOFF_OK/SM_ADDITEM/SM_ABILITY/SM_SUBABILITY/FeatureChanged"}
+        {"seq":4,"direction":"server_to_client","message":"SM_TAKEOFF_OK/SM_ADDITEM/SM_SENDUSEITEMS/SM_ABILITY/SM_SUBABILITY/SM_WEIGHTCHANGED"}
       ]
     }
   ]

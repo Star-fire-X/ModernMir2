@@ -604,6 +604,17 @@ const LegacyUserItem* Player::bag_item(
   return nullptr;
 }
 
+std::optional<std::size_t> Player::bag_item_index(
+    std::int32_t make_index, std::string_view expected_name,
+    const std::unordered_map<std::int32_t, ItemConfig>& item_configs) const {
+  for (std::size_t index = 0; index < character_.bag_items.size(); ++index) {
+    if (matches_item(character_.bag_items[index], make_index, expected_name, item_configs)) {
+      return index;
+    }
+  }
+  return std::nullopt;
+}
+
 const LegacyUserItem* Player::storage_item(
     std::int32_t make_index, std::string_view expected_name,
     const std::unordered_map<std::int32_t, ItemConfig>& item_configs) const {
@@ -736,6 +747,7 @@ std::optional<LegacyUserItem> Player::remove_bag_item(
     if (matches_item(item, make_index, expected_name, item_configs)) {
       const auto removed = item;
       item = LegacyUserItem{};
+      compact_legacy_items(character_.bag_items);
       return removed;
     }
   }
@@ -748,6 +760,7 @@ std::optional<LegacyUserItem> Player::remove_bag_item_at(std::size_t slot) {
   }
   const auto removed = character_.bag_items[slot];
   character_.bag_items[slot] = LegacyUserItem{};
+  compact_legacy_items(character_.bag_items);
   return removed;
 }
 

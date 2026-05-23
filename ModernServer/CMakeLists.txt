@@ -184,7 +184,6 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_legacy_bag_flow_target_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_bag_flow_target_smoke
     COMMAND mir2_legacy_bag_flow_target_smoke)
-  set_tests_properties(mir2_legacy_bag_flow_target_smoke PROPERTIES DISABLED TRUE)
 
   add_executable(mir2_trade_protocol_golden_smoke
     tests/trade_protocol_golden_smoke.cpp)

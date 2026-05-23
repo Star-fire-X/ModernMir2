@@ -150,34 +150,37 @@ int main() {
     static_cast<void>(runtime.tick(now_ms));
     static_cast<void>(runtime.route_logic_command(make_use(501, 1001, "Healing Potion")));
     auto dispatch = tick_due(runtime, now_ms);
-    const auto update = find_packet(dispatch, mir2::kSmUpdateItem);
-    assert(update.has_value());
-    const auto updated = decode_client_item(update->body);
-    assert(updated.has_value());
-    assert(updated->make_index == 1001);
-    assert(updated->dura == 2);
+    const auto del = find_packet(dispatch, mir2::kSmDelItem);
+    assert(del.has_value());
+    const auto deleted = decode_client_item(del->body);
+    assert(deleted.has_value());
+    assert(deleted->make_index == 1001);
+    assert(!find_packet(dispatch, mir2::kSmUpdateItem).has_value());
     assert(find_packet(dispatch, mir2::kSmEatOk).has_value());
     assert(!dispatch.persist_requests.empty());
 
     auto snapshot = runtime.snapshot_character_actor("PotionUser");
     assert(snapshot.has_value());
-    assert(snapshot->bag_items[0].make_index == 1001);
-    assert(snapshot->bag_items[0].dura == 2);
+    assert(!bag_has_make_index(*snapshot, 1001));
 
-    snapshot->ability.hp = snapshot->ability.max_hp;
-    snapshot->ability.mp = snapshot->ability.max_mp;
+    auto full_character = base_character("FullPotionUser", "3");
+    full_character.ability.hp = full_character.ability.max_hp;
+    full_character.ability.mp = full_character.ability.max_mp;
+    full_character.bag_items[0] = mir2::LegacyUserItem{1002, 1, 3, 3};
     mir2::LogicRuntime full_runtime(config);
     full_runtime.initialize();
-    static_cast<void>(full_runtime.route_logic_command(make_enter(502, *snapshot)));
+    static_cast<void>(full_runtime.route_logic_command(make_enter(502, full_character)));
     std::uint64_t full_now_ms = 20;
     static_cast<void>(full_runtime.tick(full_now_ms));
-    static_cast<void>(full_runtime.route_logic_command(make_use(502, 1001, "Healing Potion")));
+    static_cast<void>(full_runtime.route_logic_command(make_use(502, 1002, "Healing Potion")));
     dispatch = tick_due(full_runtime, full_now_ms);
     assert(find_packet(dispatch, mir2::kSmEatFail).has_value());
     snapshot = full_runtime.snapshot_character_actor("PotionUser");
+    assert(!snapshot.has_value());
+    snapshot = full_runtime.snapshot_character_actor("FullPotionUser");
     assert(snapshot.has_value());
-    assert(snapshot->bag_items[0].make_index == 1001);
-    assert(snapshot->bag_items[0].dura == 2);
+    assert(snapshot->bag_items[0].make_index == 1002);
+    assert(snapshot->bag_items[0].dura == 3);
   }
 
   {
