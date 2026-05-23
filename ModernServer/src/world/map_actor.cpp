@@ -364,25 +364,41 @@ std::vector<LegacyUserItem> collect_detail_goods(
   return std::vector<LegacyUserItem>(matches.begin() + start, matches.begin() + end);
 }
 
+std::optional<std::size_t> find_merchant_item_index(
+    const Npc& merchant, std::string_view expected_name, std::int32_t item_make_index,
+    const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
+  const auto& goods = merchant.merchant_items();
+  for (std::size_t index = 0; index < goods.size(); ++index) {
+    const auto& item = goods[index];
+    if (is_empty(item) || item_name(item, item_configs) != expected_name) {
+      continue;
+    }
+    const auto* config = find_item_config(item_configs, item.index);
+    const auto can_ignore_make_index =
+        config != nullptr && !requires_detail_goods_list(*config);
+    if (!can_ignore_make_index && item.make_index != item_make_index) {
+      continue;
+    }
+    return index;
+  }
+  return std::nullopt;
+}
+
 std::optional<LegacyUserItem> take_merchant_item(
     Npc& merchant, std::string_view expected_name, std::int32_t item_make_index,
     const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
-  auto& goods = merchant.merchant_items_mutable();
-  for (auto it = goods.begin(); it != goods.end(); ++it) {
-    if (is_empty(*it) || item_name(*it, item_configs) != expected_name) {
-      continue;
-    }
-    const auto* config = find_item_config(item_configs, it->index);
-    const auto can_ignore_make_index =
-        config != nullptr && !requires_detail_goods_list(*config);
-    if (!can_ignore_make_index && it->make_index != item_make_index) {
-      continue;
-    }
-    auto item = *it;
-    goods.erase(it);
-    return item;
+  const auto item_index =
+      find_merchant_item_index(merchant, expected_name, item_make_index, item_configs);
+  if (!item_index.has_value()) {
+    return std::nullopt;
   }
-  return std::nullopt;
+  auto& goods = merchant.merchant_items_mutable();
+  if (*item_index >= goods.size()) {
+    return std::nullopt;
+  }
+  auto item = goods[*item_index];
+  goods.erase(goods.begin() + static_cast<std::ptrdiff_t>(*item_index));
+  return item;
 }
 
 GameObject* find_attack_target_by_actor_id(
@@ -2206,6 +2222,7 @@ bool MapActor::can_receive_trade_items(const Player& receiver,
                                        const std::vector<LegacyUserItem>& items) const {
   std::size_t free_slots = 0;
   std::int32_t total_weight = 0;
+  std::unordered_set<std::int32_t> incoming_make_indices;
   for (const auto& bag_item : receiver.character().bag_items) {
     if (is_empty(bag_item)) {
       ++free_slots;
@@ -2217,7 +2234,18 @@ bool MapActor::can_receive_trade_items(const Player& receiver,
     return false;
   }
   for (const auto& item : items) {
-    if (is_empty(item)) {
+    if (is_empty(item) || !incoming_make_indices.insert(item.make_index).second) {
+      return false;
+    }
+    const auto make_index_matches = [&](const LegacyUserItem& existing) {
+      return !is_empty(existing) && existing.make_index == item.make_index;
+    };
+    if (std::any_of(receiver.character().bag_items.begin(),
+                    receiver.character().bag_items.end(), make_index_matches) ||
+        std::any_of(receiver.character().equipped_items.begin(),
+                    receiver.character().equipped_items.end(), make_index_matches) ||
+        std::any_of(receiver.character().storage_items.begin(),
+                    receiver.character().storage_items.end(), make_index_matches)) {
       return false;
     }
     total_weight += item_weight(item, item_configs_);
@@ -2301,10 +2329,41 @@ bool MapActor::commit_trade(TradeSession& session, RuntimeDispatch& dispatch) {
   if (first == nullptr || second == nullptr) {
     return false;
   }
+  std::unordered_set<std::int32_t> trade_make_indices;
+  auto add_trade_make_indices = [&](const std::vector<LegacyUserItem>& items) {
+    for (const auto& item : items) {
+      if (is_empty(item) || !trade_make_indices.insert(item.make_index).second) {
+        return false;
+      }
+    }
+    return true;
+  };
+  auto character_has_make_index = [](const CharacterRecord& character,
+                                     std::int32_t make_index) {
+    const auto make_index_matches = [&](const LegacyUserItem& item) {
+      return !is_empty(item) && item.make_index == make_index;
+    };
+    return std::any_of(character.bag_items.begin(), character.bag_items.end(),
+                       make_index_matches) ||
+           std::any_of(character.equipped_items.begin(), character.equipped_items.end(),
+                       make_index_matches) ||
+           std::any_of(character.storage_items.begin(), character.storage_items.end(),
+                       make_index_matches);
+  };
+  auto offered_items_still_exist = [&](const CharacterRecord& character,
+                                      const std::vector<LegacyUserItem>& items) {
+    return std::any_of(items.begin(), items.end(), [&](const LegacyUserItem& item) {
+      return !is_empty(item) && character_has_make_index(character, item.make_index);
+    });
+  };
   if (first->is_dead() || second->is_dead() || !in_interaction_range(*first, *second) ||
       (session.first.gold < 0 || session.second.gold < 0) ||
       static_cast<std::int64_t>(first->character().gold) + session.second.gold > kLegacyBagGold ||
       static_cast<std::int64_t>(second->character().gold) + session.first.gold > kLegacyBagGold ||
+      !add_trade_make_indices(session.first.items) ||
+      !add_trade_make_indices(session.second.items) ||
+      offered_items_still_exist(first->character(), session.first.items) ||
+      offered_items_still_exist(second->character(), session.second.items) ||
       !can_receive_trade_items(*first, session.second.items) ||
       !can_receive_trade_items(*second, session.first.items)) {
     cancel_trade_for(first->id(), dispatch, true);

@@ -1252,41 +1252,49 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                      make_buy_item_result_packet(requester->session_id(), false, 2, 0));
         break;
       }
-      auto item = take_merchant_item(*merchant, mail.payload, mail.item_make_index, item_configs_);
-      if (!item.has_value()) {
+      const auto merchant_item_index =
+          find_merchant_item_index(*merchant, mail.payload, mail.item_make_index, item_configs_);
+      if (!merchant_item_index.has_value()) {
         queue_packet(dispatch, requester->session_id(),
                      make_buy_item_result_packet(requester->session_id(), false, 1, 0));
         break;
       }
-      const auto price = compute_merchant_sell_price(*merchant, *item, item_configs_);
-      if (!requester->can_add_bag_item(*item, item_configs_) || !requester->has_free_bag_slot()) {
-        merchant->merchant_items_mutable().push_back(*item);
+      const auto item = merchant->merchant_items()[*merchant_item_index];
+      const auto price = compute_merchant_sell_price(*merchant, item, item_configs_);
+      if (!requester->can_add_bag_item(item, item_configs_) || !requester->has_free_bag_slot()) {
         queue_packet(dispatch, requester->session_id(),
                      make_buy_item_result_packet(requester->session_id(), false, 2, 0));
         break;
       }
       if (price <= 0 || !requester->can_spend_gold(price)) {
-        merchant->merchant_items_mutable().push_back(*item);
         queue_packet(dispatch, requester->session_id(),
                      make_buy_item_result_packet(requester->session_id(), false, 3, 0));
         break;
       }
+      auto removed_item = take_merchant_item(*merchant, mail.payload, mail.item_make_index, item_configs_);
+      if (!removed_item.has_value()) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_buy_item_result_packet(requester->session_id(), false, 1, 0));
+        break;
+      }
       requester->spend_gold(price);
-      if (!requester->add_bag_item(*item)) {
+      if (!requester->add_bag_item(*removed_item)) {
         requester->add_gold(price);
-        merchant->merchant_items_mutable().push_back(*item);
+        auto& goods = merchant->merchant_items_mutable();
+        const auto insert_at = std::min(*merchant_item_index, goods.size());
+        goods.insert(goods.begin() + static_cast<std::ptrdiff_t>(insert_at), *removed_item);
         queue_packet(dispatch, requester->session_id(),
                      make_buy_item_result_packet(requester->session_id(), false, 2, 0));
         break;
       }
       requester->refresh_derived_state(item_configs_);
       queue_packet(dispatch, requester->session_id(),
-                   make_add_item_packet(requester->session_id(), requester->id(), *item, item_configs_));
+                   make_add_item_packet(requester->session_id(), requester->id(), *removed_item, item_configs_));
       queue_packet(dispatch, requester->session_id(),
                    make_weight_changed_packet(requester->session_id(), requester->character()));
       queue_packet(dispatch, requester->session_id(),
                    make_buy_item_result_packet(requester->session_id(), true,
-                                               requester->character().gold, item->make_index));
+                                               requester->character().gold, removed_item->make_index));
       queue_save_character(dispatch, *requester);
       dispatch.persist_requests.push_back(make_save_merchant_state_request(*merchant));
       break;
