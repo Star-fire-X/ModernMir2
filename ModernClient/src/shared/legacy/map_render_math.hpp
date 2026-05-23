@@ -188,4 +188,14 @@ inline int legacy_small_tile_frame_index(const std::uint16_t mid_img) {
   return mid_img == 0U ? -1 : static_cast<int>(mid_img) - 1;
 }
 
+inline bool legacy_map_door_state_reaches(const bool open, const int door_x,
+                                          const int door_y, const int x,
+                                          const int y) {
+  const auto left = open ? door_x - 10 : door_x - 8;
+  const auto right = door_x + 10;
+  const auto top = open ? door_y - 10 : door_y - 8;
+  const auto bottom = door_y + 10;
+  return x >= left && x <= right && y >= top && y <= bottom;
+}
+
 }  // namespace mir2::legacy

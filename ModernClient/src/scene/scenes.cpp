@@ -7503,7 +7503,6 @@ class WorldScene final : public Scene {
     legacy_hud_.sync(context);
     auto& world = context.state->world;
     const auto now_ms = detail::monotonic_ms();
-    context.state->expire_map_door_states(now_ms);
     animation_.update(world, now_ms);
     if (context.audio != nullptr) {
       update_main_theme(*context.audio, delta_seconds, now_ms);
@@ -8015,12 +8014,6 @@ class WorldScene final : public Scene {
 
   std::optional<bool> dynamic_door_state_for(ClientContext& context, const MapCell& cell,
                                              int x, int y) const {
-    const auto exact = context.state->world.map_doors.find(
-        GameStateStore::map_door_key(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)));
-    if (exact != context.state->world.map_doors.end()) {
-      return exact->second.open;
-    }
-
     if (map_ == nullptr) {
       return std::nullopt;
     }
@@ -8030,18 +8023,25 @@ class WorldScene final : public Scene {
       return std::nullopt;
     }
 
+    std::optional<bool> result;
+    std::uint64_t best_sequence = 0;
     for (const auto& [key, state] : context.state->world.map_doors) {
       const auto door_x = GameStateStore::map_door_key_x(key);
       const auto door_y = GameStateStore::map_door_key_y(key);
-      if (std::abs(door_x - x) > 8 || std::abs(door_y - y) > 8) {
+      if (!legacy::legacy_map_door_state_reaches(state.open, door_x, door_y, x, y)) {
         continue;
       }
       const auto* door_cell = map_->cell(door_x, door_y);
-      if (door_cell != nullptr && (door_cell->door_index & 0x7FU) == door_id) {
-        return state.open;
+      if (door_cell == nullptr || (door_cell->door_index & 0x80U) == 0U ||
+          (door_cell->door_index & 0x7FU) != door_id) {
+        continue;
+      }
+      if (!result.has_value() || state.sequence > best_sequence) {
+        result = state.open;
+        best_sequence = state.sequence;
       }
     }
-    return std::nullopt;
+    return result;
   }
 
   bool crash_man(ClientContext& context, const ActorState& self, int x, int y) const {

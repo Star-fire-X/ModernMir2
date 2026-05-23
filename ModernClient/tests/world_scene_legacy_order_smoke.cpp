@@ -1,3 +1,4 @@
+#include "app/client_app.hpp"
 #include "assets/asset_manager.hpp"
 #include "audio/audio_service.hpp"
 #include "audio/audio_backend.hpp"
@@ -5,6 +6,7 @@
 #include "render/software_renderer.hpp"
 #include "scene/scenes.hpp"
 #include "shared/legacy/map_render_math.hpp"
+#include "shared/legacy/movement_rules.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -170,6 +172,52 @@ void reset_frame_input(mir2::client::InputState& input, mir2::client::ClientCont
   context.legacy_input_dispatched = false;
 }
 
+void write_u16(std::vector<std::uint8_t>& bytes, const std::size_t offset,
+               const std::uint16_t value) {
+  bytes[offset] = static_cast<std::uint8_t>(value & 0xFFU);
+  bytes[offset + 1U] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
+}
+
+void write_cell(std::vector<std::uint8_t>& bytes, const std::size_t header_size,
+                const int height, const int x, const int y, const std::uint16_t bk,
+                const std::uint16_t mid, const std::uint16_t fr,
+                const std::uint8_t door_index = 0,
+                const std::uint8_t door_offset = 0) {
+  const auto offset = header_size +
+      (static_cast<std::size_t>(x) * static_cast<std::size_t>(height) +
+       static_cast<std::size_t>(y)) *
+          12U;
+  write_u16(bytes, offset, bk);
+  write_u16(bytes, offset + 2U, mid);
+  write_u16(bytes, offset + 4U, fr);
+  bytes[offset + 6U] = door_index;
+  bytes[offset + 7U] = door_offset;
+}
+
+std::filesystem::path write_dynamic_door_map_root() {
+  const auto root = std::filesystem::temp_directory_path() / "mir2_dynamic_door_scene_smoke";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root / "Data");
+  std::filesystem::create_directories(root / "Map");
+
+  constexpr int width = 40;
+  constexpr int height = 40;
+  constexpr std::size_t header_size = 52U;
+  std::vector<std::uint8_t> bytes(header_size + width * height * 12U);
+  write_u16(bytes, 0U, width);
+  write_u16(bytes, 2U, height);
+  write_cell(bytes, header_size, height, 11, 20, 0, 0, 0, 0x80U | 3U, 0x80U);
+  write_cell(bytes, header_size, height, 13, 20, 0, 0, 0, 0x80U | 3U, 0x00U);
+  write_cell(bytes, header_size, height, 21, 20, 0, 0, 0, 0x80U | 3U, 0x80U);
+  write_cell(bytes, header_size, height, 21, 19, 0, 0, 0x8000U);
+  write_cell(bytes, header_size, height, 21, 21, 0, 0, 0x8000U);
+
+  std::ofstream file(root / "Map" / "dynamicdoor.map", std::ios::binary);
+  file.write(reinterpret_cast<const char*>(bytes.data()),
+             static_cast<std::streamsize>(bytes.size()));
+  return root;
+}
+
 void test_legacy_raw_input_events() {
   mir2::client::ClientConfig config;
   mir2::client::GameStateStore state;
@@ -293,6 +341,65 @@ void test_legacy_raw_input_events() {
   scenes.process_action_messages(context, 0.016F);
 }
 
+void test_dynamic_door_latest_propagation_blocks_walk() {
+  const auto root = write_dynamic_door_map_root();
+  mir2::client::ClientConfig config;
+  config.asset_root = root.wstring();
+  mir2::client::AssetManager assets;
+  assert(assets.initialize(root));
+  mir2::client::ClientApp app;
+  app.set_config_for_test(config);
+  app.enable_protocol_test_mode_for_test();
+  auto& state = app.state_for_test();
+  mir2::client::InputState input;
+  mir2::client::SceneManager scenes;
+  mir2::client::ClientContext context{&app, &config, &state, &assets, nullptr, nullptr, &input};
+
+  auto& world = state.world;
+  world.self_actor_id = 1;
+  world.width = 40;
+  world.height = 40;
+  world.map_id = "dynamicdoor";
+  mir2::client::ActorState self;
+  self.actor_id = 1;
+  self.x = 20;
+  self.y = 20;
+  self.dir = mir2::legacy::next_direction(self.x, self.y, 21, 20);
+  world.actors.emplace(1, self);
+  state.apply(mir2::client_v1::MapDoorState{11, 20, true});
+  state.apply(mir2::client_v1::MapDoorState{13, 20, false});
+
+  scenes.initialize(context);
+  scenes.change_scene(mir2::client::SceneId::world, context);
+  world.legacy_target_x = 21;
+  world.legacy_target_y = 20;
+  world.legacy_chr_action = mir2::client::LegacyChrAction::walk;
+  scenes.process_action_messages(context, 0.016F);
+
+  const auto self_it = world.actors.find(1);
+  assert(self_it != world.actors.end());
+  assert(self_it->second.x == 20);
+  assert(self_it->second.y == 20);
+  assert(!world.action_locked);
+  assert(world.last_sent_action_ident == 0);
+  assert(world.legacy_target_x == -1);
+  assert(world.legacy_target_y == -1);
+  assert(world.legacy_chr_action == mir2::client::LegacyChrAction::none);
+
+  state.apply(mir2::client_v1::MapDoorState{11, 20, true});
+  world.legacy_target_x = 21;
+  world.legacy_target_y = 20;
+  world.legacy_chr_action = mir2::client::LegacyChrAction::walk;
+  scenes.process_action_messages(context, 0.016F);
+
+  const auto moved_self_it = world.actors.find(1);
+  assert(moved_self_it != world.actors.end());
+  assert(moved_self_it->second.x == 21);
+  assert(moved_self_it->second.y == 20);
+  assert(world.action_locked);
+  assert(world.last_sent_action_ident != 0);
+}
+
 }  // namespace
 
 int main() {
@@ -306,6 +413,7 @@ int main() {
   _putenv_s("MIR2_LEGACY_TRACE_FILE", trace_path.string().c_str());
 
   test_legacy_raw_input_events();
+  test_dynamic_door_latest_propagation_blocks_walk();
   std::filesystem::remove(trace_path);
 
   mir2::client::GameStateStore state;

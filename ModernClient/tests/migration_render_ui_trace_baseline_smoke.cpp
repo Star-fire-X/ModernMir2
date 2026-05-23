@@ -59,6 +59,9 @@ std::vector<std::string> run_render_order_trace() {
   for (const auto layer : mir2::legacy::kLegacyMapRowDrawOrder) {
     trace.emplace_back(legacy_map_draw_layer_name(layer));
   }
+  trace.emplace_back(legacy_map_draw_layer_name(LegacyMapDrawLayer::actor_overlay));
+  trace.emplace_back(legacy_map_draw_layer_name(LegacyMapDrawLayer::selection_blend));
+  trace.emplace_back(legacy_map_draw_layer_name(LegacyMapDrawLayer::debug_overlay));
   trace.emplace_back(legacy_map_draw_layer_name(LegacyMapDrawLayer::overlay_effects));
   trace.emplace_back(legacy_map_draw_layer_name(LegacyMapDrawLayer::actor_screen_overlay));
   trace.emplace_back(legacy_ui_paint_layer_label(

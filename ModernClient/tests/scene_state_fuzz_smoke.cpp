@@ -142,7 +142,6 @@ int main() {
         state.apply(mir2::client_v1::MapChange{(rng() % 2U) == 0U ? "0" : "1"});
         break;
       case 12:
-        state.expire_map_door_states(static_cast<std::uint64_t>(rng() % 20000U));
         break;
       case 13:
         if (!state.world.map_transition_pending) {

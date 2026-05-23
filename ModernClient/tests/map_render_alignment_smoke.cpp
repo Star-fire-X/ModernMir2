@@ -14,10 +14,21 @@
 #include "assets/asset_manager.hpp"
 #include "assets/legacy_map_resources.hpp"
 #include "render/software_renderer.hpp"
+#include "shared/legacy/map_document.hpp"
 #include "shared/legacy/map_render_order.hpp"
 #include "shared/legacy/map_render_math.hpp"
 
 namespace {
+
+constexpr std::array<std::pair<int, int>, 7> kLegacyMap3UnblockedCells{{
+    {624, 278},
+    {627, 278},
+    {634, 271},
+    {564, 287},
+    {564, 286},
+    {661, 277},
+    {578, 296},
+}};
 
 std::filesystem::path optional_asset_root() {
   const auto* env = std::getenv("MIR2_ASSET_ROOT");
@@ -88,6 +99,7 @@ void expect_cell(const mir2::client::MapCell* cell, const std::uint16_t bk_img,
 
 std::filesystem::path write_alignment_map_root() {
   const auto root = std::filesystem::temp_directory_path() / "mir2_map_render_alignment_smoke";
+  std::filesystem::remove_all(root);
   std::filesystem::create_directories(root / "Data");
   std::filesystem::create_directories(root / "Map");
 
@@ -125,6 +137,20 @@ std::filesystem::path write_alignment_map_root() {
     write_cell(bytes, header_size, height, 1, 1, {51, 52, 53, 0x80U | 5U, 0, 56, 57, 5, 58}, key);
     write_cell(bytes, header_size, height, 1, 2, {61, 62, 63, 0x80U | 5U, 0x80U, 66, 67, 6, 68}, key);
     write_file(root / "Map" / "SNAKE.map", bytes);
+  }
+  {
+    constexpr int width = 663;
+    constexpr int height = 297;
+    constexpr std::size_t header_size = 52U;
+    std::vector<std::uint8_t> bytes(header_size + width * height * 12U);
+    write_u16(bytes, 0U, width);
+    write_u16(bytes, 2U, height);
+    for (const auto& [x, y] : kLegacyMap3UnblockedCells) {
+      write_cell(bytes, header_size, height, x, y, {0x8002U, 0, 0x8004U, 0, 0, 0, 0, 0, 0});
+    }
+    write_cell(bytes, header_size, height, 625, 278,
+               {0x8006U, 0, 0x8008U, 0, 0, 0, 0, 0, 0});
+    write_file(root / "Map" / "3.map", bytes);
   }
   return root;
 }
@@ -247,6 +273,12 @@ int main() {
   assert(legacy_actor_base_y(shifted, 200, -16) == 184);
   assert(legacy_actor_draw_row(200, 0) == 200);
   assert(legacy_actor_draw_row(200, 2) == 198);
+  assert(legacy_map_door_state_reaches(true, 20, 20, 10, 10));
+  assert(legacy_map_door_state_reaches(true, 20, 20, 30, 30));
+  assert(!legacy_map_door_state_reaches(true, 20, 20, 9, 20));
+  assert(legacy_map_door_state_reaches(false, 20, 20, 12, 12));
+  assert(legacy_map_door_state_reaches(false, 20, 20, 30, 30));
+  assert(!legacy_map_door_state_reaches(false, 20, 20, 10, 20));
   assert(legacy_ground_item_draw_x(shifted, 100, 20) ==
          legacy_tile_draw_x(shifted, 100) + kLegacyHalfX - 10);
   assert(legacy_ground_item_draw_y(shifted, 200, 14) ==
@@ -255,8 +287,7 @@ int main() {
   static_assert(kLegacyMapRowDrawOrder[0] == LegacyMapDrawLayer::large_object);
   static_assert(kLegacyMapRowDrawOrder[1] == LegacyMapDrawLayer::ground_item);
   static_assert(kLegacyMapRowDrawOrder[2] == LegacyMapDrawLayer::actor);
-  static_assert(kLegacyMapRowDrawOrder[3] == LegacyMapDrawLayer::actor_overlay);
-  static_assert(kLegacyMapRowDrawOrder[4] == LegacyMapDrawLayer::fly_effect);
+  static_assert(kLegacyMapRowDrawOrder[3] == LegacyMapDrawLayer::fly_effect);
   assert(legacy_map_draw_layer_name(LegacyMapDrawLayer::large_object) == "large_object");
   assert(legacy_map_draw_layer_name(LegacyMapDrawLayer::background_tiles) ==
          "background_tiles");
@@ -271,9 +302,11 @@ int main() {
   assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::ground_item) <
          legacy_map_draw_layer_rank(LegacyMapDrawLayer::actor));
   assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::actor) <
+         legacy_map_draw_layer_rank(LegacyMapDrawLayer::fly_effect));
+  assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::fly_effect) <
          legacy_map_draw_layer_rank(LegacyMapDrawLayer::actor_overlay));
   assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::actor_overlay) <
-         legacy_map_draw_layer_rank(LegacyMapDrawLayer::fly_effect));
+         legacy_map_draw_layer_rank(LegacyMapDrawLayer::selection_blend));
 
   SoftwareSurface blend_surface(2, 1);
   constexpr std::uint32_t kBlendDst = 0xFF204060U;
@@ -314,7 +347,8 @@ int main() {
   assert(!legacy_map_object_resource(0, -1).has_value());
 
   AssetManager temp_assets;
-  assert(temp_assets.initialize(write_alignment_map_root()));
+  const auto map_root = write_alignment_map_root();
+  assert(temp_assets.initialize(map_root));
   const auto phase1_map = temp_assets.load_map("phase1");
   assert(phase1_map != nullptr);
   assert(phase1_map->width == 3);
@@ -348,7 +382,26 @@ int main() {
   assert(!snake_map->can_move(1, 1));
   assert(snake_map->can_move(1, 2));
 
-  MapCell object_cell;
+  const auto map3 = temp_assets.load_map("3");
+  assert(map3 != nullptr);
+  assert(map3->width == 663);
+  assert(map3->height == 297);
+  for (const auto& [x, y] : kLegacyMap3UnblockedCells) {
+    const auto* cell = map3->cell(x, y);
+    assert(cell != nullptr);
+    assert(cell->bk_img == 2);
+    assert(cell->fr_img == 4);
+    assert(map3->can_move(x, y));
+  }
+  assert(!map3->can_move(625, 278));
+  const auto legacy_map3 = mir2::legacy::decode_map_file(map_root / "Map" / "3.map");
+  assert(legacy_map3 != nullptr);
+  for (const auto& [x, y] : kLegacyMap3UnblockedCells) {
+    assert(legacy_map3->can_move(x, y));
+  }
+  assert(!legacy_map3->can_move(625, 278));
+
+  mir2::client::MapCell object_cell;
   object_cell.fr_img = 100;
   object_cell.ani_frame = 3;
   object_cell.ani_tick = 1;

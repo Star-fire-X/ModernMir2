@@ -9,10 +9,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cctype>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace mir2::legacy {
@@ -118,6 +120,32 @@ inline bool is_antihack_map_id(const std::filesystem::path& path) {
          map_id == "LABY04" || map_id == "SNAKE";
 }
 
+inline void apply_legacy_map_unblock_patch(const std::filesystem::path& path,
+                                           MapDocument& map) {
+  if (path.stem().string() != "3") {
+    return;
+  }
+  constexpr std::array<std::pair<int, int>, 7> kMap3UnblockedCells{{
+      {624, 278},
+      {627, 278},
+      {634, 271},
+      {564, 287},
+      {564, 286},
+      {661, 277},
+      {578, 296},
+  }};
+  for (const auto& [x, y] : kMap3UnblockedCells) {
+    if (x < 0 || y < 0 || x >= map.width || y >= map.height) {
+      continue;
+    }
+    auto& cell = map.cells[static_cast<std::size_t>(y) *
+                               static_cast<std::size_t>(map.width) +
+                           static_cast<std::size_t>(x)];
+    cell.bk_img &= 0x7FFFU;
+    cell.fr_img &= 0x7FFFU;
+  }
+}
+
 /// 读取文件全部字节到 vector
 inline std::vector<std::uint8_t> read_file_bytes(const std::filesystem::path& path) {
   std::ifstream file(path, std::ios::binary);
@@ -193,6 +221,7 @@ inline std::shared_ptr<MapDocument> decode_map_file(const std::filesystem::path&
       cell.light = bytes[source + 11U];
     }
   }
+  detail::apply_legacy_map_unblock_patch(path, *map);
   return map;
 }
 
