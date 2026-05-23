@@ -1278,7 +1278,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       requester->refresh_derived_state(item_configs_);
       queue_packet(dispatch, requester->session_id(),
-                   make_add_item_packet(requester->session_id(), *item, item_configs_));
+                   make_add_item_packet(requester->session_id(), requester->id(), *item, item_configs_));
       queue_packet(dispatch, requester->session_id(),
                    make_weight_changed_packet(requester->session_id(), requester->character()));
       queue_packet(dispatch, requester->session_id(),
@@ -1432,7 +1432,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       peer_offer->last_change_time_ms = now_ms;
       player->refresh_derived_state(item_configs_);
       queue_packet(dispatch, player->session_id(),
-                   make_add_item_packet(player->session_id(), item, item_configs_));
+                   make_add_item_packet(player->session_id(), player->id(), item, item_configs_));
       queue_packet(dispatch, player->session_id(),
                    make_weight_changed_packet(player->session_id(), player->character()));
       queue_packet(dispatch, player->session_id(),
@@ -1650,7 +1650,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       requester->refresh_derived_state(item_configs_);
       queue_packet(dispatch, requester->session_id(),
-                   make_add_item_packet(requester->session_id(), *removed, item_configs_));
+                   make_add_item_packet(requester->session_id(), requester->id(), *removed, item_configs_));
       queue_packet(dispatch, requester->session_id(),
                    make_take_back_storage_result_packet(requester->session_id(),
                                                         kSmTakeBackStorageItemOk,
@@ -1729,7 +1729,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       ground_items_.erase(ground_it);
 
       queue_packet(dispatch, player->session_id(),
-                   make_add_item_packet(player->session_id(), ground_item.item, item_configs_));
+                   make_add_item_packet(player->session_id(), player->id(), ground_item.item, item_configs_));
       queue_packet(dispatch, player->session_id(),
                    make_weight_changed_packet(player->session_id(), player->character()));
       queue_save_character(dispatch, *player);
@@ -1840,7 +1840,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                      make_del_item_packet(player->session_id(), player->id(), *swapped_item,
                                           item_configs_));
         queue_packet(dispatch, player->session_id(),
-                     make_add_item_packet(player->session_id(), *swapped_item, item_configs_));
+                     make_add_item_packet(player->session_id(), player->id(), *swapped_item, item_configs_));
       }
       queue_packet(dispatch, player->session_id(),
                    make_take_on_result_packet(player->session_id(), true, player->character().feature));
@@ -1932,7 +1932,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       queue_packet(dispatch, player->session_id(),
                    make_take_off_result_packet(player->session_id(), true, player->character().feature));
       queue_packet(dispatch, player->session_id(),
-                   make_add_item_packet(player->session_id(), *removed, item_configs_));
+                   make_add_item_packet(player->session_id(), player->id(), *removed, item_configs_));
       queue_packet(dispatch, player->session_id(),
                    make_ability_packet(player->session_id(), player->character()));
       queue_packet(dispatch, player->session_id(), make_sub_ability_packet(player->session_id(), *player));
@@ -2043,7 +2043,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                           item_configs_));
         for (const auto& item : unbound_items) {
           queue_packet(dispatch, player->session_id(),
-                       make_add_item_packet(player->session_id(), item, item_configs_));
+                       make_add_item_packet(player->session_id(), player->id(), item, item_configs_));
         }
         queue_packet(dispatch, player->session_id(),
                      make_eat_result_packet(player->session_id(), true));

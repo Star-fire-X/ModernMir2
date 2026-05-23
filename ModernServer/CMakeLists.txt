@@ -167,6 +167,25 @@ if(BUILD_TESTING)
   add_test(NAME mir2_legacy_protocol_command_golden_smoke
     COMMAND mir2_legacy_protocol_command_golden_smoke)
 
+  add_executable(mir2_legacy_bag_protocol_baseline_smoke
+    tests/legacy_bag_protocol_baseline_smoke.cpp)
+  target_link_libraries(mir2_legacy_bag_protocol_baseline_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_bag_protocol_baseline_smoke
+    COMMAND mir2_legacy_bag_protocol_baseline_smoke)
+
+  add_executable(mir2_legacy_bag_wire_abi_smoke
+    tests/legacy_bag_wire_abi_smoke.cpp)
+  target_link_libraries(mir2_legacy_bag_wire_abi_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_bag_wire_abi_smoke
+    COMMAND mir2_legacy_bag_wire_abi_smoke)
+
+  add_executable(mir2_legacy_bag_flow_target_smoke
+    tests/legacy_bag_flow_target_smoke.cpp)
+  target_link_libraries(mir2_legacy_bag_flow_target_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_bag_flow_target_smoke
+    COMMAND mir2_legacy_bag_flow_target_smoke)
+  set_tests_properties(mir2_legacy_bag_flow_target_smoke PROPERTIES DISABLED TRUE)
+
   add_executable(mir2_trade_protocol_golden_smoke
     tests/trade_protocol_golden_smoke.cpp)
   target_link_libraries(mir2_trade_protocol_golden_smoke PRIVATE mir2_hostlib)

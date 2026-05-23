@@ -297,6 +297,7 @@ struct LegacyStdItem {
   std::uint8_t ani_count{0};
   std::int8_t special_pwr{0};
   std::uint8_t item_desc{0};
+  std::uint8_t padding_after_item_desc{0};
   std::uint16_t looks{0};
   std::uint16_t dura_max{0};
   std::uint16_t ac{0};
@@ -306,6 +307,7 @@ struct LegacyStdItem {
   std::uint16_t sc{0};
   std::uint8_t need{0};
   std::uint8_t need_level{0};
+  std::array<std::uint8_t, 2> padding_before_price{};
   std::int32_t price{0};
   std::int32_t stock{0};
   std::uint8_t atk_spd{0};
@@ -314,6 +316,7 @@ struct LegacyStdItem {
   std::uint8_t mg_avoid{0};
   std::uint8_t strong{0};
   std::uint8_t undead{0};
+  std::array<std::uint8_t, 2> padding_before_hp_add{};
   std::int32_t hp_add{0};
   std::int32_t mp_add{0};
   std::int32_t exp_add{0};
@@ -323,6 +326,7 @@ struct LegacyStdItem {
   std::uint8_t eff_type2{0};
   std::uint8_t eff_rate2{0};
   std::uint8_t eff_value2{0};
+  std::array<std::uint8_t, 2> padding_tail{};
 };
 
 struct LegacyClientItem {
@@ -377,19 +381,37 @@ static_assert(offsetof(LegacyUserItem, color_r) == 24);
 static_assert(offsetof(LegacyUserItem, color_g) == 25);
 static_assert(offsetof(LegacyUserItem, color_b) == 26);
 static_assert(offsetof(LegacyUserItem, prefix) == 27);
-static_assert(sizeof(LegacyStdItem) == 69);
+static_assert(sizeof(LegacyStdItem) == 76);
 static_assert(offsetof(LegacyStdItem, name) == 0);
 static_assert(offsetof(LegacyStdItem, std_mode) == 15);
 static_assert(offsetof(LegacyStdItem, shape) == 16);
 static_assert(offsetof(LegacyStdItem, weight) == 17);
 static_assert(offsetof(LegacyStdItem, ani_count) == 18);
-static_assert(offsetof(LegacyStdItem, price) == 37);
-static_assert(offsetof(LegacyStdItem, eff_value2) == 68);
-static_assert(sizeof(LegacyClientItem) == 77);
+static_assert(offsetof(LegacyStdItem, special_pwr) == 19);
+static_assert(offsetof(LegacyStdItem, item_desc) == 20);
+static_assert(offsetof(LegacyStdItem, looks) == 22);
+static_assert(offsetof(LegacyStdItem, dura_max) == 24);
+static_assert(offsetof(LegacyStdItem, ac) == 26);
+static_assert(offsetof(LegacyStdItem, mac) == 28);
+static_assert(offsetof(LegacyStdItem, dc) == 30);
+static_assert(offsetof(LegacyStdItem, mc) == 32);
+static_assert(offsetof(LegacyStdItem, sc) == 34);
+static_assert(offsetof(LegacyStdItem, need) == 36);
+static_assert(offsetof(LegacyStdItem, need_level) == 37);
+static_assert(offsetof(LegacyStdItem, price) == 40);
+static_assert(offsetof(LegacyStdItem, stock) == 44);
+static_assert(offsetof(LegacyStdItem, atk_spd) == 48);
+static_assert(offsetof(LegacyStdItem, undead) == 53);
+static_assert(offsetof(LegacyStdItem, hp_add) == 56);
+static_assert(offsetof(LegacyStdItem, mp_add) == 60);
+static_assert(offsetof(LegacyStdItem, exp_add) == 64);
+static_assert(offsetof(LegacyStdItem, eff_type1) == 68);
+static_assert(offsetof(LegacyStdItem, eff_value2) == 73);
+static_assert(sizeof(LegacyClientItem) == 84);
 static_assert(offsetof(LegacyClientItem, item) == 0);
-static_assert(offsetof(LegacyClientItem, make_index) == 69);
-static_assert(offsetof(LegacyClientItem, dura) == 73);
-static_assert(offsetof(LegacyClientItem, dura_max) == 75);
+static_assert(offsetof(LegacyClientItem, make_index) == 76);
+static_assert(offsetof(LegacyClientItem, dura) == 80);
+static_assert(offsetof(LegacyClientItem, dura_max) == 82);
 
 template <std::size_t N>
 inline void set_short_string(LegacyShortString<N>& target, const std::string& value) {

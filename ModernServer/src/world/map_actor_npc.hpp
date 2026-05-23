@@ -676,7 +676,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
           break;
         }
         queue_packet(dispatch, player.session_id(),
-                     make_add_item_packet(player.session_id(), item, item_configs_));
+                     make_add_item_packet(player.session_id(), player.id(), item, item_configs_));
         script_state_mutated = true;
         trace("give_item", true, item.make_index, item_config->name);
       }

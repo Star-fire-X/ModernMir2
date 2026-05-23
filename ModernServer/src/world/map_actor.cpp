@@ -2258,7 +2258,7 @@ void MapActor::cancel_trade_for(std::uint64_t actor_id, RuntimeDispatch& dispatc
         continue;
       }
       queue_packet(dispatch, player->session_id(),
-                   make_add_item_packet(player->session_id(), item, item_configs_));
+                   make_add_item_packet(player->session_id(), player->id(), item, item_configs_));
     }
     if (offer.gold > 0) {
       player->add_gold(offer.gold);
@@ -2354,11 +2354,11 @@ bool MapActor::commit_trade(TradeSession& session, RuntimeDispatch& dispatch) {
   second->refresh_derived_state(item_configs_);
   for (const auto& item : added_to_first) {
     queue_packet(dispatch, first->session_id(),
-                 make_add_item_packet(first->session_id(), item, item_configs_));
+                 make_add_item_packet(first->session_id(), first->id(), item, item_configs_));
   }
   for (const auto& item : added_to_second) {
     queue_packet(dispatch, second->session_id(),
-                 make_add_item_packet(second->session_id(), item, item_configs_));
+                 make_add_item_packet(second->session_id(), second->id(), item, item_configs_));
   }
   if (session.first.gold > 0 || session.second.gold > 0) {
     queue_packet(dispatch, first->session_id(),
@@ -3042,7 +3042,7 @@ bool MapActor::handle_weapon_upgrade_get_back(Player& player, Npc& npc,
   records.erase(record_it);
   static_cast<void>(player.add_bag_item(item));
   queue_packet(dispatch, player.session_id(),
-               make_add_item_packet(player.session_id(), item, item_configs_));
+               make_add_item_packet(player.session_id(), player.id(), item, item_configs_));
   player.refresh_derived_state(item_configs_);
   queue_packet(dispatch, player.session_id(),
                make_weight_changed_packet(player.session_id(), player.character()));
