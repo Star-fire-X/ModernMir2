@@ -481,11 +481,13 @@ LegacyPacket make_magic_fire_fail_packet(std::uint64_t session_id, const GameObj
 }
 
 LegacyPacket make_add_item_packet(
-    std::uint64_t session_id, const LegacyUserItem& item,
+    std::uint64_t session_id, std::uint64_t actor_id, const LegacyUserItem& item,
     const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
   const auto client_item = make_client_item(item, item_configs);
-  return make_legacy_game_packet(session_id, 0, 0, make_default_message(kSmAddItem, 0, 0, 0, 0),
-                                 legacy_encode_buffer(&client_item, sizeof(client_item)));
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmAddItem, static_cast<std::int32_t>(actor_id), 0, 0, 1),
+      legacy_encode_buffer(&client_item, sizeof(client_item)));
 }
 
 LegacyPacket make_update_item_packet(

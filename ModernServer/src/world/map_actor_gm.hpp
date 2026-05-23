@@ -376,7 +376,7 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
         break;
       }
       queue_packet(result.dispatch, player->session_id(),
-                   make_add_item_packet(player->session_id(), item, item_configs_));
+                   make_add_item_packet(player->session_id(), player->id(), item, item_configs_));
       ++made;
     }
     if (made == 0) {

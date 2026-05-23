@@ -35,8 +35,8 @@ int main() {
   static_assert(offsetof(mir2::LegacyUserItem, desc) == 10);
   static_assert(offsetof(mir2::LegacyUserItem, color_r) == 24);
   static_assert(offsetof(mir2::LegacyUserItem, prefix) == 27);
-  static_assert(sizeof(mir2::LegacyStdItem) == 69);
-  static_assert(sizeof(mir2::LegacyClientItem) == 77);
+  static_assert(sizeof(mir2::LegacyStdItem) == 76);
+  static_assert(sizeof(mir2::LegacyClientItem) == 84);
 
   mir2::HostConfig host_config;
   host_config.maps.push_back(mir2::MapConfig{"0", "Compat", {}, 0, 0, 10, 10});

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "Phase 0 bag command cases. body_hex is decoded text for legacy_string cases.",
+  "cases": [
+    {"name":"drop_item_make_index_name","ident":1000,"recog":10003,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"44726f702053776f7264","expected_make_index":10003,"expected_name":"Drop Sword","expected_slot":-1,"expected_target_actor":0},
+    {"name":"take_on_item_make_index_slot_name","ident":1003,"recog":10001,"param":2,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e","expected_make_index":10001,"expected_name":"Potion","expected_slot":2,"expected_target_actor":0},
+    {"name":"take_off_item_make_index_slot_name","ident":1004,"recog":10001,"param":2,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e","expected_make_index":10001,"expected_name":"Potion","expected_slot":2,"expected_target_actor":0},
+    {"name":"eat_item_make_index_name","ident":1006,"recog":10002,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"456c69786972","expected_make_index":10002,"expected_name":"Elixir","expected_slot":-1,"expected_target_actor":0},
+    {"name":"deal_add_item_make_index_name","ident":1026,"recog":10008,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"47656d","expected_make_index":10008,"expected_name":"Gem","expected_slot":-1,"expected_target_actor":0},
+    {"name":"deal_del_item_make_index_name","ident":1027,"recog":10008,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"47656d","expected_make_index":10008,"expected_name":"Gem","expected_slot":-1,"expected_target_actor":0},
+    {"name":"user_sell_item_split_make_index_name","ident":1013,"recog":501,"param":1234,"tag":2,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e","expected_make_index":132306,"expected_name":"Potion","expected_slot":-1,"expected_target_actor":501},
+    {"name":"user_storage_item_split_make_index_name","ident":1031,"recog":501,"param":1234,"tag":2,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e","expected_make_index":132306,"expected_name":"Potion","expected_slot":-1,"expected_target_actor":501},
+    {"name":"user_take_back_storage_item_split_make_index_name","ident":1032,"recog":501,"param":1234,"tag":2,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e","expected_make_index":132306,"expected_name":"Potion","expected_slot":-1,"expected_target_actor":501}
+  ]
+}
