@@ -1996,6 +1996,23 @@ void LegacyActorAnimation::sync_actor(const ActorState& actor, const std::uint64
   const auto revived = !actor.dead && last_dead_;
   auto queued_legacy_event = false;
   auto newest_legacy_event_sequence = last_legacy_event_sequence_;
+  std::vector<std::pair<std::uint64_t, std::uint16_t>> hurry_spell_keys;
+  auto remember_hurry_spell = [&](const ActorState& event) {
+    if (event.current_action != client_v1::ActorActionKind::spell || event.action_started_ms == 0) {
+      return;
+    }
+    const auto key = std::make_pair(event.action_started_ms, event.magic_id);
+    if (std::find(hurry_spell_keys.begin(), hurry_spell_keys.end(), key) == hurry_spell_keys.end()) {
+      hurry_spell_keys.push_back(key);
+    }
+  };
+  auto superseded_by_hurry_spell = [&](const ActorState& event) {
+    if (event.current_action != client_v1::ActorActionKind::spell || event.action_started_ms == 0) {
+      return false;
+    }
+    const auto key = std::make_pair(event.action_started_ms, event.magic_id);
+    return std::find(hurry_spell_keys.begin(), hurry_spell_keys.end(), key) != hurry_spell_keys.end();
+  };
 
   auto queue_events_by_priority = [&](const LegacyEventPriority priority) {
     for (const auto& event : actor.legacy_pending_actions) {
@@ -2006,7 +2023,13 @@ void LegacyActorAnimation::sync_actor(const ActorState& actor, const std::uint64
         continue;
       }
       const auto hurry = priority == LegacyEventPriority::hurry;
+      if (!hurry && superseded_by_hurry_spell(event)) {
+        continue;
+      }
       queue_or_begin(event, legacy_move_action(event.current_action), now_ms, hurry);
+      if (hurry) {
+        remember_hurry_spell(event);
+      }
       newest_legacy_event_sequence =
           std::max(newest_legacy_event_sequence, event.legacy_event_sequence);
       queued_legacy_event = true;
@@ -2099,6 +2122,30 @@ void LegacyActorAnimation::sync_actor(const ActorState& actor, const std::uint64
 
 void LegacyActorAnimation::queue_or_begin(const ActorState& actor, const bool is_move,
                                           const std::uint64_t now_ms, const bool hurry) {
+  const auto spell_key_match = [&](const ActorState& queued) {
+    return actor.current_action == client_v1::ActorActionKind::spell &&
+           queued.current_action == client_v1::ActorActionKind::spell &&
+           actor.action_started_ms != 0 &&
+           actor.action_started_ms == queued.action_started_ms &&
+           actor.magic_id == queued.magic_id;
+  };
+  if (hurry && actor.current_action == client_v1::ActorActionKind::spell) {
+    pending_actions_.erase(
+        std::remove_if(
+            pending_actions_.begin(),
+            pending_actions_.end(),
+            [&](const ActorState& queued) {
+              return queued.legacy_event_priority == LegacyEventPriority::normal &&
+                     spell_key_match(queued);
+            }),
+        pending_actions_.end());
+    const auto active_same_spell =
+        motion_kind_ == MotionKind::action && spell_active_ &&
+        active_action_started_ms_ == actor.action_started_ms && last_magic_id_ == actor.magic_id;
+    if (active_same_spell) {
+      return;
+    }
+  }
   if (motion_kind_ == MotionKind::idle && !lock_end_frame_) {
     if (is_move) {
       begin_move(actor, now_ms);
@@ -3804,7 +3851,7 @@ void AnimationManager::update(const WorldViewState& world, const std::uint64_t n
     const auto found = world.actors.find(actor_id);
     if (found != world.actors.end()) {
       const auto wait_server_accept =
-          actor_id == world.self_actor_id && world.action_locked;
+          actor_id == world.self_actor_id && action_lock_active(world, now_ms);
       animation.update(found->second, clock_, now_ms, wait_server_accept, trace_frame_index_);
       actor_snapshots_[actor_id] = found->second;
     }

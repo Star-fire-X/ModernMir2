@@ -1029,6 +1029,99 @@ int main() {
          appearance.body_offset +
              legacy_frame_index(legacy_human_action_info(LegacyHumanAction::spell), 2, 1));
 
+  auto prioritized_spell_actor = actor;
+  prioritized_spell_actor.current_action = mir2::client_v1::ActorActionKind::spell;
+  prioritized_spell_actor.magic_id = 1;
+  prioritized_spell_actor.action_started_ms = 6800;
+  prioritized_spell_actor.action_target_x = 14;
+  prioritized_spell_actor.action_target_y = 10;
+  prioritized_spell_actor.action_magic = true;
+  prioritized_spell_actor.action_magic_effect = 1;
+  prioritized_spell_actor.action_magic_effect_type = 1;
+  prioritized_spell_actor.legacy_event_sequence = 2;
+  auto normal_spell_event = prioritized_spell_actor;
+  normal_spell_event.legacy_event_sequence = 1;
+  normal_spell_event.legacy_event_priority = LegacyEventPriority::normal;
+  auto hurry_spell_event = prioritized_spell_actor;
+  hurry_spell_event.legacy_event_sequence = 2;
+  hurry_spell_event.legacy_event_priority = LegacyEventPriority::hurry;
+  auto hurry_only_actor = prioritized_spell_actor;
+  hurry_only_actor.legacy_pending_actions.clear();
+  hurry_only_actor.legacy_pending_actions.push_back(hurry_spell_event);
+  auto hurry_plus_normal_actor = prioritized_spell_actor;
+  hurry_plus_normal_actor.legacy_pending_actions.clear();
+  hurry_plus_normal_actor.legacy_pending_actions.push_back(normal_spell_event);
+  hurry_plus_normal_actor.legacy_pending_actions.push_back(hurry_spell_event);
+  auto hurry_only_world = world;
+  auto hurry_plus_normal_world = world;
+  hurry_only_world.action_locked = false;
+  hurry_only_world.action_lock_started_ms = 0;
+  hurry_plus_normal_world.action_locked = false;
+  hurry_plus_normal_world.action_lock_started_ms = 0;
+  hurry_only_world.actors[1] = hurry_only_actor;
+  hurry_plus_normal_world.actors[1] = hurry_plus_normal_actor;
+  AnimationManager hurry_only_animations;
+  hurry_only_animations.reset(6800);
+  AnimationManager hurry_plus_normal_animations;
+  hurry_plus_normal_animations.reset(6800);
+  hurry_only_animations.update(hurry_only_world, 6800);
+  hurry_plus_normal_animations.update(hurry_plus_normal_world, 6800);
+  for (std::uint64_t now = 6886; now <= 9300; now += 86) {
+    hurry_only_animations.update(hurry_only_world, now);
+    hurry_plus_normal_animations.update(hurry_plus_normal_world, now);
+    assert(hurry_only_animations.is_actor_legacy_idle(1) ==
+           hurry_plus_normal_animations.is_actor_legacy_idle(1));
+    const auto hurry_only_pose = hurry_only_animations.pose_for(1);
+    const auto hurry_plus_normal_pose = hurry_plus_normal_animations.pose_for(1);
+    assert(hurry_only_pose.has_value() == hurry_plus_normal_pose.has_value());
+    if (hurry_only_pose.has_value() && hurry_plus_normal_pose.has_value()) {
+      assert(hurry_only_pose->body_index == hurry_plus_normal_pose->body_index);
+    }
+  }
+
+  animations.reset(6000);
+  auto delayed_spell_actor = actor;
+  delayed_spell_actor.current_action = mir2::client_v1::ActorActionKind::hit;
+  delayed_spell_actor.legacy_action_ident = mir2::legacy::kSmHit;
+  delayed_spell_actor.action_started_ms = 6000;
+  world.actors[1] = delayed_spell_actor;
+  world.action_locked = false;
+  world.action_lock_started_ms = 0;
+  animations.update(world, 6000);
+
+  delayed_spell_actor.current_action = mir2::client_v1::ActorActionKind::spell;
+  delayed_spell_actor.legacy_action_ident = 17;
+  delayed_spell_actor.magic_id = 1;
+  delayed_spell_actor.action_started_ms = 6061;
+  delayed_spell_actor.action_target_x = 14;
+  delayed_spell_actor.action_target_y = 10;
+  delayed_spell_actor.action_magic = true;
+  delayed_spell_actor.action_magic_effect = 1;
+  delayed_spell_actor.action_magic_effect_type = -1;
+  delayed_spell_actor.legacy_event_sequence = 1;
+  auto delayed_normal_event = delayed_spell_actor;
+  delayed_normal_event.legacy_event_priority = LegacyEventPriority::normal;
+  delayed_normal_event.legacy_event_sequence = 1;
+  delayed_spell_actor.legacy_pending_actions.clear();
+  delayed_spell_actor.legacy_pending_actions.push_back(delayed_normal_event);
+  world.actors[1] = delayed_spell_actor;
+  animations.update(world, 6061);
+
+  auto delayed_hurry_event = delayed_spell_actor;
+  delayed_hurry_event.legacy_event_priority = LegacyEventPriority::hurry;
+  delayed_hurry_event.legacy_event_sequence = 2;
+  delayed_hurry_event.action_magic_effect_type = 1;
+  delayed_spell_actor.legacy_pending_actions.push_back(delayed_hurry_event);
+  delayed_spell_actor.legacy_event_sequence = 2;
+  delayed_spell_actor.action_magic_effect_type = 1;
+  world.actors[1] = delayed_spell_actor;
+  animations.update(world, 6122);
+
+  for (std::uint64_t now = 6208; now <= 8400; now += 86) {
+    animations.update(world, now);
+  }
+  assert(animations.is_actor_legacy_idle(1));
+
   animations.reset(7000);
   world.actors[1] = actor;
   world.actors[1].current_action = mir2::client_v1::ActorActionKind::hit;
@@ -1043,6 +1136,22 @@ int main() {
   world.action_locked = false;
   animations.update(world, 7700);
   assert(animations.is_actor_legacy_idle(1));
+  world.action_lock_started_ms = 0;
+
+  animations.reset(12000);
+  world.actors[1] = actor;
+  world.actors[1].current_action = mir2::client_v1::ActorActionKind::hit;
+  world.actors[1].legacy_action_ident = mir2::legacy::kSmHit;
+  world.actors[1].action_started_ms = 12000;
+  world.action_locked = true;
+  world.action_lock_started_ms = 1000;
+  animations.update(world, 12000);
+  for (std::uint64_t now = 12086; now <= 12600; now += 86) {
+    animations.update(world, now);
+  }
+  assert(animations.is_actor_legacy_idle(1));
+  world.action_locked = false;
+  world.action_lock_started_ms = 0;
 
   animations.reset(3000);
   world.actors[1] = actor;
