@@ -26,6 +26,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
+#include <fstream>
+#include <limits>
+#include <sstream>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -34,6 +39,68 @@
 #include "shared/legacy/movement_rules.hpp"
 
 namespace mir2::client {
+
+namespace {
+
+bool legacy_anim_trace_flag_cached(const char* name) {
+  const auto* value = std::getenv(name);
+  return value != nullptr && value[0] != '\0' && value[0] != '0';
+}
+
+void legacy_anim_trace_write_line(const std::string& line) {
+  const auto* file_path = std::getenv("MIR2_ANIM_TRACE_FILE");
+  if (file_path == nullptr || file_path[0] == '\0') {
+    file_path = std::getenv("MIR2_LEGACY_TRACE_FILE");
+  }
+  if (file_path == nullptr || file_path[0] == '\0') {
+    return;
+  }
+  std::ofstream file(file_path, std::ios::app | std::ios::binary);
+  file << line;
+}
+
+}  // namespace
+
+bool legacy_anim_trace_enabled() {
+  static const bool enabled =
+      legacy_anim_trace_flag_cached("MIR2_ANIM_TRACE") ||
+      legacy_anim_trace_flag_cached("MIR2_LEGACY_TRACE");
+  return enabled;
+}
+
+void legacy_anim_trace_record(const LegacyAnimTraceRecord& record) {
+  if (!legacy_anim_trace_enabled()) {
+    return;
+  }
+  std::ostringstream out;
+  out << "[mir2-anim]"
+      << " frame=" << record.frame_index
+      << " t=" << record.now_ms
+      << " stage=" << record.stage
+      << " reason=" << record.reason
+      << " actor=" << record.actor_id
+      << " actor_type=" << record.actor_type
+      << " action=" << record.action_state
+      << " dir=" << record.direction
+      << " logical_pos=" << record.logical_x << "," << record.logical_y
+      << " render_offset=" << record.render_offset_x << "," << record.render_offset_y
+      << " animation_start_time=" << record.animation_start_time
+      << " animation_frame_index=" << record.animation_frame_index
+      << " animation_frame_interval=" << record.animation_frame_interval
+      << " action_finished=" << (record.action_finished ? 1 : 0)
+      << " effect_id=" << record.effect_id
+      << " effect_type=" << record.effect_type
+      << " effect_owner=" << record.effect_owner
+      << " effect_target=" << record.effect_target
+      << " effect_pos=" << record.effect_x << "," << record.effect_y
+      << " effect_frame_index=" << record.effect_frame_index
+      << " effect_create_frame=" << record.effect_create_frame
+      << " effect_destroy_frame=" << record.effect_destroy_frame
+      << " render_layer=" << record.render_layer
+      << " same_frame_visible=" << (record.same_frame_visible ? 1 : 0)
+      << '\n';
+  legacy_anim_trace_write_line(out.str());
+}
 
 namespace {
 
@@ -553,6 +620,61 @@ bool legacy_move_action(const client_v1::ActorActionKind kind) {
          kind == client_v1::ActorActionKind::rush_kung ||
          kind == client_v1::ActorActionKind::backstep ||
          kind == client_v1::ActorActionKind::knockback;
+}
+
+const char* actor_type_name(const client_v1::ActorType type) {
+  switch (type) {
+    case client_v1::ActorType::player:
+      return "player";
+    case client_v1::ActorType::monster:
+      return "monster";
+    case client_v1::ActorType::npc:
+      return "npc";
+    default:
+      return "unknown";
+  }
+}
+
+const char* action_kind_name(const client_v1::ActorActionKind kind) {
+  switch (kind) {
+    case client_v1::ActorActionKind::turn:
+      return "turn";
+    case client_v1::ActorActionKind::walk:
+      return "walk";
+    case client_v1::ActorActionKind::run:
+      return "run";
+    case client_v1::ActorActionKind::hit:
+      return "hit";
+    case client_v1::ActorActionKind::spell:
+      return "spell";
+    case client_v1::ActorActionKind::struck:
+      return "struck";
+    case client_v1::ActorActionKind::rush:
+      return "rush";
+    case client_v1::ActorActionKind::rush_kung:
+      return "rush_kung";
+    case client_v1::ActorActionKind::backstep:
+      return "backstep";
+    case client_v1::ActorActionKind::knockback:
+      return "knockback";
+    default:
+      return "unknown";
+  }
+}
+
+const char* effect_kind_name(const LegacyEffectManager::EffectKind kind) {
+  switch (kind) {
+    case LegacyEffectManager::EffectKind::map:
+      return "map";
+    case LegacyEffectManager::EffectKind::char_attached:
+      return "char_attached";
+    case LegacyEffectManager::EffectKind::magic:
+      return "magic";
+    case LegacyEffectManager::EffectKind::normal_draw:
+      return "normal_draw";
+    default:
+      return "unknown";
+  }
 }
 
 /// 根据魔法 ID 和施法者/目标位置判断弹道类型
@@ -1820,6 +1942,7 @@ void LegacyActorAnimation::initialize(const ActorState& actor, const std::uint64
   default_frame_count_ = std::max(1, stand_action_for(actor).frame);
   current_frame_ = default_frame_for(actor);
   frame_started_ms_ = now_ms;
+  motion_started_ms_ = now_ms;
   default_frame_time_ms_ = now_ms;
   smooth_move_time_ms_ = now_ms;
   last_move_started_ms_ = actor.move_started_ms;
@@ -1840,11 +1963,13 @@ void LegacyActorAnimation::initialize(const ActorState& actor, const std::uint64
   special_effect_events_.clear();
   last_special_event_action_started_ms_ = 0;
   last_special_event_local_frame_ = -1;
+  last_state_change_frame_ = 0;
 }
 
 /// 与服务端角色状态同步：检测新移动、新动作、新死亡
 void LegacyActorAnimation::sync_actor(const ActorState& actor, const std::uint64_t now_ms,
-                                      const bool self_actor) {
+                                      const bool self_actor,
+                                      const std::uint64_t trace_frame_index) {
   const auto was_initialized = initialized_;
   if (!initialized_) {
     initialize(actor, now_ms);
@@ -1852,6 +1977,8 @@ void LegacyActorAnimation::sync_actor(const ActorState& actor, const std::uint64
   actor_id_ = actor.actor_id;
   self_actor_ = self_actor;
   dir_ = actor.dir % 8U;
+  auto trace_state_changed = !was_initialized;
+  auto trace_reason = std::string_view{"initialize"};
 
   // 检测是否有新的移动开始
   const auto new_move = actor.move_started_ms != 0 &&
@@ -1866,42 +1993,127 @@ void LegacyActorAnimation::sync_actor(const ActorState& actor, const std::uint64
        actor.legacy_action_ident != last_legacy_ident_ || actor.magic_id != last_magic_id_);
   // 检测是否刚死亡
   const auto newly_dead = actor.dead && !last_dead_;
+  const auto revived = !actor.dead && last_dead_;
   auto queued_legacy_event = false;
-
-  for (const auto& event : actor.legacy_pending_actions) {
-    if (event.legacy_event_sequence <= last_legacy_event_sequence_) {
-      continue;
+  auto newest_legacy_event_sequence = last_legacy_event_sequence_;
+  std::vector<std::pair<std::uint64_t, std::uint16_t>> hurry_spell_keys;
+  auto remember_hurry_spell = [&](const ActorState& event) {
+    if (event.current_action != client_v1::ActorActionKind::spell || event.action_started_ms == 0) {
+      return;
     }
-    queue_or_begin(event, legacy_move_action(event.current_action), now_ms);
-    last_legacy_event_sequence_ = event.legacy_event_sequence;
-    queued_legacy_event = true;
-  }
+    const auto key = std::make_pair(event.action_started_ms, event.magic_id);
+    if (std::find(hurry_spell_keys.begin(), hurry_spell_keys.end(), key) == hurry_spell_keys.end()) {
+      hurry_spell_keys.push_back(key);
+    }
+  };
+  auto superseded_by_hurry_spell = [&](const ActorState& event) {
+    if (event.current_action != client_v1::ActorActionKind::spell || event.action_started_ms == 0) {
+      return false;
+    }
+    const auto key = std::make_pair(event.action_started_ms, event.magic_id);
+    return std::find(hurry_spell_keys.begin(), hurry_spell_keys.end(), key) != hurry_spell_keys.end();
+  };
+
+  auto queue_events_by_priority = [&](const LegacyEventPriority priority) {
+    for (const auto& event : actor.legacy_pending_actions) {
+      if (event.legacy_event_sequence <= last_legacy_event_sequence_) {
+        continue;
+      }
+      if (event.legacy_event_priority != priority) {
+        continue;
+      }
+      const auto hurry = priority == LegacyEventPriority::hurry;
+      if (!hurry && superseded_by_hurry_spell(event)) {
+        continue;
+      }
+      queue_or_begin(event, legacy_move_action(event.current_action), now_ms, hurry);
+      if (hurry) {
+        remember_hurry_spell(event);
+      }
+      newest_legacy_event_sequence =
+          std::max(newest_legacy_event_sequence, event.legacy_event_sequence);
+      queued_legacy_event = true;
+    }
+  };
+  queue_events_by_priority(LegacyEventPriority::hurry);
+  queue_events_by_priority(LegacyEventPriority::normal);
 
   if (newly_dead) {
     pending_actions_.clear();
-    begin_motion(actor, die_action_for(actor), MotionKind::action, 0, now_ms);
+    dead_ = true;
+    spell_active_ = false;
+    spell_effect_ready_started_ms_.reset();
+    spell_effect_spawned_started_ms_ = 0;
+    if (actor.legacy_death_mode == LegacyDeathMode::play_death_anim) {
+      begin_motion(actor, die_action_for(actor), MotionKind::action, 0, now_ms);
+      trace_reason = "dead_play_anim";
+    } else {
+      motion_kind_ = MotionKind::idle;
+      smooth_move_time_ms_ = 0;
+      xx_ = actor.x;
+      yy_ = actor.y;
+      shift_ = LegacyShiftResult{xx_, yy_, 0, 0};
+      lock_end_frame_ = false;
+      reset_default_frame(actor, now_ms);
+      current_frame_ = default_frame_for(actor);
+      motion_started_ms_ = now_ms;
+      trace_reason = "dead_instant_corpse";
+    }
+    trace_state_changed = true;
+  } else if (revived) {
+    pending_actions_.clear();
+    dead_ = false;
+    spell_active_ = false;
+    spell_effect_ready_started_ms_.reset();
+    spell_effect_spawned_started_ms_ = 0;
+    motion_kind_ = MotionKind::idle;
+    smooth_move_time_ms_ = 0;
+    xx_ = actor.x;
+    yy_ = actor.y;
+    shift_ = LegacyShiftResult{xx_, yy_, 0, 0};
+    lock_end_frame_ = false;
+    reset_default_frame(actor, now_ms);
+    current_frame_ = default_frame_for(actor);
+    motion_started_ms_ = now_ms;
+    trace_state_changed = true;
+    trace_reason = "revive_to_idle";
   } else if (queued_legacy_event) {
     // Queued legacy action snapshots preserve intermediate move segments that
     // arrived in the same network poll before the renderer observed them.
+    trace_state_changed = true;
+    trace_reason = "queue_legacy_event";
   } else if (new_move) {
     queue_or_begin(actor, true, now_ms);
+    trace_state_changed = true;
+    trace_reason = "new_move";
   } else if (new_action) {
     if (legacy_move_action(actor.current_action)) {
       queue_or_begin(actor, true, now_ms);
+      trace_reason = "new_move_action";
     } else {
       queue_or_begin(actor, false, now_ms);
+      trace_reason = "new_action";
     }
+    trace_state_changed = true;
   } else if (motion_kind_ == MotionKind::idle && (xx_ != actor.x || yy_ != actor.y)) {
     // 空闲时坐标变化，直接跟随
     xx_ = actor.x;
     yy_ = actor.y;
     shift_ = LegacyShiftResult{xx_, yy_, 0, 0};
     current_frame_ = default_frame_for(actor);
+    trace_state_changed = true;
+    trace_reason = "idle_snap_position";
+  }
+
+  if (trace_state_changed) {
+    last_state_change_frame_ = trace_frame_index;
+    trace_actor_state(actor, trace_frame_index, now_ms, "state_change", trace_reason);
   }
 
   last_move_started_ms_ = actor.move_started_ms;
   last_action_started_ms_ = actor.action_started_ms;
-  last_legacy_event_sequence_ = std::max(last_legacy_event_sequence_, actor.legacy_event_sequence);
+  last_legacy_event_sequence_ =
+      std::max(newest_legacy_event_sequence, actor.legacy_event_sequence);
   last_action_kind_ = actor.current_action;
   last_legacy_ident_ = actor.legacy_action_ident;
   last_magic_id_ = actor.magic_id;
@@ -1909,7 +2121,31 @@ void LegacyActorAnimation::sync_actor(const ActorState& actor, const std::uint64
 }
 
 void LegacyActorAnimation::queue_or_begin(const ActorState& actor, const bool is_move,
-                                          const std::uint64_t now_ms) {
+                                          const std::uint64_t now_ms, const bool hurry) {
+  const auto spell_key_match = [&](const ActorState& queued) {
+    return actor.current_action == client_v1::ActorActionKind::spell &&
+           queued.current_action == client_v1::ActorActionKind::spell &&
+           actor.action_started_ms != 0 &&
+           actor.action_started_ms == queued.action_started_ms &&
+           actor.magic_id == queued.magic_id;
+  };
+  if (hurry && actor.current_action == client_v1::ActorActionKind::spell) {
+    pending_actions_.erase(
+        std::remove_if(
+            pending_actions_.begin(),
+            pending_actions_.end(),
+            [&](const ActorState& queued) {
+              return queued.legacy_event_priority == LegacyEventPriority::normal &&
+                     spell_key_match(queued);
+            }),
+        pending_actions_.end());
+    const auto active_same_spell =
+        motion_kind_ == MotionKind::action && spell_active_ &&
+        active_action_started_ms_ == actor.action_started_ms && last_magic_id_ == actor.magic_id;
+    if (active_same_spell) {
+      return;
+    }
+  }
   if (motion_kind_ == MotionKind::idle && !lock_end_frame_) {
     if (is_move) {
       begin_move(actor, now_ms);
@@ -1918,7 +2154,19 @@ void LegacyActorAnimation::queue_or_begin(const ActorState& actor, const bool is
     }
     return;
   }
-  pending_actions_.push_back(actor);
+  auto queued_actor = actor;
+  queued_actor.legacy_event_priority =
+      hurry ? LegacyEventPriority::hurry : LegacyEventPriority::normal;
+  if (hurry) {
+    auto insert_pos = pending_actions_.begin();
+    while (insert_pos != pending_actions_.end() &&
+           insert_pos->legacy_event_priority == LegacyEventPriority::hurry) {
+      ++insert_pos;
+    }
+    pending_actions_.insert(insert_pos, queued_actor);
+    return;
+  }
+  pending_actions_.push_back(queued_actor);
 }
 
 void LegacyActorAnimation::begin_queued_or_idle(const ActorState& fallback_actor,
@@ -1934,14 +2182,18 @@ void LegacyActorAnimation::begin_queued_or_idle(const ActorState& fallback_actor
     return;
   }
   motion_kind_ = MotionKind::idle;
+  motion_started_ms_ = now_ms;
   smooth_move_time_ms_ = now_ms;
   reset_default_frame(fallback_actor, now_ms);
 }
 
-void LegacyActorAnimation::finish_motion(const ActorState& actor, const std::uint64_t now_ms) {
+void LegacyActorAnimation::finish_motion(const ActorState& actor, const std::uint64_t now_ms,
+                                         const std::uint64_t trace_frame_index) {
+  last_state_change_frame_ = trace_frame_index;
   spell_active_ = false;
   if (actor.dead || dead_) {
     motion_kind_ = MotionKind::idle;
+    motion_started_ms_ = now_ms;
     current_frame_ = end_frame_;
     return;
   }
@@ -2024,6 +2276,7 @@ void LegacyActorAnimation::begin_motion(const ActorState& actor, const ResolvedA
   end_frame_ = start_frame_ + action_.frame - 1;
   current_frame_ = action_reverse_ ? end_frame_ : start_frame_;
   frame_started_ms_ = now_ms;
+  motion_started_ms_ = now_ms;
   default_frame_time_ms_ = now_ms;
   default_frame_count_ = std::max(1, stand_action_for(actor).frame);
   dead_ = actor.dead;
@@ -2053,121 +2306,204 @@ bool LegacyActorAnimation::spell_magic_ready(const ActorState& actor,
          elapsed_ms(now_ms, wait_magic_request_ms_) > timeout_ms;
 }
 
+bool LegacyActorAnimation::should_hold_for_server_ack(
+    const ActorState& actor, const bool wait_server_accept) const {
+  if (!self_actor_ || !wait_server_accept || actor.dead || dead_) {
+    return false;
+  }
+  return actor.current_action == client_v1::ActorActionKind::hit ||
+         actor.current_action == client_v1::ActorActionKind::spell;
+}
+
+void LegacyActorAnimation::trace_actor_state(const ActorState& actor,
+                                             const std::uint64_t trace_frame_index,
+                                             const std::uint64_t now_ms,
+                                             const std::string_view stage,
+                                             const std::string_view reason,
+                                             const bool action_finished) const {
+  if (!legacy_anim_trace_enabled()) {
+    return;
+  }
+  LegacyAnimTraceRecord record;
+  record.frame_index = trace_frame_index;
+  record.now_ms = now_ms;
+  record.stage = std::string(stage);
+  record.reason = std::string(reason);
+  record.actor_id = actor.actor_id;
+  record.actor_type = actor_type_name(actor.actor_type);
+  record.action_state =
+      motion_kind_ == MotionKind::idle ? "idle" : action_kind_name(actor.current_action);
+  record.direction = static_cast<int>(dir_);
+  record.logical_x = xx_;
+  record.logical_y = yy_;
+  record.render_offset_x = shift_.shift_x;
+  record.render_offset_y = shift_.shift_y;
+  record.animation_start_time = motion_started_ms_;
+  record.animation_frame_index = current_frame_;
+  record.animation_frame_interval =
+      action_.frame_time_ms > static_cast<std::uint64_t>(std::numeric_limits<int>::max())
+          ? std::numeric_limits<int>::max()
+          : static_cast<int>(action_.frame_time_ms);
+  record.action_finished = action_finished;
+  legacy_anim_trace_record(record);
+}
+
 /// 更新动画：根据 motion_kind 推进帧
 /// - move：根据 move_tick 推进，到最后一帧回到 idle
 /// - action：按 frame_time_ms 间隔推进，到最后一帧回到 idle
 /// - idle：播放待机动画（带呼吸效果）
 void LegacyActorAnimation::update(const ActorState& actor, const LegacyAnimationClock& clock,
-                                  const std::uint64_t now_ms) {
+                                  const std::uint64_t now_ms, const bool wait_server_accept,
+                                  const std::uint64_t trace_frame_index) {
   if (!initialized_) {
     initialize(actor, now_ms);
   }
   if (war_mode_ && elapsed_ms(now_ms, war_mode_time_ms_) > 4000U) {
     war_mode_ = false;  // 战斗模式 4 秒后自动退出
   }
+  auto trace_anim = [&](const std::string_view reason, const bool action_finished = false) {
+    trace_actor_state(actor, trace_frame_index, now_ms, "anim", reason, action_finished);
+  };
 
   if (motion_kind_ == MotionKind::move) {
     // 移动动画：由 move_tick 驱动帧推进
-    if (clock.move_tick()) {
-      if (!move_backwards_ && (current_frame_ < start_frame_ || current_frame_ > end_frame_)) {
-        current_frame_ = start_frame_ - 1;
-      }
-      if (move_backwards_ && (current_frame_ < start_frame_ || current_frame_ > end_frame_)) {
-        current_frame_ = end_frame_ + 1;
-      }
-      if (move_backwards_) {
-        if (current_frame_ > start_frame_) {
+    if (!clock.move_tick()) {
+      trace_anim("move_wait_tick");
+      return;
+    }
+    if (!move_backwards_ && (current_frame_ < start_frame_ || current_frame_ > end_frame_)) {
+      current_frame_ = start_frame_ - 1;
+    }
+    if (move_backwards_ && (current_frame_ < start_frame_ || current_frame_ > end_frame_)) {
+      current_frame_ = end_frame_ + 1;
+    }
+    if (move_backwards_) {
+      if (current_frame_ > start_frame_) {
+        --current_frame_;
+        if (pending_actions_.size() >= 2 && current_frame_ > start_frame_) {
           --current_frame_;
-          if (pending_actions_.size() >= 2 && current_frame_ > start_frame_) {
-            --current_frame_;
-          }
-          const auto cur_step = end_frame_ - current_frame_ + 1;
-          const auto max_step = end_frame_ - start_frame_ + 1;
-          shift_ = legacy_shift(xx_, yy_, move_shift_dir_, move_step_, cur_step, max_step);
         }
-        if (current_frame_ <= start_frame_) {
-          lock_end_frame_ = true;
-          begin_queued_or_idle(actor, now_ms);
-        }
-        return;
-      }
-      if (current_frame_ < end_frame_) {
-        ++current_frame_;
-        if (pending_actions_.size() >= 2 && current_frame_ < end_frame_) {
-          ++current_frame_;
-        }
-        const auto cur_step = current_frame_ - start_frame_ + 1;
+        const auto cur_step = end_frame_ - current_frame_ + 1;
         const auto max_step = end_frame_ - start_frame_ + 1;
         shift_ = legacy_shift(xx_, yy_, move_shift_dir_, move_step_, cur_step, max_step);
       }
-      if (rush_kung_move_ && current_frame_ >= end_frame_ - 3) {
-        shift_ = LegacyShiftResult{move_return_x_, move_return_y_, 0, 0};
+      if (current_frame_ <= start_frame_) {
         lock_end_frame_ = true;
         begin_queued_or_idle(actor, now_ms);
+        trace_anim("move_back_finish");
         return;
       }
-      if (current_frame_ >= end_frame_) {
-        lock_end_frame_ = true;
-        begin_queued_or_idle(actor, now_ms);
-      }
+      trace_anim("move_back_step");
+      return;
     }
+    if (current_frame_ < end_frame_) {
+      ++current_frame_;
+      if (pending_actions_.size() >= 2 && current_frame_ < end_frame_) {
+        ++current_frame_;
+      }
+      const auto cur_step = current_frame_ - start_frame_ + 1;
+      const auto max_step = end_frame_ - start_frame_ + 1;
+      shift_ = legacy_shift(xx_, yy_, move_shift_dir_, move_step_, cur_step, max_step);
+    }
+    if (rush_kung_move_ && current_frame_ >= end_frame_ - 3) {
+      shift_ = LegacyShiftResult{move_return_x_, move_return_y_, 0, 0};
+      lock_end_frame_ = true;
+      begin_queued_or_idle(actor, now_ms);
+      trace_anim("rush_kung_finish");
+      return;
+    }
+    if (current_frame_ >= end_frame_) {
+      lock_end_frame_ = true;
+      begin_queued_or_idle(actor, now_ms);
+      trace_anim("move_finish");
+      return;
+    }
+    trace_anim("move_step");
     return;
   }
 
   if (motion_kind_ == MotionKind::action) {
+    const auto hold_for_ack = should_hold_for_server_ack(actor, wait_server_accept);
     // 动作动画：按 frame_time_ms 间隔推进帧
     if (current_frame_ < start_frame_ || current_frame_ > end_frame_) {
       current_frame_ = action_reverse_ ? end_frame_ : start_frame_;
     }
-    if (elapsed_ms(now_ms, frame_started_ms_) > action_.frame_time_ms) {
-      if (action_lock_single_frame_) {
-        finish_motion(actor, now_ms);
-        return;
-      }
-      if (spell_active_) {
-        if ((cur_eff_frame_ == spell_frame_ - 2) && !spell_magic_ready(actor, now_ms)) {
-          return;
-        }
-        if (current_frame_ < end_frame_) {
-          if (current_frame_ < end_frame_ - 1 || cur_eff_frame_ >= spell_frame_ - 2) {
-            ++current_frame_;
-          }
-        }
-        ++cur_eff_frame_;
-        frame_started_ms_ = now_ms;
-        if (cur_eff_frame_ == spell_frame_ - 1 &&
-            spell_effect_ready_started_ms_ != active_action_started_ms_) {
-          spell_effect_ready_started_ms_ = active_action_started_ms_;
-        }
-        if (current_frame_ >= end_frame_ && cur_eff_frame_ >= spell_frame_) {
-          finish_motion(actor, now_ms);
-        }
-        maybe_emit_special_frame_event(actor);
-        return;
-      }
-      if (action_reverse_) {
-        if (current_frame_ > start_frame_) {
-          --current_frame_;
-          frame_started_ms_ = now_ms;
-        } else {
-          finish_motion(actor, now_ms);
-        }
-        maybe_emit_special_frame_event(actor);
+    if (elapsed_ms(now_ms, frame_started_ms_) <= action_.frame_time_ms) {
+      trace_anim("action_wait_frame");
+      return;
+    }
+    if (action_lock_single_frame_) {
+      finish_motion(actor, now_ms, trace_frame_index);
+      trace_anim("action_lock_single_finish", true);
+      return;
+    }
+    if (spell_active_) {
+      if ((cur_eff_frame_ == spell_frame_ - 2) && !spell_magic_ready(actor, now_ms)) {
+        trace_anim("spell_wait_magic_ready");
         return;
       }
       if (current_frame_ < end_frame_) {
-        ++current_frame_;
-        frame_started_ms_ = now_ms;
-      } else {
-        finish_motion(actor, now_ms);
+        if (current_frame_ < end_frame_ - 1 || cur_eff_frame_ >= spell_frame_ - 2) {
+          ++current_frame_;
+        }
+      }
+      ++cur_eff_frame_;
+      frame_started_ms_ = now_ms;
+      if (cur_eff_frame_ == spell_frame_ - 1 &&
+          spell_effect_ready_started_ms_ != active_action_started_ms_) {
+        spell_effect_ready_started_ms_ = active_action_started_ms_;
+      }
+      auto spell_finished = false;
+      if (current_frame_ >= end_frame_ && cur_eff_frame_ >= spell_frame_) {
+        if (hold_for_ack) {
+          frame_started_ms_ = now_ms;
+          maybe_emit_special_frame_event(actor);
+          trace_anim("spell_hold_server_ack");
+          return;
+        }
+        finish_motion(actor, now_ms, trace_frame_index);
+        spell_finished = true;
       }
       maybe_emit_special_frame_event(actor);
+      trace_anim(spell_finished ? "spell_finish" : "spell_step", spell_finished);
+      return;
     }
+    if (action_reverse_) {
+      auto reverse_finished = false;
+      if (current_frame_ > start_frame_) {
+        --current_frame_;
+        frame_started_ms_ = now_ms;
+      } else {
+        finish_motion(actor, now_ms, trace_frame_index);
+        reverse_finished = true;
+      }
+      maybe_emit_special_frame_event(actor);
+      trace_anim(reverse_finished ? "action_reverse_finish" : "action_reverse_step",
+                 reverse_finished);
+      return;
+    }
+    auto action_finished = false;
+    if (current_frame_ < end_frame_) {
+      ++current_frame_;
+      frame_started_ms_ = now_ms;
+    } else {
+      if (hold_for_ack) {
+        frame_started_ms_ = now_ms;
+        maybe_emit_special_frame_event(actor);
+        trace_anim("action_hold_server_ack");
+        return;
+      }
+      finish_motion(actor, now_ms, trace_frame_index);
+      action_finished = true;
+    }
+    maybe_emit_special_frame_event(actor);
+    trace_anim(action_finished ? "action_finish" : "action_step", action_finished);
     return;
   }
 
   // 待机动画：播放 stand 动画，带呼吸闪烁
   refresh_default_frame(actor, now_ms);
+  trace_anim("idle_refresh");
 }
 
 /// 更新待机帧：死亡状态显示死亡帧，否则按 500ms 间隔切换待机子帧
@@ -2630,6 +2966,28 @@ std::optional<ActorRenderPose> LegacyActorAnimation::pose_for(const ActorState& 
         appearance.weapon >= 2 ? appearance.weapon_offset + render_frame : -1;
     pose.weapon_before_body = pose.weapon_index >= 0 &&
                               legacy_weapon_before_body(appearance.sex, render_frame);
+    if (motion_kind_ == MotionKind::action) {
+      const auto local_frame = std::max(0, render_frame - start_frame_);
+      if (actor.current_action == client_v1::ActorActionKind::spell &&
+          actor.action_magic_effect > 0 && spell_active_) {
+        const auto effect_index = actor.action_magic_effect - 1;
+        if (effect_index >= 0) {
+          const auto effect = legacy_magic_effect_base(effect_index, 0);
+          if (effect.frame_base > 0 && spell_frame_ > 0) {
+            const auto effect_frame =
+                effect.frame_base + std::clamp(cur_eff_frame_, 0, spell_frame_ - 1);
+            add_pose_overlay(pose, effect.archive, effect_frame);
+          }
+        }
+      }
+      if (actor.current_action == client_v1::ActorActionKind::struck) {
+        const auto hit_effect_index = actor.last_damage_magic ? 5 : 0;
+        const auto hit_effect = legacy_magic_effect_base(hit_effect_index, 1);
+        if (hit_effect.frame_base > 0) {
+          add_pose_overlay(pose, hit_effect.archive, hit_effect.frame_base + local_frame);
+        }
+      }
+    }
     return pose;
   }
 
@@ -2777,15 +3135,21 @@ void LegacyEffectManager::clear() {
   char_effects_.clear();
   overlay_effects_.clear();
   fly_effects_.clear();
+  next_trace_effect_id_ = 1;
 }
 
 void LegacyEffectManager::spawn_map_effect(const Effect& effect) {
-  ground_effects_.push_back(normalize_basic_effect(effect, EffectKind::map));
+  auto normalized = normalize_basic_effect(effect, EffectKind::map);
+  normalized.trace_effect_id = next_trace_effect_id_++;
+  normalized.trace_create_frame = 0;
+  ground_effects_.push_back(normalized);
 }
 
 void LegacyEffectManager::spawn_char_effect(const std::uint64_t actor_id, const Effect& effect) {
   auto normalized = normalize_basic_effect(effect, EffectKind::char_attached);
   normalized.target_actor_id = actor_id;
+  normalized.trace_effect_id = next_trace_effect_id_++;
+  normalized.trace_create_frame = 0;
   char_effects_.push_back(CharEffect{actor_id, normalized});
 }
 
@@ -2824,6 +3188,8 @@ void LegacyEffectManager::spawn_magic_effect(const Effect& effect) {
   normalized.fly_xf = static_cast<double>(normalized.fly_x);
   normalized.fly_yf = static_cast<double>(normalized.fly_y);
   normalized.old_dir16 = normalized.dir16;
+  normalized.trace_effect_id = next_trace_effect_id_++;
+  normalized.trace_create_frame = 0;
   fly_effects_.push_back(normalized);
 }
 
@@ -2849,7 +3215,24 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_map_effect(
   effect.repeat_count = repeat_count;
   effect.fixed_effect = true;
   effect.blend = true;
+  effect.trace_effect_id = next_trace_effect_id_++;
+  effect.trace_create_frame = 0;
   ground_effects_.push_back(effect);
+  if (legacy_anim_trace_enabled()) {
+    LegacyAnimTraceRecord trace;
+    trace.frame_index = effect.trace_create_frame;
+    trace.now_ms = now_ms;
+    trace.stage = "effect_create";
+    trace.reason = "spawn_map_effect";
+    trace.effect_id = effect.trace_effect_id;
+    trace.effect_type = effect_kind_name(effect.kind);
+    trace.effect_x = effect.x;
+    trace.effect_y = effect.y;
+    trace.effect_frame_index = effect.current_frame;
+    trace.effect_create_frame = static_cast<std::int64_t>(effect.trace_create_frame);
+    trace.render_layer = "ground_effect";
+    legacy_anim_trace_record(trace);
+  }
   return ground_effects_.back();
 }
 
@@ -2868,7 +3251,23 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_char_effect(
   effect.target_actor_id = actor_id;
   effect.fixed_effect = true;
   effect.blend = true;
+  effect.trace_effect_id = next_trace_effect_id_++;
+  effect.trace_create_frame = 0;
   char_effects_.push_back(CharEffect{actor_id, effect});
+  if (legacy_anim_trace_enabled()) {
+    LegacyAnimTraceRecord trace;
+    trace.frame_index = effect.trace_create_frame;
+    trace.now_ms = now_ms;
+    trace.stage = "effect_create";
+    trace.reason = "spawn_char_effect";
+    trace.effect_id = effect.trace_effect_id;
+    trace.effect_type = effect_kind_name(effect.kind);
+    trace.effect_target = actor_id;
+    trace.effect_frame_index = effect.current_frame;
+    trace.effect_create_frame = static_cast<std::int64_t>(effect.trace_create_frame);
+    trace.render_layer = "actor_overlay";
+    legacy_anim_trace_record(trace);
+  }
   return char_effects_.back().effect;
 }
 
@@ -2914,6 +3313,8 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
   effect.ready_distance = create.ready_distance;
   effect.fly_frame_offset = create.fly_frame_offset;
   effect.fly_frame_stride = create.fly_frame_stride;
+  effect.trace_effect_id = next_trace_effect_id_++;
+  effect.trace_create_frame = create.trace_frame_index;
 
   auto force_fixed_base = [&](const ArchiveId archive, const int frame_base,
                               const int frame_count, const int explosion_frame_count,
@@ -3082,9 +3483,45 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
 
   if (magic_type == LegacyMagicType::ground_effect) {
     ground_effects_.push_back(effect);
+    if (legacy_anim_trace_enabled()) {
+      LegacyAnimTraceRecord trace;
+      trace.frame_index = effect.trace_create_frame;
+      trace.now_ms = create.now_ms;
+      trace.stage = "effect_create";
+      trace.reason = "spawn_magic_ground";
+      trace.actor_id = effect.owner_actor_id;
+      trace.effect_id = effect.trace_effect_id;
+      trace.effect_type = effect_kind_name(effect.kind);
+      trace.effect_owner = effect.owner_actor_id;
+      trace.effect_target = effect.target_actor_id;
+      trace.effect_x = effect.target_x;
+      trace.effect_y = effect.target_y;
+      trace.effect_frame_index = effect.current_frame;
+      trace.effect_create_frame = static_cast<std::int64_t>(effect.trace_create_frame);
+      trace.render_layer = "ground_effect";
+      legacy_anim_trace_record(trace);
+    }
     return ground_effects_.back();
   }
   fly_effects_.push_back(effect);
+  if (legacy_anim_trace_enabled()) {
+    LegacyAnimTraceRecord trace;
+    trace.frame_index = effect.trace_create_frame;
+    trace.now_ms = create.now_ms;
+    trace.stage = "effect_create";
+    trace.reason = "spawn_magic_effect";
+    trace.actor_id = effect.owner_actor_id;
+    trace.effect_id = effect.trace_effect_id;
+    trace.effect_type = effect_kind_name(effect.kind);
+    trace.effect_owner = effect.owner_actor_id;
+    trace.effect_target = effect.target_actor_id;
+    trace.effect_x = effect.x;
+    trace.effect_y = effect.y;
+    trace.effect_frame_index = effect.current_frame;
+    trace.effect_create_frame = static_cast<std::int64_t>(effect.trace_create_frame);
+    trace.render_layer = "fly_effect";
+    legacy_anim_trace_record(trace);
+  }
   return fly_effects_.back();
 }
 
@@ -3109,7 +3546,24 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_normal_draw_effect(
   effect.next_frame_ms = next_frame_ms;
   effect.fixed_effect = true;
   effect.blend = blend;
+  effect.trace_effect_id = next_trace_effect_id_++;
+  effect.trace_create_frame = 0;
   overlay_effects_.push_back(effect);
+  if (legacy_anim_trace_enabled()) {
+    LegacyAnimTraceRecord trace;
+    trace.frame_index = effect.trace_create_frame;
+    trace.now_ms = now_ms;
+    trace.stage = "effect_create";
+    trace.reason = "spawn_normal_draw_effect";
+    trace.effect_id = effect.trace_effect_id;
+    trace.effect_type = effect_kind_name(effect.kind);
+    trace.effect_x = effect.x;
+    trace.effect_y = effect.y;
+    trace.effect_frame_index = effect.current_frame;
+    trace.effect_create_frame = static_cast<std::int64_t>(effect.trace_create_frame);
+    trace.render_layer = "overlay_effect";
+    legacy_anim_trace_record(trace);
+  }
   return overlay_effects_.back();
 }
 
@@ -3123,32 +3577,77 @@ void LegacyEffectManager::del_magic(const int server_magic_id) {
 }
 
 /// 更新所有特效：移除已结束的特效
-void LegacyEffectManager::update(const std::uint64_t now_ms) {
-  update(now_ms, {});
+void LegacyEffectManager::update(const std::uint64_t now_ms,
+                                 const std::uint64_t trace_frame_index) {
+  update(now_ms, {}, trace_frame_index);
 }
 
 void LegacyEffectManager::update(
     const std::uint64_t now_ms,
-    const std::unordered_map<std::uint64_t, ActorRenderPose>& actor_poses) {
+    const std::unordered_map<std::uint64_t, ActorRenderPose>& actor_poses,
+    const std::uint64_t trace_frame_index) {
+  const auto trace_enabled = legacy_anim_trace_enabled();
+  auto trace_destroy = [&](const Effect& effect, const std::string_view reason) {
+    if (!trace_enabled) {
+      return;
+    }
+    LegacyAnimTraceRecord trace;
+    trace.frame_index = trace_frame_index;
+    trace.now_ms = now_ms;
+    trace.stage = "effect_destroy";
+    trace.reason = std::string(reason);
+    trace.actor_id = effect.owner_actor_id;
+    trace.effect_id = effect.trace_effect_id;
+    trace.effect_type = effect_kind_name(effect.kind);
+    trace.effect_owner = effect.owner_actor_id;
+    trace.effect_target = effect.target_actor_id;
+    trace.effect_x = effect.rx;
+    trace.effect_y = effect.ry;
+    trace.effect_frame_index = effect.current_frame;
+    trace.effect_create_frame = static_cast<std::int64_t>(effect.trace_create_frame);
+    trace.effect_destroy_frame = static_cast<std::int64_t>(trace_frame_index);
+    trace.same_frame_visible = effect.trace_create_frame == trace_frame_index;
+    legacy_anim_trace_record(trace);
+  };
   ground_effects_.erase(
       std::remove_if(ground_effects_.begin(), ground_effects_.end(),
-                     [now_ms](Effect& effect) { return !advance_effect_frame(effect, now_ms); }),
+                     [now_ms, &trace_destroy](Effect& effect) {
+                       const auto keep = advance_effect_frame(effect, now_ms);
+                       if (!keep) {
+                         trace_destroy(effect, "ground_effect_end");
+                       }
+                       return !keep;
+                     }),
       ground_effects_.end());
   char_effects_.erase(
       std::remove_if(char_effects_.begin(), char_effects_.end(),
-                     [now_ms](CharEffect& effect) {
-                       return !advance_effect_frame(effect.effect, now_ms);
+                     [now_ms, &trace_destroy](CharEffect& effect) {
+                       const auto keep = advance_effect_frame(effect.effect, now_ms);
+                       if (!keep) {
+                         trace_destroy(effect.effect, "char_effect_end");
+                       }
+                       return !keep;
                      }),
       char_effects_.end());
   overlay_effects_.erase(
       std::remove_if(overlay_effects_.begin(), overlay_effects_.end(),
-                     [now_ms](Effect& effect) { return !advance_effect_frame(effect, now_ms); }),
+                     [now_ms, &trace_destroy](Effect& effect) {
+                       const auto keep = advance_effect_frame(effect, now_ms);
+                       if (!keep) {
+                         trace_destroy(effect, "overlay_effect_end");
+                       }
+                       return !keep;
+                     }),
       overlay_effects_.end());
   fly_effects_.erase(
       std::remove_if(fly_effects_.begin(), fly_effects_.end(),
-                     [this, now_ms, &actor_poses](Effect& effect) {
-                       return !run_magic_effect(effect, now_ms, magic_audio_cues_,
-                                                actor_poses);
+                     [this, now_ms, &actor_poses, &trace_destroy](Effect& effect) {
+                       const auto keep =
+                           run_magic_effect(effect, now_ms, magic_audio_cues_, actor_poses);
+                       if (!keep) {
+                         trace_destroy(effect, "fly_effect_end");
+                       }
+                       return !keep;
                      }),
       fly_effects_.end());
 }
@@ -3161,8 +3660,30 @@ std::vector<LegacyMagicAudioCue> LegacyEffectManager::drain_magic_audio_cues() {
 
 /// 渲染所有地面特效
 void LegacyEffectManager::render_ground(AssetManager& assets, SoftwareRenderer& renderer,
-                                        const legacy::LegacyMapViewport& viewport) const {
+                                        const legacy::LegacyMapViewport& viewport,
+                                        const std::uint64_t trace_frame_index,
+                                        const std::uint64_t now_ms) const {
+  const auto trace_enabled = legacy_anim_trace_enabled();
   for (const auto& effect : ground_effects_) {
+    if (trace_enabled) {
+      LegacyAnimTraceRecord trace;
+      trace.frame_index = trace_frame_index;
+      trace.now_ms = now_ms;
+      trace.stage = "render";
+      trace.reason = "render_ground_effect";
+      trace.actor_id = effect.owner_actor_id;
+      trace.effect_id = effect.trace_effect_id;
+      trace.effect_type = effect_kind_name(effect.kind);
+      trace.effect_owner = effect.owner_actor_id;
+      trace.effect_target = effect.target_actor_id;
+      trace.effect_x = effect.rx;
+      trace.effect_y = effect.ry;
+      trace.effect_frame_index = effect.current_frame;
+      trace.effect_create_frame = static_cast<std::int64_t>(effect.trace_create_frame);
+      trace.render_layer = "ground_effect";
+      trace.same_frame_visible = effect.trace_create_frame == trace_frame_index;
+      legacy_anim_trace_record(trace);
+    }
     const auto screen_x = world_to_screen_x(effect.fly_x, viewport);
     const auto screen_y = world_to_screen_y(effect.fly_y, viewport);
     draw_effect_frame(assets, renderer, effect, screen_x, screen_y, effect.draw_frame_index());
@@ -3172,7 +3693,10 @@ void LegacyEffectManager::render_ground(AssetManager& assets, SoftwareRenderer& 
 /// 渲染指定行的飞行魔法特效（按 Y 行排序绘制）
 void LegacyEffectManager::render_fly(AssetManager& assets, SoftwareRenderer& renderer,
                                      const legacy::LegacyMapViewport& viewport,
-                                     const int row) const {
+                                     const int row,
+                                     const std::uint64_t trace_frame_index,
+                                     const std::uint64_t now_ms) const {
+  const auto trace_enabled = legacy_anim_trace_enabled();
   for (const auto& effect : fly_effects_) {
     if (effect_row(effect) != row) {
       continue;
@@ -3181,6 +3705,25 @@ void LegacyEffectManager::render_fly(AssetManager& assets, SoftwareRenderer& ren
     if (!effect.fixed_effect && std::abs(effect.fly_x - effect.fire_x) <= effect.ready_distance &&
         std::abs(effect.fly_y - effect.fire_y) <= effect.ready_distance) {
       continue;
+    }
+    if (trace_enabled) {
+      LegacyAnimTraceRecord trace;
+      trace.frame_index = trace_frame_index;
+      trace.now_ms = now_ms;
+      trace.stage = "render";
+      trace.reason = "render_fly_effect";
+      trace.actor_id = effect.owner_actor_id;
+      trace.effect_id = effect.trace_effect_id;
+      trace.effect_type = effect_kind_name(effect.kind);
+      trace.effect_owner = effect.owner_actor_id;
+      trace.effect_target = effect.target_actor_id;
+      trace.effect_x = effect.rx;
+      trace.effect_y = effect.ry;
+      trace.effect_frame_index = effect.current_frame;
+      trace.effect_create_frame = static_cast<std::int64_t>(effect.trace_create_frame);
+      trace.render_layer = "fly_effect";
+      trace.same_frame_visible = effect.trace_create_frame == trace_frame_index;
+      legacy_anim_trace_record(trace);
     }
     const auto screen_x = world_to_screen_x(effect.fly_x, viewport);
     const auto screen_y = world_to_screen_y(effect.fly_y, viewport);
@@ -3192,7 +3735,10 @@ void LegacyEffectManager::render_fly(AssetManager& assets, SoftwareRenderer& ren
 void LegacyEffectManager::render_overlay_for_actor(const std::uint64_t actor_id,
                                                    const ActorRenderPose& pose,
                                                    AssetManager& assets, SoftwareRenderer& renderer,
-                                                   const legacy::LegacyMapViewport& viewport) const {
+                                                   const legacy::LegacyMapViewport& viewport,
+                                                   const std::uint64_t trace_frame_index,
+                                                   const std::uint64_t now_ms) const {
+  const auto trace_enabled = legacy_anim_trace_enabled();
   const auto screen_x =
       legacy::legacy_tile_draw_x(viewport, pose.rx) + pose.shift_x + kLegacyUnitX / 2;
   const auto screen_y =
@@ -3201,6 +3747,31 @@ void LegacyEffectManager::render_overlay_for_actor(const std::uint64_t actor_id,
     if (effect.actor_id != actor_id) {
       continue;
     }
+    if (trace_enabled) {
+      LegacyAnimTraceRecord trace;
+      trace.frame_index = trace_frame_index;
+      trace.now_ms = now_ms;
+      trace.stage = "render";
+      trace.reason = "render_char_effect";
+      trace.actor_id = actor_id;
+      trace.action_state = "actor_overlay";
+      trace.direction = static_cast<int>(pose.dir);
+      trace.logical_x = pose.rx;
+      trace.logical_y = pose.ry;
+      trace.render_offset_x = pose.shift_x;
+      trace.render_offset_y = pose.shift_y;
+      trace.effect_id = effect.effect.trace_effect_id;
+      trace.effect_type = effect_kind_name(effect.effect.kind);
+      trace.effect_owner = effect.effect.owner_actor_id;
+      trace.effect_target = effect.effect.target_actor_id;
+      trace.effect_x = pose.rx;
+      trace.effect_y = pose.ry;
+      trace.effect_frame_index = effect.effect.current_frame;
+      trace.effect_create_frame = static_cast<std::int64_t>(effect.effect.trace_create_frame);
+      trace.render_layer = "actor_overlay";
+      trace.same_frame_visible = effect.effect.trace_create_frame == trace_frame_index;
+      legacy_anim_trace_record(trace);
+    }
     draw_effect_frame(assets, renderer, effect.effect, screen_x, screen_y,
                       effect.effect.draw_frame_index());
   }
@@ -3208,8 +3779,30 @@ void LegacyEffectManager::render_overlay_for_actor(const std::uint64_t actor_id,
 
 /// 渲染所有叠加特效
 void LegacyEffectManager::render_overlay(AssetManager& assets, SoftwareRenderer& renderer,
-                                         const legacy::LegacyMapViewport& viewport) const {
+                                         const legacy::LegacyMapViewport& viewport,
+                                         const std::uint64_t trace_frame_index,
+                                         const std::uint64_t now_ms) const {
+  const auto trace_enabled = legacy_anim_trace_enabled();
   for (const auto& effect : overlay_effects_) {
+    if (trace_enabled) {
+      LegacyAnimTraceRecord trace;
+      trace.frame_index = trace_frame_index;
+      trace.now_ms = now_ms;
+      trace.stage = "render";
+      trace.reason = "render_overlay_effect";
+      trace.actor_id = effect.owner_actor_id;
+      trace.effect_id = effect.trace_effect_id;
+      trace.effect_type = effect_kind_name(effect.kind);
+      trace.effect_owner = effect.owner_actor_id;
+      trace.effect_target = effect.target_actor_id;
+      trace.effect_x = effect.rx;
+      trace.effect_y = effect.ry;
+      trace.effect_frame_index = effect.current_frame;
+      trace.effect_create_frame = static_cast<std::int64_t>(effect.trace_create_frame);
+      trace.render_layer = "overlay_effect";
+      trace.same_frame_visible = effect.trace_create_frame == trace_frame_index;
+      legacy_anim_trace_record(trace);
+    }
     const auto screen_x = world_to_screen_x(effect.fly_x, viewport);
     const auto screen_y = world_to_screen_y(effect.fly_y, viewport);
     draw_effect_frame(assets, renderer, effect, screen_x, screen_y, effect.draw_frame_index());
@@ -3227,6 +3820,8 @@ void AnimationManager::reset(const std::uint64_t now_ms) {
   actors_.clear();
   spell_effect_started_ms_.clear();
   special_effect_started_ms_.clear();
+  trace_frame_index_ = 0;
+  trace_now_ms_ = now_ms;
 }
 
 /// 与世界状态同步：更新角色快照、同步动画状态机、移除已离开的角色
@@ -3234,7 +3829,7 @@ void AnimationManager::sync_world(const WorldViewState& world, const std::uint64
   actor_snapshots_ = world.actors;
   for (const auto& [actor_id, actor] : world.actors) {
     auto& animation = actors_[actor_id];
-    animation.sync_actor(actor, now_ms, actor_id == world.self_actor_id);
+    animation.sync_actor(actor, now_ms, actor_id == world.self_actor_id, trace_frame_index_);
   }
   for (auto it = actors_.begin(); it != actors_.end();) {
     if (world.actors.find(it->first) == world.actors.end()) {
@@ -3248,12 +3843,16 @@ void AnimationManager::sync_world(const WorldViewState& world, const std::uint64
 
 /// 更新所有动画和特效：推进时钟、同步世界、更新角色动画、生成法术特效
 void AnimationManager::update(const WorldViewState& world, const std::uint64_t now_ms) {
+  ++trace_frame_index_;
+  trace_now_ms_ = now_ms;
   clock_.advance(now_ms);
   sync_world(world, now_ms);
   for (auto& [actor_id, animation] : actors_) {
     const auto found = world.actors.find(actor_id);
     if (found != world.actors.end()) {
-      animation.update(found->second, clock_, now_ms);
+      const auto wait_server_accept =
+          actor_id == world.self_actor_id && action_lock_active(world, now_ms);
+      animation.update(found->second, clock_, now_ms, wait_server_accept, trace_frame_index_);
       actor_snapshots_[actor_id] = found->second;
     }
   }
@@ -3269,7 +3868,7 @@ void AnimationManager::update(const WorldViewState& world, const std::uint64_t n
       poses.emplace(actor_id, *pose);
     }
   }
-  effects_.update(now_ms, poses);
+  effects_.update(now_ms, poses, trace_frame_index_);
 }
 
 std::vector<LegacyMagicAudioCue> AnimationManager::drain_magic_audio_cues() {
@@ -3368,6 +3967,7 @@ void AnimationManager::spawn_spell_effect_for_actor(const WorldViewState& world,
   create.magic_type = spell_magic_type(magic_id, actor.x == target_x && actor.y == target_y);
   create.repetition = true;
   create.now_ms = now_ms;
+  create.trace_frame_index = trace_frame_index_;
   create.next_frame_ms = 50;
   effects_.spawn_magic_effect(create);
 }
@@ -3430,6 +4030,7 @@ void AnimationManager::spawn_special_effect_event(const WorldViewState& world,
   create.magic_type = event.magic_type;
   create.repetition = true;
   create.now_ms = now_ms;
+  create.trace_frame_index = trace_frame_index_;
   create.next_frame_ms = event.next_frame_ms;
   create.frame_count = event.frame_count;
   create.explosion_frame_count = event.explosion_frame_count;
@@ -3465,6 +4066,14 @@ bool AnimationManager::is_actor_legacy_idle(const std::uint64_t actor_id) const 
     return false;
   }
   return animation->second.is_legacy_idle();
+}
+
+bool AnimationManager::actor_state_changed_this_frame(const std::uint64_t actor_id) const {
+  const auto animation = actors_.find(actor_id);
+  if (animation == actors_.end()) {
+    return false;
+  }
+  return animation->second.last_state_change_frame() == trace_frame_index_;
 }
 
 int AnimationManager::map_object_frame(const MapCell& cell) const {

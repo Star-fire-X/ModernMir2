@@ -44,12 +44,35 @@ void test_action_order_is_event_driven() {
 
   const auto& actor = state.world.actors[2];
   assert(actor.dead);
+  assert(actor.legacy_death_mode == LegacyDeathMode::instant_corpse);
   assert(actor.current_action == ActorActionKind::turn);
   assert(actor.legacy_pending_actions.size() == 4);
   assert(actor.legacy_pending_actions[0].legacy_action_ident == 10);
   assert(actor.legacy_pending_actions[1].legacy_action_ident == legacy::kSmWalk);
   assert(actor.legacy_pending_actions[2].legacy_action_ident == 31);
   assert(actor.legacy_pending_actions[3].legacy_action_ident == 32);
+}
+
+void test_nowdeath_uses_play_death_mode() {
+  auto state = make_store();
+  state.apply(ActorDeath{2, 12, 10, 2, legacy::kSmNowDeath});
+  state.process_legacy_actor_queues(1000);
+  const auto& actor = state.world.actors[2];
+  assert(actor.dead);
+  assert(actor.legacy_death_mode == LegacyDeathMode::play_death_anim);
+}
+
+void test_vitals_revive_clears_dead_state() {
+  auto state = make_store();
+  state.apply(ActorDeath{2, 12, 10, 2, legacy_sm::kDeath});
+  state.process_legacy_actor_queues(1000);
+  state.world.actors[2].skeleton = true;
+  state.apply(ActorVitals{2, 30, 40, 10, 20, 0, 0, false, 0});
+  const auto& actor = state.world.actors[2];
+  assert(!actor.dead);
+  assert(!actor.skeleton);
+  assert(actor.current_action == ActorActionKind::turn);
+  assert(actor.legacy_action_ident == legacy_sm::kTurn);
 }
 
 void test_magic_fire_is_hurry_event() {
@@ -61,9 +84,13 @@ void test_magic_fire_is_hurry_event() {
   state.apply(ActorMagicFire{1, 2, 13, 10, 1, 1, 638});
   state.process_legacy_actor_queues(1001);
   assert(state.world.actors[1].legacy_pending_actions.size() == before + 1);
+  assert(state.world.actors[1].legacy_pending_actions.back().legacy_event_priority ==
+         LegacyEventPriority::hurry);
   assert(state.world.actors[1].action_magic);
   assert(state.world.actors[1].action_magic_effect_type == 5);
   state.apply(ActorMagicFireFail{1, 639});
+  assert(state.world.actors[1].legacy_pending_actions.back().legacy_event_priority ==
+         LegacyEventPriority::hurry);
   state.process_legacy_actor_queues(1002);
   assert(!state.world.actors[1].action_magic);
   assert(state.world.actors[1].action_magic_failed);
@@ -112,6 +139,8 @@ void test_independent_visual_state_events() {
 
 int main() {
   test_action_order_is_event_driven();
+  test_nowdeath_uses_play_death_mode();
+  test_vitals_revive_clears_dead_state();
   test_magic_fire_is_hurry_event();
   test_spell_and_magic_fire_share_queue_tick();
   test_remove_delay_matches_legacy_hide();

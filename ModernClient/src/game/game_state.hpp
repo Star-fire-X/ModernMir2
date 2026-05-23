@@ -61,6 +61,16 @@ constexpr std::uint16_t kStruck = 31;
 
 }  // namespace legacy_sm
 
+enum class LegacyDeathMode : std::uint8_t {
+  instant_corpse,
+  play_death_anim,
+};
+
+enum class LegacyEventPriority : std::uint8_t {
+  normal,
+  hurry,
+};
+
 /// 客户端配置，从 client.ini 加载
 /// 对应原传奇客户端的 Mir2.ini 配置文件
 struct ClientConfig {
@@ -148,6 +158,8 @@ struct ActorState {
   int legacy_old_y{0};
   std::uint8_t legacy_old_dir{0};
   bool legacy_has_old_position{false};
+  LegacyDeathMode legacy_death_mode{LegacyDeathMode::instant_corpse};
+  LegacyEventPriority legacy_event_priority{LegacyEventPriority::normal};
   std::uint64_t legacy_event_sequence{0};
   std::deque<LegacyActorMessage> legacy_action_queue{};
   std::vector<ActorState> legacy_pending_actions{};
@@ -783,11 +795,32 @@ struct GameStateStore {
   ConnectionPhase connection_phase{ConnectionPhase::login};
   std::uint64_t legacy_actor_event_sequence{0};
 
-  void record_legacy_actor_event(ActorState& actor) {
+  static void revive_actor(ActorState& actor) {
+    actor.dead = false;
+    actor.skeleton = false;
+    actor.legacy_pending_actions.clear();
+    actor.current_action = client_v1::ActorActionKind::turn;
+    actor.legacy_action_ident = legacy_sm::kTurn;
+    actor.legacy_death_mode = LegacyDeathMode::instant_corpse;
+    actor.legacy_event_priority = LegacyEventPriority::normal;
+    actor.action_started_ms = 0;
+    actor.action_duration_ms = 0;
+    actor.running = false;
+    actor.move_started_ms = 0;
+    actor.move_duration_ms = 0;
+    actor.action_magic = false;
+    actor.action_magic_effect = 0;
+    actor.action_magic_effect_type = -1;
+    actor.action_magic_failed = false;
+  }
+
+  void record_legacy_actor_event(
+      ActorState& actor, const LegacyEventPriority priority = LegacyEventPriority::normal) {
     auto event = actor;
     event.legacy_action_queue.clear();
     event.legacy_pending_actions.clear();
     event.pending_remove = false;
+    event.legacy_event_priority = priority;
     event.legacy_event_sequence = ++legacy_actor_event_sequence;
     actor.legacy_pending_actions.push_back(event);
     if (actor.legacy_pending_actions.size() > 32U) {
@@ -924,14 +957,16 @@ struct GameStateStore {
         actor.action_magic_effect_type =
             legacy_visual_effect_type(actor.magic_id, message.magic_effect_type);
         actor.action_magic_failed = false;
-        record_legacy_actor_event(actor);
+        actor.legacy_event_priority = LegacyEventPriority::hurry;
+        record_legacy_actor_event(actor, LegacyEventPriority::hurry);
         break;
       case LegacyActorMessage::Kind::magic_fire_fail:
         actor.action_magic = false;
         actor.action_magic_effect = 0;
         actor.action_magic_effect_type = -1;
         actor.action_magic_failed = true;
-        record_legacy_actor_event(actor);
+        actor.legacy_event_priority = LegacyEventPriority::hurry;
+        record_legacy_actor_event(actor, LegacyEventPriority::hurry);
         break;
       case LegacyActorMessage::Kind::death:
         if (message.x != 0 || message.y != 0) {
@@ -947,6 +982,9 @@ struct GameStateStore {
         actor.current_action = client_v1::ActorActionKind::turn;
         actor.legacy_action_ident =
             message.legacy_ident != 0 ? message.legacy_ident : legacy_sm::kDeath;
+        actor.legacy_death_mode = actor.legacy_action_ident == legacy_sm::kNowDeath
+                                      ? LegacyDeathMode::play_death_anim
+                                      : LegacyDeathMode::instant_corpse;
         actor.action_started_ms = now_ms;
         actor.action_duration_ms =
             action_duration_ms(client_v1::ActorActionKind::turn, actor.legacy_action_ident);
@@ -1573,6 +1611,10 @@ struct GameStateStore {
     actor.x = message.x;
     actor.y = message.y;
     actor.dir = message.dir;
+    if (actor.dead && actor.hp > 0) {
+      revive_actor(actor);
+      record_legacy_actor_event(actor);
+    }
   }
 
   static std::uint64_t map_door_key(const std::int32_t x, const std::int32_t y) {
@@ -1623,6 +1665,10 @@ struct GameStateStore {
     actor.feature = message.actor.feature;
     actor.status = message.actor.status;
     actor.actor_type = message.actor.actor_type;
+    if (actor.dead && actor.hp > 0) {
+      revive_actor(actor);
+      record_legacy_actor_event(actor);
+    }
     if (inserted) {
       world.actor_draw_order.push_back(message.actor.actor_id);
     }
@@ -1718,6 +1764,10 @@ struct GameStateStore {
     actor.last_damage = message.damage;
     actor.last_hitter_id = message.source_actor_id;
     actor.last_damage_magic = message.magic;
+    if (actor.dead && actor.hp > 0) {
+      revive_actor(actor);
+      record_legacy_actor_event(actor);
+    }
     if (message.actor_id == world.self_actor_id) {
       if (message.hp >= 0) {
         world.self_ability_detail.hp = static_cast<std::uint16_t>(std::clamp(message.hp, 0, 65535));
