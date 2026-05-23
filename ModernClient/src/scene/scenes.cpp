@@ -147,6 +147,10 @@ InputState input_for_legacy_event(const InputState& source, const LegacyInputEve
   input.left_released = false;
   input.right_pressed = false;
   input.right_released = false;
+  input.wheel_delta = 0;
+  input.wheel_scrolled = false;
+  input.left_double_click = false;
+  input.right_double_click = false;
   input.key_pressed.fill(false);
   input.text_input.clear();
   input.backspace_pressed = false;
@@ -176,6 +180,20 @@ InputState input_for_legacy_event(const InputState& source, const LegacyInputEve
     case LegacyInputEventKind::right_up:
       input.right_released = true;
       input.right_down = false;
+      break;
+    case LegacyInputEventKind::mouse_wheel:
+      input.wheel_delta = event.wheel_delta;
+      input.wheel_scrolled = event.wheel_delta != 0;
+      break;
+    case LegacyInputEventKind::left_double_click:
+      input.left_pressed = true;
+      input.left_double_click = true;
+      input.left_down = true;
+      break;
+    case LegacyInputEventKind::right_double_click:
+      input.right_pressed = true;
+      input.right_double_click = true;
+      input.right_down = true;
       break;
     case LegacyInputEventKind::key_down:
       if (event.key < input.key_pressed.size()) {

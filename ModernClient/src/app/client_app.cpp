@@ -497,6 +497,10 @@ void ClientApp::dispatch_legacy_input_events(ClientContext& context) {
       event_input.left_released = false;
       event_input.right_pressed = false;
       event_input.right_released = false;
+      event_input.wheel_delta = 0;
+      event_input.wheel_scrolled = false;
+      event_input.left_double_click = false;
+      event_input.right_double_click = false;
       event_input.key_pressed.fill(false);
       event_input.text_input.clear();
       event_input.backspace_pressed = false;
@@ -522,6 +526,20 @@ void ClientApp::dispatch_legacy_input_events(ClientContext& context) {
         case LegacyInputEventKind::right_up:
           event_input.right_released = true;
           event_input.right_down = false;
+          break;
+        case LegacyInputEventKind::mouse_wheel:
+          event_input.wheel_delta = event.wheel_delta;
+          event_input.wheel_scrolled = event.wheel_delta != 0;
+          break;
+        case LegacyInputEventKind::left_double_click:
+          event_input.left_pressed = true;
+          event_input.left_double_click = true;
+          event_input.left_down = true;
+          break;
+        case LegacyInputEventKind::right_double_click:
+          event_input.right_pressed = true;
+          event_input.right_double_click = true;
+          event_input.right_down = true;
           break;
         case LegacyInputEventKind::key_down:
           if (event.key < event_input.key_pressed.size()) {

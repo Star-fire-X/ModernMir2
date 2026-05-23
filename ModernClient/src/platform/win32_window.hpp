@@ -41,6 +41,9 @@ enum class LegacyInputEventKind {
   left_up,
   right_down,
   right_up,
+  mouse_wheel,
+  left_double_click,
+  right_double_click,
   key_down,
   key_up,
   char_input
@@ -53,6 +56,7 @@ struct LegacyInputEvent {
   int mouse_y{0};
   std::uint16_t key{0};
   wchar_t character{0};
+  int wheel_delta{0};
   bool shift{false};
   bool ctrl{false};
   bool alt{false};

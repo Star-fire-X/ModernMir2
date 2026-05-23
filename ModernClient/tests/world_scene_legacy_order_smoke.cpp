@@ -84,12 +84,85 @@ mir2::client::LegacyInputEvent left_up_event(const int x, const int y) {
   return event;
 }
 
+mir2::client::LegacyInputEvent right_down_event(const int x, const int y) {
+  mir2::client::LegacyInputEvent event;
+  event.kind = mir2::client::LegacyInputEventKind::right_down;
+  event.mouse_x = x;
+  event.mouse_y = y;
+  event.right_down = true;
+  return event;
+}
+
+mir2::client::LegacyInputEvent right_up_event(const int x, const int y) {
+  mir2::client::LegacyInputEvent event;
+  event.kind = mir2::client::LegacyInputEventKind::right_up;
+  event.mouse_x = x;
+  event.mouse_y = y;
+  return event;
+}
+
+mir2::client::LegacyInputEvent mouse_wheel_event(const int x, const int y, const int delta) {
+  mir2::client::LegacyInputEvent event;
+  event.kind = mir2::client::LegacyInputEventKind::mouse_wheel;
+  event.mouse_x = x;
+  event.mouse_y = y;
+  event.wheel_delta = delta;
+  return event;
+}
+
+mir2::client::LegacyInputEvent left_double_click_event(const int x, const int y) {
+  mir2::client::LegacyInputEvent event;
+  event.kind = mir2::client::LegacyInputEventKind::left_double_click;
+  event.mouse_x = x;
+  event.mouse_y = y;
+  event.left_down = true;
+  return event;
+}
+
+mir2::client::LegacyInputEvent right_double_click_event(const int x, const int y) {
+  mir2::client::LegacyInputEvent event;
+  event.kind = mir2::client::LegacyInputEventKind::right_double_click;
+  event.mouse_x = x;
+  event.mouse_y = y;
+  event.right_down = true;
+  return event;
+}
+
 mir2::client::LegacyInputEvent key_down_event(const std::uint16_t key) {
   mir2::client::LegacyInputEvent event;
   event.kind = mir2::client::LegacyInputEventKind::key_down;
   event.key = key;
   return event;
 }
+
+class PointerEventProbe final : public mir2::client::ui::UiNode {
+ public:
+  explicit PointerEventProbe(const mir2::client::RectI bounds) : UiNode(bounds) {}
+
+  bool on_mouse_wheel(mir2::client::ui::UiTree& /*tree*/,
+                      const mir2::client::InputState& /*input*/,
+                      const int wheel_delta) override {
+    ++wheel_hits;
+    last_wheel_delta = wheel_delta;
+    return true;
+  }
+
+  bool on_double_click(mir2::client::ui::UiTree& /*tree*/,
+                       const mir2::client::InputState& /*input*/,
+                       const mir2::client::ui::UiMouseButton button) override {
+    if (button == mir2::client::ui::UiMouseButton::left) {
+      ++left_double_hits;
+    } else if (button == mir2::client::ui::UiMouseButton::right) {
+      ++right_double_hits;
+    }
+    return true;
+  }
+
+  int wheel_hits{0};
+  int last_wheel_delta{0};
+  int left_double_hits{0};
+  int right_double_hits{0};
+};
 
 void reset_frame_input(mir2::client::InputState& input, mir2::client::ClientContext& context) {
   input = mir2::client::InputState{};
@@ -174,6 +247,33 @@ void test_legacy_raw_input_events() {
   assert(drag_window->bounds.x == 330);
   assert(drag_window->bounds.y == 120);
   drag_window->set_visible(*ui_tree, false);
+  reset_frame_input(input, context);
+
+  auto* pointer_probe = ui_tree->root()->emplace_child<PointerEventProbe>(
+      mir2::client::RectI{100, 100, 80, 80});
+  input.events.push_back(mouse_move_event(120, 120, false));
+  input.events.push_back(mouse_wheel_event(130, 130, 120));
+  scenes.dispatch_legacy_input_events(context);
+  assert(context.legacy_input_dispatched);
+  assert(pointer_probe->wheel_hits == 1);
+  assert(pointer_probe->last_wheel_delta == 120);
+  reset_frame_input(input, context);
+
+  input.events.push_back(left_down_event(120, 120));
+  input.events.push_back(left_double_click_event(120, 120));
+  input.events.push_back(left_up_event(120, 120));
+  scenes.dispatch_legacy_input_events(context);
+  assert(context.legacy_input_dispatched);
+  assert(pointer_probe->left_double_hits == 1);
+  reset_frame_input(input, context);
+
+  input.events.push_back(right_down_event(120, 120));
+  input.events.push_back(right_double_click_event(120, 120));
+  input.events.push_back(right_up_event(120, 120));
+  scenes.dispatch_legacy_input_events(context);
+  assert(context.legacy_input_dispatched);
+  assert(pointer_probe->right_double_hits == 1);
+  pointer_probe->set_visible(*ui_tree, false);
   reset_frame_input(input, context);
 
   world.focus_actor_id = 77;
