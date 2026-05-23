@@ -200,11 +200,11 @@ int main() {
   mir2::tests::send_client_v1_message(
       *game_socket, mir2::client_v1::MoveIntent{331, 271, mir2::client_v1::MoveMode::walk},
       game_sequence);
-  const auto delta = game_reader.wait_for_message<mir2::client_v1::ActorStateDelta>();
-  if (!delta.has_value() || delta->actor_id != enter_world->self_actor_id ||
-      delta->x != 331 || delta->y != 271) {
+  const auto ack = game_reader.wait_for_matching<mir2::client_v1::ActionAck>(
+      [](const mir2::client_v1::ActionAck& action_ack) { return action_ack.ok; });
+  if (!ack.has_value()) {
     stop_runtime();
-    return fail("move");
+    return fail("move ack");
   }
 
   stop_runtime();

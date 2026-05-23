@@ -314,22 +314,34 @@ int main() {
   assert(!state.world.npc_dialog.visible);
 
   state.apply(ActorAction{2000, ActorActionKind::hit, 332, 271, 4, 1000, 0, 14, 0, false});
+  assert(state.world.actors[2000].current_action == ActorActionKind::turn);
+  state.process_legacy_actor_queues(mir2::client::detail::monotonic_ms());
   assert(state.world.actors[2000].current_action == ActorActionKind::hit);
   assert(state.world.actors[2000].legacy_action_ident == 14);
+  state.world.actors[2000].action_started_ms = 0;
   state.apply(ActorAction{2000, ActorActionKind::hit, 332, 271, 4, 1000, 0,
                           mir2::legacy::kCmPowerHit, 0, false});
+  state.process_legacy_actor_queues(mir2::client::detail::monotonic_ms());
   assert(state.world.actors[2000].legacy_action_ident == mir2::legacy::kSmPowerHit);
+  state.world.actors[2000].action_started_ms = 0;
   state.apply(ActorAction{2000, ActorActionKind::hit, 332, 271, 4, 1000, 0,
                           mir2::legacy::kCmLongHit, 0, false});
+  state.process_legacy_actor_queues(mir2::client::detail::monotonic_ms());
   assert(state.world.actors[2000].legacy_action_ident == mir2::legacy::kSmLongHit);
+  state.world.actors[2000].action_started_ms = 0;
   state.apply(ActorAction{2000, ActorActionKind::hit, 332, 271, 4, 1000, 0,
                           mir2::legacy::kCmWideHit, 0, false});
+  state.process_legacy_actor_queues(mir2::client::detail::monotonic_ms());
   assert(state.world.actors[2000].legacy_action_ident == mir2::legacy::kSmWideHit);
+  state.world.actors[2000].action_started_ms = 0;
   state.apply(ActorAction{2000, ActorActionKind::hit, 332, 271, 4, 1000, 0,
                           mir2::legacy::kCmFireHit, 0, false});
+  state.process_legacy_actor_queues(mir2::client::detail::monotonic_ms());
   assert(state.world.actors[2000].legacy_action_ident == mir2::legacy::kSmFireHit);
+  state.world.actors[2000].action_started_ms = 0;
   state.apply(ActorAction{2000, ActorActionKind::hit, 332, 271, 4, 1000, 0,
                           mir2::legacy::kCmCrossHit, 0, false});
+  state.process_legacy_actor_queues(mir2::client::detail::monotonic_ms());
   assert(state.world.actors[2000].legacy_action_ident == mir2::legacy::kSmCrossHit);
 
   state.apply(ActorVitals{2000, 7, 12, -1, -1, 5, 1000, false});
@@ -338,6 +350,7 @@ int main() {
   assert(state.world.actors[2000].last_damage == 5);
 
   state.apply(ActorAction{1000, ActorActionKind::spell, 335, 272, 3, 2000, 0, 0, 1, true, 3});
+  state.process_legacy_actor_queues(mir2::client::detail::monotonic_ms());
   assert(state.world.actors[1000].current_action == ActorActionKind::spell);
   assert(state.world.actors[1000].magic_id == 1);
   assert(state.world.actors[1000].action_magic_effect == 3);
@@ -346,13 +359,16 @@ int main() {
   assert(state.world.actors[1000].action_target_y == 272);
   assert(state.world.actors[1000].action_target_actor_id == 2000);
   state.apply(ActorMagicFire{1000, 2000, 336, 273, 7, 32});
+  state.process_legacy_actor_queues(mir2::client::detail::monotonic_ms());
   assert(state.world.actors[1000].action_magic_effect_type == 7);
   assert(state.world.actors[1000].action_magic_effect == 32);
   assert(state.world.actors[1000].action_target_x == 336);
 
   state.apply(ActorDeath{2000, 332, 271, 4});
-  assert(state.world.actors[2000].dead);
   assert(state.world.actors[2000].hp == 0);
+  state.world.actors[2000].action_started_ms = 0;
+  state.process_legacy_actor_queues(mir2::client::detail::monotonic_ms());
+  assert(state.world.actors[2000].dead);
 
   MagicList magics;
   magics.magics.push_back(
@@ -440,21 +456,29 @@ int main() {
 
   state.apply(WorldClearObjects{});
   assert(state.world.map_transition_pending);
-  assert(state.world.self_actor_id == 0);
-  assert(state.world.actors.empty());
-  assert(state.world.ground_items.empty());
-  assert(!state.map_door_open(12, 13));
+  assert(state.world.map_clear_waiting_for_change);
+  assert(state.should_defer_runtime_for_map_transition(mir2::client::detail::monotonic_ms()));
+  assert(state.world.self_actor_id == 1000);
+  assert(!state.world.actors.empty());
+  assert(state.map_door_open(12, 13));
   assert(state.world.bag_items[0].name == "Potion");
   assert(state.world.equipment[1].name == "Sword");
   assert(state.world.magics.size() == 1);
-  assert(!state.world.minimap.visible);
-  assert(!state.world.trade.visible);
-  assert(state.world.group.visible);
-  assert(state.world.guild.visible);
 
+  state.world.actors[1000].action_started_ms = mir2::client::detail::monotonic_ms();
+  state.world.actors[1000].action_duration_ms = 1000;
   state.apply(MapChange{"1"});
+  assert(state.world.map_transition_pending);
+  assert(!state.world.map_clear_waiting_for_change);
+  assert(state.world.map_change_waiting);
+  assert(state.world.pending_map_id == "1");
+  assert(state.world.map_id != "1");
+  assert(!state.world.actors.empty());
+  state.world.actors[1000].action_started_ms = 0;
+  assert(state.finish_pending_map_transition_if_ready(mir2::client::detail::monotonic_ms()));
   assert(state.world.map_id == "1");
   assert(state.world.map_transition_pending);
+  assert(state.world.actors.empty());
   WorldSnapshot changed_snapshot;
   changed_snapshot.map_id = "1";
   changed_snapshot.width = 500;

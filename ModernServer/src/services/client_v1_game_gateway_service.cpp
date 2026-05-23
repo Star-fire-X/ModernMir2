@@ -2142,48 +2142,12 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       const auto time_text = slash == std::string::npos ? std::string_view{} : std::string_view(body).substr(slash + 1);
       const auto time = parse_i32(time_text).value_or(0);
       messages.push_back(client_v1::ActionAck{ok, static_cast<std::uint32_t>(std::max(time, 0))});
-      std::optional<client_v1::ActionIntent> pending;
-      SessionState current;
       {
         std::scoped_lock lock(mutex_);
         auto it = sessions_.find(session_id);
         if (it != sessions_.end()) {
-          pending = it->second.pending_action;
           it->second.pending_action.reset();
-          current = it->second;
         }
-      }
-      if (ok && pending.has_value() && current.actor_id != 0) {
-        const auto kind = pending->kind == client_v1::WorldActionKind::run
-                              ? client_v1::ActorActionKind::run
-                              : (pending->kind == client_v1::WorldActionKind::walk
-                                     ? client_v1::ActorActionKind::walk
-                                     : (pending->kind == client_v1::WorldActionKind::attack
-                                            ? client_v1::ActorActionKind::hit
-                                            : client_v1::ActorActionKind::turn));
-        if (pending->kind == client_v1::WorldActionKind::walk ||
-            pending->kind == client_v1::WorldActionKind::run ||
-            pending->kind == client_v1::WorldActionKind::turn) {
-          const auto ack_x = pending->kind == client_v1::WorldActionKind::turn
-                                 ? current.character.x
-                                 : pending->x;
-          const auto ack_y = pending->kind == client_v1::WorldActionKind::turn
-                                 ? current.character.y
-                                 : pending->y;
-          messages.push_back(client_v1::ActorStateDelta{current.actor_id, ack_x, ack_y, pending->dir});
-          std::scoped_lock lock(mutex_);
-          auto it = sessions_.find(session_id);
-          if (it != sessions_.end()) {
-            it->second.character.x = ack_x;
-            it->second.character.y = ack_y;
-            it->second.character.dir = pending->dir;
-          }
-          pending->x = ack_x;
-          pending->y = ack_y;
-        }
-        messages.push_back(client_v1::ActorAction{current.actor_id, kind, pending->x, pending->y,
-                                                  pending->dir, pending->target_actor_id, 0,
-                                                  pending->legacy_ident, 0, false});
       }
     }
     return;
@@ -2290,11 +2254,6 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       const auto status = desc.has_value() ? desc->status : 0;
       messages.push_back(client_v1::ActorUpsert{
           make_actor(actor_id, name, decoded->message.param, decoded->message.tag, dir, feature, status)});
-      if (decoded->message.ident == kSmWalk || decoded->message.ident == kSmRun ||
-          decoded->message.ident == kSmRush || decoded->message.ident == kSmBackStep) {
-        messages.push_back(client_v1::ActorStateDelta{
-            actor_id, decoded->message.param, decoded->message.tag, dir});
-      }
       messages.push_back(client_v1::ActorAction{
           actor_id, actor_action_kind_for_sm(decoded->message.ident), decoded->message.param,
           decoded->message.tag, dir, 0, 0, decoded->message.ident, 0, false});
@@ -2368,9 +2327,6 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       messages.push_back(client_v1::ActorDeath{
           actor_id, decoded->message.param, decoded->message.tag,
           static_cast<std::uint8_t>(decoded->message.series), decoded->message.ident});
-      if (decoded->message.ident == kSmNowDeath) {
-        messages.push_back(client_v1::SysMessage{"You died.", 1});
-      }
       break;
     case kSmDisappear:
     case kSmSpaceMoveHide:
@@ -2378,33 +2334,29 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       messages.push_back(client_v1::ActorRemove{actor_id, decoded->message.ident});
       break;
     case kSmAlive: {
+      const auto desc = decode_char_desc_prefix(decoded->body);
       client_v1::ActorUpsert upsert;
-      client_v1::ActorVitals vitals;
       {
         std::scoped_lock lock(mutex_);
         auto& current = sessions_[session_id];
         current.character.x = decoded->message.param;
         current.character.y = decoded->message.tag;
         current.character.dir = static_cast<std::uint8_t>(decoded->message.series);
+        if (desc.has_value()) {
+          current.character.feature = desc->feature;
+          current.character.status = desc->status;
+        }
         state = current;
         upsert.actor = make_actor(actor_id, current.character_name,
                                   current.character.x, current.character.y,
                                   current.character.dir, current.character.feature,
                                   current.character.status);
-        vitals = client_v1::ActorVitals{
-            actor_id,
-            static_cast<std::int32_t>(current.character.ability.hp),
-            static_cast<std::int32_t>(current.character.ability.max_hp),
-            static_cast<std::int32_t>(current.character.ability.mp),
-            static_cast<std::int32_t>(current.character.ability.max_mp),
-            0, 0, false};
       }
       messages.push_back(upsert);
-      messages.push_back(vitals);
-      messages.push_back(client_v1::ActorStateDelta{
-          actor_id, decoded->message.param, decoded->message.tag,
-          static_cast<std::uint8_t>(decoded->message.series)});
-      messages.push_back(client_v1::SysMessage{"Revived.", 0});
+      messages.push_back(client_v1::ActorAction{
+          actor_id, client_v1::ActorActionKind::turn, decoded->message.param,
+          decoded->message.tag, static_cast<std::uint8_t>(decoded->message.series), 0,
+          decoded->message.series, decoded->message.ident, 0, false});
       break;
     }
     case kSmAbility:
@@ -2524,7 +2476,6 @@ void ClientV1GameGatewayService::translate_legacy_packet(
           messages.push_back(client_v1::InventoryAdd{
               client_v1::ItemSlotState{*slot, state}});
         }
-        messages.push_back(client_v1::SysMessage{"Picked up " + to_string(item->item.name), 0});
       }
       break;
     case kSmDelItem:
@@ -2606,12 +2557,8 @@ void ClientV1GameGatewayService::translate_legacy_packet(
           messages.push_back(std::move(*equipment_snapshot));
         }
       }
-      messages.push_back(client_v1::SysMessage{
-          "Durability changed: slot " + std::to_string(decoded->message.param), 0});
       break;
     case kSmDropItemSuccess:
-      messages.push_back(client_v1::SysMessage{
-          "Dropped " + legacy_decode_string(decoded->body), 0});
       break;
     case kSmDropItemFail:
       messages.push_back(client_v1::SysMessage{
@@ -2702,8 +2649,6 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       }
       messages.push_back(self_ability);
       messages.push_back(self_ability_detail);
-      messages.push_back(client_v1::SysMessage{
-          "Gold: " + std::to_string(decoded->message.recog), 0});
       break;
     }
     case kSmDealChangeGoldOk:
@@ -3138,6 +3083,10 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       break;
     }
     default:
+      messages.push_back(client_v1::SysMessage{
+          std::to_string(decoded->message.ident) + " : " +
+              std::string(decoded->body.begin(), decoded->body.end()),
+          0});
       break;
   }
 

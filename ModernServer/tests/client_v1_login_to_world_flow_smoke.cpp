@@ -367,11 +367,10 @@ int main() {
   const auto move_y = snapshot->actors.front().y + 1;
   send_message(*game_socket, mir2::client_v1::MoveIntent{move_x, move_y, mir2::client_v1::MoveMode::walk},
                game_sequence);
-  const auto delta = game_reader.wait_for_message<mir2::client_v1::ActorStateDelta>();
-  if (!delta.has_value() || delta->actor_id != enter_world->self_actor_id || delta->x != move_x ||
-      delta->y != move_y) {
+  const auto ack = game_reader.wait_for_message<mir2::client_v1::ActionAck>();
+  if (!ack.has_value() || !ack->ok) {
     stop_services();
-    return fail("move");
+    return fail("move ack");
   }
 
   stop_services();

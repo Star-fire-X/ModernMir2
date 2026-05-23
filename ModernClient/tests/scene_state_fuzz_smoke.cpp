@@ -38,14 +38,6 @@ void assert_draw_orders_valid(const mir2::client::GameStateStore& state) {
     assert(state.world.ground_items.find(id) != state.world.ground_items.end());
     assert(seen_items.insert(id).second);
   }
-
-  if (state.world.map_transition_pending) {
-    assert(state.world.actors.empty());
-    assert(state.world.ground_items.empty());
-    assert(state.world.map_doors.empty());
-    assert(state.world.actor_draw_order.empty());
-    assert(state.world.ground_item_draw_order.empty());
-  }
 }
 
 void seed_visible_world(mir2::client::GameStateStore& state) {
@@ -155,6 +147,7 @@ int main() {
       case 13:
         if (!state.world.map_transition_pending) {
           state.apply(mir2::client_v1::ActorDeath{1, 330, 270, 0});
+          state.process_legacy_actor_queues(static_cast<std::uint64_t>(step));
           assert(state.world.actors[1].dead);
           seed_visible_world(state);
           assert(!state.world.actors[1].dead);

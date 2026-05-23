@@ -136,6 +136,7 @@ int main() {
 
   state.apply(ActorVitals{100, 10, 15, -1, -1, 3, 200, false});
   state.apply(ActorAction{100, ActorActionKind::struck, 0, 0, 0, 200, 3, 31, 0, false, 0});
+  state.process_legacy_actor_queues(mir2::client::detail::monotonic_ms());
   assert(state.world.latest_struck_ms != 0);
   return 0;
 }

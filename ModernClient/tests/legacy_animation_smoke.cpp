@@ -945,6 +945,7 @@ int main() {
   queued_store.apply(mir2::client_v1::ActorAction{
       1, mir2::client_v1::ActorActionKind::walk, 12, 10, 2, 0, 0,
       mir2::legacy::kSmWalk, 0, false, 0});
+  queued_store.process_legacy_actor_queues(900);
   AnimationManager queued_animations;
   queued_animations.reset(900);
   queued_animations.update(queued_store.world, 1000);
