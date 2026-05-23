@@ -324,7 +324,7 @@ int main() {
   self.y = 50;
   self.mp = 0;
   world.actors.emplace(1, self);
-  world.magics.push_back(mir2::client::MagicShortcutState{7, 1, 0, 0, 0, "Fire", 0, 0, 0});
+  world.magics.push_back(mir2::client::MagicShortcutState{7, 1, 0, 0, 0, "Fire", 0, 0, 1});
 
   mir2::client::SceneManager scenes;
   mir2::client::ClientContext context{nullptr, &config, &state, nullptr, &audio, nullptr, &input};

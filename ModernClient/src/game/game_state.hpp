@@ -509,6 +509,7 @@ struct WorldViewState {
   bool attack_slow{false};
   std::uint64_t latest_struck_ms{0};       ///< 最近一次被击中的时间戳
   std::uint64_t latest_spell_ms{0};        ///< 最近一次施法时间戳
+  std::uint64_t magic_delay_time_ms{0};    ///< 上一次施法设置的 Delphi MagicDelayTime
   std::uint64_t magic_pk_delay_ms{300};    ///< 魔法/PK 最小间隔（毫秒，防速攻）
   int legacy_target_x{-1};                 ///< 旧版行走目标 X（用于旧版点击移动）
   int legacy_target_y{-1};
@@ -531,6 +532,7 @@ struct WorldViewState {
   bool can_cross_hit{false};                  ///< 兼容 +GOOD CRS / +GOOD UCRS
   bool next_time_fire_hit{false};             ///< 兼容 +GOOD FIR：下一次攻击改为 CM_FIREHIT
   std::uint64_t latest_fire_hit_ms{0};        ///< 最近一次收到 FIR 标记时间
+  std::uint64_t latest_rush_rush_ms{0};       ///< 最近一次收到野蛮冲撞确认时间
   std::int32_t eating_item_make_index{0};     ///< 正在使用的物品 MakeIndex
   std::int32_t eating_item_slot{-1};          ///< 正在使用的物品槽位
   std::uint64_t eat_time_ms{0};               ///< 使用物品的时间戳（用于冷却判断）
@@ -639,7 +641,7 @@ inline std::int32_t legacy_next_hit_delay_ms(const std::int32_t level,
 }
 
 /// 检查角色是否可以发起下一次攻击
-inline bool can_next_hit(const WorldViewState& world, const ActorState& self,
+inline bool can_next_hit(WorldViewState& world, const ActorState& self,
                          const std::uint64_t now) {
   if (self.dead) {
     return false;
@@ -649,6 +651,7 @@ inline bool can_next_hit(const WorldViewState& world, const ActorState& self,
       world.self_ability_detail.speed, world.attack_slow);
   if (world.latest_hit_ms == 0 ||
       elapsed_ms(now, world.latest_hit_ms) > static_cast<std::uint64_t>(next_hit)) {
+    world.latest_hit_ms = now;
     return true;
   }
   return false;
@@ -959,6 +962,10 @@ struct GameStateStore {
       if (actor.actor_id == world.self_actor_id) {
         world.latest_struck_ms = actor.action_started_ms;
       }
+    }
+    if (actor.actor_id == world.self_actor_id &&
+        (legacy_ident == legacy::kSmRush || legacy_ident == legacy::kSmRushKung)) {
+      world.latest_rush_rush_ms = actor.action_started_ms;
     }
   }
 
@@ -1374,6 +1381,7 @@ struct GameStateStore {
     world.move_slow_level = 0;
     world.move_slow = false;
     world.attack_slow = false;
+    world.magic_delay_time_ms = 0;
     world.legacy_target_x = -1;
     world.legacy_target_y = -1;
     world.legacy_chr_action = LegacyChrAction::none;
@@ -1381,6 +1389,7 @@ struct GameStateStore {
     world.run_ready_count = 0;
     world.mouse_down_ms = 0;
     world.last_pickup_ms = 0;
+    world.latest_rush_rush_ms = 0;
     world.eating_item_make_index = 0;
     world.eating_item_slot = -1;
     world.eat_time_ms = 0;
@@ -1527,6 +1536,7 @@ struct GameStateStore {
     const auto can_cross_hit = world.can_cross_hit;
     const auto next_time_fire_hit = world.next_time_fire_hit;
     const auto latest_fire_hit_ms = world.latest_fire_hit_ms;
+    const auto latest_rush_rush_ms = world.latest_rush_rush_ms;
     const auto self_ability = world.self_ability;
     const auto self_ability_detail = world.self_ability_detail;
     const auto sys_messages = world.sys_messages;
@@ -1579,6 +1589,7 @@ struct GameStateStore {
       world.can_cross_hit = can_cross_hit;
       world.next_time_fire_hit = next_time_fire_hit;
       world.latest_fire_hit_ms = latest_fire_hit_ms;
+      world.latest_rush_rush_ms = latest_rush_rush_ms;
       world.self_ability = self_ability;
       world.self_ability_detail = self_ability_detail;
       world.sys_messages = sys_messages;
