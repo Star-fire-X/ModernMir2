@@ -944,7 +944,9 @@ void ClientApp::request_action(const client_v1::ActionIntent& intent) {
 }
 
 // 法术/技能请求：锁定动作并设置魔法释放状态后发送到服务器
-void ClientApp::request_spell(const client_v1::SpellIntent& intent) {
+void ClientApp::request_spell(const client_v1::SpellIntent& intent,
+                              const bool play_local_action,
+                              const std::uint64_t magic_delay_time_ms) {
   const auto now_ms = detail::monotonic_ms();
   state_.world.action_locked = true;
   state_.world.action_lock_started_ms = now_ms;
@@ -952,6 +954,7 @@ void ClientApp::request_spell(const client_v1::SpellIntent& intent) {
   state_.world.last_sent_action_ident = 3017U;
   state_.world.last_sent_action_dir = intent.dir;
   state_.world.latest_spell_ms = state_.world.action_lock_started_ms;
+  state_.world.magic_delay_time_ms = magic_delay_time_ms;
   state_.world.magic_pk_delay_ms = 0;
   if (intent.target_actor_id != 0) {
     if (const auto it = state_.world.actors.find(intent.target_actor_id);
@@ -975,19 +978,21 @@ void ClientApp::request_spell(const client_v1::SpellIntent& intent) {
     actor.legacy_old_y = actor.y;
     actor.legacy_old_dir = actor.dir;
     actor.legacy_has_old_position = true;
-    actor.dir = intent.dir;
-    actor.current_action = client_v1::ActorActionKind::spell;
-    actor.magic_id = intent.magic_id;
-    actor.action_target_actor_id = intent.target_actor_id;
-    actor.action_target_x = intent.x;
-    actor.action_target_y = intent.y;
-    actor.action_magic = true;
-    actor.action_magic_effect = 0;
-    actor.action_magic_effect_type = -1;
-    actor.action_magic_failed = false;
-    state_.apply_magic_metadata(actor, intent.magic_id);
-    actor.action_started_ms = now_ms;
-    actor.action_duration_ms = GameStateStore::action_duration_ms(actor.current_action, 0);
+    if (play_local_action) {
+      actor.dir = intent.dir;
+      actor.current_action = client_v1::ActorActionKind::spell;
+      actor.magic_id = intent.magic_id;
+      actor.action_target_actor_id = intent.target_actor_id;
+      actor.action_target_x = intent.x;
+      actor.action_target_y = intent.y;
+      actor.action_magic = true;
+      actor.action_magic_effect = 0;
+      actor.action_magic_effect_type = -1;
+      actor.action_magic_failed = false;
+      state_.apply_magic_metadata(actor, intent.magic_id);
+      actor.action_started_ms = now_ms;
+      actor.action_duration_ms = GameStateStore::action_duration_ms(actor.current_action, 0);
+    }
   }
   protocol_.send(intent);
 }

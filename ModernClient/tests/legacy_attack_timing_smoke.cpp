@@ -25,35 +25,35 @@ int main() {
   world.latest_hit_ms = 1000;
   assert(!can_next_hit(world, self, 2400));
   assert(can_next_hit(world, self, 2401));
-  assert(world.latest_hit_ms == 1000);
+  assert(world.latest_hit_ms == 2401);
 
   world.self_ability_detail.level = 30;
   world.self_ability_detail.speed = 0;
   world.latest_hit_ms = 1000;
   assert(!can_next_hit(world, self, 2029));
   assert(can_next_hit(world, self, 2031));
-  assert(world.latest_hit_ms == 1000);
+  assert(world.latest_hit_ms == 2031);
 
   world.self_ability_detail.level = 30;
   world.self_ability_detail.speed = 10;
   world.latest_hit_ms = 1000;
   assert(!can_next_hit(world, self, 1599));
   assert(can_next_hit(world, self, 1601));
-  assert(world.latest_hit_ms == 1000);
+  assert(world.latest_hit_ms == 1601);
 
   world.self_ability_detail.level = 1;
   world.self_ability_detail.speed = -1;
   world.latest_hit_ms = 1000;
   assert(!can_next_hit(world, self, 2446));
   assert(can_next_hit(world, self, 2447));
-  assert(world.latest_hit_ms == 1000);
+  assert(world.latest_hit_ms == 2447);
 
   world.self_ability_detail.level = 40;
   world.self_ability_detail.speed = 99;
   world.latest_hit_ms = 1000;
   assert(!can_next_hit(world, self, 1600));
   assert(can_next_hit(world, self, 1601));
-  assert(world.latest_hit_ms == 1000);
+  assert(world.latest_hit_ms == 1601);
 
   world.self_ability_detail.level = 0;
   world.self_ability_detail.speed = 0;
@@ -64,7 +64,7 @@ int main() {
   assert(world.attack_slow);
   assert(!can_next_hit(world, self, 3900));
   assert(can_next_hit(world, self, 3901));
-  assert(world.latest_hit_ms == 1000);
+  assert(world.latest_hit_ms == 3901);
 
   world.self_ability_detail.weight = 21;
   world.self_ability_detail.max_weight = 10;
