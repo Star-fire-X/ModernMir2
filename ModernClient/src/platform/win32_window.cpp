@@ -182,6 +182,7 @@ LRESULT Win32Window::handle_message(UINT message, WPARAM wparam, LPARAM lparam) 
       input_.left_double_click = true;
       input_.mouse_x = GET_X_LPARAM(lparam);
       input_.mouse_y = GET_Y_LPARAM(lparam);
+      append_event(LegacyInputEventKind::left_double_click);
       return 0;
     case WM_LBUTTONUP:
       ReleaseCapture();   // 释放鼠标捕获
@@ -206,6 +207,7 @@ LRESULT Win32Window::handle_message(UINT message, WPARAM wparam, LPARAM lparam) 
       input_.right_double_click = true;
       input_.mouse_x = GET_X_LPARAM(lparam);
       input_.mouse_y = GET_Y_LPARAM(lparam);
+      append_event(LegacyInputEventKind::right_double_click);
       return 0;
     case WM_RBUTTONUP:
       ReleaseCapture();
@@ -220,8 +222,11 @@ LRESULT Win32Window::handle_message(UINT message, WPARAM wparam, LPARAM lparam) 
       ScreenToClient(hwnd_, &point);
       input_.mouse_x = point.x;
       input_.mouse_y = point.y;
-      input_.wheel_delta += GET_WHEEL_DELTA_WPARAM(wparam);
+      const auto delta = GET_WHEEL_DELTA_WPARAM(wparam);
+      input_.wheel_delta += delta;
       input_.wheel_scrolled = true;
+      append_event(LegacyInputEventKind::mouse_wheel);
+      input_.events.back().wheel_delta = delta;
       return 0;
     }
 
