@@ -22,11 +22,10 @@ enum class LegacyMapDrawLayer : std::uint8_t {
   actor_screen_overlay,
 };
 
-constexpr std::array<LegacyMapDrawLayer, 5> kLegacyMapRowDrawOrder{
+constexpr std::array<LegacyMapDrawLayer, 4> kLegacyMapRowDrawOrder{
     LegacyMapDrawLayer::large_object,
     LegacyMapDrawLayer::ground_item,
     LegacyMapDrawLayer::actor,
-    LegacyMapDrawLayer::actor_overlay,
     LegacyMapDrawLayer::fly_effect,
 };
 
@@ -78,9 +77,9 @@ inline int legacy_map_draw_layer_rank(const LegacyMapDrawLayer layer) {
       return 5;
     case LegacyMapDrawLayer::actor:
       return 6;
-    case LegacyMapDrawLayer::actor_overlay:
-      return 7;
     case LegacyMapDrawLayer::fly_effect:
+      return 7;
+    case LegacyMapDrawLayer::actor_overlay:
       return 8;
     case LegacyMapDrawLayer::selection_blend:
       return 9;

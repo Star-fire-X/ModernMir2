@@ -448,6 +448,7 @@ struct LobbyViewState {
 struct MapDoorRuntimeState {
   bool open{false};
   std::uint64_t updated_ms{0};
+  std::uint64_t sequence{0};
 };
 
 /// 世界视图状态：包含所有动态游戏数据
@@ -465,6 +466,7 @@ struct WorldViewState {
   std::unordered_map<std::uint64_t, ActorState> actors{};         ///< 所有在线角色（key = actor_id）
   std::unordered_map<std::uint64_t, client_v1::GroundItemState> ground_items{};  ///< 地面物品
   std::unordered_map<std::uint64_t, MapDoorRuntimeState> map_doors{};  ///< 动态门状态（key = x/y）
+  std::uint64_t map_door_sequence{0};
   std::vector<std::uint64_t> actor_draw_order{};       ///< Delphi ActorList-equivalent draw order
   std::vector<std::uint64_t> ground_item_draw_order{}; ///< Delphi DropedItemList-equivalent draw order
   std::vector<SysMessageState> sys_messages{}; ///< DrawScreenTop 系统消息短提示
@@ -544,8 +546,6 @@ struct WorldViewState {
 inline std::uint64_t elapsed_ms(const std::uint64_t now, const std::uint64_t then) {
   return now >= then ? now - then : 0;
 }
-
-constexpr std::uint64_t kLegacyMapDoorOpenExpireMs = 6000U;
 
 /// 检查动作锁定是否仍然有效
 /// 锁定超过 10 秒自动解除（安全措施，避免锁死）
@@ -1626,7 +1626,8 @@ struct GameStateStore {
 
   void apply(const client_v1::MapDoorState& message) {
     const auto key = map_door_key(message.x, message.y);
-    world.map_doors[key] = MapDoorRuntimeState{message.open, detail::monotonic_ms()};
+    world.map_doors[key] =
+        MapDoorRuntimeState{message.open, detail::monotonic_ms(), ++world.map_door_sequence};
   }
 
   /// 应用角色增量更新消息（坐标/方向变化）
@@ -1659,17 +1660,6 @@ struct GameStateStore {
   [[nodiscard]] bool map_door_open(std::int32_t x, std::int32_t y) const {
     const auto it = world.map_doors.find(map_door_key(x, y));
     return it != world.map_doors.end() && it->second.open;
-  }
-
-  void expire_map_door_states(const std::uint64_t now_ms) {
-    for (auto it = world.map_doors.begin(); it != world.map_doors.end();) {
-      if (it->second.open &&
-          elapsed_ms(now_ms, it->second.updated_ms) >= kLegacyMapDoorOpenExpireMs) {
-        it = world.map_doors.erase(it);
-      } else {
-        ++it;
-      }
-    }
   }
 
   /// 应用角色新增/更新消息
