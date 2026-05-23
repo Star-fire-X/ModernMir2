@@ -2,6 +2,7 @@
 #include "shared/legacy/action_ids.hpp"
 
 #include <cassert>
+#include <cstddef>
 
 using namespace mir2::client;
 using namespace mir2::client_v1;
@@ -21,6 +22,16 @@ GameStateStore make_store() {
   snapshot.actors.push_back(WorldActor{3, "Leaving", 12, 10, 4, 300, 3, ActorType::monster});
   state.apply(snapshot);
   return state;
+}
+
+std::size_t queued_death_message_count(const ActorState& actor) {
+  std::size_t count = 0;
+  for (const auto& message : actor.legacy_action_queue) {
+    if (message.kind == LegacyActorMessage::Kind::death) {
+      ++count;
+    }
+  }
+  return count;
 }
 
 void test_action_order_is_event_driven() {
@@ -75,6 +86,26 @@ void test_vitals_revive_clears_dead_state() {
   assert(actor.legacy_action_ident == legacy_sm::kTurn);
 }
 
+void test_vitals_revive_clears_queued_death() {
+  auto state = make_store();
+  state.apply(ActorAction{2, ActorActionKind::hit, 11, 10, 4, 1, 0, legacy::kSmHit, 0, false, 0});
+  state.process_legacy_actor_queues(1000);
+  state.world.actors[2].action_started_ms = 2000;
+  state.world.actors[2].action_duration_ms = 10000;
+  state.apply(ActorDeath{2, 11, 10, 4, legacy_sm::kDeath});
+  assert(queued_death_message_count(state.world.actors[2]) == 1);
+  state.apply(ActorVitals{2, -1, -1, 10, 20, 0, 0, false, 0});
+  assert(queued_death_message_count(state.world.actors[2]) == 1);
+  state.apply(ActorVitals{2, 30, 40, 10, 20, 0, 0, false, 0});
+  assert(queued_death_message_count(state.world.actors[2]) == 0);
+  state.world.actors[2].action_started_ms = 0;
+  state.world.actors[2].action_duration_ms = 0;
+  state.process_legacy_actor_queues(3000);
+  const auto& actor = state.world.actors[2];
+  assert(!actor.dead);
+  assert(actor.hp == 30);
+}
+
 void test_magic_fire_is_hurry_event() {
   auto state = make_store();
   state.apply(MagicList{{MagicEntry{9, 1, 0, 0, 1000, "Fireball", 1, 900, 1}}});
@@ -94,6 +125,31 @@ void test_magic_fire_is_hurry_event() {
   state.process_legacy_actor_queues(1002);
   assert(!state.world.actors[1].action_magic);
   assert(state.world.actors[1].action_magic_failed);
+}
+
+void test_magic_fire_waits_behind_unstarted_spell() {
+  auto state = make_store();
+  state.apply(MagicList{{MagicEntry{9, 1, 0, 0, 1000, "Fireball", 1, 900, 1}}});
+  state.apply(ActorAction{1, ActorActionKind::hit, 10, 10, 2, 1, 0, legacy::kSmHit, 0, false, 0});
+  state.process_legacy_actor_queues(1000);
+  state.world.actors[1].action_started_ms = 2000;
+  state.world.actors[1].action_duration_ms = 10000;
+
+  state.apply(ActorAction{1, ActorActionKind::spell, 13, 10, 2, 2, 0, 17, 9, true, 1});
+  state.apply(ActorMagicFire{1, 2, 13, 10, 1, 1, 638});
+  assert(state.world.actors[1].legacy_action_queue.size() == 2);
+  const auto before_events = state.world.actors[1].legacy_pending_actions.size();
+
+  state.process_legacy_actor_queues(3000);
+  const auto& actor = state.world.actors[1];
+  assert(actor.current_action == ActorActionKind::hit);
+  assert(!actor.action_magic);
+  assert(actor.magic_id == 0);
+  assert(actor.action_magic_effect == 0);
+  assert(actor.action_magic_effect_type == -1);
+  assert(actor.legacy_action_queue.size() == 2);
+  assert(actor.legacy_action_queue.front().kind == LegacyActorMessage::Kind::action);
+  assert(actor.legacy_pending_actions.size() == before_events);
 }
 
 void test_spell_and_magic_fire_share_queue_tick() {
@@ -141,7 +197,9 @@ int main() {
   test_action_order_is_event_driven();
   test_nowdeath_uses_play_death_mode();
   test_vitals_revive_clears_dead_state();
+  test_vitals_revive_clears_queued_death();
   test_magic_fire_is_hurry_event();
+  test_magic_fire_waits_behind_unstarted_spell();
   test_spell_and_magic_fire_share_queue_tick();
   test_remove_delay_matches_legacy_hide();
   test_independent_visual_state_events();
