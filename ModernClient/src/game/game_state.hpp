@@ -492,9 +492,16 @@ struct WorldViewState {
   int run_ready_count{0};                     ///< 连续跑步计数（旧版跑步机制，连续走 N 步后进入跑步状态）
   std::uint64_t last_attack_ms{0};            ///< 上次攻击时间
   std::uint64_t latest_hit_ms{0};             ///< 最近一次命中时间
+  std::uint64_t action_lock_timeout_cleared_ms{0};  ///< 10 秒超时解锁时刻（同毫秒内仍拒绝）
   std::uint64_t last_move_ms{0};              ///< 上次移动时间
   std::uint64_t mouse_down_ms{0};             ///< 鼠标按下时间戳（用于长按检测）
   std::uint64_t last_pickup_ms{0};            ///< 上次拾取时间
+  bool next_time_power_hit{false};            ///< 兼容 +GOOD PWR：下一次攻击改为 CM_POWERHIT
+  bool can_long_hit{false};                   ///< 兼容 +GOOD LNG / +GOOD ULNG
+  bool can_wide_hit{false};                   ///< 兼容 +GOOD WID / +GOOD UWID
+  bool can_cross_hit{false};                  ///< 兼容 +GOOD CRS / +GOOD UCRS
+  bool next_time_fire_hit{false};             ///< 兼容 +GOOD FIR：下一次攻击改为 CM_FIREHIT
+  std::uint64_t latest_fire_hit_ms{0};        ///< 最近一次收到 FIR 标记时间
   std::int32_t eating_item_make_index{0};     ///< 正在使用的物品 MakeIndex
   std::int32_t eating_item_slot{-1};          ///< 正在使用的物品槽位
   std::uint64_t eat_time_ms{0};               ///< 使用物品的时间戳（用于冷却判断）
@@ -517,11 +524,15 @@ inline bool action_lock_active(const WorldViewState& world, const std::uint64_t 
 
 inline bool server_accept_next_action(WorldViewState& world, const std::uint64_t now) {
   if (!world.action_locked) {
+    if (world.action_lock_timeout_cleared_ms == now) {
+      return false;
+    }
     return true;
   }
   if (elapsed_ms(now, world.action_lock_started_ms) > 10000U) {
     world.action_locked = false;
-    return true;
+    world.action_lock_timeout_cleared_ms = now;
+    return false;
   }
   return false;
 }
@@ -607,12 +618,22 @@ inline bool can_next_hit(const WorldViewState& world, const ActorState& self,
   const auto next_hit = legacy_next_hit_delay_ms(
       static_cast<std::int32_t>(world.self_ability_detail.level),
       world.self_ability_detail.speed, world.attack_slow);
-  return world.latest_hit_ms == 0 ||
-         elapsed_ms(now, world.latest_hit_ms) > static_cast<std::uint64_t>(next_hit);
+  if (world.latest_hit_ms == 0 ||
+      elapsed_ms(now, world.latest_hit_ms) > static_cast<std::uint64_t>(next_hit)) {
+    return true;
+  }
+  return false;
 }
 
 inline bool is_unlock_action(WorldViewState& world, const std::uint16_t action_ident,
                              const std::uint8_t dir, const std::uint64_t now) {
+  if (world.map_transition_pending) {
+    world.action_fail_lock = false;
+    world.fail_action_ident = 0;
+    world.fail_dir = 0;
+    world.fail_action_time_ms = 0;
+    return false;
+  }
   if (world.action_fail_lock && action_ident == world.fail_action_ident &&
       dir == world.fail_dir && elapsed_ms(now, world.fail_action_time_ms) < 1000U) {
     return false;
@@ -1126,6 +1147,7 @@ struct GameStateStore {
     world.fail_action_ident = 0;
     world.fail_dir = 0;
     world.fail_action_time_ms = 0;
+    world.action_lock_timeout_cleared_ms = 0;
     world.last_sent_action_ident = 0;
     world.last_sent_action_dir = 0;
     world.dizzy_delay_start_ms = 0;
@@ -1176,6 +1198,7 @@ struct GameStateStore {
     world.fail_action_ident = 0;
     world.fail_dir = 0;
     world.fail_action_time_ms = 0;
+    world.action_lock_timeout_cleared_ms = 0;
     world.last_sent_action_ident = 0;
     world.last_sent_action_dir = 0;
     world.legacy_target_x = -1;
@@ -1263,6 +1286,12 @@ struct GameStateStore {
     const auto bag_items = world.bag_items;
     const auto equipment = world.equipment;
     const auto magics = world.magics;
+    const auto next_time_power_hit = world.next_time_power_hit;
+    const auto can_long_hit = world.can_long_hit;
+    const auto can_wide_hit = world.can_wide_hit;
+    const auto can_cross_hit = world.can_cross_hit;
+    const auto next_time_fire_hit = world.next_time_fire_hit;
+    const auto latest_fire_hit_ms = world.latest_fire_hit_ms;
     const auto self_ability = world.self_ability;
     const auto self_ability_detail = world.self_ability_detail;
     const auto sys_messages = world.sys_messages;
@@ -1309,6 +1338,12 @@ struct GameStateStore {
       world.bag_items = bag_items;
       world.equipment = equipment;
       world.magics = magics;
+      world.next_time_power_hit = next_time_power_hit;
+      world.can_long_hit = can_long_hit;
+      world.can_wide_hit = can_wide_hit;
+      world.can_cross_hit = can_cross_hit;
+      world.next_time_fire_hit = next_time_fire_hit;
+      world.latest_fire_hit_ms = latest_fire_hit_ms;
       world.self_ability = self_ability;
       world.self_ability_detail = self_ability_detail;
       world.sys_messages = sys_messages;
@@ -1791,6 +1826,31 @@ struct GameStateStore {
   /// 系统消息保留顶部短提示，同时进入聊天板
   void apply(const client_v1::SysMessage& message) {
     push_sys_message(message.text);
+    auto tag = message.text;
+    if (tag.rfind("+GOOD ", 0) == 0 && tag.size() > 6) {
+      tag = tag.substr(6);
+    }
+    if (tag == "PWR") {
+      world.next_time_power_hit = true;
+    } else if (tag == "LNG") {
+      world.can_long_hit = true;
+    } else if (tag == "ULNG") {
+      world.can_long_hit = false;
+    } else if (tag == "WID") {
+      world.can_wide_hit = true;
+    } else if (tag == "UWID") {
+      world.can_wide_hit = false;
+    } else if (tag == "CRS") {
+      world.can_cross_hit = true;
+    } else if (tag == "UCRS") {
+      world.can_cross_hit = false;
+    } else if (tag == "FIR") {
+      world.next_time_fire_hit = true;
+      world.latest_fire_hit_ms = detail::monotonic_ms();
+    } else if (tag == "UFIR") {
+      world.next_time_fire_hit = false;
+      world.latest_fire_hit_ms = 0;
+    }
   }
 
   /// 应用动作确认消息
@@ -1799,6 +1859,7 @@ struct GameStateStore {
   /// 客户端需要回滚到动作之前的状态。
   void apply(const client_v1::ActionAck& message) {
     world.action_locked = false;
+    world.action_lock_timeout_cleared_ms = 0;
     world.last_action_ack_ms = detail::monotonic_ms();
     world.last_action_ack_ok = message.ok;
     // 动作被服务端拒绝时，客户端需要回滚

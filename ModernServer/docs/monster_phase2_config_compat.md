@@ -78,7 +78,11 @@ record into a single-point `respawn_ms` spawn.
 
 The output keeps Delphi probability semantics by writing `sel_point = n - 1`
 and `max_point = m`. Item `count` defaults to `1` when omitted. `MonItems`
-files are sorted by path before export so generated drop order is stable.
+files are sorted by path before export so generated drop order is stable. If an
+unquoted item name ends in a number and the imported item list does not prove
+that the prefix is a known item, PR-2 preserves the full name and leaves
+`count = 1`; those rows need source data or quoting confirmation before a later
+PR can safely reinterpret the trailing number as quantity.
 
 ## ODBC Boundary
 
@@ -87,7 +91,12 @@ Access/ODBC driver. PR-2 does not add a new database dependency for CI.
 
 When ODBC is unavailable, the importer keeps the existing placeholder monster
 definitions and emits a warning. Text-based MonGen and MonItems import remains
-covered by CI either way.
+covered by CI either way. If an ODBC-enabled build cannot read the `Monster`
+table, PR-2 writes placeholder monster definitions from the built-in fallback
+names plus `MonItems/*.txt` monster file names so `MonGen.txt` keeps the same
+name hints used by the text-only path. `MonItems` count disambiguation also
+loads `MakeItem.txt` names directly, so ODBC `StdItems` export does not remove
+the text-file item-name hints needed by legacy drop rows.
 
 ## Follow-Up Gates
 

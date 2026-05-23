@@ -141,6 +141,75 @@ void legacy_ui_lifecycle_trace(const legacy_ui_lifecycle::LegacyUiLifecycleTrace
   legacy_trace(legacy_ui_lifecycle::legacy_ui_lifecycle_trace_label(label));
 }
 
+InputState input_for_legacy_event(const InputState& source, const LegacyInputEvent& event) {
+  auto input = source;
+  input.left_pressed = false;
+  input.left_released = false;
+  input.right_pressed = false;
+  input.right_released = false;
+  input.key_pressed.fill(false);
+  input.text_input.clear();
+  input.backspace_pressed = false;
+  input.enter_pressed = false;
+  input.events.clear();
+  input.mouse_x = event.mouse_x;
+  input.mouse_y = event.mouse_y;
+  input.left_down = event.left_down;
+  input.right_down = event.right_down;
+  input.key_down[VK_SHIFT] = event.shift;
+  input.key_down[VK_CONTROL] = event.ctrl;
+  input.key_down[VK_MENU] = event.alt;
+
+  switch (event.kind) {
+    case LegacyInputEventKind::left_down:
+      input.left_pressed = true;
+      input.left_down = true;
+      break;
+    case LegacyInputEventKind::left_up:
+      input.left_released = true;
+      input.left_down = false;
+      break;
+    case LegacyInputEventKind::right_down:
+      input.right_pressed = true;
+      input.right_down = true;
+      break;
+    case LegacyInputEventKind::right_up:
+      input.right_released = true;
+      input.right_down = false;
+      break;
+    case LegacyInputEventKind::key_down:
+      if (event.key < input.key_pressed.size()) {
+        input.key_pressed[event.key] = true;
+        input.key_down[event.key] = true;
+      }
+      if (event.key == VK_BACK) {
+        input.backspace_pressed = true;
+      } else if (event.key == VK_RETURN) {
+        input.enter_pressed = true;
+      }
+      break;
+    case LegacyInputEventKind::key_up:
+      if (event.key < input.key_down.size()) {
+        input.key_down[event.key] = false;
+      }
+      break;
+    case LegacyInputEventKind::char_input:
+      if (event.character != 0) {
+        input.text_input.push_back(event.character);
+      }
+      break;
+    case LegacyInputEventKind::mouse_move:
+      break;
+  }
+  return input;
+}
+
+void merge_ui_input(ui::UiInputResult& merged, const ui::UiInputResult& next) {
+  merged.consumed = merged.consumed || next.consumed;
+  merged.text_focus = merged.text_focus || next.text_focus;
+  merged.dragging = merged.dragging || next.dragging;
+}
+
 void legacy_trace_map_layer(
     const legacy::LegacyMapDrawLayer layer,
     const int row = std::numeric_limits<int>::min()) {
@@ -3342,9 +3411,9 @@ class LegacyHud final {
         }
         if (!was_visible) {
           legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::show_shop_menu);
+          tree_->bring_to_front(merchant_menu_);
         }
         move_bag_for_npc_dialog();
-        tree_->bring_to_front(merchant_menu_);
       } else if (!shop.visible) {
         merchant_selected_index_ = -1;
       }
@@ -3366,8 +3435,8 @@ class LegacyHud final {
       if (show) {
         if (!was_visible) {
           legacy_magic_npc_trace(legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::show_sell_dialog);
+          tree_->bring_to_front(merchant_sell_dialog_);
         }
-        tree_->bring_to_front(merchant_sell_dialog_);
       }
     }
   }
@@ -3390,6 +3459,7 @@ class LegacyHud final {
         if (!was_visible) {
           legacy_magic_npc_trace(
               legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::show_storage_menu);
+          tree_->bring_to_front(storage_window_);
         }
         const auto max_page =
             std::max(0, (static_cast<int>(world.storage.items.size()) + 4) / 5 - 1);
@@ -3402,7 +3472,6 @@ class LegacyHud final {
           move_bag_for_npc_dialog();
           tree_->bring_to_front(item_bag_);
         }
-        tree_->bring_to_front(storage_window_);
       } else {
         storage_page_ = 0;
       }
@@ -3413,9 +3482,12 @@ class LegacyHud final {
       tree_->bring_to_front(item_bag_);
     }
     if (repair_dialog_ != nullptr) {
+      const auto was_visible = repair_dialog_->visible;
       repair_dialog_->set_visible(*tree_, world.repair.dialog_visible);
       if (world.repair.dialog_visible) {
-        tree_->bring_to_front(repair_dialog_);
+        if (!was_visible) {
+          tree_->bring_to_front(repair_dialog_);
+        }
       }
     }
     if (group_window_ != nullptr) {
@@ -3425,8 +3497,8 @@ class LegacyHud final {
         if (!was_visible) {
           legacy_trade_group_guild_trace(
               legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::show_group_window);
+          tree_->bring_to_front(group_window_);
         }
-        tree_->bring_to_front(group_window_);
       }
     }
     if (trade_remote_window_ != nullptr) {
@@ -3437,8 +3509,8 @@ class LegacyHud final {
           legacy_trade_group_guild_trace(
               legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
                   show_trade_remote_window);
+          tree_->bring_to_front(trade_remote_window_);
         }
-        tree_->bring_to_front(trade_remote_window_);
       }
     }
     if (trade_window_ != nullptr) {
@@ -3449,8 +3521,8 @@ class LegacyHud final {
           legacy_trade_group_guild_trace(
               legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::
                   show_trade_local_window);
+          tree_->bring_to_front(trade_window_);
         }
-        tree_->bring_to_front(trade_window_);
       } else if (was_visible) {
         legacy_trade_group_guild_trace(
             legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::hide_trade_windows);
@@ -3463,8 +3535,8 @@ class LegacyHud final {
         if (!was_visible) {
           legacy_trade_group_guild_trace(
               legacy_trade_group_guild_ui::LegacyTradeGroupGuildUiTraceLabel::show_guild_window);
+          tree_->bring_to_front(guild_window_);
         }
-        tree_->bring_to_front(guild_window_);
       }
     }
   }
@@ -3473,8 +3545,9 @@ class LegacyHud final {
     if (state_ == nullptr || minimap_ == nullptr || tree_ == nullptr) {
       return;
     }
+    const auto was_visible = minimap_->visible;
     minimap_->set_visible(*tree_, state_->world.minimap.visible);
-    if (minimap_->visible) {
+    if (minimap_->visible && !was_visible) {
       tree_->bring_to_front(minimap_);
     }
   }
@@ -3535,8 +3608,8 @@ class LegacyHud final {
       if (!was_visible) {
         legacy_magic_npc_trace(
             legacy_magic_npc_ui::LegacyMagicNpcUiTraceLabel::show_merchant_dialog);
+        tree_->bring_to_front(npc_dialog_);
       }
-      tree_->bring_to_front(npc_dialog_);
     } else {
       npc_dialog_->visible = true;
     }
@@ -7178,17 +7251,92 @@ class WorldScene final : public Scene {
     scene_run(context, delta_seconds);
   }
 
+  void dispatch_legacy_input_events(ClientContext& context) override {
+    if (context.input == nullptr || context.input->events.empty()) {
+      return;
+    }
+    sync_map(context);
+    legacy_hud_.sync(context);
+    ui_.set_asset_manager(context.assets);
+
+    ui::UiInputResult merged;
+    for (const auto& event : context.input->events) {
+      auto event_input = input_for_legacy_event(*context.input, event);
+      const auto* previous_input = context.input;
+      context.input = &event_input;
+      auto result = ui_.capture_input(event_input);
+      ui_.process_queued_events(event_input);
+      context.ui_input = result;
+      merge_ui_input(merged, result);
+
+      const auto input_guard = result.consumed || result.text_focus || result.dragging;
+      if (!input_guard && !legacy_hud_.blocks_world_input()) {
+        auto& world = context.state->world;
+        if (!legacy_hud_.handle_shortcuts(context, ui_)) {
+          if (world.self_actor_id != 0) {
+            auto self_it = world.actors.find(world.self_actor_id);
+            if (self_it != world.actors.end()) {
+              const auto now_ms = detail::monotonic_ms();
+              for (int index = 0; index < 8; ++index) {
+                if (event_input.key_pressed[VK_F1 + index] &&
+                    magic_for_slot(world, index) != 0) {
+                  world.action_key = index;
+                }
+              }
+              if (event_input.key_pressed['R']) {
+                if (context.app != nullptr) {
+                  context.app->request_reselect_character();
+                }
+              } else if (event_input.key_pressed[VK_ESCAPE]) {
+                world.legacy_target_x = -1;
+                world.legacy_target_y = -1;
+                world.legacy_chr_action = LegacyChrAction::none;
+                world.target_actor_id = 0;
+                world.action_key = -1;
+              } else {
+                const auto legacy_input = make_legacy_input(context, self_it->second, now_ms);
+                world.focus_actor_id = focused_actor_at(context, legacy_input);
+                world.focus_ground_item_id =
+                    focused_ground_item_at(context, legacy_input.map_x, legacy_input.map_y);
+                clear_invalid_targets(world);
+                collect_keyboard_ops(context, legacy_input, self_it->second);
+                collect_mouse_ops(context, legacy_input, self_it->second);
+              }
+            }
+          }
+        }
+      }
+      context.input = previous_input;
+    }
+    context.ui_input = merged;
+    context.legacy_input_dispatched = true;
+  }
+
   void capture_ui_input(ClientContext& context) override {
+    if (context.legacy_input_dispatched) {
+      return;
+    }
     sync_map(context);
     legacy_hud_.sync(context);
     Scene::capture_ui_input(context);
   }
 
   void process_key_messages(ClientContext& context) override {
+    if (context.legacy_input_dispatched) {
+      return;
+    }
     auto& world = context.state->world;
     const auto now_ms = detail::monotonic_ms();
+    const auto escape_pressed = context.input != nullptr && context.input->key_pressed[VK_ESCAPE];
+    const auto key_consumed =
+        context.ui_input.consumed && !context.ui_input.hover_consumed;
     const auto input_guard =
-        context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging;
+        key_consumed || context.ui_input.text_focus || context.ui_input.dragging ||
+        context.ui_input.app_modal_visible;
+    const auto allow_guarded_escape = escape_pressed && !context.ui_input.app_modal_visible;
+    if (input_guard && !allow_guarded_escape) {
+      return;
+    }
     if (legacy_hud_.handle_shortcuts(context, ui_)) {
       return;
     }
@@ -7228,11 +7376,11 @@ class WorldScene final : public Scene {
     }
 
     update_legacy_weight_slow(world);
-    server_accept_next_action(world, now_ms);
 
     const auto input_guard =
-        context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging;
-    if (input_guard) {
+        context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging ||
+        context.ui_input.app_modal_visible;
+    if (!context.legacy_input_dispatched && input_guard) {
       world.focus_actor_id = 0;
       world.focus_ground_item_id = 0;
       world.legacy_target_x = -1;
@@ -7247,59 +7395,68 @@ class WorldScene final : public Scene {
     }
 
     const auto legacy_input = make_legacy_input(context, it->second, now_ms);
-    world.focus_actor_id = focused_actor_at(context, legacy_input);
-    world.focus_ground_item_id = focused_ground_item_at(context, legacy_input.map_x,
-                                                        legacy_input.map_y);
     clear_invalid_targets(world);
-    if (legacy_trace_enabled() &&
-        (input.left_pressed || input.right_pressed || input.left_released ||
-         input.right_released || input.key_pressed[VK_LEFT] || input.key_pressed[VK_RIGHT] ||
-         input.key_pressed[VK_UP] || input.key_pressed[VK_DOWN])) {
-      std::ostringstream out;
-      out << "world_input now=" << now_ms << " mouse=" << legacy_input.mouse_x << ','
-          << legacy_input.mouse_y << " map=" << legacy_input.map_x << ',' << legacy_input.map_y
-          << " left_pressed=" << input.left_pressed << " right_pressed=" << input.right_pressed
-          << " left_released=" << input.left_released
-          << " focus_actor=" << world.focus_actor_id
-          << " focus_ground=" << world.focus_ground_item_id
-          << " ui_consumed=" << context.ui_input.consumed
-          << " text_focus=" << context.ui_input.text_focus
-          << " dragging=" << context.ui_input.dragging
-          << " moving_item=" << world.moving_item.active;
-      legacy_trace(out.str());
+    if (!context.legacy_input_dispatched) {
+      world.focus_actor_id = focused_actor_at(context, legacy_input);
+      world.focus_ground_item_id = focused_ground_item_at(context, legacy_input.map_x,
+                                                          legacy_input.map_y);
+      clear_invalid_targets(world);
+      if (legacy_trace_enabled() &&
+          (input.left_pressed || input.right_pressed || input.left_released ||
+           input.right_released || input.key_pressed[VK_LEFT] || input.key_pressed[VK_RIGHT] ||
+           input.key_pressed[VK_UP] || input.key_pressed[VK_DOWN])) {
+        std::ostringstream out;
+        out << "world_input now=" << now_ms << " mouse=" << legacy_input.mouse_x << ','
+            << legacy_input.mouse_y << " map=" << legacy_input.map_x << ',' << legacy_input.map_y
+            << " left_pressed=" << input.left_pressed << " right_pressed=" << input.right_pressed
+            << " left_released=" << input.left_released
+            << " focus_actor=" << world.focus_actor_id
+            << " focus_ground=" << world.focus_ground_item_id
+            << " ui_consumed=" << context.ui_input.consumed
+            << " text_focus=" << context.ui_input.text_focus
+            << " dragging=" << context.ui_input.dragging
+            << " app_modal_visible=" << context.ui_input.app_modal_visible
+            << " moving_item=" << world.moving_item.active;
+        legacy_trace(out.str());
+      }
+
+      if (legacy_hud_.blocks_world_input()) {
+        world.legacy_target_x = -1;
+        world.legacy_target_y = -1;
+        world.legacy_chr_action = LegacyChrAction::none;
+        world.target_actor_id = 0;
+        world.action_key = -1;
+        return;
+      }
+
+      if (input.key_pressed['R']) {
+        context.app->request_reselect_character();
+        return;
+      }
+      if (input.key_pressed[VK_ESCAPE]) {
+        world.legacy_target_x = -1;
+        world.legacy_target_y = -1;
+        world.legacy_chr_action = LegacyChrAction::none;
+        world.target_actor_id = 0;
+        world.action_key = -1;
+        return;
+      }
+
+      collect_keyboard_ops(context, legacy_input, it->second);
+      collect_mouse_ops(context, legacy_input, it->second);
+
+      if (debug_arrow_move_enabled()) {
+        if (handle_debug_arrow_move(context, it->second)) {
+          return;
+        }
+      }
     }
 
-    if (legacy_hud_.blocks_world_input()) {
-      world.legacy_target_x = -1;
-      world.legacy_target_y = -1;
-      world.legacy_chr_action = LegacyChrAction::none;
-      world.target_actor_id = 0;
-      world.action_key = -1;
-      return;
-    }
-
-    if (input.key_pressed['R']) {
-      context.app->request_reselect_character();
-      return;
-    }
-    if (input.key_pressed[VK_ESCAPE]) {
-      world.legacy_target_x = -1;
-      world.legacy_target_y = -1;
-      world.legacy_chr_action = LegacyChrAction::none;
-      world.target_actor_id = 0;
-      world.action_key = -1;
-      return;
-    }
-
-    collect_keyboard_ops(context, legacy_input, it->second);
-    collect_mouse_ops(context, legacy_input, it->second);
-
-    if (debug_arrow_move_enabled()) {
+    if (context.legacy_input_dispatched && debug_arrow_move_enabled()) {
       if (handle_debug_arrow_move(context, it->second)) {
         return;
       }
     }
-
     if (process_pending_magic(context, legacy_input)) {
       return;
     }
@@ -7315,7 +7472,9 @@ class WorldScene final : public Scene {
   }
 
   void dwin_process(ClientContext& context) override {
-    ui_.process_queued_events(*context.input);
+    if (!context.legacy_input_dispatched) {
+      ui_.process_queued_events(*context.input);
+    }
     legacy_hud_.process_pending_actions(context);
   }
 
@@ -7376,6 +7535,7 @@ class WorldScene final : public Scene {
                                          animation_.trace_now_ms());
     }
     render_world_rows(context, viewport);
+    render_actor_effect_overlays_after_rows(context, viewport);
     legacy_trace_map_layer(legacy::LegacyMapDrawLayer::selection_blend);
     render_actor_selection_blend_pass(context, viewport);
     legacy_trace_map_layer(legacy::LegacyMapDrawLayer::debug_overlay);
@@ -7461,11 +7621,8 @@ class WorldScene final : public Scene {
   }
 
   std::pair<int, int> screen_to_map_tile(ClientContext& context, const ActorState& self) const {
-    return legacy::legacy_mouse_to_map_clamped(viewport_for_self(self), context.input->mouse_x,
-                                               context.input->mouse_y, context.state->world.width,
-                                               context.state->world.height,
-                                               map_ != nullptr ? map_->width : 0,
-                                               map_ != nullptr ? map_->height : 0);
+    return legacy::legacy_mouse_to_map(viewport_for_self(self), context.input->mouse_x,
+                                       context.input->mouse_y);
   }
 
   std::uint64_t focused_actor_at(ClientContext& context, const LegacyInputFrame& input) const {
@@ -7916,7 +8073,7 @@ class WorldScene final : public Scene {
 
   bool process_pending_move(ClientContext& context, std::uint64_t now_ms) {
     auto& world = context.state->world;
-    if (world.legacy_target_x < 0 || world.legacy_chr_action == LegacyChrAction::none) {
+    if (world.legacy_chr_action == LegacyChrAction::none) {
       return false;
     }
     auto self_it = world.actors.find(world.self_actor_id);
@@ -8028,8 +8185,128 @@ class WorldScene final : public Scene {
     return true;
   }
 
-  bool try_pickup(ClientContext& context, const ActorState& self, std::uint64_t now_ms) const {
+  static bool actor_alive_at(const WorldViewState& world, const std::uint64_t self_actor_id, int x,
+                             int y) {
+    for (const auto& [actor_id, actor] : world.actors) {
+      if (actor_id == self_actor_id || actor.dead) {
+        continue;
+      }
+      if (actor.x == x && actor.y == y) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static std::pair<int, int> front_position(const ActorState& self, const std::uint8_t dir) {
+    const auto delta = legacy::direction_delta(dir);
+    return {self.x + delta.dx, self.y + delta.dy};
+  }
+
+  static bool target_in_sword_long_attack_range(const WorldViewState& world, const ActorState& self,
+                                                const std::uint8_t dir) {
+    const auto delta = legacy::direction_delta(dir);
+    const auto x = self.x + delta.dx * 2;
+    const auto y = self.y + delta.dy * 2;
+    return actor_alive_at(world, self.actor_id, x, y);
+  }
+
+  static bool target_in_sword_wide_attack_range(const WorldViewState& world, const ActorState& self,
+                                                const std::uint8_t dir) {
+    const auto [fx, fy] = front_position(self, dir);
+    if (!actor_alive_at(world, self.actor_id, fx, fy)) {
+      return false;
+    }
+    for (const auto offset : {1, 2, 7}) {
+      const auto mdir = static_cast<std::uint8_t>((dir + offset) % 8);
+      const auto [rx, ry] = front_position(self, mdir);
+      if (actor_alive_at(world, self.actor_id, rx, ry)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static bool target_in_sword_cross_attack_range(const WorldViewState& world,
+                                                 const ActorState& self,
+                                                 const std::uint8_t dir) {
+    const auto [fx, fy] = front_position(self, dir);
+    if (!actor_alive_at(world, self.actor_id, fx, fy)) {
+      return false;
+    }
+    for (const auto offset : {1, 2, 3, 4, 5, 6, 7}) {
+      const auto mdir = static_cast<std::uint8_t>((dir + offset) % 8);
+      const auto [rx, ry] = front_position(self, mdir);
+      if (actor_alive_at(world, self.actor_id, rx, ry)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static std::uint16_t base_attack_ident(const WorldViewState& world) {
+    if (const auto& weapon = world.equipment[static_cast<std::size_t>(kEquipWeapon)];
+        !item_empty(weapon) && weapon.std_mode == 6U) {
+      return legacy::kCmHeavyHit;
+    }
+    return legacy::kCmHit;
+  }
+
+  static std::uint16_t choose_ground_attack_ident(WorldViewState& world, const ActorState& self,
+                                                  const std::uint8_t dir,
+                                                  const std::uint64_t now_ms) {
+    auto ident = legacy::kCmHit;
+    switch (now_ms % 3U) {
+      case 1U:
+        ident = legacy::kCmHeavyHit;
+        break;
+      case 2U:
+        ident = legacy::kCmBigHit;
+        break;
+      default:
+        ident = legacy::kCmHit;
+        break;
+    }
+    if (world.can_long_hit && target_in_sword_long_attack_range(world, self, dir)) {
+      ident = legacy::kCmLongHit;
+    }
+    if (world.can_wide_hit && world.self_ability_detail.mp >= 3 &&
+        target_in_sword_wide_attack_range(world, self, dir)) {
+      ident = legacy::kCmWideHit;
+    }
+    if (world.can_cross_hit && world.self_ability_detail.mp >= 6 &&
+        target_in_sword_cross_attack_range(world, self, dir)) {
+      ident = legacy::kCmCrossHit;
+    }
+    return ident;
+  }
+
+  static std::uint16_t choose_target_attack_ident(const WorldViewState& world, const ActorState& self,
+                                                  const std::uint8_t dir) {
+    auto ident = base_attack_ident(world);
+    if (world.next_time_fire_hit && world.self_ability_detail.mp >= 7) {
+      return legacy::kCmFireHit;
+    }
+    if (world.next_time_power_hit) {
+      return legacy::kCmPowerHit;
+    }
+    if (world.can_cross_hit && world.self_ability_detail.mp >= 6) {
+      ident = legacy::kCmCrossHit;
+    } else if (world.can_wide_hit && world.self_ability_detail.mp >= 3) {
+      ident = legacy::kCmWideHit;
+    } else if (world.can_long_hit && target_in_sword_long_attack_range(world, self, dir)) {
+      ident = legacy::kCmLongHit;
+    }
+    return ident;
+  }
+
+  bool try_pickup(ClientContext& context, const ActorState& self, std::uint64_t now_ms) {
     auto& world = context.state->world;
+    const auto animation_idle = self_actor_legacy_idle(world, now_ms);
+    if (!server_accept_next_action(world, now_ms) ||
+        !can_next_action(world, self, animation_idle, now_ms)) {
+      return false;
+    }
     if (world.last_pickup_ms != 0 && elapsed_ms(now_ms, world.last_pickup_ms) < 250U) {
       return false;
     }
@@ -8038,7 +8315,7 @@ class WorldScene final : public Scene {
     return true;
   }
 
-  bool process_pending_pickup(ClientContext& context, std::uint64_t now_ms) const {
+  bool process_pending_pickup(ClientContext& context, std::uint64_t now_ms) {
     auto& world = context.state->world;
     if (world.pending_pickup_item_id == 0) {
       return false;
@@ -8059,7 +8336,9 @@ class WorldScene final : public Scene {
       }
       return sent;
     }
-    if (!can_next_action(world, self_it->second, now_ms)) {
+    const auto animation_idle = self_actor_legacy_idle(world, now_ms);
+    if (!server_accept_next_action(world, now_ms) ||
+        !can_next_action(world, self_it->second, animation_idle, now_ms)) {
       return false;
     }
     world.legacy_target_x = item_it->second.x;
@@ -8073,16 +8352,19 @@ class WorldScene final : public Scene {
     auto self_it = world.actors.find(world.self_actor_id);
     const auto animation_idle = self_actor_legacy_idle(world, now_ms);
     if (self_it == world.actors.end() || !server_accept_next_action(world, now_ms) ||
-        !can_next_action(world, self_it->second, animation_idle, now_ms) ||
-        !can_next_hit(world, self_it->second, now_ms)) {
+        !can_next_action(world, self_it->second, animation_idle, now_ms)) {
       return false;
     }
     const auto dir = direction_between(self_it->second.x, self_it->second.y, x, y,
                                        self_it->second.dir);
-    if (!is_unlock_action(world, legacy::kCmHit, dir, now_ms)) {
+    const auto attack_ident = choose_ground_attack_ident(world, self_it->second, dir, now_ms);
+    if (!is_unlock_action(world, attack_ident, dir, now_ms)) {
       return false;
     }
-    send_attack(context, self_it->second.x, self_it->second.y, dir, 0, 0);
+    if (!can_next_hit(world, self_it->second, now_ms)) {
+      return false;
+    }
+    send_attack(context, self_it->second.x, self_it->second.y, dir, 0, attack_ident);
     world.latest_hit_ms = now_ms;
     world.last_attack_ms = now_ms;
     return true;
@@ -8110,24 +8392,36 @@ class WorldScene final : public Scene {
     const auto& target = target_it->second;
     const auto distance = std::max(std::abs(target.x - self.x), std::abs(target.y - self.y));
     const auto dir = direction_between(self.x, self.y, target.x, target.y, self.dir);
-    if (distance > 1) {
+    const auto delta = legacy::direction_delta(dir);
+    const auto target_at_long_hit_cell = target.x == self.x + delta.dx * 2 &&
+                                         target.y == self.y + delta.dy * 2;
+    const auto can_target_long_hit = world.can_long_hit && target_at_long_hit_cell;
+    if (distance > 1 && !can_target_long_hit) {
       chase_target(context, self, target, dir);
       return process_pending_move(context, now_ms);
     }
 
     const auto animation_idle = self_actor_legacy_idle(world, now_ms);
     if (!server_accept_next_action(world, now_ms) ||
-        !can_next_action(world, self, animation_idle, now_ms) ||
-        !can_next_hit(world, self, now_ms)) {
+        !can_next_action(world, self, animation_idle, now_ms)) {
       world.target_actor_id = target_actor_id;
       return false;
     }
-
-    if (!is_unlock_action(world, legacy::kCmHit, dir, now_ms)) {
+    const auto attack_ident = choose_target_attack_ident(world, self, dir);
+    if (!is_unlock_action(world, attack_ident, dir, now_ms)) {
       return false;
     }
-    send_attack(context, self.x, self.y, dir, target_actor_id, 0);
+    if (!can_next_hit(world, self, now_ms)) {
+      world.target_actor_id = target_actor_id;
+      return false;
+    }
+    send_attack(context, self.x, self.y, dir, target_actor_id, attack_ident);
     world.latest_hit_ms = now_ms;
+    if (attack_ident == legacy::kCmFireHit) {
+      world.next_time_fire_hit = false;
+    } else if (attack_ident == legacy::kCmPowerHit) {
+      world.next_time_power_hit = false;
+    }
     world.last_attack_ms = now_ms;
     return true;
   }
@@ -8174,7 +8468,13 @@ class WorldScene final : public Scene {
       return false;
     }
     const auto animation_idle = self_actor_legacy_idle(world, input.tick);
-    if (!can_next_action(world, self_it->second, animation_idle, input.tick)) {
+    if (!server_accept_next_action(world, input.tick) ||
+        !can_next_action(world, self_it->second, animation_idle, input.tick)) {
+      return false;
+    }
+    const auto width = map_ != nullptr ? map_->width : world.width;
+    const auto height = map_ != nullptr ? map_->height : world.height;
+    if (!legacy::in_bounds(width, height, input.map_x, input.map_y)) {
       return false;
     }
     send_spell(context, self_it->second, input.map_x, input.map_y,
@@ -8378,13 +8678,6 @@ class WorldScene final : public Scene {
           }
           legacy_trace_map_layer(legacy::LegacyMapDrawLayer::actor, y);
           render_actor(context, it->pose, viewport, it->actor_id == context.state->world.self_actor_id);
-          if (context.assets != nullptr) {
-            legacy_trace_map_layer(legacy::LegacyMapDrawLayer::actor_overlay, y);
-            animation_.effects().render_overlay_for_actor(it->actor_id, it->pose, *context.assets,
-                                                          *context.renderer, viewport,
-                                                          animation_.trace_frame_index(),
-                                                          animation_.trace_now_ms());
-          }
         }
       }
 
@@ -8394,6 +8687,33 @@ class WorldScene final : public Scene {
                                         animation_.trace_frame_index(),
                                         animation_.trace_now_ms());
       }
+    }
+  }
+
+  void render_actor_effect_overlays_after_rows(
+      ClientContext& context, const legacy::LegacyMapViewport& viewport) {
+    if (context.assets == nullptr) {
+      return;
+    }
+    const auto bounds = legacy::legacy_map_render_bounds(viewport);
+    const auto within_visible_rows = [&](const ActorRenderPose& pose) {
+      const auto draw_row = legacy::legacy_actor_draw_row(pose.ry, pose.down_draw_level);
+      return draw_row >= bounds.visible_top && draw_row <= bounds.visible_bottom;
+    };
+
+    auto draw_overlay = [&](const std::uint64_t actor_id, const std::optional<ActorRenderPose>& pose) {
+      if (!pose.has_value() || !pose->visible || !within_visible_rows(*pose)) {
+        return;
+      }
+      legacy_trace_map_layer(legacy::LegacyMapDrawLayer::actor_overlay);
+      animation_.effects().render_overlay_for_actor(actor_id, *pose, *context.assets, *context.renderer,
+                                                    viewport, animation_.trace_frame_index(),
+                                                    animation_.trace_now_ms());
+    };
+
+    const auto actors = collect_row_actor_draws(context, viewport);
+    for (const auto& actor : actors) {
+      draw_overlay(actor.actor_id, std::optional<ActorRenderPose>{actor.pose});
     }
   }
 
@@ -8741,7 +9061,26 @@ class WorldScene final : public Scene {
 
 }  // namespace
 
+void Scene::dispatch_legacy_input_events(ClientContext& context) {
+  if (context.input == nullptr || context.input->events.empty()) {
+    return;
+  }
+  ui_tree().set_asset_manager(context.assets);
+  ui::UiInputResult merged;
+  for (const auto& event : context.input->events) {
+    auto event_input = input_for_legacy_event(*context.input, event);
+    const auto result = ui_tree().capture_input(event_input);
+    ui_tree().process_queued_events(event_input);
+    merge_ui_input(merged, result);
+  }
+  context.ui_input = merged;
+  context.legacy_input_dispatched = true;
+}
+
 void Scene::capture_ui_input(ClientContext& context) {
+  if (context.legacy_input_dispatched) {
+    return;
+  }
   if (context.input == nullptr) {
     context.ui_input = {};
     return;
@@ -8755,6 +9094,9 @@ void Scene::process_key_messages(ClientContext& /*context*/) {}
 void Scene::process_action_messages(ClientContext& /*context*/, float /*delta_seconds*/) {}
 
 void Scene::dwin_process(ClientContext& context) {
+  if (context.legacy_input_dispatched) {
+    return;
+  }
   if (context.input != nullptr) {
     ui_tree().process_queued_events(*context.input);
   }
@@ -8810,6 +9152,12 @@ void SceneManager::update(ClientContext& context, float delta_seconds) {
     process_action_messages(context, delta_seconds);
     dwin_process(context);
     scene_run(context, delta_seconds);
+  }
+}
+
+void SceneManager::dispatch_legacy_input_events(ClientContext& context) {
+  if (current_scene_ != nullptr) {
+    current_scene_->dispatch_legacy_input_events(context);
   }
 }
 

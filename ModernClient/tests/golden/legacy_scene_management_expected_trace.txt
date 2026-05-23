@@ -2,6 +2,7 @@
 # Later smoke tests should compare emitted trace labels against these sequences.
 
 [frame.render_due.can_draw]
+legacy_input_dispatch
 timer1_network_drain
 decode_packets_in_buffer_order
 process_key_messages
@@ -17,6 +18,7 @@ draw_moving_item
 flip
 
 [frame.not_render_due]
+legacy_input_dispatch
 timer1_network_drain
 decode_packets_in_buffer_order
 process_key_messages
@@ -25,8 +27,12 @@ dwin_process
 play_scene_run
 
 [frame.cannot_draw]
+legacy_input_dispatch
 timer1_network_drain
 decode_packets_in_buffer_order
+process_key_messages
+process_action_messages
+play_scene_run
 process_key_messages
 process_action_messages
 dwin_process

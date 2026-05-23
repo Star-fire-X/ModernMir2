@@ -356,6 +356,10 @@ int ClientApp::run() {
     frame_scheduler_.run_frame(
         delta,
         LegacyFrameScheduler::Hooks{
+            [this, &context] {
+              dispatch_legacy_input_events(context);
+              flush_scene_change_if_pending(context);
+            },
             [this, &context, delta] {
               protocol_.poll();
               handle_protocol_events(context);
@@ -390,24 +394,20 @@ int ClientApp::run() {
             [this, &context] {
               legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::ui_windows_dwin_direct_paint);
               scenes_.paint_ui(context);
+              render_modal();
             },
             [this, &context] {
               legacy_ui_paint_trace(
                   ui::LegacyUiPaintTraceLabel::top_system_messages_draw_screen_top);
               scenes_.paint_ui_top(context);
-              render_modal();
             },
             [this, &context] {
               legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::hint_tooltip_draw_hint);
-              if (!state_.modal.visible) {
-                scenes_.paint_ui_hint(context);
-              }
+              scenes_.paint_ui_hint(context);
             },
             [this, &context] {
               legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::moving_item_cursor);
-              if (!state_.modal.visible) {
-                scenes_.paint_ui_moving_item(context);
-              }
+              scenes_.paint_ui_moving_item(context);
               legacy_ui_paint_trace(ui::LegacyUiPaintTraceLabel::mouse_cursor);
             },
             [this] {
@@ -429,6 +429,11 @@ void ClientApp::refresh_mapped_input() {
       renderer_.window_to_logical(window_.input().mouse_x, window_.input().mouse_y);
   mapped_input_.mouse_x = logical_point.x;
   mapped_input_.mouse_y = logical_point.y;
+  for (auto& event : mapped_input_.events) {
+    const auto event_point = renderer_.window_to_logical(event.mouse_x, event.mouse_y);
+    event.mouse_x = event_point.x;
+    event.mouse_y = event_point.y;
+  }
 }
 
 #ifdef MIR2_CLIENT_TESTING
@@ -473,7 +478,86 @@ void ClientApp::flush_scene_change_if_pending(ClientContext& context) {
   scene_change_pending_ = false;
 }
 
+void ClientApp::dispatch_legacy_input_events(ClientContext& context) {
+  if (context.input == nullptr || context.input->events.empty()) {
+    return;
+  }
+  if (state_.modal.visible) {
+    modal_ui_.set_asset_manager(&assets_);
+    modal_ui_.set_trace_callback([](const std::string_view label) { legacy_trace(label); });
+    for (const auto& event : context.input->events) {
+      auto event_input = *context.input;
+      event_input.left_pressed = false;
+      event_input.left_released = false;
+      event_input.right_pressed = false;
+      event_input.right_released = false;
+      event_input.key_pressed.fill(false);
+      event_input.text_input.clear();
+      event_input.backspace_pressed = false;
+      event_input.enter_pressed = false;
+      event_input.events.clear();
+      event_input.mouse_x = event.mouse_x;
+      event_input.mouse_y = event.mouse_y;
+      event_input.left_down = event.left_down;
+      event_input.right_down = event.right_down;
+      switch (event.kind) {
+        case LegacyInputEventKind::left_down:
+          event_input.left_pressed = true;
+          event_input.left_down = true;
+          break;
+        case LegacyInputEventKind::left_up:
+          event_input.left_released = true;
+          event_input.left_down = false;
+          break;
+        case LegacyInputEventKind::right_down:
+          event_input.right_pressed = true;
+          event_input.right_down = true;
+          break;
+        case LegacyInputEventKind::right_up:
+          event_input.right_released = true;
+          event_input.right_down = false;
+          break;
+        case LegacyInputEventKind::key_down:
+          if (event.key < event_input.key_pressed.size()) {
+            event_input.key_pressed[event.key] = true;
+            event_input.key_down[event.key] = true;
+          }
+          if (event.key == VK_BACK) {
+            event_input.backspace_pressed = true;
+          } else if (event.key == VK_RETURN) {
+            event_input.enter_pressed = true;
+          }
+          break;
+        case LegacyInputEventKind::key_up:
+          if (event.key < event_input.key_down.size()) {
+            event_input.key_down[event.key] = false;
+          }
+          break;
+        case LegacyInputEventKind::char_input:
+          if (event.character != 0) {
+            event_input.text_input.push_back(event.character);
+          }
+          break;
+        case LegacyInputEventKind::mouse_move:
+          break;
+      }
+      event_input.key_down[VK_SHIFT] = event.shift;
+      event_input.key_down[VK_CONTROL] = event.ctrl;
+      event_input.key_down[VK_MENU] = event.alt;
+      context.ui_input = modal_ui_.capture_input(event_input);
+      context.ui_input.consumed = true;
+      process_modal_input(event_input);
+    }
+    context.legacy_input_dispatched = true;
+    return;
+  }
+  scenes_.dispatch_legacy_input_events(context);
+}
+
 void ClientApp::capture_ui_input(ClientContext& context) {
+  if (context.legacy_input_dispatched) {
+    return;
+  }
   if (!state_.modal.visible) {
     if (auto* tree = scenes_.current_ui_tree()) {
       tree->set_trace_callback([](const std::string_view label) { legacy_trace(label); });
@@ -486,11 +570,14 @@ void ClientApp::capture_ui_input(ClientContext& context) {
   modal_ui_.set_trace_callback([](const std::string_view label) { legacy_trace(label); });
   context.ui_input = modal_ui_.capture_input(mapped_input_);
   context.ui_input.consumed = true;
+  context.ui_input.app_modal_visible = true;
 }
 
 void ClientApp::dwin_process(ClientContext& context) {
   if (state_.modal.visible) {
-    process_modal_input();
+    if (!context.legacy_input_dispatched) {
+      process_modal_input();
+    }
     return;
   }
   scenes_.dwin_process(context);
@@ -764,6 +851,7 @@ void ClientApp::request_action(const client_v1::ActionIntent& intent) {
   const auto now_ms = detail::monotonic_ms();
   state_.world.action_locked = true;
   state_.world.action_lock_started_ms = now_ms;
+  state_.world.action_lock_timeout_cleared_ms = 0;
   const auto sent_ident = [&] {
     switch (intent.kind) {
       case client_v1::WorldActionKind::walk:
@@ -836,10 +924,18 @@ void ClientApp::request_spell(const client_v1::SpellIntent& intent) {
   const auto now_ms = detail::monotonic_ms();
   state_.world.action_locked = true;
   state_.world.action_lock_started_ms = now_ms;
+  state_.world.action_lock_timeout_cleared_ms = 0;
   state_.world.last_sent_action_ident = 3017U;
   state_.world.last_sent_action_dir = intent.dir;
   state_.world.latest_spell_ms = state_.world.action_lock_started_ms;
-  state_.world.magic_pk_delay_ms = 300;  // 魔法攻击最小间隔 300ms
+  state_.world.magic_pk_delay_ms = 0;
+  if (intent.target_actor_id != 0) {
+    if (const auto it = state_.world.actors.find(intent.target_actor_id);
+        it != state_.world.actors.end() &&
+        it->second.actor_type == client_v1::ActorType::player) {
+      state_.world.magic_pk_delay_ms = 300U + (now_ms % 1100U);
+    }
+  }
   if (legacy_trace_enabled()) {
     std::ostringstream out;
     out << "request_spell now=" << now_ms << " magic=" << intent.magic_id << " x=" << intent.x
@@ -2508,7 +2604,7 @@ void ClientApp::show_confirm_modal(const std::wstring& title, const std::wstring
   modal_ui_.clear();
   modal_confirm_action_ = std::move(on_confirm);
   modal_has_cancel_ = true;
-  modal_enter_confirms_ = true;
+  modal_enter_confirms_ = false;
   const auto layout = legacy_auth_ui::legacy_message_modal_layout(
       sprite_rect(assets_.get_frame(ArchiveId::prguse, kMessageDialogIndex), 0, 0, 360, 180));
   auto* root = modal_ui_.set_root<ui::UiNode>(RectI{0, 0, kNativeClientWidth, kNativeClientHeight});
@@ -2591,11 +2687,26 @@ void ClientApp::show_destructive_confirm_modal(const std::wstring& title,
 }
 
 void ClientApp::process_modal_input() {
+  process_modal_input(mapped_input_);
+}
+
+void ClientApp::process_modal_input(const InputState& input) {
   if (!state_.modal.visible) {
     return;
   }
+  if (input.key_pressed[VK_ESCAPE] && modal_has_cancel_) {
+    state_.hide_modal();
+    modal_ui_.clear();
+    modal_confirm_action_ = {};
+    modal_has_cancel_ = false;
+    modal_enter_confirms_ = true;
+    if (state_.login.login_state == LoginState::lsCloseAll) {
+      state_.login.login_state = LoginState::lsLogin;
+    }
+    return;
+  }
   if (modal_enter_confirms_ &&
-      (mapped_input_.key_pressed[VK_RETURN] || mapped_input_.enter_pressed)) {
+      (input.key_pressed[VK_RETURN] || input.enter_pressed)) {
     const auto trace_modal_ok = !modal_confirm_action_ && !modal_has_cancel_;
     auto on_confirm = std::move(modal_confirm_action_);
     if (trace_modal_ok) {
@@ -2610,18 +2721,7 @@ void ClientApp::process_modal_input() {
     }
     return;
   }
-  if (mapped_input_.key_pressed[VK_ESCAPE] && modal_has_cancel_) {
-    state_.hide_modal();
-    modal_ui_.clear();
-    modal_confirm_action_ = {};
-    modal_has_cancel_ = false;
-    modal_enter_confirms_ = true;
-    if (state_.login.login_state == LoginState::lsCloseAll) {
-      state_.login.login_state = LoginState::lsLogin;
-    }
-    return;
-  }
-  modal_ui_.process_queued_events(mapped_input_);
+  modal_ui_.process_queued_events(input);
 }
 
 // 渲染模态对话框：在场景之上绘制对话框背景精灵和 UI 按钮

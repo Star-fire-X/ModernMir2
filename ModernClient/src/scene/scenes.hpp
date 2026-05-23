@@ -51,6 +51,7 @@ struct ClientContext {
   SoftwareRenderer* renderer{nullptr};
   const InputState* input{nullptr};
   ui::UiInputResult ui_input{};  ///< 当前帧的 UI 输入查询结果
+  bool legacy_input_dispatched{false}; ///< 本帧是否已按 VCL 顺序分发 raw 输入事件
 };
 
 /// 场景枚举：客户端的状态机节点
@@ -81,6 +82,7 @@ class Scene {
   virtual void exit(ClientContext& context) = 0;    ///< 离开场景时的清理（释放精灵缓存、断开网络）
   virtual void update(ClientContext& context, float delta_seconds) = 0;  ///< 每帧逻辑更新（网络轮询、动画、状态同步）
   virtual void render(ClientContext& context) = 0;  ///< 每帧渲染（清屏、绘制背景、精灵、UI）
+  virtual void dispatch_legacy_input_events(ClientContext& context);
   virtual void capture_ui_input(ClientContext& context);
   virtual void process_key_messages(ClientContext& context);
   virtual void process_action_messages(ClientContext& context, float delta_seconds);
@@ -107,6 +109,7 @@ class SceneManager {
   void change_scene(SceneId id, ClientContext& context);
   /// 兼容入口：按 legacy 阶段顺序更新当前场景
   void update(ClientContext& context, float delta_seconds);
+  void dispatch_legacy_input_events(ClientContext& context);
   void capture_ui_input(ClientContext& context);
   void process_key_messages(ClientContext& context);
   void process_action_messages(ClientContext& context, float delta_seconds);

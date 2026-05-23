@@ -19,7 +19,9 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <string>
+#include <vector>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -33,6 +35,32 @@
 
 namespace mir2::client {
 
+enum class LegacyInputEventKind {
+  mouse_move,
+  left_down,
+  left_up,
+  right_down,
+  right_up,
+  key_down,
+  key_up,
+  char_input
+};
+
+struct LegacyInputEvent {
+  LegacyInputEventKind kind{LegacyInputEventKind::mouse_move};
+  std::uint32_t sequence{0};
+  int mouse_x{0};
+  int mouse_y{0};
+  std::uint16_t key{0};
+  wchar_t character{0};
+  bool shift{false};
+  bool ctrl{false};
+  bool alt{false};
+  bool repeat{false};
+  bool left_down{false};
+  bool right_down{false};
+};
+
 /// 每帧输入状态：包含鼠标位置/按键、键盘状态、文本输入
 /// begin_frame() 清除瞬态标志（按下/释放/文本），帧间持续状态保留
 /// 确保鼠标按下/释放等事件不会跨帧重复触发
@@ -45,11 +73,16 @@ struct InputState {
   bool right_down{false};      ///< 右键持续按下
   bool right_pressed{false};   ///< 右键刚按下（瞬态）
   bool right_released{false};  ///< 右键刚释放（瞬态）
+  int wheel_delta{0};          ///< 鼠标滚轮增量（瞬态，单位为 WHEEL_DELTA 的倍数）
+  bool wheel_scrolled{false};  ///< 本帧是否发生滚轮事件（瞬态）
+  bool left_double_click{false};   ///< 左键双击边沿（瞬态）
+  bool right_double_click{false};  ///< 右键双击边沿（瞬态）
   std::array<bool, 256> key_down{};     ///< 键盘键持续按下（数组索引为虚拟键码）
   std::array<bool, 256> key_pressed{};  ///< 键盘键刚按下（瞬态，仅首次触发）
   std::wstring text_input{};            ///< 本帧输入的文本（WM_CHAR 消息累积）
   bool backspace_pressed{false};        ///< 退格键按下（瞬态）
   bool enter_pressed{false};            ///< 回车键按下（瞬态）
+  std::vector<LegacyInputEvent> events{}; ///< 本帧 Win32/VCL 顺序输入事件
 
   /// 清零所有瞬态标志，每帧开始时调用
   /// 必须在窗口消息泵送之前调用，确保新帧从空白瞬态开始
@@ -58,10 +91,15 @@ struct InputState {
     left_released = false;
     right_pressed = false;
     right_released = false;
+    wheel_delta = 0;
+    wheel_scrolled = false;
+    left_double_click = false;
+    right_double_click = false;
     key_pressed.fill(false);
     text_input.clear();
     backspace_pressed = false;
     enter_pressed = false;
+    events.clear();
   }
 };
 

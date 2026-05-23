@@ -255,6 +255,20 @@ bool UiNode::on_mouse_up(UiTree& tree, const InputState& input, const UiMouseBut
   return false;
 }
 
+bool UiNode::on_mouse_wheel(UiTree& tree, const InputState& input, const int wheel_delta) {
+  (void)tree;
+  (void)input;
+  (void)wheel_delta;
+  return false;
+}
+
+bool UiNode::on_double_click(UiTree& tree, const InputState& input, const UiMouseButton button) {
+  (void)tree;
+  (void)input;
+  (void)button;
+  return false;
+}
+
 // ====================================================================
 // Panel（面板）
 // ====================================================================
@@ -668,8 +682,8 @@ bool Window::on_mouse_down(UiTree& tree, const InputState& input, const UiMouseB
     return true;
   }
   tree.focus(this);
+  tree.bring_to_front(this);
   if (floating) {
-    tree.bring_to_front(this);
     dragging = true;
     drag_origin_x = input.mouse_x;
     drag_origin_y = input.mouse_y;
@@ -730,9 +744,7 @@ bool Window::on_mouse_up(UiTree& tree, const InputState& /*input*/, const UiMous
 
 void Window::show(UiTree& tree) {
   set_visible(tree, true);
-  if (floating) {
-    tree.bring_to_front(this);
-  }
+  tree.bring_to_front(this);
 }
 
 void Window::hide(UiTree& tree) { set_visible(tree, false); }
@@ -948,6 +960,8 @@ UiInputResult UiTree::capture_input(const InputState& input) {
 
   const auto has_mouse_down = input.left_pressed || input.right_pressed;
   const auto has_mouse_up = input.left_released || input.right_released;
+  const auto has_mouse_wheel = input.wheel_scrolled && input.wheel_delta != 0;
+  const auto has_double_click = input.left_double_click || input.right_double_click;
   const auto has_mouse_move = !has_mouse_down && !has_mouse_up &&
                               (input.left_down || input.right_down || captured_ != nullptr);
   if (has_mouse_down) {
@@ -978,6 +992,15 @@ UiInputResult UiTree::capture_input(const InputState& input) {
   }
 
   auto* target = captured_ != nullptr ? captured_ : hit;
+  const auto hover_only_event =
+      !has_mouse_down && !has_mouse_up && !has_mouse_wheel && !has_double_click &&
+      !input.left_down && !input.right_down && captured_ == nullptr;
+  if (hit != nullptr && !hit->background) {
+    result.consumed = true;
+    if (hover_only_event) {
+      result.hover_consumed = true;
+    }
+  }
   if (input.left_pressed) {
     result.consumed = (target != nullptr && !target->background) || result.consumed;
     if (is_valid_target(target)) {
@@ -1005,6 +1028,14 @@ UiInputResult UiTree::capture_input(const InputState& input) {
   }
   if (input.right_released) {
     target = captured_ != nullptr ? captured_ : hit;
+    result.consumed = (target != nullptr && !target->background) || result.consumed;
+  }
+  if (has_mouse_wheel) {
+    target = passive_pointer_target(input.mouse_x, input.mouse_y);
+    result.consumed = (target != nullptr && !target->background) || result.consumed;
+  }
+  if (has_double_click) {
+    target = passive_pointer_target(input.mouse_x, input.mouse_y);
     result.consumed = (target != nullptr && !target->background) || result.consumed;
   }
 
@@ -1071,6 +1102,19 @@ void UiTree::process_queued_events(const InputState& input) {
     if (mouse_down_ == target || captured_ == nullptr) {
       mouse_down_ = nullptr;
     }
+  }
+
+  if (event_input.wheel_scrolled && event_input.wheel_delta != 0) {
+    dispatch_mouse_wheel(passive_pointer_target(event_input.mouse_x, event_input.mouse_y), event_input,
+                         event_input.wheel_delta);
+  }
+  if (event_input.left_double_click) {
+    dispatch_double_click(passive_pointer_target(event_input.mouse_x, event_input.mouse_y), event_input,
+                          UiMouseButton::left);
+  }
+  if (event_input.right_double_click) {
+    dispatch_double_click(passive_pointer_target(event_input.mouse_x, event_input.mouse_y), event_input,
+                          UiMouseButton::right);
   }
 
   UiInputResult result;
@@ -1327,6 +1371,34 @@ bool UiTree::dispatch_mouse_down(UiNode* target, const InputState& input,
 
 bool UiTree::dispatch_mouse_up(UiNode* target, const InputState& input, const UiMouseButton button) {
   return is_valid_target(target) && target->on_mouse_up(*this, input, button);
+}
+
+bool UiTree::dispatch_mouse_wheel(UiNode* target, const InputState& input, const int wheel_delta) {
+  return is_valid_target(target) && target->on_mouse_wheel(*this, input, wheel_delta);
+}
+
+bool UiTree::dispatch_double_click(UiNode* target, const InputState& input,
+                                   const UiMouseButton button) {
+  return is_valid_target(target) && target->on_double_click(*this, input, button);
+}
+
+UiNode* UiTree::passive_pointer_target(const int x, const int y) const {
+  if (active_menu_ != nullptr) {
+    if (auto* hit = active_menu_->hit_test(x, y, assets_); hit != nullptr) {
+      return hit;
+    }
+    return active_menu_;
+  }
+  if (modal_ != nullptr) {
+    if (auto* hit = modal_->hit_test(x, y, assets_); hit != nullptr) {
+      return hit;
+    }
+    return modal_;
+  }
+  if (is_valid_target(captured_)) {
+    return captured_;
+  }
+  return root_ != nullptr ? root_->hit_test(x, y, assets_) : nullptr;
 }
 
 /// 分发键盘事件：依次处理按键、文本输入、退格、回车

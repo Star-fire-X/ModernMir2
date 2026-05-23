@@ -19,8 +19,9 @@ int main() {
   assert(!can_next_action(world, self, 1100));
   assert(!server_accept_next_action(world, 11000));
   assert(world.action_locked);
-  assert(server_accept_next_action(world, 11001));
+  assert(!server_accept_next_action(world, 11001));
   assert(!world.action_locked);
+  assert(world.action_lock_timeout_cleared_ms == 11001);
   assert(can_next_action(world, self, 11001));
   assert(server_accept_next_action(world, 11002));
   self.action_started_ms = 1000;

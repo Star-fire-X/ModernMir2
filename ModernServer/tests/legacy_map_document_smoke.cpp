@@ -1,6 +1,7 @@
 #include "shared/legacy/map_document.hpp"
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -26,6 +27,29 @@ void write_cell(std::vector<std::uint8_t>& bytes, std::size_t offset,
   bytes[offset + 11U] = cell.light;
 }
 
+std::size_t cell_offset(std::size_t header_size, int height, int x, int y) {
+  return header_size +
+      (static_cast<std::size_t>(x) * static_cast<std::size_t>(height) +
+       static_cast<std::size_t>(y)) *
+          mir2::legacy::detail::kMapCellSize;
+}
+
+void expect_cell(const mir2::legacy::MapCell* cell, std::uint16_t bk_img,
+                 std::uint16_t mid_img, std::uint16_t fr_img, std::uint8_t door_index,
+                 std::uint8_t door_offset, std::uint8_t ani_frame,
+                 std::uint8_t ani_tick, std::uint8_t area, std::uint8_t light) {
+  assert(cell != nullptr);
+  assert(cell->bk_img == bk_img);
+  assert(cell->mid_img == mid_img);
+  assert(cell->fr_img == fr_img);
+  assert(cell->door_index == door_index);
+  assert(cell->door_offset == door_offset);
+  assert(cell->ani_frame == ani_frame);
+  assert(cell->ani_tick == ani_tick);
+  assert(cell->area == area);
+  assert(cell->light == light);
+}
+
 void write_file(const std::filesystem::path& path, const std::vector<std::uint8_t>& bytes) {
   std::ofstream file(path, std::ios::binary);
   file.write(reinterpret_cast<const char*>(bytes.data()),
@@ -44,7 +68,7 @@ int main() {
   const auto root = temp_dir();
 
   {
-    constexpr int width = 2;
+    constexpr int width = 3;
     constexpr int height = 2;
     std::vector<std::uint8_t> bytes(
         mir2::legacy::detail::kMapHeaderSize +
@@ -52,14 +76,18 @@ int main() {
     write_u16(bytes, 0, width);
     write_u16(bytes, 2, height);
 
-    write_cell(bytes, mir2::legacy::detail::kMapHeaderSize + 0U,
-               mir2::legacy::MapCell{1, 2, 3, 0, 0, 4, 5, 6, 7});
-    write_cell(bytes, mir2::legacy::detail::kMapHeaderSize + 12U,
+    write_cell(bytes, cell_offset(mir2::legacy::detail::kMapHeaderSize, height, 0, 0),
+               mir2::legacy::MapCell{1, 2, 3, 4, 5, 6, 7, 1, 8});
+    write_cell(bytes, cell_offset(mir2::legacy::detail::kMapHeaderSize, height, 0, 1),
                mir2::legacy::MapCell{0x8001U, 20, 30, 0, 0, 0, 0, 0, 0});
-    write_cell(bytes, mir2::legacy::detail::kMapHeaderSize + 24U,
-               mir2::legacy::MapCell{100, 200, 300, 0x80U | 3U, 0, 0, 0, 0, 0});
-    write_cell(bytes, mir2::legacy::detail::kMapHeaderSize + 36U,
-               mir2::legacy::MapCell{101, 201, 301, 0x80U | 3U, 0x80U, 0, 0, 0, 0});
+    write_cell(bytes, cell_offset(mir2::legacy::detail::kMapHeaderSize, height, 1, 0),
+               mir2::legacy::MapCell{40, 50, 0x8002U, 0, 0, 0, 0, 0, 0});
+    write_cell(bytes, cell_offset(mir2::legacy::detail::kMapHeaderSize, height, 1, 1),
+               mir2::legacy::MapCell{60, 70, 80, 0x80U | 3U, 0, 9, 10, 2, 11});
+    write_cell(bytes, cell_offset(mir2::legacy::detail::kMapHeaderSize, height, 2, 0),
+               mir2::legacy::MapCell{90, 100, 110, 0x80U | 3U, 0x80U, 12, 13, 3, 14});
+    write_cell(bytes, cell_offset(mir2::legacy::detail::kMapHeaderSize, height, 2, 1),
+               mir2::legacy::MapCell{120, 130, 140, 4, 5, 15, 16, 6, 17});
 
     const auto path = root / "0.map";
     write_file(path, bytes);
@@ -69,23 +97,30 @@ int main() {
     assert(map->check_key == 0);
     assert(map->width == width);
     assert(map->height == height);
-    assert(map->cell(0, 0)->bk_img == 1);
-    assert(map->cell(0, 1)->bk_img == 0x8001U);
-    assert(map->cell(1, 0)->fr_img == 300);
-    assert(map->cell(1, 1)->door_offset == 0x80U);
+    expect_cell(map->cell(0, 0), 1, 2, 3, 4, 5, 6, 7, 1, 8);
+    expect_cell(map->cell(0, 1), 0x8001U, 20, 30, 0, 0, 0, 0, 0, 0);
+    expect_cell(map->cell(1, 0), 40, 50, 0x8002U, 0, 0, 0, 0, 0, 0);
+    expect_cell(map->cell(1, 1), 60, 70, 80, 0x80U | 3U, 0, 9, 10, 2, 11);
+    expect_cell(map->cell(2, 0), 90, 100, 110, 0x80U | 3U, 0x80U, 12, 13, 3, 14);
+    expect_cell(map->cell(2, 1), 120, 130, 140, 4, 5, 15, 16, 6, 17);
+    assert(map->cell(-1, 0) == nullptr);
+    assert(map->cell(3, 0) == nullptr);
     assert(map->can_move(0, 0));
     assert(!map->can_move(0, 1));
     assert(!map->can_move(1, 0));
-    assert(map->can_move(1, 1));
-    assert(map->terrain_can_move(1, 0));
-    assert(mir2::legacy::MapDocument::door_blocks_move(*map->cell(1, 0)));
+    assert(!map->can_move(1, 1));
+    assert(map->can_move(2, 0));
+    assert(map->can_move(2, 1));
+    assert(map->terrain_can_move(1, 1));
+    assert(mir2::legacy::MapDocument::door_blocks_move(*map->cell(1, 1)));
     assert(!map->can_fly(1, 0));
-    assert(map->can_fly(1, 1));
+    assert(!map->can_fly(1, 1));
+    assert(map->can_fly(2, 0));
   }
 
   {
     constexpr int width = 2;
-    constexpr int height = 1;
+    constexpr int height = 3;
     constexpr std::uint16_t key = 0xAA55U;
     std::vector<std::uint8_t> bytes(
         mir2::legacy::detail::kAntiHackMapHeaderSize +
@@ -94,10 +129,18 @@ int main() {
     write_u16(bytes, 33U, key);
     write_u16(bytes, 35U, height ^ key);
 
-    write_cell(bytes, mir2::legacy::detail::kAntiHackMapHeaderSize + 0U,
-               mir2::legacy::MapCell{11, 12, 13, 0, 0, 14, 15, 16, 17}, key);
-    write_cell(bytes, mir2::legacy::detail::kAntiHackMapHeaderSize + 12U,
-               mir2::legacy::MapCell{21, 22, 0x8001U, 0, 0, 0, 0, 0, 0}, key);
+    write_cell(bytes, cell_offset(mir2::legacy::detail::kAntiHackMapHeaderSize, height, 0, 0),
+               mir2::legacy::MapCell{11, 12, 13, 14, 15, 16, 17, 1, 18}, key);
+    write_cell(bytes, cell_offset(mir2::legacy::detail::kAntiHackMapHeaderSize, height, 0, 1),
+               mir2::legacy::MapCell{21, 22, 23, 24, 25, 26, 27, 2, 28}, key);
+    write_cell(bytes, cell_offset(mir2::legacy::detail::kAntiHackMapHeaderSize, height, 0, 2),
+               mir2::legacy::MapCell{31, 32, 0x8001U, 34, 35, 36, 37, 3, 38}, key);
+    write_cell(bytes, cell_offset(mir2::legacy::detail::kAntiHackMapHeaderSize, height, 1, 0),
+               mir2::legacy::MapCell{41, 42, 43, 44, 45, 46, 47, 4, 48}, key);
+    write_cell(bytes, cell_offset(mir2::legacy::detail::kAntiHackMapHeaderSize, height, 1, 1),
+               mir2::legacy::MapCell{51, 52, 53, 0x80U | 5U, 0, 56, 57, 5, 58}, key);
+    write_cell(bytes, cell_offset(mir2::legacy::detail::kAntiHackMapHeaderSize, height, 1, 2),
+               mir2::legacy::MapCell{61, 62, 63, 0x80U | 5U, 0x80U, 66, 67, 6, 68}, key);
 
     const auto path = root / "SNAKE.map";
     write_file(path, bytes);
@@ -107,11 +150,15 @@ int main() {
     assert(map->check_key == key);
     assert(map->width == width);
     assert(map->height == height);
-    assert(map->cell(0, 0)->bk_img == 11);
-    assert(map->cell(0, 0)->mid_img == 12);
-    assert(map->cell(0, 0)->fr_img == 13);
-    assert(map->cell(1, 0)->fr_img == 0x8001U);
-    assert(!map->can_move(1, 0));
+    expect_cell(map->cell(0, 0), 11, 12, 13, 14, 15, 16, 17, 1, 18);
+    expect_cell(map->cell(0, 1), 21, 22, 23, 24, 25, 26, 27, 2, 28);
+    expect_cell(map->cell(0, 2), 31, 32, 0x8001U, 34, 35, 36, 37, 3, 38);
+    expect_cell(map->cell(1, 0), 41, 42, 43, 44, 45, 46, 47, 4, 48);
+    expect_cell(map->cell(1, 1), 51, 52, 53, 0x80U | 5U, 0, 56, 57, 5, 58);
+    expect_cell(map->cell(1, 2), 61, 62, 63, 0x80U | 5U, 0x80U, 66, 67, 6, 68);
+    assert(!map->can_move(0, 2));
+    assert(!map->can_move(1, 1));
+    assert(map->can_move(1, 2));
   }
 
   {

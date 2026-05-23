@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -18,16 +19,23 @@
 
 namespace {
 
-std::filesystem::path resolve_root() {
+std::filesystem::path optional_asset_root() {
+  const auto* env = std::getenv("MIR2_ASSET_ROOT");
+  if (env != nullptr && *env != '\0') {
+    const std::filesystem::path env_root{env};
+    if (std::filesystem::exists(env_root / "Data") && std::filesystem::exists(env_root / "Map")) {
+      return env_root;
+    }
+  }
   const std::filesystem::path configured = LR"(F:\mir2\Legend of Mir)";
-  if (std::filesystem::exists(configured / "Data")) {
+  if (std::filesystem::exists(configured / "Data") && std::filesystem::exists(configured / "Map")) {
     return configured;
   }
   const auto local = std::filesystem::absolute("Legend of Mir");
-  if (std::filesystem::exists(local / "Data")) {
+  if (std::filesystem::exists(local / "Data") && std::filesystem::exists(local / "Map")) {
     return local;
   }
-  return configured;
+  return {};
 }
 
 void write_u16(std::vector<std::uint8_t>& bytes, const std::size_t offset,
@@ -36,27 +44,46 @@ void write_u16(std::vector<std::uint8_t>& bytes, const std::size_t offset,
   bytes[offset + 1U] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
 }
 
-void write_cell(std::vector<std::uint8_t>& bytes, const int height, const int x, const int y,
-                const std::uint16_t bk_img, const std::uint16_t mid_img,
-                const std::uint16_t fr_img, const std::uint8_t door_index,
-                const std::uint8_t door_offset, const std::uint8_t ani_frame,
-                const std::uint8_t ani_tick, const std::uint8_t area,
-                const std::uint8_t light) {
-  constexpr std::size_t kMapHeaderSize = 52U;
+void write_cell(std::vector<std::uint8_t>& bytes, const std::size_t header_size,
+                const int height, const int x, const int y,
+                const mir2::client::MapCell cell, const std::uint16_t key = 0) {
   constexpr std::size_t kMapCellSize = 12U;
-  const auto source = kMapHeaderSize +
+  const auto source = header_size +
       (static_cast<std::size_t>(x) * static_cast<std::size_t>(height) +
        static_cast<std::size_t>(y)) *
           kMapCellSize;
-  write_u16(bytes, source, bk_img);
-  write_u16(bytes, source + 2U, mid_img);
-  write_u16(bytes, source + 4U, fr_img);
-  bytes[source + 6U] = door_index;
-  bytes[source + 7U] = door_offset;
-  bytes[source + 8U] = ani_frame;
-  bytes[source + 9U] = ani_tick;
-  bytes[source + 10U] = area;
-  bytes[source + 11U] = light;
+  write_u16(bytes, source, cell.bk_img ^ key);
+  write_u16(bytes, source + 2U, cell.mid_img ^ key);
+  write_u16(bytes, source + 4U, cell.fr_img ^ key);
+  bytes[source + 6U] = cell.door_index;
+  bytes[source + 7U] = cell.door_offset;
+  bytes[source + 8U] = cell.ani_frame;
+  bytes[source + 9U] = cell.ani_tick;
+  bytes[source + 10U] = cell.area;
+  bytes[source + 11U] = cell.light;
+}
+
+void write_file(const std::filesystem::path& path, const std::vector<std::uint8_t>& bytes) {
+  std::ofstream file(path, std::ios::binary);
+  file.write(reinterpret_cast<const char*>(bytes.data()),
+             static_cast<std::streamsize>(bytes.size()));
+}
+
+void expect_cell(const mir2::client::MapCell* cell, const std::uint16_t bk_img,
+                 const std::uint16_t mid_img, const std::uint16_t fr_img,
+                 const std::uint8_t door_index, const std::uint8_t door_offset,
+                 const std::uint8_t ani_frame, const std::uint8_t ani_tick,
+                 const std::uint8_t area, const std::uint8_t light) {
+  assert(cell != nullptr);
+  assert(cell->bk_img == bk_img);
+  assert(cell->mid_img == mid_img);
+  assert(cell->fr_img == fr_img);
+  assert(cell->door_index == door_index);
+  assert(cell->door_offset == door_offset);
+  assert(cell->ani_frame == ani_frame);
+  assert(cell->ani_tick == ani_tick);
+  assert(cell->area == area);
+  assert(cell->light == light);
 }
 
 std::filesystem::path write_alignment_map_root() {
@@ -64,19 +91,41 @@ std::filesystem::path write_alignment_map_root() {
   std::filesystem::create_directories(root / "Data");
   std::filesystem::create_directories(root / "Map");
 
-  constexpr int width = 3;
-  constexpr int height = 2;
-  std::vector<std::uint8_t> bytes(52U + width * height * 12U);
-  write_u16(bytes, 0U, width);
-  write_u16(bytes, 2U, height);
+  {
+    constexpr int width = 3;
+    constexpr int height = 2;
+    constexpr std::size_t header_size = 52U;
+    std::vector<std::uint8_t> bytes(header_size + width * height * 12U);
+    write_u16(bytes, 0U, width);
+    write_u16(bytes, 2U, height);
 
-  write_cell(bytes, height, 0, 0, 2, 3, 4, 5, 6, 7, 8, 1, 9);
-  write_cell(bytes, height, 1, 0, 0, 0, 0x8000U, 0, 0, 0, 0, 0, 0);
-  write_cell(bytes, height, 2, 1, 0, 0, 10, 0x80U, 0x80U, 0, 0, 6, 11);
+    write_cell(bytes, header_size, height, 0, 0, {2, 3, 4, 5, 6, 7, 8, 1, 9});
+    write_cell(bytes, header_size, height, 0, 1, {0x8001U, 20, 30, 0, 0, 0, 0, 0, 0});
+    write_cell(bytes, header_size, height, 1, 0, {40, 50, 0x8002U, 0, 0, 0, 0, 0, 0});
+    write_cell(bytes, header_size, height, 1, 1, {60, 70, 80, 0x80U | 3U, 0, 9, 10, 2, 11});
+    write_cell(bytes, header_size, height, 2, 0, {90, 100, 110, 0x80U | 3U, 0x80U, 12, 13, 3, 14});
+    write_cell(bytes, header_size, height, 2, 1, {120, 130, 140, 4, 5, 15, 16, 6, 17});
+    write_file(root / "Map" / "phase1.map", bytes);
+  }
 
-  std::ofstream file(root / "Map" / "phase1.map", std::ios::binary);
-  file.write(reinterpret_cast<const char*>(bytes.data()),
-             static_cast<std::streamsize>(bytes.size()));
+  {
+    constexpr int width = 2;
+    constexpr int height = 3;
+    constexpr std::uint16_t key = 0xAA55U;
+    constexpr std::size_t header_size = 64U;
+    std::vector<std::uint8_t> bytes(header_size + width * height * 12U);
+    write_u16(bytes, 31U, width ^ key);
+    write_u16(bytes, 33U, key);
+    write_u16(bytes, 35U, height ^ key);
+
+    write_cell(bytes, header_size, height, 0, 0, {11, 12, 13, 14, 15, 16, 17, 1, 18}, key);
+    write_cell(bytes, header_size, height, 0, 1, {21, 22, 23, 24, 25, 26, 27, 2, 28}, key);
+    write_cell(bytes, header_size, height, 0, 2, {31, 32, 0x8001U, 34, 35, 36, 37, 3, 38}, key);
+    write_cell(bytes, header_size, height, 1, 0, {41, 42, 43, 44, 45, 46, 47, 4, 48}, key);
+    write_cell(bytes, header_size, height, 1, 1, {51, 52, 53, 0x80U | 5U, 0, 56, 57, 5, 58}, key);
+    write_cell(bytes, header_size, height, 1, 2, {61, 62, 63, 0x80U | 5U, 0x80U, 66, 67, 6, 68}, key);
+    write_file(root / "Map" / "SNAKE.map", bytes);
+  }
   return root;
 }
 
@@ -270,22 +319,34 @@ int main() {
   assert(phase1_map != nullptr);
   assert(phase1_map->width == 3);
   assert(phase1_map->height == 2);
-  const auto* first = phase1_map->cell(0, 0);
-  assert(first != nullptr);
-  assert(first->bk_img == 2);
-  assert(first->mid_img == 3);
-  assert(first->fr_img == 4);
-  assert(first->door_index == 5);
-  assert(first->door_offset == 6);
-  assert(first->ani_frame == 7);
-  assert(first->ani_tick == 8);
-  assert(first->area == 1);
-  assert(first->light == 9);
+  expect_cell(phase1_map->cell(0, 0), 2, 3, 4, 5, 6, 7, 8, 1, 9);
+  expect_cell(phase1_map->cell(0, 1), 0x8001U, 20, 30, 0, 0, 0, 0, 0, 0);
+  expect_cell(phase1_map->cell(1, 0), 40, 50, 0x8002U, 0, 0, 0, 0, 0, 0);
+  expect_cell(phase1_map->cell(1, 1), 60, 70, 80, 0x80U | 3U, 0, 9, 10, 2, 11);
+  expect_cell(phase1_map->cell(2, 0), 90, 100, 110, 0x80U | 3U, 0x80U, 12, 13, 3, 14);
+  expect_cell(phase1_map->cell(2, 1), 120, 130, 140, 4, 5, 15, 16, 6, 17);
   assert(phase1_map->cell(-1, 0) == nullptr);
   assert(phase1_map->cell(3, 0) == nullptr);
   assert(phase1_map->can_move(0, 0));
   assert(!phase1_map->can_move(1, 0));
+  assert(!phase1_map->can_move(0, 1));
+  assert(!phase1_map->can_move(1, 1));
+  assert(phase1_map->can_move(2, 0));
   assert(phase1_map->can_move(2, 1));
+
+  const auto snake_map = temp_assets.load_map("SNAKE");
+  assert(snake_map != nullptr);
+  assert(snake_map->width == 2);
+  assert(snake_map->height == 3);
+  expect_cell(snake_map->cell(0, 0), 11, 12, 13, 14, 15, 16, 17, 1, 18);
+  expect_cell(snake_map->cell(0, 1), 21, 22, 23, 24, 25, 26, 27, 2, 28);
+  expect_cell(snake_map->cell(0, 2), 31, 32, 0x8001U, 34, 35, 36, 37, 3, 38);
+  expect_cell(snake_map->cell(1, 0), 41, 42, 43, 44, 45, 46, 47, 4, 48);
+  expect_cell(snake_map->cell(1, 1), 51, 52, 53, 0x80U | 5U, 0, 56, 57, 5, 58);
+  expect_cell(snake_map->cell(1, 2), 61, 62, 63, 0x80U | 5U, 0x80U, 66, 67, 6, 68);
+  assert(!snake_map->can_move(0, 2));
+  assert(!snake_map->can_move(1, 1));
+  assert(snake_map->can_move(1, 2));
 
   MapCell object_cell;
   object_cell.fr_img = 100;
@@ -314,23 +375,44 @@ int main() {
   object_cell.door_index = 1;
   object_cell.door_offset = 0x82U;
   assert(legacy_map_object_frame(object_cell, 0) == 101);
+  object_cell.fr_img = 0x8064U;
+  object_cell.door_index = 0;
+  object_cell.door_offset = 0;
+  assert(legacy_map_object_frame(object_cell, 0) == 99);
+  object_cell.door_index = 1;
+  object_cell.door_offset = 0x02U;
+  assert(legacy_map_object_frame(object_cell, 0) == 99);
+  object_cell.door_index = 0;
+  object_cell.door_offset = 0x82U;
+  assert(legacy_map_object_frame(object_cell, 0) == 99);
 
-  AssetManager assets;
-  assert(assets.initialize(resolve_root()));
-  const auto map0 = assets.load_map("0");
-  assert(map0 != nullptr);
-  assert(map0->width > 0);
-  assert(map0->height > 0);
-  assert(map0->cell(0, 0) != nullptr);
-  assert(first_decodable_frame(assets, ArchiveId::tiles, 32) != nullptr);
-  assert(first_decodable_frame(assets, ArchiveId::sm_tiles, 128) != nullptr);
-  assert(first_decodable_frame(assets, ArchiveId::objects1, 512) != nullptr);
-  assert(first_decodable_frame(assets, ArchiveId::dn_items, 4096) != nullptr);
-  assert(first_decodable_frame(assets, ArchiveId::effect, 512) != nullptr);
-  assert(assets.get_frame(ArchiveId::tiles, 9999999) == nullptr);
-  assert(assets.get_frame(ArchiveId::tiles, 9999999) == nullptr);
+  if (const auto real_root = optional_asset_root(); !real_root.empty()) {
+    AssetManager assets;
+    assert(assets.initialize(real_root));
+    const auto map0 = assets.load_map("0");
+    const auto map3 = assets.load_map("3");
+    assert(map0 != nullptr);
+    assert(map3 != nullptr);
+    assert(map0->width > 0);
+    assert(map0->height > 0);
+    assert(map3->width > 0);
+    assert(map3->height > 0);
+    assert(map0->cell(0, 0) != nullptr);
+    assert(map3->cell(0, 0) != nullptr);
+    assert(first_decodable_frame(assets, ArchiveId::tiles, 32) != nullptr);
+    assert(first_decodable_frame(assets, ArchiveId::sm_tiles, 128) != nullptr);
+    assert(first_decodable_frame(assets, ArchiveId::objects1, 512) != nullptr);
+    assert(first_decodable_frame(assets, ArchiveId::dn_items, 4096) != nullptr);
+    assert(first_decodable_frame(assets, ArchiveId::effect, 512) != nullptr);
+    assert(assets.get_frame(ArchiveId::tiles, 9999999) == nullptr);
+    assert(assets.get_frame(ArchiveId::tiles, 9999999) == nullptr);
+    std::cout << "real_maps=0:" << map0->width << "x" << map0->height
+              << " 3:" << map3->width << "x" << map3->height << '\n';
+  } else {
+    std::cout << "real_asset_root=skip set MIR2_ASSET_ROOT to enable real map/resource checks\n";
+  }
 
-  std::cout << "phase4_map=" << phase1_map->width << "x" << phase1_map->height
-            << " map0=" << map0->width << "x" << map0->height << '\n';
+  std::cout << "phase1_map=" << phase1_map->width << "x" << phase1_map->height
+            << " snake_map=" << snake_map->width << "x" << snake_map->height << '\n';
   return 0;
 }

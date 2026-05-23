@@ -8,6 +8,7 @@ namespace mir2::client {
 class LegacyFrameScheduler {
  public:
   struct Hooks {
+    std::function<void()> legacy_input_dispatch;
     std::function<void()> timer1_network_drain;
     std::function<void()> capture_ui_input;
     std::function<void()> process_key_messages;
@@ -24,7 +25,15 @@ class LegacyFrameScheduler {
   };
 
   void run_frame(float delta_seconds, const Hooks& hooks) {
+    call(hooks.legacy_input_dispatch);
     call(hooks.timer1_network_drain);
+    const auto can_draw = hooks.can_draw == nullptr || hooks.can_draw();
+    if (!can_draw) {
+      call(hooks.process_key_messages);
+      call(hooks.process_action_messages);
+      call(hooks.scene_run);
+    }
+
     call(hooks.capture_ui_input);
     call(hooks.process_key_messages);
     call(hooks.process_action_messages);
@@ -32,7 +41,6 @@ class LegacyFrameScheduler {
 
     render_elapsed_ms_ += std::max(0.0F, delta_seconds) * 1000.0F;
     const auto render_due = render_elapsed_ms_ >= kFrameIntervalMs;
-    const auto can_draw = hooks.can_draw == nullptr || hooks.can_draw();
     if (render_due && can_draw) {
       render_elapsed_ms_ = 0.0F;
       call(hooks.draw_screen);

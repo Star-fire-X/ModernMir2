@@ -11,12 +11,12 @@
 // 进行网络通信，使用 DirectDraw 7 进行 2D 渲染。
 //
 // 本客户端的主循环流程（每帧）：
-//   1. pump_messages()       — 处理 Win32 窗口消息
-//   2. protocol_.poll()      — 非阻塞网络 I/O 轮询
-//   3. handle_protocol_events() — 处理收到的网络事件
-//   4. refresh_mapped_input()   — 更新输入状态
-//   5. update()              — 驱动场景逻辑更新
-//   6. render()              — 渲染场景并呈现到屏幕
+//   1. pump_messages()          — 处理 Win32 窗口消息并保留 raw 输入顺序
+//   2. refresh_mapped_input()   — 更新逻辑坐标输入状态
+//   3. legacy_input_dispatch()  — 复刻 VCL 消息副作用
+//   4. protocol_.poll()         — Timer1 风格网络 drain 和协议分发
+//   5. key/action/dwin/scene    — 按 Delphi 帧阶段驱动场景
+//   6. draw/direct/top/hint/flip — 渲染并呈现到屏幕
 // ============================================================
 #pragma once
 
@@ -161,9 +161,11 @@ class ClientApp {
   void handle_auto_character_list();
   void handle_protocol_events(ClientContext& context);
   void flush_scene_change_if_pending(ClientContext& context);
+  void dispatch_legacy_input_events(ClientContext& context);
   void capture_ui_input(ClientContext& context);
   void dwin_process(ClientContext& context);
   void process_modal_input();
+  void process_modal_input(const InputState& input);
   [[nodiscard]] bool can_draw_frame() const;
   /// 将窗口输入的像素坐标转换为逻辑坐标（考虑缩放）
   void refresh_mapped_input();
