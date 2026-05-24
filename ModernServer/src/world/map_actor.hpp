@@ -127,6 +127,8 @@ class MapActor {
       std::uint64_t actor_id) const;
   [[nodiscard]] std::int64_t legacy_player_run_time_ms(std::uint64_t actor_id) const;
   [[nodiscard]] std::optional<CharacterRecord> snapshot_player(std::uint64_t actor_id) const;
+  [[nodiscard]] std::optional<CharacterRecord> persistent_snapshot_player(
+      std::uint64_t actor_id) const;
   [[nodiscard]] std::optional<MonsterSnapshot> legacy_monster_snapshot(
       std::uint64_t actor_id) const;
   [[nodiscard]] bool legacy_set_player_slave_relax(std::uint64_t actor_id, bool value);

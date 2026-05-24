@@ -1554,6 +1554,14 @@ std::optional<CharacterRecord> MapActor::snapshot_player(std::uint64_t actor_id)
   return player->snapshot();
 }
 
+std::optional<CharacterRecord> MapActor::persistent_snapshot_player(std::uint64_t actor_id) const {
+  const auto* player = find_player(actor_id);
+  if (player == nullptr) {
+    return std::nullopt;
+  }
+  return player->persistent_snapshot();
+}
+
 RuntimeDispatch MapActor::legacy_spawn_player(const ActorMail& mail,
                                               std::uint64_t current_tick,
                                               std::uint64_t now_ms,

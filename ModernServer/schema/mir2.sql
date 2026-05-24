@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS characters (
   slave_blob BLOB NOT NULL DEFAULT X'',
   body_luck REAL NOT NULL DEFAULT 0,
   birth_items_granted INTEGER NOT NULL DEFAULT 0,
+  save_version INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (account_id, character_name),
   FOREIGN KEY (account_id) REFERENCES accounts(account_id)

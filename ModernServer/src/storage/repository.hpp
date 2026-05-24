@@ -62,7 +62,7 @@ class Repository {
   [[nodiscard]] bool create_character(const CharacterRecord& character);
   [[nodiscard]] bool delete_character(const std::string& account_id,
                                       const std::string& character_name);
-  void save_character(const CharacterRecord& character);
+  bool save_character(const CharacterRecord& character);
   void record_legacy_import(const LegacyImportRecord& record);
   [[nodiscard]] std::size_t count_legacy_import_records();
   void record_audit(const AuditEvent& audit);
