@@ -75,6 +75,27 @@ void bind_text(sqlite3_stmt* statement, int index, const std::string& value) {
   sqlite3_bind_text(statement, index, value.c_str(), -1, SQLITE_TRANSIENT);
 }
 
+std::optional<std::uint64_t> load_save_version(sqlite3* database, const std::string& account_id,
+                                               const std::string& character_name,
+                                               const char* table_name) {
+  sqlite3_stmt* statement = nullptr;
+  const auto sql = std::string("SELECT save_version FROM ") + table_name +
+                   " WHERE account_id = ?1 AND character_name = ?2 LIMIT 1;";
+  if (sqlite3_prepare_v2(database, sql.c_str(), -1, &statement, nullptr) != SQLITE_OK) {
+    throw std::runtime_error("Failed to prepare save_version statement.");
+  }
+
+  bind_text(statement, 1, account_id);
+  bind_text(statement, 2, character_name);
+  std::optional<std::uint64_t> version;
+  if (sqlite3_step(statement) == SQLITE_ROW) {
+    version =
+        static_cast<std::uint64_t>(std::max<sqlite3_int64>(0, sqlite3_column_int64(statement, 0)));
+  }
+  finalize_statement(statement);
+  return version;
+}
+
 template <typename T, std::size_t N>
 void bind_blob_array(sqlite3_stmt* statement, int index, const std::array<T, N>& values) {
   sqlite3_bind_blob(statement, index, values.data(), static_cast<int>(sizeof(values)),
@@ -1586,6 +1607,13 @@ std::vector<CharacterRecord> Repository::list_characters(const std::string& acco
 
 bool Repository::create_character(const CharacterRecord& character) {
   ensure_account(database_, character.account_id);
+  auto character_to_create = character;
+  const auto tombstone_version =
+      load_save_version(database_, character.account_id, character.character_name,
+                        "character_save_tombstones");
+  if (tombstone_version.has_value() && *tombstone_version >= character_to_create.save_version) {
+    character_to_create.save_version = *tombstone_version + 1;
+  }
 
   static constexpr const char* kSql =
       "INSERT INTO characters(account_id, character_name, map_id, x, y, dir, light, job, sex, hair,"
@@ -1603,7 +1631,7 @@ bool Repository::create_character(const CharacterRecord& character) {
     throw std::runtime_error("Failed to prepare create_character statement.");
   }
 
-  bind_character_fields(statement, character);
+  bind_character_fields(statement, character_to_create);
 
   const auto result = sqlite3_step(statement);
   finalize_statement(statement);
@@ -1611,24 +1639,68 @@ bool Repository::create_character(const CharacterRecord& character) {
 }
 
 bool Repository::delete_character(const std::string& account_id, const std::string& character_name) {
-  static constexpr const char* kSql =
-      "DELETE FROM characters WHERE account_id = ?1 AND character_name = ?2;";
-
-  sqlite3_stmt* statement = nullptr;
-  if (sqlite3_prepare_v2(database_, kSql, -1, &statement, nullptr) != SQLITE_OK) {
-    throw std::runtime_error("Failed to prepare delete_character statement.");
+  const auto save_version =
+      load_save_version(database_, account_id, character_name, "characters");
+  if (!save_version.has_value()) {
+    return false;
   }
+  exec_or_throw(database_, "BEGIN IMMEDIATE;");
+  bool deleted = false;
+  try {
+    static constexpr const char* kTombstoneSql =
+        "INSERT INTO character_save_tombstones(account_id, character_name, save_version, deleted_at)"
+        " VALUES(?1, ?2, ?3, CURRENT_TIMESTAMP)"
+        " ON CONFLICT(account_id, character_name) DO UPDATE SET"
+        " save_version = MAX(character_save_tombstones.save_version, excluded.save_version),"
+        " deleted_at = CURRENT_TIMESTAMP;";
+    static constexpr const char* kDeleteSql =
+        "DELETE FROM characters WHERE account_id = ?1 AND character_name = ?2;";
 
-  bind_text(statement, 1, account_id);
-  bind_text(statement, 2, character_name);
-  const auto result = sqlite3_step(statement);
-  const auto changes = sqlite3_changes(database_);
-  finalize_statement(statement);
-  return result == SQLITE_DONE && changes > 0;
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2(database_, kTombstoneSql, -1, &statement, nullptr) != SQLITE_OK) {
+      throw std::runtime_error("Failed to prepare delete_character tombstone statement.");
+    }
+    bind_text(statement, 1, account_id);
+    bind_text(statement, 2, character_name);
+    sqlite3_bind_int64(statement, 3, static_cast<sqlite3_int64>(*save_version));
+    if (sqlite3_step(statement) != SQLITE_DONE) {
+      finalize_statement(statement);
+      throw std::runtime_error("Failed to execute delete_character tombstone statement.");
+    }
+    finalize_statement(statement);
+
+    if (sqlite3_prepare_v2(database_, kDeleteSql, -1, &statement, nullptr) != SQLITE_OK) {
+      throw std::runtime_error("Failed to prepare delete_character statement.");
+    }
+
+    bind_text(statement, 1, account_id);
+    bind_text(statement, 2, character_name);
+    const auto result = sqlite3_step(statement);
+    const auto changes = sqlite3_changes(database_);
+    finalize_statement(statement);
+    if (result != SQLITE_DONE) {
+      throw std::runtime_error("Failed to execute delete_character statement.");
+    }
+    deleted = changes > 0;
+    exec_or_throw(database_, deleted ? "COMMIT;" : "ROLLBACK;");
+  } catch (...) {
+    try {
+      exec_or_throw(database_, "ROLLBACK;");
+    } catch (...) {
+    }
+    throw;
+  }
+  return deleted;
 }
 
 bool Repository::save_character(const CharacterRecord& character) {
   ensure_account(database_, character.account_id);
+  const auto tombstone_version =
+      load_save_version(database_, character.account_id, character.character_name,
+                        "character_save_tombstones");
+  if (tombstone_version.has_value() && *tombstone_version >= character.save_version) {
+    return false;
+  }
 
   static constexpr const char* kSql =
       "INSERT INTO characters(account_id, character_name, map_id, x, y, dir, light, job, sex, hair,"

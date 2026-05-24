@@ -108,7 +108,24 @@ bool stale_save_is_rejected(const std::filesystem::path& source_root,
     return false;
   }
   loaded = repository.load_character("guest", "VersionHero");
-  return loaded.has_value() && loaded->gold == 300 && loaded->save_version == 2;
+  if (!loaded.has_value() || loaded->gold != 300 || loaded->save_version != 2) {
+    return false;
+  }
+
+  if (!repository.delete_character("guest", "VersionHero")) {
+    return false;
+  }
+  if (repository.save_character(stale) || repository.save_character(equal) ||
+      repository.load_character("guest", "VersionHero").has_value()) {
+    return false;
+  }
+
+  auto recreated = make_character(400, 0);
+  if (!repository.create_character(recreated)) {
+    return false;
+  }
+  loaded = repository.load_character("guest", "VersionHero");
+  return loaded.has_value() && loaded->gold == 400 && loaded->save_version == 3;
 }
 
 }  // namespace

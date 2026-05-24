@@ -3063,7 +3063,7 @@ std::optional<CharacterRecord> LogicRuntime::snapshot_character_actor(
   return map_it->second->snapshot_player(located->second);
 }
 
-std::vector<CharacterRecord> LogicRuntime::snapshot_online_characters() const {
+std::vector<CharacterRecord> LogicRuntime::snapshot_online_characters() {
   std::vector<CharacterRecord> characters;
   characters.reserve(session_index_.size());
   for (const auto& [_, locator] : session_index_) {
@@ -3071,7 +3071,7 @@ std::vector<CharacterRecord> LogicRuntime::snapshot_online_characters() const {
     if (map_it == maps_.end()) {
       continue;
     }
-    if (auto character = map_it->second->persistent_snapshot_player(locator.actor_id);
+    if (auto character = map_it->second->persistent_snapshot_player(locator.actor_id, last_now_ms_);
         character.has_value()) {
       characters.push_back(*character);
     }
