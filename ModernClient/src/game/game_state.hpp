@@ -239,6 +239,16 @@ struct PendingItemActionState {
   std::uint64_t started_ms{0};
 };
 
+struct PendingActionAckState {
+  std::uint16_t action_ident{0};
+  std::uint8_t dir{0};
+  bool rollback_position{false};
+  int old_x{0};
+  int old_y{0};
+  std::uint8_t old_dir{0};
+  std::uint64_t lock_started_ms{0};
+};
+
 /// 聊天板行：对应 Delphi DScreen.ChatStrs + ChatBks
 struct ChatLineState {
   std::string text{};
@@ -503,6 +513,8 @@ struct WorldViewState {
   std::uint64_t fail_action_time_ms{0};
   std::uint16_t last_sent_action_ident{0};
   std::uint8_t last_sent_action_dir{0};
+  std::deque<PendingActionAckState> pending_action_acks{};
+  bool skip_next_move_fail_ack{false};
   std::uint64_t dizzy_delay_start_ms{0};
   std::uint64_t dizzy_delay_time_ms{0};
   int skip_tick{0};
@@ -563,6 +575,8 @@ inline bool server_accept_next_action(WorldViewState& world, const std::uint64_t
   if (elapsed_ms(now, world.action_lock_started_ms) > 10000U) {
     world.action_locked = false;
     world.action_lock_timeout_cleared_ms = now;
+    world.pending_action_acks.clear();
+    world.skip_next_move_fail_ack = false;
     return false;
   }
   return false;
@@ -674,19 +688,32 @@ inline bool is_unlock_action(WorldViewState& world, const std::uint16_t action_i
   return true;
 }
 
+inline bool is_queued_move_action(const std::uint16_t action_ident) {
+  return action_ident == static_cast<std::uint16_t>(3000U + legacy::kSmWalk) ||
+         action_ident == static_cast<std::uint16_t>(3000U + legacy::kSmRun);
+}
+
 inline void legacy_action_failed(WorldViewState& world, ActorState& self,
-                                 const std::uint64_t now) {
+                                 const std::uint64_t now,
+                                 const PendingActionAckState* pending_ack = nullptr) {
   world.legacy_target_x = -1;
   world.legacy_target_y = -1;
   world.legacy_chr_action = LegacyChrAction::none;
   world.action_fail_lock = true;
-  world.fail_action_ident = world.last_sent_action_ident;
-  world.fail_dir = world.last_sent_action_dir;
+  world.fail_action_ident =
+      pending_ack != nullptr ? pending_ack->action_ident : world.last_sent_action_ident;
+  world.fail_dir = pending_ack != nullptr ? pending_ack->dir : world.last_sent_action_dir;
   world.fail_action_time_ms = now;
-  self.x = self.legacy_has_old_position ? self.legacy_old_x : self.from_x;
-  self.y = self.legacy_has_old_position ? self.legacy_old_y : self.from_y;
-  if (self.legacy_has_old_position) {
-    self.dir = self.legacy_old_dir;
+  if (pending_ack != nullptr && pending_ack->rollback_position) {
+    self.x = pending_ack->old_x;
+    self.y = pending_ack->old_y;
+    self.dir = pending_ack->old_dir;
+  } else {
+    self.x = self.legacy_has_old_position ? self.legacy_old_x : self.from_x;
+    self.y = self.legacy_has_old_position ? self.legacy_old_y : self.from_y;
+    if (self.legacy_has_old_position) {
+      self.dir = self.legacy_old_dir;
+    }
   }
   self.from_x = self.x;
   self.from_y = self.y;
@@ -963,8 +990,8 @@ struct GameStateStore {
         world.latest_struck_ms = actor.action_started_ms;
       }
     }
-    if (actor.actor_id == world.self_actor_id &&
-        (legacy_ident == legacy::kSmRush || legacy_ident == legacy::kSmRushKung)) {
+    // Delphi ClMain.pas updates LatestRushRushTime only for SM_RUSH, not SM_RUSHKUNG.
+    if (actor.actor_id == world.self_actor_id && legacy_ident == legacy::kSmRush) {
       world.latest_rush_rush_ms = actor.action_started_ms;
     }
   }
@@ -1375,6 +1402,8 @@ struct GameStateStore {
     world.action_lock_timeout_cleared_ms = 0;
     world.last_sent_action_ident = 0;
     world.last_sent_action_dir = 0;
+    world.pending_action_acks.clear();
+    world.skip_next_move_fail_ack = false;
     world.dizzy_delay_start_ms = 0;
     world.dizzy_delay_time_ms = 0;
     world.skip_tick = 0;
@@ -1427,6 +1456,8 @@ struct GameStateStore {
     world.action_lock_timeout_cleared_ms = 0;
     world.last_sent_action_ident = 0;
     world.last_sent_action_dir = 0;
+    world.pending_action_acks.clear();
+    world.skip_next_move_fail_ack = false;
     world.legacy_target_x = -1;
     world.legacy_target_y = -1;
     world.legacy_chr_action = LegacyChrAction::none;
@@ -2046,14 +2077,51 @@ struct GameStateStore {
   /// ok=true 表示服务端接受了动作；ok=false 表示拒绝，
   /// 客户端需要回滚到动作之前的状态。
   void apply(const client_v1::ActionAck& message) {
-    world.action_locked = false;
+    const auto ack_ms = detail::monotonic_ms();
+    const auto skip_duplicate_move_fail =
+        !message.ok && message.server_time_ms == 0 && world.skip_next_move_fail_ack &&
+        !world.pending_action_acks.empty() &&
+        !world.pending_action_acks.front().rollback_position;
     world.action_lock_timeout_cleared_ms = 0;
-    world.last_action_ack_ms = detail::monotonic_ms();
+    world.last_action_ack_ms = ack_ms;
     world.last_action_ack_ok = message.ok;
+    if (skip_duplicate_move_fail) {
+      world.skip_next_move_fail_ack = false;
+      return;
+    }
+    world.skip_next_move_fail_ack = false;
+    PendingActionAckState pending_ack;
+    const bool has_pending_ack = !world.pending_action_acks.empty();
+    if (has_pending_ack) {
+      pending_ack = world.pending_action_acks.front();
+      world.pending_action_acks.pop_front();
+    }
+    world.action_locked = !world.pending_action_acks.empty();
+    if (world.action_locked) {
+      world.action_lock_started_ms = world.pending_action_acks.front().lock_started_ms;
+    }
+    if (!message.ok && has_pending_ack && pending_ack.rollback_position &&
+        is_queued_move_action(pending_ack.action_ident) && message.server_time_ms != 0 &&
+        !world.pending_action_acks.empty()) {
+      world.skip_next_move_fail_ack = true;
+    }
     // 动作被服务端拒绝时，客户端需要回滚
     if (!message.ok) {
       if (auto it = world.actors.find(world.self_actor_id); it != world.actors.end()) {
-        legacy_action_failed(world, it->second, world.last_action_ack_ms);
+        if (has_pending_ack && !pending_ack.rollback_position) {
+          const auto preserve_fail_lock =
+              world.action_fail_lock &&
+              elapsed_ms(world.last_action_ack_ms, world.fail_action_time_ms) < 1000U;
+          if (!preserve_fail_lock) {
+            world.action_fail_lock = true;
+            world.fail_action_ident = pending_ack.action_ident;
+            world.fail_dir = pending_ack.dir;
+            world.fail_action_time_ms = world.last_action_ack_ms;
+          }
+        } else {
+          legacy_action_failed(world, it->second, world.last_action_ack_ms,
+                               has_pending_ack ? &pending_ack : nullptr);
+        }
       }
     }
   }
