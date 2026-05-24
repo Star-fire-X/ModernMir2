@@ -4,6 +4,13 @@
 #include <utility>
 
 namespace mir2 {
+namespace {
+
+bool elapsed_gt(std::uint64_t now_ms, std::uint64_t start_ms, std::uint64_t interval_ms) {
+  return now_ms - start_ms > interval_ms;
+}
+
+}  // namespace
 
 std::uint64_t LegacyEventManager::enqueue(LegacyEventRecord record, std::uint64_t now_ms) {
   if (record.skip_if_occupied && has_active_event(record.map_id, record.x, record.y)) {
@@ -95,9 +102,9 @@ LegacyEventManagerRun LegacyEventManager::run(std::uint64_t now_ms,
                                               std::uint64_t current_tick) {
   LegacyEventManagerRun result;
   for (auto group_it = holy_groups_.begin(); group_it != holy_groups_.end();) {
-    const auto expired =
-        (group_it->seize_ms > 0 && now_ms > group_it->open_start_ms + group_it->seize_ms) ||
-        now_ms > group_it->open_start_ms + 3ULL * 60ULL * 1000ULL;
+    const auto expired = (group_it->seize_ms > 0 &&
+                          elapsed_gt(now_ms, group_it->open_start_ms, group_it->seize_ms)) ||
+                         elapsed_gt(now_ms, group_it->open_start_ms, 3ULL * 60ULL * 1000ULL);
     if (expired) {
       add_group_trace(result.dispatch, *group_it, "holy_group_close", now_ms, current_tick);
       close_holy_group_events(*group_it, result, now_ms, current_tick);
@@ -110,16 +117,17 @@ LegacyEventManagerRun LegacyEventManager::run(std::uint64_t now_ms,
   std::size_t index = 0;
   while (index < active_events_.size()) {
     auto& event = active_events_[index];
-    if (event.active && !event.closed && now_ms > event.run_start_ms + event.run_tick_ms) {
+    if (event.active && !event.closed && elapsed_gt(now_ms, event.run_start_ms,
+                                                    event.run_tick_ms)) {
       event.run_start_ms = now_ms;
       add_trace(result.dispatch, event, "run", now_ms, current_tick);
       if (event.type == LegacyEventType::fire_burn &&
-          (event.last_damage_ms == 0 || now_ms > event.last_damage_ms + 3000ULL)) {
+          (event.last_damage_ms == 0 || elapsed_gt(now_ms, event.last_damage_ms, 3000ULL))) {
         event.last_damage_ms = now_ms;
         add_trace(result.dispatch, event, "fire_tick", now_ms, current_tick);
         result.fire_burn_events.push_back(event);
       }
-      if (event.continue_ms > 0 && now_ms > event.open_start_ms + event.continue_ms) {
+      if (elapsed_gt(now_ms, event.open_start_ms, event.continue_ms)) {
         close_event_at(index, result, now_ms, current_tick);
         continue;
       }
@@ -129,7 +137,7 @@ LegacyEventManagerRun LegacyEventManager::run(std::uint64_t now_ms,
 
   constexpr std::uint64_t kClosedTtlMs = 5ULL * 60ULL * 1000ULL;
   for (auto it = closed_events_.begin(); it != closed_events_.end(); ++it) {
-    if (now_ms > it->close_time_ms + kClosedTtlMs) {
+    if (elapsed_gt(now_ms, it->close_time_ms, kClosedTtlMs)) {
       add_trace(result.dispatch, *it, "cleanup_closed", now_ms, current_tick);
       result.cleaned_events.push_back(*it);
       closed_events_.erase(it);
@@ -143,12 +151,16 @@ std::string LegacyEventManager::type_name(LegacyEventType type) const {
   switch (type) {
     case LegacyEventType::stone_mine:
       return "stone_mine";
+    case LegacyEventType::digout_zombi:
+      return "digout_zombi";
     case LegacyEventType::pile_stones:
       return "pile_stones";
     case LegacyEventType::holy_curtain:
       return "holy_curtain";
     case LegacyEventType::fire_burn:
       return "fire_burn";
+    case LegacyEventType::sculp_piece:
+      return "sculp_piece";
   }
   return "unknown";
 }
@@ -172,7 +184,7 @@ void LegacyEventManager::add_trace(RuntimeDispatch& dispatch, const LegacyEventR
       std::to_string(event.x) + "," + std::to_string(event.y),
       0,
       0,
-      0,
+      event.event_param,
       0,
       success});
 }
