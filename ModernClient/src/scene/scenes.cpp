@@ -7914,6 +7914,9 @@ class WorldScene final : public Scene {
       world.legacy_target_y = -1;
       world.legacy_chr_action = LegacyChrAction::none;
     }
+    if (input.left_pressed || input.right_pressed) {
+      world.action_key = -1;
+    }
 
     if (left_action) {
       if (world.focus_actor_id != 0 && world.focus_actor_id != world.self_actor_id) {
@@ -7936,13 +7939,9 @@ class WorldScene final : public Scene {
         try_attack_target(context, world.target_actor_id, input.tick);
         return;
       }
+      world.target_actor_id = 0;
       if (input.shift) {
         try_attack_ground(context, input.map_x, input.map_y, input.tick);
-        return;
-      }
-      if (world.focus_ground_item_id != 0) {
-        world.pending_pickup_item_id = world.focus_ground_item_id;
-        world.target_actor_id = 0;
         return;
       }
       if (input.map_x == self.x && input.map_y == self.y) {
@@ -8138,11 +8137,22 @@ class WorldScene final : public Scene {
       return false;
     }
     const auto animation_idle = self_actor_legacy_idle(world, now_ms);
-    if (!server_accept_next_action(world, now_ms) ||
-        !can_next_action(world, self_it->second, animation_idle, now_ms)) {
+    if (!server_accept_next_action(world, now_ms)) {
+      world.legacy_target_x = -1;
+      world.legacy_target_y = -1;
+      world.legacy_chr_action = LegacyChrAction::none;
+      return false;
+    }
+    if (!can_next_action(world, self_it->second, animation_idle, now_ms)) {
+      world.legacy_target_x = -1;
+      world.legacy_target_y = -1;
+      world.legacy_chr_action = LegacyChrAction::none;
       return false;
     }
     if (legacy_move_skip_due_to_slow(world)) {
+      world.legacy_target_x = -1;
+      world.legacy_target_y = -1;
+      world.legacy_chr_action = LegacyChrAction::none;
       return false;
     }
     const auto sent = send_move(context, self_it->second, world.legacy_target_x,
@@ -8380,23 +8390,36 @@ class WorldScene final : public Scene {
     }
     auto self_it = world.actors.find(world.self_actor_id);
     if (self_it == world.actors.end()) {
+      world.pending_pickup_item_id = 0;
       return false;
     }
     if (self_it->second.x == item_it->second.x && self_it->second.y == item_it->second.y) {
-      const auto sent = try_pickup(context, self_it->second, now_ms);
-      if (sent) {
+      const auto animation_idle = self_actor_legacy_idle(world, now_ms);
+      if (!server_accept_next_action(world, now_ms)) {
         world.pending_pickup_item_id = 0;
+        return false;
       }
-      return sent;
+      if (!can_next_action(world, self_it->second, animation_idle, now_ms)) {
+        world.pending_pickup_item_id = 0;
+        return false;
+      }
+      context.app->request_pickup(client_v1::PickupIntent{self_it->second.x, self_it->second.y});
+      world.pending_pickup_item_id = 0;
+      return true;
     }
     const auto animation_idle = self_actor_legacy_idle(world, now_ms);
-    if (!server_accept_next_action(world, now_ms) ||
-        !can_next_action(world, self_it->second, animation_idle, now_ms)) {
+    if (!server_accept_next_action(world, now_ms)) {
+      world.pending_pickup_item_id = 0;
+      return false;
+    }
+    if (!can_next_action(world, self_it->second, animation_idle, now_ms)) {
+      world.pending_pickup_item_id = 0;
       return false;
     }
     world.legacy_target_x = item_it->second.x;
     world.legacy_target_y = item_it->second.y;
     world.legacy_chr_action = LegacyChrAction::walk;
+    world.pending_pickup_item_id = 0;
     return false;
   }
 

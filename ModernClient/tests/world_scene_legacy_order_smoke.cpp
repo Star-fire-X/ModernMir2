@@ -262,8 +262,9 @@ void test_legacy_raw_input_events() {
   input.mouse_x = stale_mouse_x;
   input.mouse_y = stale_mouse_y;
   scenes.process_action_messages(context, 0.016F);
-  assert(world.legacy_target_x == 52);
-  assert(world.legacy_target_y == 50);
+  assert(world.legacy_target_x == -1);
+  assert(world.legacy_target_y == -1);
+  assert(world.legacy_chr_action == mir2::client::LegacyChrAction::none);
   world.action_locked = false;
   world.action_lock_started_ms = 0;
   world.legacy_target_x = -1;
@@ -767,7 +768,7 @@ int main() {
   scenes.process_action_messages(context, 0.016F);
   assert(world.legacy_target_x < 0);
   assert(world.legacy_target_y < 0);
-  assert(world.legacy_chr_action == mir2::client::LegacyChrAction::walk);
+  assert(world.legacy_chr_action == mir2::client::LegacyChrAction::none);
   world.action_locked = false;
   world.action_lock_started_ms = 0;
   world.legacy_target_x = -1;
