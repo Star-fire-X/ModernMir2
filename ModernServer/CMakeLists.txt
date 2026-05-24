@@ -1059,6 +1059,7 @@ if(BUILD_TESTING)
       mir2_castle_manager_smoke
       mir2_guild_protocol_golden_smoke
       mir2_monster_legacy_drop_scatter_smoke
+      mir2_legacy_event_manager_smoke
       mir2_client_v1_auth_boundary_smoke
       mir2_client_v1_login_to_world_flow_smoke
       mir2_client_v1_game_command_bridge_smoke
