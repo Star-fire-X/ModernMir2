@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -20,7 +21,17 @@ namespace mir2 {
 
 namespace {
 
-constexpr std::uint64_t kDeletedCharacterSaveVersionBarrier = 1ULL << 62;
+constexpr std::uint64_t kDeletedCharacterSaveVersionStride = 1ULL << 48;
+constexpr std::uint64_t kMaxSqliteSaveVersion =
+    static_cast<std::uint64_t>((std::numeric_limits<sqlite3_int64>::max)());
+
+std::uint64_t deleted_character_save_version_barrier(std::uint64_t save_version) {
+  if (save_version >= kMaxSqliteSaveVersion - kDeletedCharacterSaveVersionStride) {
+    return kMaxSqliteSaveVersion - 1;
+  }
+  return ((save_version / kDeletedCharacterSaveVersionStride) + 1) *
+         kDeletedCharacterSaveVersionStride;
+}
 
 std::string read_text_file(const std::filesystem::path& path) {
   std::ifstream file(path, std::ios::binary);
@@ -1646,8 +1657,7 @@ bool Repository::delete_character(const std::string& account_id, const std::stri
   if (!save_version.has_value()) {
     return false;
   }
-  const auto tombstone_save_version =
-      std::max(*save_version + 1, kDeletedCharacterSaveVersionBarrier);
+  const auto tombstone_save_version = deleted_character_save_version_barrier(*save_version);
   exec_or_throw(database_, "BEGIN IMMEDIATE;");
   bool deleted = false;
   try {

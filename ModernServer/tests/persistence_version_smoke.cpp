@@ -8,7 +8,7 @@
 
 namespace {
 
-constexpr std::uint64_t kDeletedCharacterSaveVersionBarrier = 1ULL << 62;
+constexpr std::uint64_t kDeletedCharacterSaveVersionStride = 1ULL << 48;
 
 int fail(const char* stage) {
   std::cerr << "persistence_version_smoke failed at " << stage << '\n';
@@ -131,8 +131,27 @@ bool stale_save_is_rejected(const std::filesystem::path& source_root,
     return false;
   }
   loaded = repository.load_character("guest", "VersionHero");
-  return loaded.has_value() && loaded->gold == 400 &&
-         loaded->save_version == kDeletedCharacterSaveVersionBarrier + 1;
+  if (!loaded.has_value() || loaded->gold != 400 ||
+      loaded->save_version != kDeletedCharacterSaveVersionStride + 1) {
+    return false;
+  }
+
+  auto future_after_recreate = *loaded;
+  future_after_recreate.gold = 500;
+  future_after_recreate.save_version = kDeletedCharacterSaveVersionStride + 1000;
+  if (!repository.delete_character("guest", "VersionHero") ||
+      repository.save_character(future_after_recreate) ||
+      repository.load_character("guest", "VersionHero").has_value()) {
+    return false;
+  }
+
+  auto recreated_again = make_character(600, 0);
+  if (!repository.create_character(recreated_again)) {
+    return false;
+  }
+  loaded = repository.load_character("guest", "VersionHero");
+  return loaded.has_value() && loaded->gold == 600 &&
+         loaded->save_version == (2 * kDeletedCharacterSaveVersionStride) + 1;
 }
 
 }  // namespace
