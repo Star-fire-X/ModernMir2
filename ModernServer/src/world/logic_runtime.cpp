@@ -52,6 +52,10 @@ bool legacy_ascii_equals_ci(std::string_view lhs, std::string_view rhs) {
   return true;
 }
 
+bool elapsed_gt(std::uint64_t now_ms, std::uint64_t start_ms, std::uint64_t interval_ms) {
+  return now_ms - start_ms > interval_ms;
+}
+
 bool legacy_command_equals(std::string_view command,
                            std::string_view utf8,
                            std::string_view gbk) {
@@ -2981,14 +2985,14 @@ void LogicRuntime::process_user_engine_timers(std::uint64_t now_ms, RuntimeDispa
     return;
   }
 
-  if (now_ms > mission_time_ms_ + kMissionIntervalMs) {
+  if (elapsed_gt(now_ms, mission_time_ms_, kMissionIntervalMs)) {
     mission_time_ms_ = now_ms;
     add_stage_trace(dispatch, "LegacyMission", "ProcessMissions", now_ms, 0, 0);
     add_stage_trace(dispatch, "LegacyMission", "CheckServerWaitTimeOut", now_ms, 0, 0);
     add_stage_trace(dispatch, "LegacyMission", "CheckHolySeizeValid", now_ms, 0, 0);
   }
 
-  if (now_ms > open_door_check_ms_ + kDoorIntervalMs) {
+  if (elapsed_gt(now_ms, open_door_check_ms_, kDoorIntervalMs)) {
     open_door_check_ms_ = now_ms;
     add_stage_trace(dispatch, "LegacyTimer", "DoorTimer", now_ms, 0, 0);
     for (const auto& map_id : map_order_) {
@@ -3000,14 +3004,14 @@ void LogicRuntime::process_user_engine_timers(std::uint64_t now_ms, RuntimeDispa
     }
   }
 
-  if (now_ms > timer10min_ms_ + kTimer10MinMs) {
+  if (elapsed_gt(now_ms, timer10min_ms_, kTimer10MinMs)) {
     timer10min_ms_ = now_ms;
     add_stage_trace(dispatch, "LegacyTimer", "Timer10Min", now_ms, 0, 0);
     add_stage_trace(dispatch, "LegacyTimer", "NoticeMan.RefreshNoticeList", now_ms, 0, 0);
     add_stage_trace(dispatch, "LegacyTimer", "UserCastle.SaveAll", now_ms, 0, 0);
   }
 
-  if (now_ms > timer10sec_ms_ + kTimer10SecMs) {
+  if (elapsed_gt(now_ms, timer10sec_ms_, kTimer10SecMs)) {
     timer10sec_ms_ = now_ms;
     add_stage_trace(dispatch, "LegacyTimer", "Timer10Sec", now_ms, 0, 0);
     add_stage_trace(dispatch, "LegacyTimer", "FrmIDSoc.SendUserCount", now_ms, 0, 0);
