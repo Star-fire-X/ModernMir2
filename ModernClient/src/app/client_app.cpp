@@ -585,6 +585,7 @@ void ClientApp::dispatch_legacy_input_events(ClientContext& context) {
       event_input.key_down[VK_MENU] = event.alt;
       context.ui_input = modal_ui_.capture_input(event_input);
       context.ui_input.consumed = true;
+      context.ui_input.app_modal_visible = true;
       process_modal_input(event_input);
     }
     context.legacy_input_dispatched = true;

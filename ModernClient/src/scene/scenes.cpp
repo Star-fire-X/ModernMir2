@@ -223,9 +223,28 @@ InputState input_for_legacy_event(const InputState& source, const LegacyInputEve
 }
 
 void merge_ui_input(ui::UiInputResult& merged, const ui::UiInputResult& next) {
+  const auto merged_non_hover_consumed = merged.consumed && !merged.hover_consumed;
+  const auto next_non_hover_consumed = next.consumed && !next.hover_consumed;
+  const auto any_hover_consumed = merged.hover_consumed || next.hover_consumed;
   merged.consumed = merged.consumed || next.consumed;
   merged.text_focus = merged.text_focus || next.text_focus;
   merged.dragging = merged.dragging || next.dragging;
+  merged.app_modal_visible = merged.app_modal_visible || next.app_modal_visible;
+  merged.hover_consumed = merged.consumed && any_hover_consumed &&
+                          !merged_non_hover_consumed && !next_non_hover_consumed;
+}
+
+void clear_world_input_state(WorldViewState& world, const bool clear_action_key = true) {
+  world.focus_actor_id = 0;
+  world.focus_ground_item_id = 0;
+  world.legacy_target_x = -1;
+  world.legacy_target_y = -1;
+  world.legacy_chr_action = LegacyChrAction::none;
+  world.pending_pickup_item_id = 0;
+  if (clear_action_key) {
+    world.action_key = -1;
+  }
+  world.mouse_down_ms = 0;
 }
 
 void legacy_trace_map_layer(
@@ -7287,9 +7306,20 @@ class WorldScene final : public Scene {
       context.ui_input = result;
       merge_ui_input(merged, result);
 
-      const auto input_guard = result.consumed || result.text_focus || result.dragging;
-      if (!input_guard && !legacy_hud_.blocks_world_input()) {
-        auto& world = context.state->world;
+      const auto shortcut_guard =
+          result.consumed || result.text_focus || result.dragging || result.app_modal_visible;
+      const auto scene_guard =
+          result.consumed || result.text_focus || result.dragging || result.app_modal_visible;
+      auto& world = context.state->world;
+      const auto allow_guarded_escape =
+          event_input.key_pressed[VK_ESCAPE] && !result.text_focus && !result.app_modal_visible;
+      const auto hud_blocks_world = legacy_hud_.blocks_world_input();
+      if (scene_guard || hud_blocks_world) {
+        clear_world_input_state(world);
+        next_left_hold_ms_ = 0;
+        next_right_hold_ms_ = 0;
+      }
+      if ((!shortcut_guard || allow_guarded_escape) && !hud_blocks_world) {
         if (!legacy_hud_.handle_shortcuts(context, ui_)) {
           if (world.self_actor_id != 0) {
             auto self_it = world.actors.find(world.self_actor_id);
@@ -7302,24 +7332,26 @@ class WorldScene final : public Scene {
                   world.action_key = index;
                 }
               }
-              if (event_input.key_pressed['R']) {
-                if (context.app != nullptr) {
-                  context.app->request_reselect_character();
-                }
-              } else if (event_input.key_pressed[VK_ESCAPE]) {
+              if (event_input.key_pressed[VK_ESCAPE]) {
                 world.legacy_target_x = -1;
                 world.legacy_target_y = -1;
                 world.legacy_chr_action = LegacyChrAction::none;
                 world.target_actor_id = 0;
                 world.action_key = -1;
-              } else {
-                const auto legacy_input = make_legacy_input(context, self_it->second, now_ms);
-                world.focus_actor_id = focused_actor_at(context, legacy_input);
-                world.focus_ground_item_id =
-                    focused_ground_item_at(context, legacy_input.map_x, legacy_input.map_y);
-                clear_invalid_targets(world);
-                collect_keyboard_ops(context, legacy_input, self_it->second);
-                collect_mouse_ops(context, legacy_input, self_it->second);
+              } else if (!scene_guard) {
+                if (event_input.key_pressed['R']) {
+                  if (context.app != nullptr) {
+                    context.app->request_reselect_character();
+                  }
+                } else {
+                  const auto legacy_input = make_legacy_input(context, self_it->second, now_ms);
+                  world.focus_actor_id = focused_actor_at(context, legacy_input);
+                  world.focus_ground_item_id =
+                      focused_ground_item_at(context, legacy_input.map_x, legacy_input.map_y);
+                  clear_invalid_targets(world);
+                  collect_keyboard_ops(context, legacy_input, self_it->second);
+                  collect_mouse_ops(context, legacy_input, self_it->second);
+                }
               }
             }
           }
@@ -7347,12 +7379,11 @@ class WorldScene final : public Scene {
     auto& world = context.state->world;
     const auto now_ms = detail::monotonic_ms();
     const auto escape_pressed = context.input != nullptr && context.input->key_pressed[VK_ESCAPE];
-    const auto key_consumed =
-        context.ui_input.consumed && !context.ui_input.hover_consumed;
     const auto input_guard =
-        key_consumed || context.ui_input.text_focus || context.ui_input.dragging ||
+        context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging ||
         context.ui_input.app_modal_visible;
-    const auto allow_guarded_escape = escape_pressed && !context.ui_input.app_modal_visible;
+    const auto allow_guarded_escape =
+        escape_pressed && !context.ui_input.text_focus && !context.ui_input.app_modal_visible;
     if (input_guard && !allow_guarded_escape) {
       return;
     }
@@ -7400,15 +7431,9 @@ class WorldScene final : public Scene {
     const auto input_guard =
         context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging ||
         context.ui_input.app_modal_visible;
-    if (!context.legacy_input_dispatched && input_guard) {
-      world.focus_actor_id = 0;
-      world.focus_ground_item_id = 0;
-      world.legacy_target_x = -1;
-      world.legacy_target_y = -1;
-      world.legacy_chr_action = LegacyChrAction::none;
-      world.pending_pickup_item_id = 0;
-      world.action_key = -1;
-      world.mouse_down_ms = 0;
+    if ((!context.legacy_input_dispatched || context.ui_input.app_modal_visible) &&
+        input_guard) {
+      clear_world_input_state(world);
       next_left_hold_ms_ = 0;
       next_right_hold_ms_ = 0;
       return;

@@ -70,7 +70,7 @@ struct UiInputResult {
   bool text_focus{false};   ///< 当前有编辑框获得焦点
   bool dragging{false};     ///< 正在拖拽中
   bool app_modal_visible{false};  ///< 应用级模态可见（阻断世界输入）
-  bool hover_consumed{false};     ///< 仅由悬停命中触发的消费（不应阻断键盘快捷键）
+  bool hover_consumed{false};     ///< 仅由悬停命中触发的消费
 };
 
 /// 鼠标按键枚举
