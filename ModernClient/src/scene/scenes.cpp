@@ -7554,9 +7554,9 @@ class WorldScene final : public Scene {
                                          animation_.trace_now_ms());
     }
     render_world_rows(context, viewport);
-    render_actor_effect_overlays_after_rows(context, viewport);
     legacy_trace_map_layer(legacy::LegacyMapDrawLayer::selection_blend);
     render_actor_selection_blend_pass(context, viewport);
+    render_actor_effect_overlays_after_rows(context, viewport);
     legacy_trace_map_layer(legacy::LegacyMapDrawLayer::debug_overlay);
     render_map_debug_overlay(context, viewport);
     if (context.assets != nullptr) {

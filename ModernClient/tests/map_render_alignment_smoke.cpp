@@ -304,9 +304,9 @@ int main() {
   assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::actor) <
          legacy_map_draw_layer_rank(LegacyMapDrawLayer::fly_effect));
   assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::fly_effect) <
-         legacy_map_draw_layer_rank(LegacyMapDrawLayer::actor_overlay));
-  assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::actor_overlay) <
          legacy_map_draw_layer_rank(LegacyMapDrawLayer::selection_blend));
+  assert(legacy_map_draw_layer_rank(LegacyMapDrawLayer::selection_blend) <
+         legacy_map_draw_layer_rank(LegacyMapDrawLayer::actor_overlay));
 
   SoftwareSurface blend_surface(2, 1);
   constexpr std::uint32_t kBlendDst = 0xFF204060U;

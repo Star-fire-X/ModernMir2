@@ -100,8 +100,8 @@ large_object
 ground_item
 actor
 fly_effect
-actor_overlay
 selection_blend
+actor_overlay
 debug_overlay
 overlay_effects
 actor_screen_overlay

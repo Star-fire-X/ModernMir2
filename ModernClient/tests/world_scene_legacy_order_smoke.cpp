@@ -590,9 +590,9 @@ int main() {
   assert(fly_last >= 0);
   assert(actor_overlay_first >= 0);
   assert(selection_blend_first >= 0);
-  assert(actor_last < actor_overlay_first);
-  assert(fly_last < actor_overlay_first);
-  assert(actor_overlay_first < selection_blend_first);
+  assert(actor_last < selection_blend_first);
+  assert(fly_last < selection_blend_first);
+  assert(selection_blend_first < actor_overlay_first);
 
   input = mir2::client::InputState{};
   input.key_pressed[VK_F1] = true;
