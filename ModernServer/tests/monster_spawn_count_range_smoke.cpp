@@ -74,7 +74,7 @@ mir2::CharacterRecord make_hero() {
   return hero;
 }
 
-void enter_hero(mir2::LogicRuntime& runtime) {
+void enter_hero(mir2::LogicRuntime& runtime, std::uint64_t now_ms) {
   mir2::LogicCommand enter;
   enter.kind = mir2::LogicCommandKind::enter_world;
   enter.session_id = 7;
@@ -85,7 +85,7 @@ void enter_hero(mir2::LogicRuntime& runtime) {
   enter.y = 30;
   enter.character = make_hero();
   static_cast<void>(runtime.route_logic_command(enter));
-  const auto dispatch = runtime.tick(1020);
+  const auto dispatch = runtime.tick(now_ms);
   assert(find_packet(dispatch, mir2::kSmNewMap).has_value());
 }
 
@@ -103,14 +103,16 @@ int main() {
     mir2::LogicRuntime runtime(config);
     runtime.initialize();
     const auto first = runtime.tick(1000);
-    const auto spawned = spawn_traces(first);
+    assert(spawn_traces(first).empty());
+    const auto first_spawn_dispatch = runtime.tick(1201);
+    const auto spawned = spawn_traces(first_spawn_dispatch);
     assert(spawned.size() == 5);
     for (const auto& trace : spawned) {
       assert(trace.value >= 22 && trace.value <= 38);
       assert(trace.damage >= 22 && trace.damage <= 38);
     }
 
-    enter_hero(runtime);
+    enter_hero(runtime, 1220);
     mir2::LogicCommand spell;
     spell.kind = mir2::LogicCommandKind::spell;
     spell.session_id = 7;
@@ -120,10 +122,10 @@ int main() {
     spell.game_message.ident = mir2::kCmSpell;
     spell.game_message.tag = 1;
     static_cast<void>(runtime.route_logic_command(spell));
-    const auto kill = runtime.tick(1040);
+    const auto kill = runtime.tick(1240);
     assert(find_packet(kill, mir2::kSmDeath).has_value());
 
-    const auto refill = runtime.tick(1301);
+    const auto refill = runtime.tick(1402);
     const auto refill_spawns = spawn_traces(refill);
     assert(refill_spawns.size() == 1);
   }
@@ -137,7 +139,8 @@ int main() {
 
     mir2::LogicRuntime runtime(config);
     runtime.initialize();
-    const auto dispatch = runtime.tick(1000);
+    assert(spawn_traces(runtime.tick(1000)).empty());
+    const auto dispatch = runtime.tick(1201);
     const auto spawned = spawn_traces(dispatch);
     assert(spawned.size() == 5);
     auto min_x = spawned.front().value;
@@ -160,7 +163,8 @@ int main() {
     config.spawns.push_back(make_group_spawn("BlockedMob", 50, 50, 0, 1));
     mir2::LogicRuntime runtime(config);
     runtime.initialize();
-    const auto dispatch = runtime.tick(1000);
+    assert(spawn_traces(runtime.tick(1000)).empty());
+    const auto dispatch = runtime.tick(1201);
     assert(spawn_traces(dispatch).empty());
     assert(spawn_traces(dispatch, "blocked").size() == 1);
   }

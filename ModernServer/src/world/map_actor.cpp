@@ -1691,11 +1691,11 @@ RuntimeDispatch MapActor::legacy_process_monster(std::uint64_t actor_id,
     return dispatch;
   }
 
-  if (monster->legacy_search_due(now_ms)) {
-    monster->mark_legacy_search_time(now_ms);
-  }
   if (run_due) {
     monster->mark_legacy_run_time(now_ms);
+    if (monster->legacy_search_due(now_ms)) {
+      monster->mark_legacy_search_time(now_ms);
+    }
     handle_monster_ai(*monster, dispatch, current_tick, now_ms);
   }
   if (!monster->is_dead() &&

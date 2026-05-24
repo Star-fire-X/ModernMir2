@@ -95,21 +95,21 @@ int main() {
     assert(has_stage_action(first, "ProcessMonsters", "budget_exhausted"));
     assert(runtime.legacy_mon_cur() == 1);
     assert(runtime.legacy_mon_sub_cur() == 0);
-    assert(runtime.legacy_gen_cur() == 1);
+    assert(runtime.legacy_gen_cur() == 0);
 
     const auto second = runtime.tick(1100);
     const std::vector<std::string> expected_second{"Oma"};
     assert(monster_names(second) == expected_second);
     assert(runtime.legacy_mon_cur() == 0);
     assert(runtime.legacy_mon_sub_cur() == 0);
-    assert(runtime.legacy_gen_cur() == 1);
+    assert(runtime.legacy_gen_cur() == 0);
 
     const auto third = runtime.tick(1301);
     const std::vector<std::string> expected_third{"Goblin"};
     assert(monster_names(third) == expected_third);
     assert(runtime.legacy_mon_cur() == 1);
     assert(runtime.legacy_mon_sub_cur() == 0);
-    assert(runtime.legacy_gen_cur() == 0);
+    assert(runtime.legacy_gen_cur() == 1);
   }
 
   {
@@ -124,11 +124,27 @@ int main() {
     assert(runtime.legacy_monster_group_count() == 1);
 
     const auto first = runtime.tick(1000);
-    assert(spawn_names(first).size() == 2);
+    assert(spawn_names(first).empty());
+    assert(action_count(first, "ProcessMonsters", "gen_check") == 0);
+    assert(runtime.legacy_mon_cur() == 0);
+    assert(runtime.legacy_mon_sub_cur() == 0);
+    assert(runtime.legacy_gen_cur() == 0);
+
+    const auto too_early = runtime.tick(1200);
+    assert(spawn_names(too_early).empty());
+    assert(action_count(too_early, "ProcessMonsters", "gen_check") == 0);
+    assert(runtime.legacy_mon_cur() == 0);
+    assert(runtime.legacy_mon_sub_cur() == 0);
+    assert(runtime.legacy_gen_cur() == 0);
+
+    const auto spawned = runtime.tick(1201);
+    assert(spawn_names(spawned).size() == 2);
+    assert(action_count(spawned, "ProcessMonsters", "gen_check") == 1);
     assert(runtime.legacy_mon_cur() == 0);
     assert(runtime.legacy_mon_sub_cur() == 1);
+    assert(runtime.legacy_gen_cur() == 0);
 
-    const auto second = runtime.tick(1100);
+    const auto second = runtime.tick(1302);
     const std::vector<std::string> expected_second{"Twin"};
     assert(monster_names(second) == expected_second);
     assert(runtime.legacy_mon_cur() == 0);
@@ -168,21 +184,35 @@ int main() {
     runtime.initialize();
 
     const auto first = runtime.tick(1000);
-    const std::vector<std::string> expected_first{"First"};
-    assert(spawn_names(first) == expected_first);
-    assert(action_count(first, "ProcessMonsters", "gen_check") == 1);
-    assert(runtime.legacy_gen_cur() == 1);
+    assert(spawn_names(first).empty());
+    assert(action_count(first, "ProcessMonsters", "gen_check") == 0);
+    assert(runtime.legacy_gen_cur() == 0);
 
-    const auto too_early = runtime.tick(1100);
+    const auto too_early = runtime.tick(1200);
     assert(spawn_names(too_early).empty());
     assert(action_count(too_early, "ProcessMonsters", "gen_check") == 0);
+    assert(runtime.legacy_gen_cur() == 0);
+
+    const auto first_group = runtime.tick(1201);
+    const std::vector<std::string> expected_first{"First"};
+    assert(spawn_names(first_group) == expected_first);
+    assert(action_count(first_group, "ProcessMonsters", "gen_check") == 1);
     assert(runtime.legacy_gen_cur() == 1);
 
-    const auto later = runtime.tick(5000);
-    const std::vector<std::string> expected_later{"Second"};
-    assert(spawn_names(later) == expected_later);
-    assert(action_count(later, "ProcessMonsters", "gen_check") == 1);
+    const auto second_too_early = runtime.tick(1401);
+    assert(spawn_names(second_too_early).empty());
+    assert(action_count(second_too_early, "ProcessMonsters", "gen_check") == 0);
+    assert(runtime.legacy_gen_cur() == 1);
+
+    const auto second_group = runtime.tick(1402);
+    const std::vector<std::string> expected_second{"Second"};
+    assert(spawn_names(second_group) == expected_second);
+    assert(action_count(second_group, "ProcessMonsters", "gen_check") == 1);
     assert(runtime.legacy_gen_cur() == 0);
+
+    const auto no_catch_up = runtime.tick(5000);
+    assert(action_count(no_catch_up, "ProcessMonsters", "gen_check") == 1);
+    assert(runtime.legacy_gen_cur() == 1);
   }
 
   return 0;
