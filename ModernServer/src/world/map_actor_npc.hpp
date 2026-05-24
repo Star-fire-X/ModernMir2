@@ -473,6 +473,15 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     return std::nullopt;
   };
 
+  auto count_bag_items_by_name = [&](std::string_view item_name_text) {
+    const auto wanted = util::lower_copy(util::trim(std::string(item_name_text)));
+    return static_cast<std::int32_t>(std::count_if(
+        player.character().bag_items.begin(), player.character().bag_items.end(),
+        [&](const LegacyUserItem& item) {
+          return !is_empty(item) && util::lower_copy(item_name(item, item_configs_)) == wanted;
+        }));
+  };
+
   auto queue_inventory_refresh = [&]() {
     player.refresh_derived_state(item_configs_);
     queue_packet(dispatch, player.session_id(),
@@ -652,6 +661,12 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     if (command_name == "GIVE") {
       const auto target = parse_script_amount_target(payload);
       if (util::lower_copy(target.target) == "gold") {
+        const auto new_gold =
+            static_cast<std::int64_t>(player.character().gold) + target.amount;
+        if (target.amount < 0 || new_gold > kLegacyBagGold) {
+          trace("give_gold_reject", false, target.amount, action_line);
+          return std::nullopt;
+        }
         player.add_gold(target.amount);
         queue_packet(dispatch, player.session_id(),
                      make_gold_changed_packet(player.session_id(), player.character().gold));
@@ -697,6 +712,11 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
         trace("take_gold", true, target.amount, action_line);
         return std::nullopt;
       }
+      if (target.amount > 0 && count_bag_items_by_name(target.target) < target.amount) {
+        trace("take_item_reject", false, count_bag_items_by_name(target.target), action_line);
+        queue_inventory_refresh();
+        return std::nullopt;
+      }
       std::vector<LegacyUserItem> removed;
       for (std::int32_t index = 0; index < target.amount; ++index) {
         auto item = remove_bag_item_by_name(target.target);
@@ -717,6 +737,11 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     }
     if (command_name == "TAKECHECKITEM") {
       const auto target = parse_script_amount_target(payload);
+      if (target.amount > 0 && count_bag_items_by_name(target.target) < target.amount) {
+        trace("takecheckitem_reject", false, count_bag_items_by_name(target.target), action_line);
+        queue_inventory_refresh();
+        return std::nullopt;
+      }
       std::vector<LegacyUserItem> removed;
       for (std::int32_t index = 0; index < target.amount; ++index) {
         auto item = remove_bag_item_by_name(target.target);

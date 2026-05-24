@@ -197,6 +197,12 @@ if(BUILD_TESTING)
   add_test(NAME mir2_trade_interleaving_fuzz_smoke
     COMMAND mir2_trade_interleaving_fuzz_smoke)
 
+  add_executable(mir2_economy_consistency_smoke
+    tests/economy_consistency_smoke.cpp)
+  target_link_libraries(mir2_economy_consistency_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_economy_consistency_smoke
+    COMMAND mir2_economy_consistency_smoke)
+
   add_executable(mir2_npc_shop_protocol_golden_smoke
     tests/npc_shop_protocol_golden_smoke.cpp)
   target_link_libraries(mir2_npc_shop_protocol_golden_smoke PRIVATE mir2_hostlib)
@@ -998,6 +1004,7 @@ if(BUILD_TESTING)
       mir2_legacy_protocol_command_golden_smoke
       mir2_trade_protocol_golden_smoke
       mir2_trade_interleaving_fuzz_smoke
+      mir2_economy_consistency_smoke
       mir2_npc_shop_protocol_golden_smoke
       mir2_npc_shop_interleaving_fuzz_smoke
       mir2_canonical_legacy_command_smoke
