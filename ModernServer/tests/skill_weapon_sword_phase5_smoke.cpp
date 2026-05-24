@@ -262,6 +262,12 @@ int main() {
     assert(has_packet_ident(dispatch, mir2::kSmRushKung));
     assert(has_trace(dispatch, "rush_crash", 27));
     assert(!has_trace(dispatch, "train_skill"));
+
+    mir2::RuntimeDispatch retry;
+    append(retry, runtime.route_logic_command(spell(1531, 27, 0)));
+    append(retry, runtime.tick());
+    assert(!has_trace(retry, "sword_cooldown_reject", 27));
+    assert(has_packet_ident(retry, mir2::kSmRushKung));
   }
 
   return 0;

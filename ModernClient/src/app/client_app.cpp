@@ -42,6 +42,7 @@
 #include <filesystem>
 #include <iterator>
 #include <memory>
+#include <random>
 #include <sstream>
 #include <string_view>
 #include <thread>
@@ -65,6 +66,12 @@ constexpr int kMessageOkButtonIndex = 361;      ///< 模态对话框"确定"按�
 constexpr int kMessageYesButtonIndex = 363;     ///< 确认对话框"是"按钮
 constexpr int kMessageCancelButtonIndex = 365;  ///< 确认对话框"取消"按钮
 constexpr int kMessageNoButtonIndex = 367;      ///< 确认对话框"否"按钮
+
+std::uint64_t legacy_magic_pk_delay_ms() {
+  static thread_local std::mt19937 rng{std::random_device{}()};
+  std::uniform_int_distribution<int> delay(0, 1099);
+  return 300U + static_cast<std::uint64_t>(delay(rng));
+}
 
 /// 窄字符串转宽字符串
 std::wstring widen(const std::string& text) { return text::utf8_to_wide(text); }
@@ -505,6 +512,10 @@ void ClientApp::dispatch_legacy_input_events(ClientContext& context) {
       event_input.left_released = false;
       event_input.right_pressed = false;
       event_input.right_released = false;
+      event_input.wheel_delta = 0;
+      event_input.wheel_scrolled = false;
+      event_input.left_double_click = false;
+      event_input.right_double_click = false;
       event_input.key_pressed.fill(false);
       event_input.text_input.clear();
       event_input.backspace_pressed = false;
@@ -530,6 +541,20 @@ void ClientApp::dispatch_legacy_input_events(ClientContext& context) {
         case LegacyInputEventKind::right_up:
           event_input.right_released = true;
           event_input.right_down = false;
+          break;
+        case LegacyInputEventKind::mouse_wheel:
+          event_input.wheel_delta = event.wheel_delta;
+          event_input.wheel_scrolled = event.wheel_delta != 0;
+          break;
+        case LegacyInputEventKind::left_double_click:
+          event_input.left_pressed = true;
+          event_input.left_double_click = true;
+          event_input.left_down = true;
+          break;
+        case LegacyInputEventKind::right_double_click:
+          event_input.right_pressed = true;
+          event_input.right_double_click = true;
+          event_input.right_down = true;
           break;
         case LegacyInputEventKind::key_down:
           if (event.key < event_input.key_pressed.size()) {
@@ -882,6 +907,18 @@ void ClientApp::request_action(const client_v1::ActionIntent& intent) {
   }();
   state_.world.last_sent_action_ident = sent_ident;
   state_.world.last_sent_action_dir = intent.dir;
+  PendingActionAckState pending_ack;
+  pending_ack.action_ident = sent_ident;
+  pending_ack.dir = intent.dir;
+  pending_ack.lock_started_ms = now_ms;
+  if (const auto it = state_.world.actors.find(state_.world.self_actor_id);
+      it != state_.world.actors.end()) {
+    pending_ack.rollback_position = true;
+    pending_ack.old_x = it->second.x;
+    pending_ack.old_y = it->second.y;
+    pending_ack.old_dir = it->second.dir;
+  }
+  state_.world.pending_action_acks.push_back(pending_ack);
   if (legacy_trace_enabled()) {
     std::ostringstream out;
     out << "request_action now=" << now_ms << " kind=" << static_cast<int>(intent.kind)
@@ -934,20 +971,37 @@ void ClientApp::request_action(const client_v1::ActionIntent& intent) {
 }
 
 // 法术/技能请求：锁定动作并设置魔法释放状态后发送到服务器
-void ClientApp::request_spell(const client_v1::SpellIntent& intent) {
+void ClientApp::request_spell(const client_v1::SpellIntent& intent,
+                              const bool play_local_action,
+                              const std::uint64_t magic_delay_time_ms) {
   const auto now_ms = detail::monotonic_ms();
   state_.world.action_locked = true;
   state_.world.action_lock_started_ms = now_ms;
   state_.world.action_lock_timeout_cleared_ms = 0;
   state_.world.last_sent_action_ident = 3017U;
   state_.world.last_sent_action_dir = intent.dir;
+  PendingActionAckState pending_ack;
+  pending_ack.action_ident = state_.world.last_sent_action_ident;
+  pending_ack.dir = intent.dir;
+  pending_ack.lock_started_ms = now_ms;
+  if (play_local_action) {
+    if (const auto it = state_.world.actors.find(state_.world.self_actor_id);
+        it != state_.world.actors.end()) {
+      pending_ack.rollback_position = true;
+      pending_ack.old_x = it->second.x;
+      pending_ack.old_y = it->second.y;
+      pending_ack.old_dir = it->second.dir;
+    }
+  }
+  state_.world.pending_action_acks.push_back(pending_ack);
   state_.world.latest_spell_ms = state_.world.action_lock_started_ms;
+  state_.world.magic_delay_time_ms = magic_delay_time_ms;
   state_.world.magic_pk_delay_ms = 0;
   if (intent.target_actor_id != 0) {
     if (const auto it = state_.world.actors.find(intent.target_actor_id);
         it != state_.world.actors.end() &&
         it->second.actor_type == client_v1::ActorType::player) {
-      state_.world.magic_pk_delay_ms = 300U + (now_ms % 1100U);
+      state_.world.magic_pk_delay_ms = legacy_magic_pk_delay_ms();
     }
   }
   if (legacy_trace_enabled()) {
@@ -965,19 +1019,21 @@ void ClientApp::request_spell(const client_v1::SpellIntent& intent) {
     actor.legacy_old_y = actor.y;
     actor.legacy_old_dir = actor.dir;
     actor.legacy_has_old_position = true;
-    actor.dir = intent.dir;
-    actor.current_action = client_v1::ActorActionKind::spell;
-    actor.magic_id = intent.magic_id;
-    actor.action_target_actor_id = intent.target_actor_id;
-    actor.action_target_x = intent.x;
-    actor.action_target_y = intent.y;
-    actor.action_magic = true;
-    actor.action_magic_effect = 0;
-    actor.action_magic_effect_type = -1;
-    actor.action_magic_failed = false;
-    state_.apply_magic_metadata(actor, intent.magic_id);
-    actor.action_started_ms = now_ms;
-    actor.action_duration_ms = GameStateStore::action_duration_ms(actor.current_action, 0);
+    if (play_local_action) {
+      actor.dir = intent.dir;
+      actor.current_action = client_v1::ActorActionKind::spell;
+      actor.magic_id = intent.magic_id;
+      actor.action_target_actor_id = intent.target_actor_id;
+      actor.action_target_x = intent.x;
+      actor.action_target_y = intent.y;
+      actor.action_magic = true;
+      actor.action_magic_effect = 0;
+      actor.action_magic_effect_type = -1;
+      actor.action_magic_failed = false;
+      state_.apply_magic_metadata(actor, intent.magic_id);
+      actor.action_started_ms = now_ms;
+      actor.action_duration_ms = GameStateStore::action_duration_ms(actor.current_action, 0);
+    }
   }
   protocol_.send(intent);
 }

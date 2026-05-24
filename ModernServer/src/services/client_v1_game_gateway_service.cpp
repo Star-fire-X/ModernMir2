@@ -224,6 +224,9 @@ client_v1::MagicEntry magic_entry_from_legacy(const LegacyClientMagic& legacy_ma
   entry.name = to_string(legacy_magic.def.magic_name);
   entry.effect = legacy_magic.def.effect;
   entry.effect_type = legacy_magic.def.effect_type;
+  entry.spell = legacy_magic.def.spell;
+  entry.def_spell = legacy_magic.def.def_spell;
+  entry.max_train_level = legacy_magic.def.max_train_level;
   const auto level = std::clamp<int>(entry.level, 0, 3);
   entry.max_train = legacy_magic.def.max_train[static_cast<std::size_t>(level)];
   return entry;

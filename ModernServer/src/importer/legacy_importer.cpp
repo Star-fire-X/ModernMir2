@@ -532,7 +532,7 @@ void write_server_files(const IniFile& setup, const std::filesystem::path& outpu
 
   {
     std::ofstream file(output_root / "runtime" / "logic.toml", std::ios::binary | std::ios::trunc);
-    file << "tick_ms = 20\n";
+    file << "tick_ms = 10\n";
     file << "player_budget_ms = " << (server.contains("HumLimit") ? server.at("HumLimit") : "30")
          << "\n";
     file << "monster_budget_ms = "

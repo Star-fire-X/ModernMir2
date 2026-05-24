@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "description": "Phase 0 Delphi bag protocol constants and ABI targets derived from PR-1 legacy_bag_protocol_findings.md.",
+  "abi_targets": {
+    "TUserItem": 40,
+    "TStdItem": 76,
+    "TClientItem": 84,
+    "TClientItem.MakeIndex": 76,
+    "TClientItem.Dura": 80,
+    "TClientItem.DuraMax": 82
+  },
+  "current_cpp_known_values": {
+    "LegacyUserItem": 40,
+    "LegacyStdItem": 76,
+    "LegacyClientItem": 84
+  },
+  "inventory": {
+    "MAXBAGITEM": 46
+  },
+  "cm": {
+    "CM_DROPITEM": 1000,
+    "CM_PICKUP": 1001,
+    "CM_TAKEONITEM": 1003,
+    "CM_TAKEOFFITEM": 1004,
+    "CM_EAT": 1006,
+    "CM_USERSELLITEM": 1013,
+    "CM_DEALADDITEM": 1026,
+    "CM_DEALDELITEM": 1027,
+    "CM_USERSTORAGEITEM": 1031,
+    "CM_USERTAKEBACKSTORAGEITEM": 1032
+  },
+  "sm": {
+    "SM_ADDITEM": 200,
+    "SM_BAGITEMS": 201,
+    "SM_DELITEM": 202,
+    "SM_UPDATEITEM": 203,
+    "SM_DROPITEM_SUCCESS": 600,
+    "SM_ITEMSHOW": 610,
+    "SM_ITEMHIDE": 611,
+    "SM_TAKEON_OK": 615,
+    "SM_TAKEOFF_OK": 619,
+    "SM_SENDUSEITEMS": 621,
+    "SM_WEIGHTCHANGED": 622,
+    "SM_EAT_OK": 635,
+    "SM_ABILITY": 52,
+    "SM_SUBABILITY": 752
+  }
+}

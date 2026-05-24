@@ -90,8 +90,10 @@ ground_effects
 large_object
 ground_item
 actor
-actor_overlay
 fly_effect
+selection_blend
+actor_overlay
+debug_overlay
 overlay_effects
 actor_screen_overlay
 ui_windows_dwin_direct_paint

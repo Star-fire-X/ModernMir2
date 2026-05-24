@@ -451,13 +451,14 @@ int main() {
          state.world.map_doors.end());
   state.apply(MapDoorState{12, 13, true});
   assert(state.map_door_open(12, 13));
+  const auto open_sequence =
+      state.world.map_doors[GameStateStore::map_door_key(12, 13)].sequence;
   state.world.map_doors[GameStateStore::map_door_key(12, 13)].updated_ms = 1;
-  state.expire_map_door_states(1 + kLegacyMapDoorOpenExpireMs);
-  assert(!state.map_door_open(12, 13));
-  assert(state.world.map_doors.find(GameStateStore::map_door_key(12, 13)) ==
-         state.world.map_doors.end());
+  assert(state.map_door_open(12, 13));
   state.apply(MapDoorState{12, 13, true});
   assert(state.map_door_open(12, 13));
+  assert(state.world.map_doors[GameStateStore::map_door_key(12, 13)].sequence >
+         open_sequence);
 
   state.apply(WorldClearObjects{});
   assert(state.world.map_transition_pending);

@@ -227,6 +227,8 @@ int main() {
   capped_hero.character_name = "CappedHero";
   capped_hero.gold = mir2::kLegacyBagGold - 10;
   capped_hero.bag_items[0].make_index = 2001;
+  capped_hero.bag_items[1] = capped_hero.bag_items[0];
+  capped_hero.bag_items[1].make_index = 2002;
 
   mir2::LogicCommand capped_enter = enter;
   capped_enter.session_id = 8;
@@ -256,7 +258,8 @@ int main() {
     return 1;
   }
   const auto capped_items = decode_bag_items(capped_bag_packet->body);
-  if (capped_items.size() != 1 || capped_items.front().make_index != 2001) {
+  if (capped_items.size() != 2 || capped_items[0].make_index != 2001 ||
+      capped_items[1].make_index != 2002) {
     return 1;
   }
 

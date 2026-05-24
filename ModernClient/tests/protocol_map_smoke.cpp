@@ -258,11 +258,12 @@ void assert_p0_protocol_goldens() {
   using namespace mir2::client_v1;
 
   Bytes payload;
-  append_u32(payload, 1);
+  append_u32(payload, kProtocolVersion);
   append_u32(payload, 0x01020304U);
   append_u32(payload, 0xA0B0C0D0U);
   append_u32(payload, 0x0F0E0D0CU);
-  assert_golden(ClientHello{1, 0x01020304U, 0xA0B0C0D0U, 0x0F0E0D0CU}, 1, 1, payload);
+  assert_golden(ClientHello{kProtocolVersion, 0x01020304U, 0xA0B0C0D0U, 0x0F0E0D0CU}, 1, 1,
+                payload);
 
   payload.clear();
   append_string(payload, "id");

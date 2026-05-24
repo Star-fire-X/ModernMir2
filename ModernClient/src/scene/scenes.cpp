@@ -147,6 +147,10 @@ InputState input_for_legacy_event(const InputState& source, const LegacyInputEve
   input.left_released = false;
   input.right_pressed = false;
   input.right_released = false;
+  input.wheel_delta = 0;
+  input.wheel_scrolled = false;
+  input.left_double_click = false;
+  input.right_double_click = false;
   input.key_pressed.fill(false);
   input.text_input.clear();
   input.backspace_pressed = false;
@@ -176,6 +180,20 @@ InputState input_for_legacy_event(const InputState& source, const LegacyInputEve
     case LegacyInputEventKind::right_up:
       input.right_released = true;
       input.right_down = false;
+      break;
+    case LegacyInputEventKind::mouse_wheel:
+      input.wheel_delta = event.wheel_delta;
+      input.wheel_scrolled = event.wheel_delta != 0;
+      break;
+    case LegacyInputEventKind::left_double_click:
+      input.left_pressed = true;
+      input.left_double_click = true;
+      input.left_down = true;
+      break;
+    case LegacyInputEventKind::right_double_click:
+      input.right_pressed = true;
+      input.right_double_click = true;
+      input.right_down = true;
       break;
     case LegacyInputEventKind::key_down:
       if (event.key < input.key_pressed.size()) {
@@ -7279,7 +7297,8 @@ class WorldScene final : public Scene {
               const auto now_ms = detail::monotonic_ms();
               for (int index = 0; index < 8; ++index) {
                 if (event_input.key_pressed[VK_F1 + index] &&
-                    magic_for_slot(world, index) != 0) {
+                    magic_for_slot(world, index) != 0 &&
+                    legacy_magic_shortcut_ready(world, now_ms)) {
                   world.action_key = index;
                 }
               }
@@ -7352,7 +7371,8 @@ class WorldScene final : public Scene {
       ui_.trace_legacy_shortcut_fallback();
     }
     for (int index = 0; index < 8; ++index) {
-      if (context.input->key_pressed[VK_F1 + index] && magic_for_slot(world, index) != 0) {
+      if (context.input->key_pressed[VK_F1 + index] && magic_for_slot(world, index) != 0 &&
+          legacy_magic_shortcut_ready(world, now_ms)) {
         world.action_key = index;
         if (legacy_trace_enabled()) {
           std::ostringstream out;
@@ -7483,7 +7503,6 @@ class WorldScene final : public Scene {
     legacy_hud_.sync(context);
     auto& world = context.state->world;
     const auto now_ms = detail::monotonic_ms();
-    context.state->expire_map_door_states(now_ms);
     animation_.update(world, now_ms);
     if (context.audio != nullptr) {
       update_main_theme(*context.audio, delta_seconds, now_ms);
@@ -7535,9 +7554,9 @@ class WorldScene final : public Scene {
                                          animation_.trace_now_ms());
     }
     render_world_rows(context, viewport);
-    render_actor_effect_overlays_after_rows(context, viewport);
     legacy_trace_map_layer(legacy::LegacyMapDrawLayer::selection_blend);
     render_actor_selection_blend_pass(context, viewport);
+    render_actor_effect_overlays_after_rows(context, viewport);
     legacy_trace_map_layer(legacy::LegacyMapDrawLayer::debug_overlay);
     render_map_debug_overlay(context, viewport);
     if (context.assets != nullptr) {
@@ -7741,6 +7760,18 @@ class WorldScene final : public Scene {
       }
     }
     return nullptr;
+  }
+
+  static int legacy_client_spell_point(const MagicShortcutState& magic) {
+    // Delphi UseMagic gates on TClientMagic.Def.Spell + DefSpell; server MP spend uses GetSpellPoint separately.
+    return magic.spell + magic.def_spell;
+  }
+
+  static bool legacy_magic_shortcut_ready(const WorldViewState& world,
+                                          const std::uint64_t now_ms) {
+    return world.latest_spell_ms == 0 ||
+           elapsed_ms(now_ms, world.latest_spell_ms) >
+               500U + world.magic_delay_time_ms;
   }
 
   /// 从原始输入构造 LegacyInputFrame（添加长按检测和地图坐标映射）
@@ -7988,12 +8019,6 @@ class WorldScene final : public Scene {
 
   std::optional<bool> dynamic_door_state_for(ClientContext& context, const MapCell& cell,
                                              int x, int y) const {
-    const auto exact = context.state->world.map_doors.find(
-        GameStateStore::map_door_key(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)));
-    if (exact != context.state->world.map_doors.end()) {
-      return exact->second.open;
-    }
-
     if (map_ == nullptr) {
       return std::nullopt;
     }
@@ -8003,18 +8028,25 @@ class WorldScene final : public Scene {
       return std::nullopt;
     }
 
+    std::optional<bool> result;
+    std::uint64_t best_sequence = 0;
     for (const auto& [key, state] : context.state->world.map_doors) {
       const auto door_x = GameStateStore::map_door_key_x(key);
       const auto door_y = GameStateStore::map_door_key_y(key);
-      if (std::abs(door_x - x) > 8 || std::abs(door_y - y) > 8) {
+      if (!legacy::legacy_map_door_state_reaches(state.open, door_x, door_y, x, y)) {
         continue;
       }
       const auto* door_cell = map_->cell(door_x, door_y);
-      if (door_cell != nullptr && (door_cell->door_index & 0x7FU) == door_id) {
-        return state.open;
+      if (door_cell == nullptr || (door_cell->door_index & 0x80U) == 0U ||
+          (door_cell->door_index & 0x7FU) != door_id) {
+        continue;
+      }
+      if (!result.has_value() || state.sequence > best_sequence) {
+        result = state.open;
+        best_sequence = state.sequence;
       }
     }
-    return std::nullopt;
+    return result;
   }
 
   bool crash_man(ClientContext& context, const ActorState& self, int x, int y) const {
@@ -8290,10 +8322,10 @@ class WorldScene final : public Scene {
     if (world.next_time_power_hit) {
       return legacy::kCmPowerHit;
     }
-    if (world.can_cross_hit && world.self_ability_detail.mp >= 6) {
-      ident = legacy::kCmCrossHit;
-    } else if (world.can_wide_hit && world.self_ability_detail.mp >= 3) {
+    if (world.can_wide_hit && world.self_ability_detail.mp >= 3) {
       ident = legacy::kCmWideHit;
+    } else if (world.can_cross_hit && world.self_ability_detail.mp >= 6) {
+      ident = legacy::kCmCrossHit;
     } else if (world.can_long_hit && target_in_sword_long_attack_range(world, self, dir)) {
       ident = legacy::kCmLongHit;
     }
@@ -8307,10 +8339,6 @@ class WorldScene final : public Scene {
         !can_next_action(world, self, animation_idle, now_ms)) {
       return false;
     }
-    if (world.last_pickup_ms != 0 && elapsed_ms(now_ms, world.last_pickup_ms) < 250U) {
-      return false;
-    }
-    world.last_pickup_ms = now_ms;
     context.app->request_pickup(client_v1::PickupIntent{self.x, self.y});
     return true;
   }
@@ -8350,8 +8378,12 @@ class WorldScene final : public Scene {
   bool try_attack_ground(ClientContext& context, int x, int y, std::uint64_t now_ms) {
     auto& world = context.state->world;
     auto self_it = world.actors.find(world.self_actor_id);
+    if (self_it == world.actors.end()) {
+      return false;
+    }
+    world.last_attack_ms = now_ms;
     const auto animation_idle = self_actor_legacy_idle(world, now_ms);
-    if (self_it == world.actors.end() || !server_accept_next_action(world, now_ms) ||
+    if (!server_accept_next_action(world, now_ms) ||
         !can_next_action(world, self_it->second, animation_idle, now_ms)) {
       return false;
     }
@@ -8365,8 +8397,6 @@ class WorldScene final : public Scene {
       return false;
     }
     send_attack(context, self_it->second.x, self_it->second.y, dir, 0, attack_ident);
-    world.latest_hit_ms = now_ms;
-    world.last_attack_ms = now_ms;
     return true;
   }
 
@@ -8392,15 +8422,12 @@ class WorldScene final : public Scene {
     const auto& target = target_it->second;
     const auto distance = std::max(std::abs(target.x - self.x), std::abs(target.y - self.y));
     const auto dir = direction_between(self.x, self.y, target.x, target.y, self.dir);
-    const auto delta = legacy::direction_delta(dir);
-    const auto target_at_long_hit_cell = target.x == self.x + delta.dx * 2 &&
-                                         target.y == self.y + delta.dy * 2;
-    const auto can_target_long_hit = world.can_long_hit && target_at_long_hit_cell;
-    if (distance > 1 && !can_target_long_hit) {
+    if (distance > 1) {
       chase_target(context, self, target, dir);
       return process_pending_move(context, now_ms);
     }
 
+    world.last_attack_ms = now_ms;
     const auto animation_idle = self_actor_legacy_idle(world, now_ms);
     if (!server_accept_next_action(world, now_ms) ||
         !can_next_action(world, self, animation_idle, now_ms)) {
@@ -8416,13 +8443,11 @@ class WorldScene final : public Scene {
       return false;
     }
     send_attack(context, self.x, self.y, dir, target_actor_id, attack_ident);
-    world.latest_hit_ms = now_ms;
     if (attack_ident == legacy::kCmFireHit) {
       world.next_time_fire_hit = false;
     } else if (attack_ident == legacy::kCmPowerHit) {
       world.next_time_power_hit = false;
     }
-    world.last_attack_ms = now_ms;
     return true;
   }
 
@@ -8450,9 +8475,9 @@ class WorldScene final : public Scene {
       return false;
     }
     const auto slot = world.action_key;
+    world.action_key = -1;
     const auto magic_id = magic_for_slot(world, slot);
     if (magic_id == 0) {
-      world.action_key = -1;
       return false;
     }
     auto self_it = world.actors.find(world.self_actor_id);
@@ -8460,11 +8485,30 @@ class WorldScene final : public Scene {
       return false;
     }
     const auto* magic = magic_for_id(world, magic_id);
-    const auto delay = static_cast<std::uint64_t>(500 + (magic != nullptr ? magic->delay_ms : 0));
-    if (world.latest_spell_ms != 0 && elapsed_ms(input.tick, world.latest_spell_ms) < delay) {
+    if (!legacy_magic_shortcut_ready(world, input.tick)) {
       return false;
     }
-    if (self_it->second.mp == 0) {
+    const auto source_only_magic = magic != nullptr && magic->effect_type == 0;
+    if (source_only_magic) {
+      if (world.action_locked && elapsed_ms(input.tick, world.action_lock_started_ms) > 10000U) {
+        world.action_locked = false;
+        world.action_lock_timeout_cleared_ms = input.tick;
+        world.pending_action_acks.clear();
+        world.skip_next_move_fail_ack = false;
+      }
+      if (magic_id == 26 && world.latest_fire_hit_ms != 0 &&
+          elapsed_ms(input.tick, world.latest_fire_hit_ms) < 10000U) {
+        return false;
+      }
+      if (magic_id == 27 && world.latest_rush_rush_ms != 0 &&
+          elapsed_ms(input.tick, world.latest_rush_rush_ms) < 3000U) {
+        return false;
+      }
+      send_spell(context, static_cast<int>(self_it->second.dir), 0, 0, self_it->second.dir,
+                 magic_id, false, 0);
+      return true;
+    }
+    if (magic != nullptr && legacy_client_spell_point(*magic) > world.self_ability_detail.mp) {
       return false;
     }
     const auto animation_idle = self_actor_legacy_idle(world, input.tick);
@@ -8477,9 +8521,22 @@ class WorldScene final : public Scene {
     if (!legacy::in_bounds(width, height, input.map_x, input.map_y)) {
       return false;
     }
-    send_spell(context, self_it->second, input.map_x, input.map_y,
-               world.focus_actor_id != 0 ? world.focus_actor_id : world.target_actor_id, magic_id);
-    world.action_key = -1;
+    std::uint64_t target_actor_id = 0;
+    auto spell_x = input.map_x;
+    auto spell_y = input.map_y;
+    if (world.focus_actor_id != 0) {
+      if (const auto target_it = world.actors.find(world.focus_actor_id);
+          target_it != world.actors.end()) {
+        target_actor_id = world.focus_actor_id;
+        spell_x = target_it->second.x;
+        spell_y = target_it->second.y;
+      }
+    }
+    const auto spell_dir =
+        direction_between(self_it->second.x, self_it->second.y, input.map_x, input.map_y,
+                          self_it->second.dir);
+    send_spell(context, spell_x, spell_y, target_actor_id, spell_dir, magic_id, true,
+               static_cast<std::uint64_t>(200 + (magic != nullptr ? magic->delay_ms : 0)));
     return true;
   }
 
@@ -8500,15 +8557,16 @@ class WorldScene final : public Scene {
     return animation_.is_actor_legacy_idle(world.self_actor_id);
   }
 
-  static void send_spell(ClientContext& context, const ActorState& self, int x, int y,
-                         std::uint64_t target_actor_id, std::uint16_t magic_id) {
+  static void send_spell(ClientContext& context, int x, int y, std::uint64_t target_actor_id,
+                         std::uint8_t dir, std::uint16_t magic_id, const bool play_local_action,
+                         const std::uint64_t magic_delay_time_ms) {
     client_v1::SpellIntent spell;
     spell.x = x;
     spell.y = y;
-    spell.dir = direction_between(self.x, self.y, x, y, self.dir);
+    spell.dir = dir;
     spell.target_actor_id = target_actor_id;
     spell.magic_id = magic_id;
-    context.app->request_spell(spell);
+    context.app->request_spell(spell, play_local_action, magic_delay_time_ms);
   }
 
   void sync_map(ClientContext& context) {

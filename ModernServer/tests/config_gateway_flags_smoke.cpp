@@ -15,6 +15,8 @@ void write_text(const std::filesystem::path& path, const char* text) {
 }  // namespace
 
 int main() {
+  assert(mir2::LogicBudgetConfig{}.tick_ms == 10);
+
   const auto root = std::filesystem::temp_directory_path() / "mir2_config_gateway_flags_smoke";
   std::error_code ignored;
   std::filesystem::remove_all(root, ignored);
@@ -65,6 +67,7 @@ int main() {
   assert(config.runtime.enable_client_v1_gateways);
   assert(!config.runtime.legacy_approval_mode);
   assert(config.runtime.io_threads == 2);
+  assert(config.budgets.tick_ms == 20);
   assert(config.budgets.player_input_budget_per_tick == 2);
 
   write_text(root / "server.toml",
@@ -77,6 +80,17 @@ int main() {
              "legacy_approval_mode = true\n");
   const auto approval_config = loader.load(root);
   assert(approval_config.runtime.legacy_approval_mode);
+  assert(approval_config.budgets.tick_ms == 20);
+
+  write_text(root / "runtime" / "logic.toml",
+             "player_budget_ms = 30\n"
+             "player_input_budget_per_tick = 2\n"
+             "monster_budget_ms = 30\n"
+             "spawn_budget_ms = 30\n"
+             "npc_budget_ms = 5\n"
+             "net_flush_budget_ms = 30\n");
+  const auto default_tick_config = loader.load(root);
+  assert(default_tick_config.budgets.tick_ms == 10);
 
   std::filesystem::remove_all(root, ignored);
   return 0;

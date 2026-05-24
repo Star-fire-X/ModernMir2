@@ -320,6 +320,9 @@ class Player : public GameObject {
   [[nodiscard]] const LegacyUserItem* bag_item(
       std::int32_t make_index, std::string_view expected_name,
       const std::unordered_map<std::int32_t, ItemConfig>& item_configs) const;
+  [[nodiscard]] std::optional<std::size_t> bag_item_index(
+      std::int32_t make_index, std::string_view expected_name,
+      const std::unordered_map<std::int32_t, ItemConfig>& item_configs) const;
   [[nodiscard]] const LegacyUserItem* storage_item(
       std::int32_t make_index, std::string_view expected_name,
       const std::unordered_map<std::int32_t, ItemConfig>& item_configs) const;

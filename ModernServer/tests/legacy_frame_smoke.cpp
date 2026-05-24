@@ -132,7 +132,11 @@ bool check_frame_driver_order() {
                                      mir2::LegacyFrameStage::user_engine_execute_run)]
           .output_count != 1 ||
       stage_index(first_trace, mir2::LegacyFrameStage::user_engine_execute_run) >=
-          stage_index(first_trace, mir2::LegacyFrameStage::event_manager_run)) {
+          stage_index(first_trace, mir2::LegacyFrameStage::event_manager_run) ||
+      stage_index(first_trace, mir2::LegacyFrameStage::event_manager_run) >=
+          stage_index(first_trace, mir2::LegacyFrameStage::server_message_run) ||
+      first_trace.stages[stage_index(first_trace, mir2::LegacyFrameStage::server_message_run)]
+              .output_count != 0) {
     std::cerr << "legacy_frame_stage_counts\n";
     return false;
   }

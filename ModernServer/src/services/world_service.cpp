@@ -576,7 +576,9 @@ void WorldService::run() {
       callbacks.event_manager_run = [this, now_ms]() -> RuntimeDispatch {
         return runtime_->run_legacy_event_manager(now_ms);
       };
-      callbacks.server_message_run = []() -> RuntimeDispatch { return {}; };
+      callbacks.server_message_run = [this, now_ms]() -> RuntimeDispatch {
+        return run_server_message_stage(now_ms);
+      };
 
       auto dispatch =
           legacy_frame_driver_.run_frame(now_ms, std::move(frame_ingress), callbacks);
@@ -639,6 +641,10 @@ RuntimeDispatch WorldService::process_ingress_batch(WorldIngressBatch& batch) {
   }
   batch.messages.clear();
   return combined;
+}
+
+RuntimeDispatch WorldService::run_server_message_stage(std::uint64_t) {
+  return {};
 }
 
 bool WorldService::accept_ingress_sequence(const WorldIngressMessage& ingress,

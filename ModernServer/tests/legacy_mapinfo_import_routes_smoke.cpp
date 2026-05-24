@@ -52,6 +52,7 @@ int main() {
 
   mir2::ConfigLoader loader;
   const auto config = loader.load(output);
+  assert(config.budgets.tick_ms == 10);
   const auto* home = find_map(config, "0");
   const auto* cave = find_map(config, "1");
   assert(home != nullptr && cave != nullptr);

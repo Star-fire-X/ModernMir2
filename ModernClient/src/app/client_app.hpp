@@ -72,7 +72,9 @@ class ClientApp {
   void request_reselect_character();
   void request_move(int x, int y, client_v1::MoveMode mode);
   void request_action(const client_v1::ActionIntent& intent);
-  void request_spell(const client_v1::SpellIntent& intent);
+  void request_spell(const client_v1::SpellIntent& intent,
+                     bool play_local_action = true,
+                     std::uint64_t magic_delay_time_ms = 0);
   void request_pickup(const client_v1::PickupIntent& intent);
   void request_use_item(const client_v1::UseItemIntent& intent);
   void request_equip_item(const client_v1::EquipItemRequest& request);

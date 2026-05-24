@@ -138,8 +138,8 @@ void test_trade_add_pending_waits_for_inventory_or_restores_on_cancel() {
 
 void test_magic_key_rebinds_clear_previous_owner() {
   GameStateStore state;
-  state.world.magics.push_back(MagicShortcutState{1, 1, 0, 0, 0, "Fire", 0, 0});
-  state.world.magics.push_back(MagicShortcutState{2, 0, 0, 0, 0, "Thunder", 0, 0});
+  state.world.magics.push_back(MagicShortcutState{1, 1, 0, 0, 0, "Fire", 0, 0, 0, 0, 0, 0});
+  state.world.magics.push_back(MagicShortcutState{2, 0, 0, 0, 0, "Thunder", 0, 0, 0, 0, 0, 0});
 
   state.bind_magic_key(2, 1);
   assert(state.world.magics[0].key == 0);

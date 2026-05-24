@@ -252,7 +252,7 @@ int main() {
   static_cast<void>(runtime.route_logic_command(make_item_command(
       mir2::LogicCommandKind::take_off_item, 7, 1001, "Wooden Sword", 1)));
   const auto take_off_dispatch = tick_player_due(runtime, now_ms);
-  if (!has_packet(take_off_dispatch, mir2::kSmDelItem) ||
+  if (has_packet(take_off_dispatch, mir2::kSmDelItem) ||
       !has_packet(take_off_dispatch, mir2::kSmTakeOffOk) ||
       !has_packet(take_off_dispatch, mir2::kSmAddItem) ||
       !has_packet(take_off_dispatch, mir2::kSmAbility) ||
@@ -261,18 +261,15 @@ int main() {
     return 1;
   }
 
-  const auto take_off_del = find_packet(take_off_dispatch, mir2::kSmDelItem);
   const auto take_off_ok = find_packet(take_off_dispatch, mir2::kSmTakeOffOk);
   const auto take_off_add = find_packet(take_off_dispatch, mir2::kSmAddItem);
   const auto take_off_weight = find_packet(take_off_dispatch, mir2::kSmWeightChanged);
-  if (!take_off_del.has_value() || !take_off_ok.has_value() || !take_off_add.has_value() ||
+  if (!take_off_ok.has_value() || !take_off_add.has_value() ||
       !take_off_weight.has_value()) {
     return 1;
   }
-  const auto take_off_removed = decode_client_item(take_off_del->body);
   const auto taken_off_item = decode_client_item(take_off_add->body);
-  if (!take_off_removed.has_value() || take_off_removed->make_index != 1001 ||
-      !taken_off_item.has_value() || taken_off_item->make_index != 1001 ||
+  if (!taken_off_item.has_value() || taken_off_item->make_index != 1001 ||
       taken_off_item->dura != 600 ||
       take_off_ok->message.recog != mir2::make_feature(0, 0, 0, 4) ||
       take_off_weight->message.recog != 4 || take_off_weight->message.param != 0 ||

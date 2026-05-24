@@ -1,4 +1,5 @@
 #include <optional>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -55,7 +56,7 @@ mir2::LogicCommand make_storage_command(mir2::LogicCommandKind kind, std::uint64
 
 mir2::RuntimeDispatch tick_until_packet(mir2::LogicRuntime& runtime, std::uint16_t ident) {
   mir2::RuntimeDispatch dispatch;
-  for (int i = 0; i < 8; ++i) {
+  for (int i = 0; i < 30; ++i) {
     dispatch = runtime.tick();
     if (find_packet(dispatch, ident).has_value()) {
       break;
@@ -67,6 +68,11 @@ mir2::RuntimeDispatch tick_until_packet(mir2::LogicRuntime& runtime, std::uint16
 }  // namespace
 
 int main() {
+  auto fail = [](const char* message) {
+    std::cerr << "storage_smoke failed at " << message << '\n';
+    return 1;
+  };
+
   mir2::HostConfig config;
   config.maps.push_back(mir2::MapConfig{"0", "StorageMap", {}, 0, 0, 20, 20});
   config.items.push_back(mir2::ItemConfig{1, "Storage Sword", 3, 90, 5, 1, 1, 1000, 1, 0, 0});
@@ -155,7 +161,67 @@ int main() {
       store_weight->message.param != 0 || store_weight->message.tag != 0 ||
       store_weight->message.series != weight_checksum(0, 0, 0) ||
       store_dispatch.persist_requests.empty()) {
-    return 1;
+    return fail("store ok");
+  }
+
+  mir2::LogicRuntime full_runtime(config);
+  full_runtime.initialize();
+  auto full_hero = hero;
+  full_hero.character_name = "FullStorageHero";
+  full_hero.bag_items[0].make_index = 2001;
+  full_hero.bag_items[1] = full_hero.bag_items[0];
+  full_hero.bag_items[1].make_index = 2002;
+  for (std::size_t index = 0; index < full_hero.storage_items.size(); ++index) {
+    full_hero.storage_items[index] = full_hero.bag_items[0];
+    full_hero.storage_items[index].make_index = static_cast<std::int32_t>(3000 + index);
+  }
+
+  mir2::LogicCommand full_enter = enter;
+  full_enter.session_id = 9;
+  full_enter.character_name = "FullStorageHero";
+  full_enter.character = full_hero;
+  static_cast<void>(full_runtime.route_logic_command(full_enter));
+  if (!find_packet(full_runtime.tick(), mir2::kSmNewMap).has_value()) {
+    return fail("full storage login");
+  }
+  for (int i = 0; i < 4; ++i) {
+    static_cast<void>(full_runtime.tick());
+  }
+
+  std::uint64_t full_merchant_id = 0;
+  for (std::uint64_t candidate = 1; candidate <= 100; ++candidate) {
+    click_npc.session_id = 9;
+    click_npc.target_actor_id = candidate;
+    static_cast<void>(full_runtime.route_logic_command(click_npc));
+    const auto click_dispatch = full_runtime.tick();
+    if (find_packet(click_dispatch, mir2::kSmSendUserStorageItem).has_value()) {
+      full_merchant_id = candidate;
+      break;
+    }
+  }
+  if (full_merchant_id == 0) {
+    return fail("full storage merchant");
+  }
+
+  mir2::RuntimeDispatch full_dispatch;
+  for (std::uint64_t candidate = 1; candidate <= 100; ++candidate) {
+    static_cast<void>(full_runtime.route_logic_command(make_storage_command(
+        mir2::LogicCommandKind::storage_item, 9, candidate, 2001, "Storage Sword")));
+    full_dispatch = tick_until_packet(full_runtime, mir2::kSmStorageFull);
+    if (find_packet(full_dispatch, mir2::kSmStorageFull).has_value()) {
+      break;
+    }
+  }
+  if (!find_packet(full_dispatch, mir2::kSmStorageFull).has_value() ||
+      find_packet(full_dispatch, mir2::kSmDelItem).has_value()) {
+    return fail("full storage result");
+  }
+
+  const auto full_snapshot = full_runtime.snapshot_character_actor("FullStorageHero");
+  if (!full_snapshot.has_value() ||
+      full_snapshot->bag_items[0].make_index != 2001 ||
+      full_snapshot->bag_items[1].make_index != 2002) {
+    return fail("full storage bag order");
   }
 
   return 0;
