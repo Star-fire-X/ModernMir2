@@ -4,6 +4,9 @@
 #include "shared/legacy/movement_rules.hpp"
 
 #include <cassert>
+#include <chrono>
+#include <cstdint>
+#include <thread>
 #include <utility>
 
 using namespace mir2::client;
@@ -15,6 +18,22 @@ namespace {
 std::pair<int, int> mouse_for_tile(const int self_x, const int self_y, const int x, const int y) {
   return mir2::legacy::legacy_screen_from_map(
       mir2::legacy::make_legacy_map_viewport(self_x, self_y), x, y);
+}
+
+LegacyInputEvent left_down_event(const int x, const int y) {
+  LegacyInputEvent event;
+  event.kind = LegacyInputEventKind::left_down;
+  event.mouse_x = x;
+  event.mouse_y = y;
+  event.left_down = true;
+  return event;
+}
+
+LegacyInputEvent key_down_event(const std::uint16_t key) {
+  LegacyInputEvent event;
+  event.kind = LegacyInputEventKind::key_down;
+  event.key = key;
+  return event;
 }
 
 void connect_for_test(ClientApp& app) {
@@ -312,7 +331,7 @@ void test_attack_attempt_updates_move_suppression() {
   assert(!world.action_locked);
 }
 
-void test_two_cell_target_chases_instead_of_longhit() {
+void test_locked_two_cell_target_drops_stale_chase_move() {
   GameStateStore state;
   ClientConfig config;
   InputState input;
@@ -330,9 +349,10 @@ void test_two_cell_target_chases_instead_of_longhit() {
   world.target_actor_id = 2;
 
   scenes.process_action_messages(context, 0.016F);
-  assert(world.legacy_chr_action == LegacyChrAction::walk);
-  assert(world.legacy_target_x == 51);
-  assert(world.legacy_target_y == 50);
+  assert(world.target_actor_id == 2);
+  assert(world.legacy_chr_action == LegacyChrAction::none);
+  assert(world.legacy_target_x == -1);
+  assert(world.legacy_target_y == -1);
 }
 
 void test_pickup_has_no_extra_client_throttle() {
@@ -359,6 +379,408 @@ void test_pickup_has_no_extra_client_throttle() {
   assert(frames.size() == 2);
   assert(decode_message<PickupIntent>(frames[0]).has_value());
   assert(decode_message<PickupIntent>(frames[1]).has_value());
+}
+
+void test_ground_pickup_clears_stale_target_before_attack_phase() {
+  ClientApp app;
+  connect_for_test(app);
+  auto& state = app.state_for_test();
+  reset_world(state);
+  auto& world = state.world;
+  ActorState target;
+  target.actor_id = 2;
+  target.x = 55;
+  target.y = 50;
+  world.actors.emplace(2, target);
+  world.target_actor_id = 2;
+  world.ground_items.emplace(900, GroundItemState{900, 50, 50, 1, "Gold"});
+
+  ClientConfig config;
+  InputState input;
+  auto [mouse_x, mouse_y] = mouse_for_tile(world.actors[1].x, world.actors[1].y, 50, 50);
+  input.mouse_x = mouse_x;
+  input.mouse_y = mouse_y;
+  input.left_pressed = true;
+  input.left_down = true;
+  SceneManager scenes;
+  ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+
+  scenes.process_action_messages(context, 0.016F);
+  const auto frames = app.drain_sent_frames_for_test();
+  assert(frames.size() == 1);
+  assert(decode_message<PickupIntent>(frames.front()).has_value());
+  assert(world.target_actor_id == 0);
+  assert(world.legacy_chr_action == LegacyChrAction::none);
+}
+
+void test_locked_pending_move_candidate_is_dropped() {
+  GameStateStore state;
+  ClientConfig config;
+  InputState input;
+  SceneManager scenes;
+  ClientContext context{nullptr, &config, &state, nullptr, nullptr, nullptr, &input};
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+  reset_world(state);
+  auto& world = state.world;
+  world.legacy_target_x = 52;
+  world.legacy_target_y = 50;
+  world.legacy_chr_action = LegacyChrAction::walk;
+  world.action_locked = true;
+  world.action_lock_started_ms = detail::monotonic_ms();
+
+  scenes.process_action_messages(context, 0.016F);
+  assert(world.legacy_target_x == -1);
+  assert(world.legacy_target_y == -1);
+  assert(world.legacy_chr_action == LegacyChrAction::none);
+}
+
+void test_locked_same_tile_pickup_candidate_is_dropped() {
+  ClientApp app;
+  connect_for_test(app);
+  auto& state = app.state_for_test();
+  reset_world(state);
+  auto& world = state.world;
+  world.ground_items.emplace(900, GroundItemState{900, 50, 50, 1, "Gold"});
+  world.pending_pickup_item_id = 900;
+  world.action_locked = true;
+  world.action_lock_started_ms = detail::monotonic_ms();
+
+  ClientConfig config;
+  InputState input;
+  SceneManager scenes;
+  ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+
+  scenes.process_action_messages(context, 0.016F);
+  assert(app.drain_sent_frames_for_test().empty());
+  assert(world.pending_pickup_item_id == 0);
+}
+
+void test_locked_far_pickup_does_not_auto_move_after_unlock() {
+  ClientApp app;
+  connect_for_test(app);
+  auto& state = app.state_for_test();
+  reset_world(state);
+  auto& world = state.world;
+  world.ground_items.emplace(900, GroundItemState{900, 51, 50, 1, "Gold"});
+  world.pending_pickup_item_id = 900;
+  world.action_locked = true;
+  world.action_lock_started_ms = detail::monotonic_ms();
+
+  ClientConfig config;
+  InputState input;
+  SceneManager scenes;
+  ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+
+  scenes.process_action_messages(context, 0.016F);
+  assert(app.drain_sent_frames_for_test().empty());
+  assert(world.pending_pickup_item_id == 0);
+  assert(world.legacy_chr_action == LegacyChrAction::none);
+
+  world.action_locked = false;
+  world.action_lock_started_ms = 0;
+  scenes.process_action_messages(context, 0.016F);
+  assert(app.drain_sent_frames_for_test().empty());
+}
+
+void test_far_ground_item_click_only_queues_move() {
+  ClientApp app;
+  connect_for_test(app);
+  auto& state = app.state_for_test();
+  reset_world(state);
+  auto& world = state.world;
+  world.ground_items.emplace(900, GroundItemState{900, 51, 50, 1, "Gold"});
+
+  ClientConfig config;
+  InputState input;
+  auto [mouse_x, mouse_y] = mouse_for_tile(world.actors[1].x, world.actors[1].y, 51, 50);
+  input.mouse_x = mouse_x;
+  input.mouse_y = mouse_y;
+  input.left_pressed = true;
+  input.left_down = true;
+  SceneManager scenes;
+  ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+
+  scenes.process_action_messages(context, 0.016F);
+  auto frames = app.drain_sent_frames_for_test();
+  assert(frames.size() == 1);
+  const auto move = decode_message<ActionIntent>(frames.front());
+  assert(move.has_value());
+  assert(move->kind == WorldActionKind::walk);
+  assert(world.pending_pickup_item_id == 0);
+  input = InputState{};
+
+  state.apply(ActionAck{true, 1234});
+  assert(!world.action_locked);
+  for (int tick = 0; tick < 3; ++tick) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(110));
+    scenes.update(context, 0.110F);
+    assert(app.drain_sent_frames_for_test().empty());
+  }
+  assert(world.pending_pickup_item_id == 0);
+}
+
+void test_pickup_turn_candidate_is_one_shot() {
+  ClientApp app;
+  connect_for_test(app);
+  auto& state = app.state_for_test();
+  reset_world(state);
+  auto& world = state.world;
+  ActorState blocker;
+  blocker.actor_id = 2;
+  blocker.x = 49;
+  blocker.y = 50;
+  world.actors.emplace(2, blocker);
+  world.ground_items.emplace(900, GroundItemState{900, 49, 50, 1, "Gold"});
+  world.pending_pickup_item_id = 900;
+
+  ClientConfig config;
+  InputState input;
+  SceneManager scenes;
+  ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+
+  scenes.process_action_messages(context, 0.016F);
+  auto frames = app.drain_sent_frames_for_test();
+  assert(frames.size() == 1);
+  const auto turn = decode_message<ActionIntent>(frames.front());
+  assert(turn.has_value());
+  assert(turn->kind == WorldActionKind::turn);
+  assert(world.pending_pickup_item_id == 0);
+
+  scenes.process_action_messages(context, 0.016F);
+  assert(app.drain_sent_frames_for_test().empty());
+  assert(world.pending_pickup_item_id == 0);
+}
+
+void test_move_candidate_drops_when_animation_busy_after_ack() {
+  ClientApp app;
+  connect_for_test(app);
+  auto& state = app.state_for_test();
+  reset_world(state);
+  auto& world = state.world;
+
+  ClientConfig config;
+  InputState input;
+  SceneManager scenes;
+  ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+
+  world.legacy_target_x = 51;
+  world.legacy_target_y = 50;
+  world.legacy_chr_action = LegacyChrAction::walk;
+  scenes.process_action_messages(context, 0.016F);
+  auto frames = app.drain_sent_frames_for_test();
+  assert(frames.size() == 1);
+  assert(decode_message<ActionIntent>(frames.front()).has_value());
+
+  state.apply(ActionAck{true, 1234});
+  scenes.update(context, 0.016F);
+  assert(!world.action_locked);
+
+  world.legacy_target_x = 52;
+  world.legacy_target_y = 50;
+  world.legacy_chr_action = LegacyChrAction::walk;
+  scenes.process_action_messages(context, 0.016F);
+  assert(app.drain_sent_frames_for_test().empty());
+  assert(world.legacy_target_x == -1);
+  assert(world.legacy_target_y == -1);
+  assert(world.legacy_chr_action == LegacyChrAction::none);
+
+  for (int tick = 0; tick < 3; ++tick) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(110));
+    scenes.update(context, 0.110F);
+    assert(app.drain_sent_frames_for_test().empty());
+  }
+  assert(world.legacy_chr_action == LegacyChrAction::none);
+}
+
+void test_far_pickup_candidate_drops_when_animation_busy_after_ack() {
+  ClientApp app;
+  connect_for_test(app);
+  auto& state = app.state_for_test();
+  reset_world(state);
+  auto& world = state.world;
+
+  ClientConfig config;
+  InputState input;
+  SceneManager scenes;
+  ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+
+  world.legacy_target_x = 51;
+  world.legacy_target_y = 50;
+  world.legacy_chr_action = LegacyChrAction::walk;
+  scenes.process_action_messages(context, 0.016F);
+  auto frames = app.drain_sent_frames_for_test();
+  assert(frames.size() == 1);
+  assert(decode_message<ActionIntent>(frames.front()).has_value());
+
+  state.apply(ActionAck{true, 1234});
+  scenes.update(context, 0.016F);
+  world.ground_items.emplace(901, GroundItemState{901, 52, 50, 1, "Gold"});
+  world.pending_pickup_item_id = 901;
+
+  scenes.process_action_messages(context, 0.016F);
+  assert(app.drain_sent_frames_for_test().empty());
+  assert(world.pending_pickup_item_id == 0);
+  assert(world.legacy_chr_action == LegacyChrAction::none);
+
+  for (int tick = 0; tick < 3; ++tick) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(110));
+    scenes.update(context, 0.110F);
+    assert(app.drain_sent_frames_for_test().empty());
+  }
+}
+
+void test_same_tile_pickup_candidate_drops_when_animation_busy_after_ack() {
+  ClientApp app;
+  connect_for_test(app);
+  auto& state = app.state_for_test();
+  reset_world(state);
+  auto& world = state.world;
+
+  ClientConfig config;
+  InputState input;
+  SceneManager scenes;
+  ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+
+  world.legacy_target_x = 51;
+  world.legacy_target_y = 50;
+  world.legacy_chr_action = LegacyChrAction::walk;
+  scenes.process_action_messages(context, 0.016F);
+  auto frames = app.drain_sent_frames_for_test();
+  assert(frames.size() == 1);
+  assert(decode_message<ActionIntent>(frames.front()).has_value());
+
+  state.apply(ActionAck{true, 1234});
+  scenes.update(context, 0.016F);
+  world.ground_items.emplace(902, GroundItemState{902, 51, 50, 1, "Gold"});
+  world.pending_pickup_item_id = 902;
+
+  scenes.process_action_messages(context, 0.016F);
+  assert(app.drain_sent_frames_for_test().empty());
+  assert(world.pending_pickup_item_id == 0);
+
+  for (int tick = 0; tick < 3; ++tick) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(110));
+    scenes.update(context, 0.110F);
+    assert(app.drain_sent_frames_for_test().empty());
+  }
+  assert(world.pending_pickup_item_id == 0);
+}
+
+void test_mouse_down_cancels_earlier_same_frame_magic_key() {
+  ClientApp app;
+  connect_for_test(app);
+  auto& state = app.state_for_test();
+  reset_world(state);
+  auto& world = state.world;
+  world.magics.push_back(MagicShortcutState{26, 1, 0, 0, 1200, "FireSword", 0, 0, 0, 0, 0, 0});
+  world.action_locked = true;
+  world.action_lock_started_ms = detail::monotonic_ms();
+
+  auto [mouse_x, mouse_y] = mouse_for_tile(world.actors[1].x, world.actors[1].y, 52, 50);
+  ClientConfig config;
+  InputState input;
+  input.mouse_x = mouse_x;
+  input.mouse_y = mouse_y;
+  input.events.push_back(key_down_event(VK_F1));
+  input.events.push_back(left_down_event(mouse_x, mouse_y));
+  SceneManager scenes;
+  ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+
+  scenes.dispatch_legacy_input_events(context);
+  assert(world.action_key == -1);
+  scenes.process_action_messages(context, 0.016F);
+  assert(app.drain_sent_frames_for_test().empty());
+}
+
+void test_later_same_frame_magic_key_survives_mouse_down() {
+  ClientApp app;
+  connect_for_test(app);
+  auto& state = app.state_for_test();
+  reset_world(state);
+  auto& world = state.world;
+  world.magics.push_back(MagicShortcutState{26, 1, 0, 0, 1200, "FireSword", 0, 0, 0, 0, 0, 0});
+  world.action_locked = true;
+  world.action_lock_started_ms = detail::monotonic_ms();
+
+  auto [mouse_x, mouse_y] = mouse_for_tile(world.actors[1].x, world.actors[1].y, 52, 50);
+  ClientConfig config;
+  InputState input;
+  input.mouse_x = mouse_x;
+  input.mouse_y = mouse_y;
+  input.events.push_back(left_down_event(mouse_x, mouse_y));
+  input.events.push_back(key_down_event(VK_F1));
+  SceneManager scenes;
+  ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+
+  scenes.dispatch_legacy_input_events(context);
+  assert(world.action_key == 0);
+  scenes.process_action_messages(context, 0.016F);
+  const auto frames = app.drain_sent_frames_for_test();
+  assert(frames.size() == 1);
+  assert(decode_message<SpellIntent>(frames.front()).has_value());
+}
+
+void test_magic_key_survives_held_mouse_repeat() {
+  ClientApp app;
+  connect_for_test(app);
+  auto& state = app.state_for_test();
+  reset_world(state);
+  auto& world = state.world;
+  world.magics.push_back(MagicShortcutState{26, 1, 0, 0, 1200, "FireSword", 0, 0, 0, 0, 0, 0});
+  world.action_locked = true;
+  world.action_lock_started_ms = detail::monotonic_ms();
+
+  auto [mouse_x, mouse_y] = mouse_for_tile(world.actors[1].x, world.actors[1].y, 52, 50);
+  ClientConfig config;
+  InputState input;
+  input.mouse_x = mouse_x;
+  input.mouse_y = mouse_y;
+  input.left_down = true;
+  input.events.push_back(left_down_event(mouse_x, mouse_y));
+  SceneManager scenes;
+  ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+
+  scenes.dispatch_legacy_input_events(context);
+  scenes.process_action_messages(context, 0.016F);
+  assert(app.drain_sent_frames_for_test().empty());
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(320));
+  input.events.clear();
+  auto key_event = key_down_event(VK_F1);
+  key_event.mouse_x = mouse_x;
+  key_event.mouse_y = mouse_y;
+  key_event.left_down = true;
+  input.events.push_back(key_event);
+  context.legacy_input_dispatched = false;
+  scenes.dispatch_legacy_input_events(context);
+  assert(world.action_key == 0);
+  scenes.process_action_messages(context, 0.016F);
+  const auto frames = app.drain_sent_frames_for_test();
+  assert(frames.size() == 1);
+  assert(decode_message<SpellIntent>(frames.front()).has_value());
 }
 
 void test_rush_confirmation_records_rush_cooldown() {
@@ -750,8 +1172,20 @@ int main() {
   test_source_only_magic_after_sm_movefail_ack_consumes_real_spell_failure();
   test_source_only_magic_expires_stale_lock_before_send();
   test_attack_attempt_updates_move_suppression();
-  test_two_cell_target_chases_instead_of_longhit();
+  test_locked_two_cell_target_drops_stale_chase_move();
   test_pickup_has_no_extra_client_throttle();
+  test_ground_pickup_clears_stale_target_before_attack_phase();
+  test_locked_pending_move_candidate_is_dropped();
+  test_locked_same_tile_pickup_candidate_is_dropped();
+  test_locked_far_pickup_does_not_auto_move_after_unlock();
+  test_far_ground_item_click_only_queues_move();
+  test_pickup_turn_candidate_is_one_shot();
+  test_move_candidate_drops_when_animation_busy_after_ack();
+  test_far_pickup_candidate_drops_when_animation_busy_after_ack();
+  test_same_tile_pickup_candidate_drops_when_animation_busy_after_ack();
+  test_mouse_down_cancels_earlier_same_frame_magic_key();
+  test_later_same_frame_magic_key_survives_mouse_down();
+  test_magic_key_survives_held_mouse_repeat();
   test_rush_confirmation_records_rush_cooldown();
   test_rush_kung_confirmation_does_not_record_rush_cooldown();
   test_target_magic_uses_target_position_and_mouse_direction();
