@@ -7,7 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(MSVC)
-  add_compile_options(/utf-8 /bigobj)
+  add_compile_options(/utf-8 /bigobj /FS)
+elseif(MINGW)
+  add_compile_options(-Wa,-mbig-obj)
 endif()
 
 if(WIN32)
@@ -1054,6 +1056,7 @@ if(BUILD_TESTING)
       mir2_npc_instance_click_guard_smoke
       mir2_scripted_merchant_smoke
       mir2_scripted_npc_dialog_smoke
+      mir2_legacy_mapquest_import_trigger_smoke
       mir2_special_consumables_legacy_smoke
       mir2_guild_manager_smoke
       mir2_castle_manager_smoke

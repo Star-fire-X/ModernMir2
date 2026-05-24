@@ -1,7 +1,9 @@
+#include <cassert>
 #include <filesystem>
 #include <fstream>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "config/config_loader.hpp"
 #include "protocol/legacy_edcode.hpp"
@@ -32,6 +34,30 @@ std::string decode_merchant_dialog(std::string_view body) {
   return mir2::legacy_decode_string(body);
 }
 
+std::optional<std::size_t> trace_index(const mir2::RuntimeDispatch& dispatch,
+                                       std::string_view stage, std::string_view action,
+                                       std::string_view label = {}) {
+  for (std::size_t i = 0; i < dispatch.legacy_traces.size(); ++i) {
+    const auto& trace = dispatch.legacy_traces[i];
+    if (trace.stage == stage && trace.action == action &&
+        (label.empty() || trace.label == label)) {
+      return i;
+    }
+  }
+  return std::nullopt;
+}
+
+void assert_script_sync_order(const mir2::RuntimeDispatch& dispatch) {
+  const auto user_begin = trace_index(dispatch, "ProcessUserHumans", "begin");
+  const auto script_begin = trace_index(dispatch, "LegacyScript", "begin");
+  const auto monster_begin = trace_index(dispatch, "ProcessMonsters", "begin");
+  assert(user_begin.has_value());
+  assert(script_begin.has_value());
+  assert(monster_begin.has_value());
+  assert(*user_begin < *script_begin);
+  assert(*script_begin < *monster_begin);
+}
+
 mir2::LogicCommand make_menu_command(std::uint64_t session_id, std::uint64_t npc_id,
                                      std::string action) {
   mir2::LogicCommand command;
@@ -44,9 +70,16 @@ mir2::LogicCommand make_menu_command(std::uint64_t session_id, std::uint64_t npc
 
 mir2::RuntimeDispatch route_due(mir2::LogicRuntime& runtime, std::uint64_t& now_ms,
                                 mir2::LogicCommand command) {
-  static_cast<void>(runtime.route_logic_command(std::move(command)));
+  const auto session_id = command.session_id;
+  const auto inbox_before = runtime.legacy_session_inbox_size(session_id);
+  const auto routed = runtime.route_logic_command(std::move(command));
+  assert(routed.session_events.empty());
+  assert(routed.legacy_traces.empty());
+  assert(runtime.legacy_session_inbox_size(session_id) == inbox_before + 1);
   now_ms += 251;
-  return runtime.tick(now_ms);
+  auto dispatch = runtime.tick(now_ms);
+  assert(runtime.legacy_session_inbox_size(session_id) == inbox_before);
+  return dispatch;
 }
 
 }  // namespace
@@ -150,6 +183,8 @@ int main() {
   click_npc.session_id = 12;
   click_npc.target_actor_id = 1;
   const auto main_dispatch = route_due(runtime, now_ms, std::move(click_npc));
+  assert_script_sync_order(main_dispatch);
+  assert(trace_index(main_dispatch, "LegacyScript", "say").has_value());
   const auto main_packet = find_packet(main_dispatch, mir2::kSmMerchantSay);
   if (!main_packet.has_value()) {
     std::filesystem::remove_all(root, ec);
@@ -163,6 +198,8 @@ int main() {
   }
 
   const auto about_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@ABOUT"));
+  assert_script_sync_order(about_dispatch);
+  assert(trace_index(about_dispatch, "LegacyScript", "say").has_value());
   const auto about_packet = find_packet(about_dispatch, mir2::kSmMerchantSay);
   if (!about_packet.has_value()) {
     std::filesystem::remove_all(root, ec);
@@ -174,7 +211,18 @@ int main() {
     return 1;
   }
 
+  const auto missing_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@missing"));
+  assert_script_sync_order(missing_dispatch);
+  assert(trace_index(missing_dispatch, "LegacyScript", "missing_section", "@missing")
+             .has_value());
+  if (find_packet(missing_dispatch, mir2::kSmMerchantSay).has_value()) {
+    std::filesystem::remove_all(root, ec);
+    return 1;
+  }
+
   const auto call_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@call"));
+  assert_script_sync_order(call_dispatch);
+  assert(trace_index(call_dispatch, "LegacyScript", "say").has_value());
   const auto call_packet = find_packet(call_dispatch, mir2::kSmMerchantSay);
   if (!call_packet.has_value()) {
     std::filesystem::remove_all(root, ec);
@@ -187,6 +235,8 @@ int main() {
   }
 
   const auto done_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@done"));
+  assert_script_sync_order(done_dispatch);
+  assert(trace_index(done_dispatch, "LegacyScript", "say").has_value());
   const auto done_packet = find_packet(done_dispatch, mir2::kSmMerchantSay);
   if (!done_packet.has_value()) {
     std::filesystem::remove_all(root, ec);
@@ -199,6 +249,8 @@ int main() {
   }
 
   const auto home_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@HOME"));
+  assert_script_sync_order(home_dispatch);
+  assert(trace_index(home_dispatch, "LegacyScript", "say").has_value());
   const auto home_packet = find_packet(home_dispatch, mir2::kSmMerchantSay);
   if (!home_packet.has_value()) {
     std::filesystem::remove_all(root, ec);
@@ -211,6 +263,8 @@ int main() {
   }
 
   const auto close_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@exit"));
+  assert_script_sync_order(close_dispatch);
+  assert(trace_index(close_dispatch, "LegacyScript", "close", "@exit").has_value());
   if (!find_packet(close_dispatch, mir2::kSmMerchantDlgClose).has_value()) {
     std::filesystem::remove_all(root, ec);
     return 1;
