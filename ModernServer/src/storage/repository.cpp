@@ -1709,59 +1709,70 @@ bool Repository::delete_character(const std::string& account_id, const std::stri
 
 bool Repository::save_character(const CharacterRecord& character) {
   ensure_account(database_, character.account_id);
-  const auto tombstone_version =
-      load_save_version(database_, character.account_id, character.character_name,
-                        "character_save_tombstones");
-  if (tombstone_version.has_value() && *tombstone_version >= character.save_version) {
-    return false;
-  }
+  exec_or_throw(database_, "BEGIN IMMEDIATE;");
+  try {
+    const auto tombstone_version =
+        load_save_version(database_, character.account_id, character.character_name,
+                          "character_save_tombstones");
+    if (tombstone_version.has_value() && *tombstone_version >= character.save_version) {
+      exec_or_throw(database_, "ROLLBACK;");
+      return false;
+    }
 
-  static constexpr const char* kSql =
-      "INSERT INTO characters(account_id, character_name, map_id, x, y, dir, light, job, sex, hair,"
-      " gold, feature, status, level, hp, mp, max_hp, max_mp, ac, mac, dc, mc, sc, exp, max_exp,"
-      " weight, max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight,"
-      " equipped_blob, bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode,"
-      " pk_point, death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob, body_luck, birth_items_granted, save_version)"
-      " VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,"
-      " ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36,"
-      " ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49)"
-      " ON CONFLICT(account_id, character_name) DO UPDATE SET map_id = excluded.map_id,"
-      " x = excluded.x, y = excluded.y, dir = excluded.dir, light = excluded.light, job = excluded.job,"
-      " sex = excluded.sex, hair = excluded.hair, gold = excluded.gold,"
-      " feature = excluded.feature, status = excluded.status, level = excluded.level,"
-      " hp = excluded.hp, mp = excluded.mp, max_hp = excluded.max_hp,"
-      " max_mp = excluded.max_mp, ac = excluded.ac, mac = excluded.mac, dc = excluded.dc,"
-      " mc = excluded.mc, sc = excluded.sc, exp = excluded.exp, max_exp = excluded.max_exp,"
-      " weight = excluded.weight, max_weight = excluded.max_weight,"
-      " wear_weight = excluded.wear_weight, max_wear_weight = excluded.max_wear_weight,"
-      " hand_weight = excluded.hand_weight, max_hand_weight = excluded.max_hand_weight,"
-      " equipped_blob = excluded.equipped_blob, bag_blob = excluded.bag_blob,"
-      " storage_blob = excluded.storage_blob, magic_blob = excluded.magic_blob,"
-      " guild_name = excluded.guild_name, guild_title = excluded.guild_title,"
-      " attack_mode = excluded.attack_mode, pk_point = excluded.pk_point,"
-      " death_time_ms = excluded.death_time_ms, quest_blob = excluded.quest_blob,"
-      " quest_open_blob = excluded.quest_open_blob, quest_unit_blob = excluded.quest_unit_blob,"
-      " script_param_blob = excluded.script_param_blob, daily_quest = excluded.daily_quest,"
-      " slave_blob = excluded.slave_blob, body_luck = excluded.body_luck,"
-      " birth_items_granted = excluded.birth_items_granted,"
-      " save_version = excluded.save_version, updated_at = CURRENT_TIMESTAMP"
-      " WHERE excluded.save_version >= characters.save_version;";
+    static constexpr const char* kSql =
+        "INSERT INTO characters(account_id, character_name, map_id, x, y, dir, light, job, sex, hair,"
+        " gold, feature, status, level, hp, mp, max_hp, max_mp, ac, mac, dc, mc, sc, exp, max_exp,"
+        " weight, max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight,"
+        " equipped_blob, bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode,"
+        " pk_point, death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
+        " daily_quest, slave_blob, body_luck, birth_items_granted, save_version)"
+        " VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,"
+        " ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36,"
+        " ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49)"
+        " ON CONFLICT(account_id, character_name) DO UPDATE SET map_id = excluded.map_id,"
+        " x = excluded.x, y = excluded.y, dir = excluded.dir, light = excluded.light, job = excluded.job,"
+        " sex = excluded.sex, hair = excluded.hair, gold = excluded.gold,"
+        " feature = excluded.feature, status = excluded.status, level = excluded.level,"
+        " hp = excluded.hp, mp = excluded.mp, max_hp = excluded.max_hp,"
+        " max_mp = excluded.max_mp, ac = excluded.ac, mac = excluded.mac, dc = excluded.dc,"
+        " mc = excluded.mc, sc = excluded.sc, exp = excluded.exp, max_exp = excluded.max_exp,"
+        " weight = excluded.weight, max_weight = excluded.max_weight,"
+        " wear_weight = excluded.wear_weight, max_wear_weight = excluded.max_wear_weight,"
+        " hand_weight = excluded.hand_weight, max_hand_weight = excluded.max_hand_weight,"
+        " equipped_blob = excluded.equipped_blob, bag_blob = excluded.bag_blob,"
+        " storage_blob = excluded.storage_blob, magic_blob = excluded.magic_blob,"
+        " guild_name = excluded.guild_name, guild_title = excluded.guild_title,"
+        " attack_mode = excluded.attack_mode, pk_point = excluded.pk_point,"
+        " death_time_ms = excluded.death_time_ms, quest_blob = excluded.quest_blob,"
+        " quest_open_blob = excluded.quest_open_blob, quest_unit_blob = excluded.quest_unit_blob,"
+        " script_param_blob = excluded.script_param_blob, daily_quest = excluded.daily_quest,"
+        " slave_blob = excluded.slave_blob, body_luck = excluded.body_luck,"
+        " birth_items_granted = excluded.birth_items_granted,"
+        " save_version = excluded.save_version, updated_at = CURRENT_TIMESTAMP"
+        " WHERE excluded.save_version >= characters.save_version;";
 
-  sqlite3_stmt* statement = nullptr;
-  if (sqlite3_prepare_v2(database_, kSql, -1, &statement, nullptr) != SQLITE_OK) {
-    throw std::runtime_error("Failed to prepare save_character statement.");
-  }
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2(database_, kSql, -1, &statement, nullptr) != SQLITE_OK) {
+      throw std::runtime_error("Failed to prepare save_character statement.");
+    }
 
-  bind_character_fields(statement, character);
+    bind_character_fields(statement, character);
 
-  if (sqlite3_step(statement) != SQLITE_DONE) {
+    if (sqlite3_step(statement) != SQLITE_DONE) {
+      finalize_statement(statement);
+      throw std::runtime_error("Failed to execute save_character statement.");
+    }
+    const auto saved = sqlite3_changes(database_) > 0;
     finalize_statement(statement);
-    throw std::runtime_error("Failed to execute save_character statement.");
+    exec_or_throw(database_, "COMMIT;");
+    return saved;
+  } catch (...) {
+    try {
+      exec_or_throw(database_, "ROLLBACK;");
+    } catch (...) {
+    }
+    throw;
   }
-  const auto saved = sqlite3_changes(database_) > 0;
-  finalize_statement(statement);
-  return saved;
 }
 
 void Repository::record_legacy_import(const LegacyImportRecord& record) {
