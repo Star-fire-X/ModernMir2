@@ -192,6 +192,9 @@ struct MagicShortcutState {
   int effect{0};            ///< 魔法图标索引基数（Delphi WMagIcon[effect*2]）
   int max_train{0};         ///< 当前等级熟练度上限
   int effect_type{0};
+  int spell{0};
+  int def_spell{0};
+  int max_train_level{0};
 };
 
 /// 模态对话框状态
@@ -1858,7 +1861,8 @@ struct GameStateStore {
       world.magics.push_back(MagicShortcutState{entry.magic_id, entry.key, entry.level,
                                                 entry.train, entry.delay_ms, entry.name,
                                                 entry.effect, entry.max_train,
-                                                entry.effect_type});
+                                                entry.effect_type, entry.spell,
+                                                entry.def_spell, entry.max_train_level});
     }
   }
 
@@ -2096,9 +2100,12 @@ struct GameStateStore {
       pending_ack = world.pending_action_acks.front();
       world.pending_action_acks.pop_front();
     }
-    world.action_locked = !world.pending_action_acks.empty();
+    const auto lock_ack =
+        std::find_if(world.pending_action_acks.begin(), world.pending_action_acks.end(),
+                     [](const PendingActionAckState& ack) { return ack.rollback_position; });
+    world.action_locked = lock_ack != world.pending_action_acks.end();
     if (world.action_locked) {
-      world.action_lock_started_ms = world.pending_action_acks.front().lock_started_ms;
+      world.action_lock_started_ms = lock_ack->lock_started_ms;
     }
     if (!message.ok && has_pending_ack && pending_ack.rollback_position &&
         is_queued_move_action(pending_ack.action_ident) && message.server_time_ms != 0 &&

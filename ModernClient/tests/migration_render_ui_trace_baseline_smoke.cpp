@@ -95,7 +95,7 @@ std::vector<std::string> run_ui_input_gate_trace() {
   self.y = 50;
   self.mp = 0;
   world.actors.emplace(1, self);
-  world.magics.push_back(MagicShortcutState{7, 1, 0, 0, 0, "Fire", 0, 0, 0});
+  world.magics.push_back(MagicShortcutState{7, 1, 0, 0, 0, "Fire", 0, 0, 0, 4, 1, 3});
 
   scenes.initialize(context);
   scenes.change_scene(SceneId::world, context);

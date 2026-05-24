@@ -23,7 +23,7 @@
 
 namespace mir2::client_v1 {
 
-constexpr std::uint32_t kProtocolVersion = 1;
+constexpr std::uint32_t kProtocolVersion = 2;
 
 /// 消息 ID 枚举：每个消息类型对应唯一的 16 位 ID
 /// 分组规则：1-99 会话，100-199 登录/账号，200-299 角色选择，
@@ -557,6 +557,9 @@ struct MagicEntry {
   std::int32_t effect{0};
   std::int32_t max_train{0};
   std::int32_t effect_type{0};
+  std::int32_t spell{0};
+  std::int32_t def_spell{0};
+  std::int32_t max_train_level{0};
 };
 
 /// 魔法列表：服务端同步角色的所有魔法
@@ -1443,6 +1446,9 @@ inline void encode(ByteWriter& writer, const MagicEntry& value) {
   writer.write_i32(value.effect);
   writer.write_i32(value.max_train);
   writer.write_i32(value.effect_type);
+  writer.write_i32(value.spell);
+  writer.write_i32(value.def_spell);
+  writer.write_i32(value.max_train_level);
 }
 
 inline bool decode(ByteReader& reader, MagicEntry& value) {
@@ -1450,7 +1456,8 @@ inline bool decode(ByteReader& reader, MagicEntry& value) {
          reader.read_u8(value.level) && reader.read_i32(value.train) &&
          reader.read_i32(value.delay_ms) && reader.read_string(value.name) &&
          reader.read_i32(value.effect) && reader.read_i32(value.max_train) &&
-         reader.read_i32(value.effect_type);
+         reader.read_i32(value.effect_type) && reader.read_i32(value.spell) &&
+         reader.read_i32(value.def_spell) && reader.read_i32(value.max_train_level);
 }
 
 inline void encode(ByteWriter& writer, const ClientHello& value) {
