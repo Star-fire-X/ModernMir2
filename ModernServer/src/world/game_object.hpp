@@ -46,9 +46,11 @@ struct LegacyRuntimeTrace {
 
 enum class LegacyEventType {
   stone_mine,
+  digout_zombi,
   pile_stones,
   holy_curtain,
-  fire_burn
+  fire_burn,
+  sculp_piece
 };
 
 struct LegacyEventRecord {
@@ -65,6 +67,7 @@ struct LegacyEventRecord {
   std::uint64_t owner_actor_id{0};
   std::uint64_t holy_group_id{0};
   std::uint64_t last_damage_ms{0};
+  std::int32_t event_param{0};
   std::int32_t damage{0};
   bool blocks_walk{false};
   bool skip_if_occupied{false};
