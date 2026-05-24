@@ -353,7 +353,11 @@ git diff --check
 PR-2:
 
 ```powershell
-cmake -S F:\mir2-event-pr2\ModernServer -B F:\mir2-event-pr2\ModernServer\build -G Ninja -DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe
-cmake --build F:\mir2-event-pr2\ModernServer\build --parallel 8
+cmake -S F:\mir2-event-pr2\ModernServer -B F:\mir2-event-pr2\ModernServer\build -G Ninja -DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe -DCMAKE_BUILD_TYPE=Debug
+cmake --build F:\mir2-event-pr2\ModernServer\build --target mir2_legacy_event_manager_smoke mir2_legacy_frame_smoke --parallel 8
 ctest --test-dir F:\mir2-event-pr2\ModernServer\build -R "legacy_event_manager|legacy_frame" --output-on-failure
+
+# CI-equivalent gate once the characterization test is part of phase2-fast:
+pwsh ci/scripts/check_build.ps1 -Project server -Config Debug -Suite phase2-fast
+pwsh ci/scripts/run_compat_tests.ps1 -Project server -Suite phase2-fast -Config Debug
 ```
