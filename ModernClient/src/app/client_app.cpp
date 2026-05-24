@@ -458,6 +458,10 @@ void ClientApp::enable_protocol_test_mode_for_test() {
 
 void ClientApp::complete_connect_for_test() { protocol_.complete_connect_for_test(); }
 
+void ClientApp::push_protocol_frame_for_test(client_v1::Frame frame) {
+  protocol_.push_frame_for_test(std::move(frame));
+}
+
 void ClientApp::push_protocol_disconnect_for_test(std::string reason) {
   protocol_.push_disconnected_for_test(std::move(reason));
 }
@@ -470,6 +474,10 @@ void ClientApp::pump_protocol_for_test() {
 
 std::vector<client_v1::Frame> ClientApp::drain_sent_frames_for_test() {
   return protocol_.drain_sent_frames_for_test();
+}
+
+const std::string& ClientApp::last_disconnect_reason_for_test() const {
+  return protocol_.last_disconnect_reason_for_test();
 }
 
 const std::vector<ProtocolClient::ConnectAttempt>& ClientApp::connect_attempts_for_test() const {
@@ -1519,59 +1527,145 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
                   std::make_move_iterator(deferred_events.end()));
   combined.insert(combined.end(), std::make_move_iterator(fresh_events.begin()),
                   std::make_move_iterator(fresh_events.end()));
-  const auto is_world_snapshot = [](const ProtocolEvent& event) {
-    const auto* frame = std::get_if<ProtocolFrameEvent>(&event);
-    return frame != nullptr && frame->frame.message_id == client_v1::MessageId::world_snapshot;
+  auto events = std::move(combined);
+  const auto is_map_transition_control = [](const client_v1::MessageId message_id) {
+    return message_id == client_v1::MessageId::world_clear_objects ||
+           message_id == client_v1::MessageId::map_change ||
+           message_id == client_v1::MessageId::map_entered ||
+           message_id == client_v1::MessageId::disconnect_reason;
   };
-  const auto is_transition_runtime = [](const ProtocolEvent& event) {
-    const auto* frame = std::get_if<ProtocolFrameEvent>(&event);
-    if (frame == nullptr) {
-      return false;
-    }
-    switch (frame->frame.message_id) {
+  const auto validate_server_frame = [](const client_v1::Frame& frame) {
+    auto can_decode = [&]<typename T>() {
+      return client_v1::decode_message<T>(frame).has_value();
+    };
+    switch (frame.message_id) {
+      case client_v1::MessageId::login_result:
+        return can_decode.operator()<client_v1::LoginResult>();
+      case client_v1::MessageId::need_update_account:
+        return can_decode.operator()<client_v1::NeedUpdateAccount>();
+      case client_v1::MessageId::server_list:
+        return can_decode.operator()<client_v1::ServerList>();
+      case client_v1::MessageId::select_server_result:
+        return can_decode.operator()<client_v1::SelectServerResult>();
+      case client_v1::MessageId::character_list:
+        return can_decode.operator()<client_v1::CharacterList>();
+      case client_v1::MessageId::select_character_result:
+        return can_decode.operator()<client_v1::SelectCharacterResult>();
+      case client_v1::MessageId::enter_world_result:
+        return can_decode.operator()<client_v1::EnterWorldResult>();
+      case client_v1::MessageId::world_snapshot:
+        return can_decode.operator()<client_v1::WorldSnapshot>();
+      case client_v1::MessageId::world_clear_objects:
+        return can_decode.operator()<client_v1::WorldClearObjects>();
+      case client_v1::MessageId::map_change:
+        return can_decode.operator()<client_v1::MapChange>();
+      case client_v1::MessageId::map_entered:
+        return can_decode.operator()<client_v1::MapEntered>();
+      case client_v1::MessageId::map_description:
+        return can_decode.operator()<client_v1::MapDescription>();
       case client_v1::MessageId::map_door_state:
+        return can_decode.operator()<client_v1::MapDoorState>();
       case client_v1::MessageId::actor_state_delta:
+        return can_decode.operator()<client_v1::ActorStateDelta>();
       case client_v1::MessageId::actor_upsert:
+        return can_decode.operator()<client_v1::ActorUpsert>();
       case client_v1::MessageId::actor_remove:
+        return can_decode.operator()<client_v1::ActorRemove>();
       case client_v1::MessageId::actor_action:
+        return can_decode.operator()<client_v1::ActorAction>();
+      case client_v1::MessageId::actor_identity_update:
+        return can_decode.operator()<client_v1::ActorIdentityUpdate>();
       case client_v1::MessageId::actor_magic_fire:
+        return can_decode.operator()<client_v1::ActorMagicFire>();
       case client_v1::MessageId::actor_magic_fire_fail:
+        return can_decode.operator()<client_v1::ActorMagicFireFail>();
       case client_v1::MessageId::actor_vitals:
+        return can_decode.operator()<client_v1::ActorVitals>();
       case client_v1::MessageId::actor_death:
+        return can_decode.operator()<client_v1::ActorDeath>();
+      case client_v1::MessageId::magic_list:
+        return can_decode.operator()<client_v1::MagicList>();
+      case client_v1::MessageId::self_ability:
+        return can_decode.operator()<client_v1::SelfAbility>();
+      case client_v1::MessageId::self_ability_detail:
+        return can_decode.operator()<client_v1::SelfAbilityDetail>();
+      case client_v1::MessageId::mini_map_data:
+        return can_decode.operator()<client_v1::MiniMapData>();
+      case client_v1::MessageId::bag_snapshot:
+        return can_decode.operator()<client_v1::BagSnapshot>();
+      case client_v1::MessageId::inventory_add:
+        return can_decode.operator()<client_v1::InventoryAdd>();
+      case client_v1::MessageId::inventory_update:
+        return can_decode.operator()<client_v1::InventoryUpdate>();
+      case client_v1::MessageId::inventory_remove:
+        return can_decode.operator()<client_v1::InventoryRemove>();
+      case client_v1::MessageId::inventory_clear_range:
+        return can_decode.operator()<client_v1::InventoryClearRange>();
+      case client_v1::MessageId::equipment_snapshot:
+        return can_decode.operator()<client_v1::EquipmentSnapshot>();
+      case client_v1::MessageId::durability_change:
+        return can_decode.operator()<client_v1::DurabilityChange>();
+      case client_v1::MessageId::action_ack:
+        return can_decode.operator()<client_v1::ActionAck>();
       case client_v1::MessageId::ground_item_add:
+        return can_decode.operator()<client_v1::GroundItemAdd>();
       case client_v1::MessageId::ground_item_remove:
-        return true;
+        return can_decode.operator()<client_v1::GroundItemRemove>();
+      case client_v1::MessageId::use_item_result:
+        return can_decode.operator()<client_v1::UseItemResult>();
+      case client_v1::MessageId::chat_line:
+        return can_decode.operator()<client_v1::ChatLine>();
+      case client_v1::MessageId::actor_say:
+        return can_decode.operator()<client_v1::ActorSay>();
+      case client_v1::MessageId::npc_dialog:
+        return can_decode.operator()<client_v1::NpcDialog>();
+      case client_v1::MessageId::npc_dialog_close:
+        return can_decode.operator()<client_v1::NpcDialogClose>();
+      case client_v1::MessageId::merchant_goods_list:
+        return can_decode.operator()<client_v1::MerchantGoodsList>();
+      case client_v1::MessageId::merchant_price_result:
+        return can_decode.operator()<client_v1::MerchantPriceResult>();
+      case client_v1::MessageId::merchant_repair_price_result:
+        return can_decode.operator()<client_v1::MerchantRepairPriceResult>();
+      case client_v1::MessageId::storage_list:
+        return can_decode.operator()<client_v1::StorageList>();
+      case client_v1::MessageId::group_state:
+        return can_decode.operator()<client_v1::GroupState>();
+      case client_v1::MessageId::trade_state:
+        return can_decode.operator()<client_v1::TradeState>();
+      case client_v1::MessageId::guild_state:
+        return can_decode.operator()<client_v1::GuildState>();
+      case client_v1::MessageId::login_notice:
+        return can_decode.operator()<client_v1::LoginNotice>();
+      case client_v1::MessageId::sys_message:
+        return can_decode.operator()<client_v1::SysMessage>();
+      case client_v1::MessageId::notice:
+        return can_decode.operator()<client_v1::Notice>();
+      case client_v1::MessageId::disconnect_reason:
+        return can_decode.operator()<client_v1::DisconnectReason>();
+      case client_v1::MessageId::pong:
+        return can_decode.operator()<client_v1::Pong>();
+      case client_v1::MessageId::create_account_result:
+        return can_decode.operator()<client_v1::CreateAccountResult>();
+      case client_v1::MessageId::update_account_result:
+        return can_decode.operator()<client_v1::UpdateAccountResult>();
+      case client_v1::MessageId::change_password_result:
+        return can_decode.operator()<client_v1::ChangePasswordResult>();
+      case client_v1::MessageId::create_character_result:
+        return can_decode.operator()<client_v1::CreateCharacterResult>();
+      case client_v1::MessageId::delete_character_result:
+        return can_decode.operator()<client_v1::DeleteCharacterResult>();
       default:
         return false;
     }
   };
-  std::vector<ProtocolEvent> events;
-  const auto snapshot = state_.world.map_transition_pending
-                            ? std::find_if(combined.begin(), combined.end(), is_world_snapshot)
-                            : combined.end();
-  if (snapshot != combined.end()) {
-    for (auto it = combined.begin(); it != snapshot; ++it) {
-      if (!is_transition_runtime(*it)) {
-        events.push_back(std::move(*it));
-      }
-    }
-    events.push_back(std::move(*snapshot));
-    for (auto it = combined.begin(); it != snapshot; ++it) {
-      if (is_transition_runtime(*it)) {
-        events.push_back(std::move(*it));
-      }
-    }
-    for (auto it = std::next(snapshot); it != combined.end(); ++it) {
-      events.push_back(std::move(*it));
-    }
-  } else {
-    events = std::move(combined);
-  }
+  auto protocol_fifo_barrier = false;
+  auto stop_protocol_drain = false;
   for (std::size_t event_index = 0; event_index < events.size(); ++event_index) {
     auto& event = events[event_index];
-    auto defer_current_and_remaining = [&] {
-      for (auto i = event_index; i < events.size(); ++i) {
-        deferred_protocol_events_.push_back(std::move(events[i]));
+    auto defer_current_frame = [&] {
+      if (std::holds_alternative<ProtocolFrameEvent>(events[event_index])) {
+        deferred_protocol_events_.push_back(std::move(events[event_index]));
       }
     };
     // ---- 连接建立事件 ----
@@ -1631,7 +1725,8 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
         }
       }
       flush_scene_change_if_pending(context);
-      continue;
+      deferred_protocol_events_.clear();
+      break;
     }
 
     // ---- 协议消息分发 ----
@@ -1643,9 +1738,31 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
     cancel_network_wait_timers();
 
     bool deferred_for_map_transition = false;
+    const auto is_control_frame = is_map_transition_control(frame_event->frame.message_id);
+    if (state_.connection_phase == GameStateStore::ConnectionPhase::play &&
+        scenes_.current_id() == SceneId::world && !is_control_frame &&
+        (state_.world.map_transition_pending || protocol_fifo_barrier)) {
+      if (!validate_server_frame(frame_event->frame)) {
+        protocol_.disconnect("protocol_decode_error");
+        deferred_protocol_events_.clear();
+        break;
+      }
+      if (legacy_trace_enabled()) {
+        std::ostringstream out;
+        out << "defer_world_runtime message_id="
+            << static_cast<int>(frame_event->frame.message_id)
+            << " map_transition=" << state_.world.map_transition_pending
+            << " fifo_barrier=" << protocol_fifo_barrier;
+        legacy_trace(out.str());
+      }
+      protocol_fifo_barrier = true;
+      defer_current_frame();
+      continue;
+    }
+
     const auto drop_world_runtime_if_inactive = [this, &deferred_for_map_transition](
-                                                   const std::string_view message_name,
-                                                   const bool allow_map_transition = false) {
+                                                    const std::string_view message_name,
+                                                    const bool allow_map_transition = false) {
       if (state_.connection_phase == GameStateStore::ConnectionPhase::play &&
           scenes_.current_id() == SceneId::world) {
         if (allow_map_transition || !state_.world.map_transition_pending) {
@@ -1905,6 +2022,16 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
               return;
             }
             state_.apply(value);
+          } else if constexpr (std::is_same_v<T, client_v1::MapEntered>) {
+            if (drop_world_runtime_if_inactive("MapEntered", true)) {
+              return;
+            }
+            state_.apply(value);
+          } else if constexpr (std::is_same_v<T, client_v1::MapDescription>) {
+            if (drop_world_runtime_if_inactive("MapDescription")) {
+              return;
+            }
+            state_.apply(value);
           } else if constexpr (std::is_same_v<T, client_v1::MapDoorState>) {
             if (drop_world_runtime_if_inactive("MapDoorState")) {
               return;
@@ -1953,6 +2080,11 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
               legacy_trace(out.str());
             }
             state_.apply(value);                    // 其他角色动作同步
+          } else if constexpr (std::is_same_v<T, client_v1::ActorIdentityUpdate>) {
+            if (drop_world_runtime_if_inactive("ActorIdentityUpdate")) {
+              return;
+            }
+            state_.apply(value);
           } else if constexpr (std::is_same_v<T, client_v1::ActorMagicFire>) {
             if (drop_world_runtime_if_inactive("ActorMagicFire")) {
               return;
@@ -2257,6 +2389,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.lobby.delete_character_pending = false;
             state_.lobby.enter_character_pending = false;
             state_.clear_play_scene_state();
+            deferred_protocol_events_.clear();
             legacy_ui_lifecycle_trace(
                 legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::disconnect_clears_play_ui);
             state_.connection_phase = GameStateStore::ConnectionPhase::login;
@@ -2264,7 +2397,8 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             request_scene_change(SceneId::login);
             show_modal(L"Disconnected",
                        legacy_auth_error_message(AuthErrorContext::disconnect, value.code,
-                                                 value.text));  // 服务端发起的断开原因
+                                                  value.text));  // 服务端发起的断开原因
+            stop_protocol_drain = true;
 
           // ---- 心跳应答 ----
           } else if constexpr (std::is_same_v<T, client_v1::Pong>) {
@@ -2399,6 +2533,12 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
       case client_v1::MessageId::map_change:
         decoded = decode_and_dispatch.operator()<client_v1::MapChange>();
         break;
+      case client_v1::MessageId::map_entered:
+        decoded = decode_and_dispatch.operator()<client_v1::MapEntered>();
+        break;
+      case client_v1::MessageId::map_description:
+        decoded = decode_and_dispatch.operator()<client_v1::MapDescription>();
+        break;
       case client_v1::MessageId::map_door_state:
         decoded = decode_and_dispatch.operator()<client_v1::MapDoorState>();
         break;
@@ -2413,6 +2553,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
         break;
       case client_v1::MessageId::actor_action:
         decoded = decode_and_dispatch.operator()<client_v1::ActorAction>();
+        break;
+      case client_v1::MessageId::actor_identity_update:
+        decoded = decode_and_dispatch.operator()<client_v1::ActorIdentityUpdate>();
         break;
       case client_v1::MessageId::actor_magic_fire:
         decoded = decode_and_dispatch.operator()<client_v1::ActorMagicFire>();
@@ -2539,10 +2682,18 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
     }
     if (!decoded) {
       protocol_.disconnect("protocol_decode_error");
+      deferred_protocol_events_.clear();
+      break;
+    }
+    if (stop_protocol_drain) {
+      deferred_protocol_events_.clear();
+      flush_scene_change_if_pending(context);
+      break;
     }
     if (deferred_for_map_transition) {
-      defer_current_and_remaining();
-      break;
+      protocol_fifo_barrier = true;
+      defer_current_frame();
+      continue;
     }
     flush_scene_change_if_pending(context);
   }

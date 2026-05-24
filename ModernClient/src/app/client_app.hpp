@@ -123,10 +123,12 @@ class ClientApp {
   void push_protocol_message_for_test(const T& message) {
     protocol_.push_message_for_test(message);
   }
+  void push_protocol_frame_for_test(client_v1::Frame frame);
   void push_protocol_disconnect_for_test(std::string reason);
   void pump_protocol_for_test();
   [[nodiscard]] GameStateStore& state_for_test() { return state_; }
   [[nodiscard]] const GameStateStore& state_for_test() const { return state_; }
+  [[nodiscard]] const std::string& last_disconnect_reason_for_test() const;
   [[nodiscard]] SceneId current_scene_for_test() const { return scenes_.current_id(); }
   [[nodiscard]] std::vector<client_v1::Frame> drain_sent_frames_for_test();
   [[nodiscard]] const std::vector<ProtocolClient::ConnectAttempt>& connect_attempts_for_test()

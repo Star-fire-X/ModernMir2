@@ -97,6 +97,9 @@ bool ProtocolClient::connect(const std::string& host, std::uint16_t port) {
 
 // 断开连接：关闭 socket，清空所有缓冲区，压入断开事件
 void ProtocolClient::disconnect(const std::string& reason) {
+#ifdef MIR2_CLIENT_TESTING
+  last_disconnect_reason_ = reason;
+#endif
   if (socket_ != INVALID_SOCKET) {
     closesocket(socket_);
     socket_ = INVALID_SOCKET;
@@ -257,6 +260,7 @@ void ProtocolClient::enable_test_mode_for_test() {
   test_mode_ = true;
   connect_attempts_.clear();
   sent_frames_.clear();
+  last_disconnect_reason_.clear();
   events_.clear();
 }
 
@@ -272,8 +276,16 @@ void ProtocolClient::push_disconnected_for_test(std::string reason) {
   if (!test_mode_) {
     return;
   }
+  last_disconnect_reason_ = reason;
   state_ = State::disconnected;
   events_.push_back(DisconnectedEvent{std::move(reason)});
+}
+
+void ProtocolClient::push_frame_for_test(client_v1::Frame frame) {
+  if (!test_mode_) {
+    return;
+  }
+  events_.push_back(ProtocolFrameEvent{std::move(frame)});
 }
 
 std::vector<client_v1::Frame> ProtocolClient::drain_sent_frames_for_test() {

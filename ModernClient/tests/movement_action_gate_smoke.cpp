@@ -85,7 +85,8 @@ int main() {
   assert(state.world.action_fail_lock);
   state.world.pending_action_acks.push_back(
       PendingActionAckState{mir2::legacy::kCmHit, 2, true, 29, 20, 2, 1300});
-  state.complete_map_transition("1");
+  state.apply(MapChange{"1"});
+  state.apply(MapEntered{"1", 1, 29, 20, 2});
   assert(state.world.pending_action_acks.empty());
   return 0;
 }

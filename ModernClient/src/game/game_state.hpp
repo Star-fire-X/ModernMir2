@@ -469,12 +469,18 @@ struct MapDoorRuntimeState {
 /// 大量全局变量（Actor列表、物品列表、魔法列表、战斗状态等）
 struct WorldViewState {
   std::string map_id{"0"};
+  std::string map_title{};
   int width{800};   ///< 地图宽度（瓦片数）
   int height{600};  ///< 地图高度（瓦片数）
   bool map_transition_pending{false};
   bool map_clear_waiting_for_change{false};
   bool map_change_waiting{false};
+  bool map_entered_waiting{false};
   std::string pending_map_id{};
+  std::uint64_t pending_self_actor_id{0};
+  int pending_self_x{0};
+  int pending_self_y{0};
+  std::uint8_t pending_self_dir{0};
   std::uint64_t self_actor_id{0};                                 ///< 自己的 actor_id
   std::unordered_map<std::uint64_t, ActorState> actors{};         ///< 所有在线角色（key = actor_id）
   std::unordered_map<std::uint64_t, client_v1::GroundItemState> ground_items{};  ///< 地面物品
@@ -886,9 +892,6 @@ struct GameStateStore {
   void enqueue_legacy_actor_message(ActorState& actor, LegacyActorMessage message) {
     actor.actor_id = message.actor_id;
     actor.legacy_action_queue.push_back(std::move(message));
-    if (actor.legacy_action_queue.size() > 64U) {
-      actor.legacy_action_queue.pop_front();
-    }
   }
 
   /// 根据动作类型返回动画持续时间（毫秒）
@@ -1145,19 +1148,12 @@ struct GameStateStore {
       if (actor.legacy_action_queue.empty()) {
         continue;
       }
-      const auto hurry = legacy_actor_message_is_hurry(actor.legacy_action_queue.front());
-      if (!hurry && actor_action_animating(actor, now_ms)) {
+      if (actor_action_animating(actor, now_ms)) {
         continue;
       }
       auto message = actor.legacy_action_queue.front();
       actor.legacy_action_queue.pop_front();
       apply_legacy_actor_message(actor, message, now_ms);
-      while (!actor.legacy_action_queue.empty() &&
-             legacy_actor_message_is_hurry(actor.legacy_action_queue.front())) {
-        message = actor.legacy_action_queue.front();
-        actor.legacy_action_queue.pop_front();
-        apply_legacy_actor_message(actor, message, now_ms);
-      }
     }
   }
 
@@ -1468,22 +1464,65 @@ struct GameStateStore {
     world.mouse_down_ms = 0;
   }
 
-  void complete_map_transition(const std::string& map_id) {
-    clear_map_objects_for_transition();
-    if (!map_id.empty()) {
-      world.map_id = map_id;
+  void complete_map_entered_transition() {
+    auto self = ActorState{};
+    if (const auto it = world.actors.find(world.self_actor_id); it != world.actors.end()) {
+      self = it->second;
     }
-    world.map_transition_pending = true;
+    clear_map_objects_for_transition();
+    if (!world.pending_map_id.empty()) {
+      world.map_id = world.pending_map_id;
+    }
+    if (world.pending_self_actor_id != 0) {
+      self.actor_id = world.pending_self_actor_id;
+      self.x = world.pending_self_x;
+      self.y = world.pending_self_y;
+      self.from_x = world.pending_self_x;
+      self.from_y = world.pending_self_y;
+      self.dir = world.pending_self_dir;
+      self.actor_type = client_v1::ActorType::player;
+      self.move_started_ms = 0;
+      self.move_duration_ms = 0;
+      self.current_action = client_v1::ActorActionKind::turn;
+      self.legacy_action_ident = legacy_sm::kTurn;
+      self.magic_id = 0;
+      self.action_target_actor_id = 0;
+      self.action_target_x = -1;
+      self.action_target_y = -1;
+      self.action_magic = false;
+      self.action_magic_effect = 0;
+      self.action_magic_effect_type = -1;
+      self.action_magic_failed = false;
+      self.action_started_ms = 0;
+      self.action_duration_ms = 0;
+      self.legacy_old_x = world.pending_self_x;
+      self.legacy_old_y = world.pending_self_y;
+      self.legacy_old_dir = world.pending_self_dir;
+      self.legacy_has_old_position = false;
+      self.legacy_event_priority = LegacyEventPriority::normal;
+      self.legacy_action_queue.clear();
+      self.legacy_pending_actions.clear();
+      self.pending_remove = false;
+      world.self_actor_id = world.pending_self_actor_id;
+      world.actors[self.actor_id] = std::move(self);
+      world.actor_draw_order.push_back(world.self_actor_id);
+    }
+    world.map_transition_pending = false;
     world.map_clear_waiting_for_change = false;
     world.map_change_waiting = false;
+    world.map_entered_waiting = false;
     world.pending_map_id.clear();
+    world.pending_self_actor_id = 0;
+    world.pending_self_x = 0;
+    world.pending_self_y = 0;
+    world.pending_self_dir = 0;
   }
 
   bool finish_pending_map_transition_if_ready(const std::uint64_t now_ms) {
-    if (!world.map_change_waiting || !self_actor_action_finished(now_ms)) {
+    if (!world.map_entered_waiting || !self_actor_action_finished(now_ms)) {
       return false;
     }
-    complete_map_transition(world.pending_map_id);
+    complete_map_entered_transition();
     return true;
   }
 
@@ -1560,25 +1599,6 @@ struct GameStateStore {
   /// 应用世界快照消息：重置整个世界状态
   /// 这是进入游戏时最重要的消息，包含地图信息和所有可见角色
   void apply(const client_v1::WorldSnapshot& message) {
-    const auto preserve_runtime = world.map_transition_pending;
-    const auto bag_items = world.bag_items;
-    const auto equipment = world.equipment;
-    const auto magics = world.magics;
-    const auto next_time_power_hit = world.next_time_power_hit;
-    const auto can_long_hit = world.can_long_hit;
-    const auto can_wide_hit = world.can_wide_hit;
-    const auto can_cross_hit = world.can_cross_hit;
-    const auto next_time_fire_hit = world.next_time_fire_hit;
-    const auto latest_fire_hit_ms = world.latest_fire_hit_ms;
-    const auto latest_rush_rush_ms = world.latest_rush_rush_ms;
-    const auto self_ability = world.self_ability;
-    const auto self_ability_detail = world.self_ability_detail;
-    const auto sys_messages = world.sys_messages;
-    const auto chat_lines = world.chat_lines;
-    const auto chat_board_top = world.chat_board_top;
-    const auto whisper_name = world.whisper_name;
-    const auto group = world.group;
-    const auto guild = world.guild;
     clear_play_scene_state();
     world.map_id = message.map_id;
     world.width = message.width;
@@ -1613,27 +1633,14 @@ struct GameStateStore {
     world.focus_ground_item_id = 0;
     world.target_actor_id = 0;
     world.pending_pickup_item_id = 0;
-    if (preserve_runtime) {
-      world.bag_items = bag_items;
-      world.equipment = equipment;
-      world.magics = magics;
-      world.next_time_power_hit = next_time_power_hit;
-      world.can_long_hit = can_long_hit;
-      world.can_wide_hit = can_wide_hit;
-      world.can_cross_hit = can_cross_hit;
-      world.next_time_fire_hit = next_time_fire_hit;
-      world.latest_fire_hit_ms = latest_fire_hit_ms;
-      world.latest_rush_rush_ms = latest_rush_rush_ms;
-      world.self_ability = self_ability;
-      world.self_ability_detail = self_ability_detail;
-      world.sys_messages = sys_messages;
-      world.chat_lines = chat_lines;
-      world.chat_board_top = chat_board_top;
-      world.whisper_name = whisper_name;
-      world.group = group;
-      world.guild = guild;
-    }
     world.map_transition_pending = false;
+    world.map_change_waiting = false;
+    world.map_entered_waiting = false;
+    world.pending_map_id.clear();
+    world.pending_self_actor_id = 0;
+    world.pending_self_x = 0;
+    world.pending_self_y = 0;
+    world.pending_self_dir = 0;
     for (const auto& actor : message.actors) {
       world.actors[actor.actor_id] = ActorState{actor.actor_id, actor.name, actor.x, actor.y,
                                                 actor.x, actor.y, actor.dir, actor.feature,
@@ -1646,16 +1653,34 @@ struct GameStateStore {
   void apply(const client_v1::WorldClearObjects& /*message*/) {
     world.map_transition_pending = true;
     world.map_clear_waiting_for_change = true;
+    world.map_entered_waiting = false;
   }
 
   void apply(const client_v1::MapChange& message) {
     world.map_transition_pending = true;
     world.map_clear_waiting_for_change = false;
     world.map_change_waiting = true;
+    world.map_entered_waiting = false;
     world.pending_map_id = message.map_id;
+  }
+
+  void apply(const client_v1::MapEntered& message) {
+    world.map_transition_pending = true;
+    world.map_clear_waiting_for_change = false;
+    world.map_change_waiting = false;
+    world.map_entered_waiting = true;
+    world.pending_map_id = message.map_id;
+    world.pending_self_actor_id = message.self_actor_id;
+    world.pending_self_x = message.x;
+    world.pending_self_y = message.y;
+    world.pending_self_dir = message.dir;
     if (self_actor_action_finished(detail::monotonic_ms())) {
-      complete_map_transition(world.pending_map_id);
+      complete_map_entered_transition();
     }
+  }
+
+  void apply(const client_v1::MapDescription& message) {
+    world.map_title = message.title;
   }
 
   void apply(const client_v1::MapDoorState& message) {
@@ -1721,6 +1746,26 @@ struct GameStateStore {
     }
     if (inserted) {
       world.actor_draw_order.push_back(message.actor.actor_id);
+    }
+  }
+
+  void apply(const client_v1::ActorIdentityUpdate& message) {
+    const auto it = world.actors.find(message.actor_id);
+    if (it == world.actors.end()) {
+      return;
+    }
+    auto& actor = it->second;
+    if ((message.mask & client_v1::kActorIdentityName) != 0U) {
+      actor.name = message.name;
+    }
+    if ((message.mask & client_v1::kActorIdentityNameColor) != 0U) {
+      actor.name_color = message.name_color;
+    }
+    if ((message.mask & client_v1::kActorIdentityFeature) != 0U) {
+      actor.feature = message.feature;
+    }
+    if ((message.mask & client_v1::kActorIdentityStatus) != 0U) {
+      actor.status = message.status;
     }
   }
 

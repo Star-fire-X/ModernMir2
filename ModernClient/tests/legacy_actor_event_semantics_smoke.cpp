@@ -106,25 +106,24 @@ void test_vitals_revive_clears_queued_death() {
   assert(actor.hp == 30);
 }
 
-void test_magic_fire_is_hurry_event() {
+void test_magic_fire_waits_for_current_action() {
   auto state = make_store();
   state.apply(MagicList{{MagicEntry{9, 1, 0, 0, 1000, "Fireball", 1, 900, 1}}});
-  state.apply(ActorAction{1, ActorActionKind::spell, 13, 10, 2, 2, 0, 17, 9, true, 1});
+  state.apply(ActorAction{1, ActorActionKind::hit, 13, 10, 2, 2, 0, 17, 0, false, 0});
   state.process_legacy_actor_queues(1000);
   const auto before = state.world.actors[1].legacy_pending_actions.size();
   state.apply(ActorMagicFire{1, 2, 13, 10, 1, 1, 638});
   state.process_legacy_actor_queues(1001);
+  assert(state.world.actors[1].legacy_pending_actions.size() == before);
+  assert(state.world.actors[1].legacy_action_queue.size() == 1);
+  assert(!state.world.actors[1].action_magic);
+  state.world.actors[1].action_started_ms = 0;
+  state.process_legacy_actor_queues(1200);
   assert(state.world.actors[1].legacy_pending_actions.size() == before + 1);
   assert(state.world.actors[1].legacy_pending_actions.back().legacy_event_priority ==
          LegacyEventPriority::hurry);
   assert(state.world.actors[1].action_magic);
-  assert(state.world.actors[1].action_magic_effect_type == 5);
-  state.apply(ActorMagicFireFail{1, 639});
-  assert(state.world.actors[1].legacy_pending_actions.back().legacy_event_priority ==
-         LegacyEventPriority::hurry);
-  state.process_legacy_actor_queues(1002);
-  assert(!state.world.actors[1].action_magic);
-  assert(state.world.actors[1].action_magic_failed);
+  assert(state.world.actors[1].action_magic_effect_type == 1);
 }
 
 void test_magic_fire_waits_behind_unstarted_spell() {
@@ -152,17 +151,20 @@ void test_magic_fire_waits_behind_unstarted_spell() {
   assert(actor.legacy_pending_actions.size() == before_events);
 }
 
-void test_spell_and_magic_fire_share_queue_tick() {
+void test_magic_fire_consumes_one_queue_entry_per_tick() {
   auto state = make_store();
   state.apply(MagicList{{MagicEntry{9, 1, 0, 0, 1000, "Fireball", 1, 900, 1}}});
-  state.apply(ActorAction{1, ActorActionKind::spell, 13, 10, 2, 2, 0, 17, 9, true, 1});
   state.apply(ActorMagicFire{1, 2, 13, 10, 1, 1, 638});
+  state.apply(ActorMagicFireFail{1, 639});
   state.process_legacy_actor_queues(1000);
-  const auto& actor = state.world.actors[1];
-  assert(actor.current_action == ActorActionKind::spell);
-  assert(actor.action_magic);
-  assert(actor.action_magic_effect == 1);
-  assert(actor.action_magic_effect_type == 5);
+  assert(state.world.actors[1].action_magic);
+  assert(state.world.actors[1].action_magic_effect == 1);
+  assert(state.world.actors[1].action_magic_effect_type == 1);
+  assert(state.world.actors[1].legacy_action_queue.size() == 1);
+  state.process_legacy_actor_queues(1001);
+  assert(!state.world.actors[1].action_magic);
+  assert(state.world.actors[1].action_magic_failed);
+  assert(state.world.actors[1].legacy_action_queue.empty());
 }
 
 void test_remove_delay_matches_legacy_hide() {
@@ -183,12 +185,33 @@ void test_remove_delay_matches_legacy_hide() {
 
 void test_independent_visual_state_events() {
   auto state = make_store();
-  state.apply_actor_feature_changed(2, 777);
-  state.apply_actor_status_changed(2, 888);
-  state.apply_actor_name_color_changed(2, 0xFF00AA00U);
+  state.apply(ActorIdentityUpdate{2,
+                                  static_cast<std::uint8_t>(
+                                      kActorIdentityName | kActorIdentityNameColor |
+                                      kActorIdentityFeature | kActorIdentityStatus),
+                                  "Renamed",
+                                  0xFF00AA00U,
+                                  777,
+                                  888});
+  assert(state.world.actors[2].name == "Renamed");
   assert(state.world.actors[2].feature == 777);
   assert(state.world.actors[2].status == 888);
   assert(state.world.actors[2].name_color == 0xFF00AA00U);
+
+  state.apply(ActorIdentityUpdate{99, kActorIdentityName, "Ghost", 0, 0, 0});
+  assert(state.world.actors.find(99) == state.world.actors.end());
+}
+
+void test_actor_action_queue_does_not_drop_fifo_after_64_messages() {
+  auto state = make_store();
+  for (int index = 0; index < 65; ++index) {
+    state.apply(ActorAction{2, ActorActionKind::turn, 11, 10,
+                            static_cast<std::uint8_t>(index % 8), 0, 0,
+                            static_cast<std::uint16_t>(100 + index), 0, false, 0});
+  }
+  assert(state.world.actors[2].legacy_action_queue.size() == 65);
+  state.process_legacy_actor_queues(1000);
+  assert(state.world.actors[2].legacy_action_ident == 100);
 }
 
 }  // namespace
@@ -198,10 +221,11 @@ int main() {
   test_nowdeath_uses_play_death_mode();
   test_vitals_revive_clears_dead_state();
   test_vitals_revive_clears_queued_death();
-  test_magic_fire_is_hurry_event();
+  test_magic_fire_waits_for_current_action();
   test_magic_fire_waits_behind_unstarted_spell();
-  test_spell_and_magic_fire_share_queue_tick();
+  test_magic_fire_consumes_one_queue_entry_per_tick();
   test_remove_delay_matches_legacy_hide();
   test_independent_visual_state_events();
+  test_actor_action_queue_does_not_drop_fifo_after_64_messages();
   return 0;
 }
