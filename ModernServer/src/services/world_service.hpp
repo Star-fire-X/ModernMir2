@@ -71,6 +71,7 @@ class WorldService : public Module {
   [[nodiscard]] RuntimeDispatch handle_persist_result(const PersistResult& result);
   void queue_gate_events(RuntimeDispatch& dispatch);
   [[nodiscard]] RuntimeDispatch run_legacy_socket_stage(std::uint64_t now_ms);
+  [[nodiscard]] RuntimeDispatch run_server_message_stage(std::uint64_t now_ms);
   bool post_gate_event(SessionEvent& event);
   void flush_dispatch(RuntimeDispatch dispatch);
 

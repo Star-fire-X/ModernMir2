@@ -1322,7 +1322,7 @@ HostConfig ConfigLoader::load(const std::filesystem::path& root) const {
     config.ports.client_v1_game_gateway.port = value_or<int>(*game, "port", 7100);
   }
 
-  config.budgets.tick_ms = value_or<int>(logic, "tick_ms", 20);
+  config.budgets.tick_ms = value_or<int>(logic, "tick_ms", 10);
   config.budgets.player_budget_ms = value_or<int>(logic, "player_budget_ms", 30);
   config.budgets.player_input_budget_per_tick =
       std::max(1, value_or<int>(logic, "player_input_budget_per_tick", 1));
