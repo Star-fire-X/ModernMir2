@@ -694,6 +694,16 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_repository_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_repository_smoke COMMAND mir2_repository_smoke)
 
+  add_executable(mir2_persistence_version_smoke tests/persistence_version_smoke.cpp)
+  target_link_libraries(mir2_persistence_version_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_persistence_version_smoke COMMAND mir2_persistence_version_smoke)
+
+  add_executable(mir2_world_shutdown_persistence_smoke
+    tests/world_shutdown_persistence_smoke.cpp)
+  target_link_libraries(mir2_world_shutdown_persistence_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_world_shutdown_persistence_smoke
+    COMMAND mir2_world_shutdown_persistence_smoke)
+
   add_executable(mir2_legacy_character_import_smoke
     tests/legacy_character_import_smoke.cpp)
   target_link_libraries(mir2_legacy_character_import_smoke PRIVATE mir2_hostlib)
@@ -1007,6 +1017,8 @@ if(BUILD_TESTING)
       mir2_trade_protocol_golden_smoke
       mir2_trade_interleaving_fuzz_smoke
       mir2_economy_consistency_smoke
+      mir2_persistence_version_smoke
+      mir2_world_shutdown_persistence_smoke
       mir2_npc_shop_protocol_golden_smoke
       mir2_npc_shop_interleaving_fuzz_smoke
       mir2_canonical_legacy_command_smoke

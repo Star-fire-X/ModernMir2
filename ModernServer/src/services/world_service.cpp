@@ -602,6 +602,19 @@ void WorldService::run() {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
   }
+
+  if (runtime_ != nullptr) {
+    RuntimeDispatch shutdown_dispatch;
+    for (auto character : runtime_->snapshot_online_characters()) {
+      PersistRequest request;
+      request.kind = PersistRequestKind::save_character;
+      request.account_id = character.account_id;
+      request.character_name = character.character_name;
+      request.character = std::move(character);
+      shutdown_dispatch.persist_requests.push_back(std::move(request));
+    }
+    flush_dispatch(std::move(shutdown_dispatch));
+  }
 }
 
 void WorldService::request_castle_dialog_context_refresh() {
@@ -1082,6 +1095,12 @@ RuntimeDispatch WorldService::handle_persist_result(const PersistResult& result)
     return {};
   }
 
+  if (!result.account_id.empty() && !result.character_name.empty()) {
+    const auto key = make_key(result.account_id, result.character_name);
+    auto& version = character_save_versions_[key];
+    version = std::max(version, result.character.save_version);
+  }
+
   if (util::starts_with(result.request_id, "guild_offline")) {
     ++offline_guild_result_count_;
   }
@@ -1148,7 +1167,33 @@ RuntimeDispatch WorldService::handle_persist_result(const PersistResult& result)
   return dispatch;
 }
 
+void WorldService::assign_character_save_versions(RuntimeDispatch& dispatch) {
+  for (auto& request : dispatch.persist_requests) {
+    if (request.kind != PersistRequestKind::save_character) {
+      continue;
+    }
+    const auto account_id =
+        request.character.account_id.empty() ? request.account_id : request.character.account_id;
+    const auto character_name = request.character.character_name.empty()
+                                    ? request.character_name
+                                    : request.character.character_name;
+    if (account_id.empty() || character_name.empty()) {
+      continue;
+    }
+
+    auto& version = character_save_versions_[make_key(account_id, character_name)];
+    version = std::max(version, request.character.save_version);
+    ++version;
+    request.account_id = account_id;
+    request.character_name = character_name;
+    request.character.account_id = account_id;
+    request.character.character_name = character_name;
+    request.character.save_version = version;
+  }
+}
+
 void WorldService::flush_dispatch(RuntimeDispatch dispatch) {
+  assign_character_save_versions(dispatch);
   queue_gate_events(dispatch);
   for (auto& event : dispatch.session_events) {
     if (event.session_id != 0) {

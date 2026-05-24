@@ -3063,6 +3063,22 @@ std::optional<CharacterRecord> LogicRuntime::snapshot_character_actor(
   return map_it->second->snapshot_player(located->second);
 }
 
+std::vector<CharacterRecord> LogicRuntime::snapshot_online_characters() {
+  std::vector<CharacterRecord> characters;
+  characters.reserve(session_index_.size());
+  for (const auto& [_, locator] : session_index_) {
+    const auto map_it = maps_.find(locator.map_id);
+    if (map_it == maps_.end()) {
+      continue;
+    }
+    if (auto character = map_it->second->persistent_snapshot_player(locator.actor_id, last_now_ms_);
+        character.has_value()) {
+      characters.push_back(*character);
+    }
+  }
+  return characters;
+}
+
 std::optional<MonsterSnapshot> LogicRuntime::legacy_monster_snapshot(
     std::string_view map_id, std::uint64_t actor_id) const {
   const auto map_it = maps_.find(std::string(map_id));

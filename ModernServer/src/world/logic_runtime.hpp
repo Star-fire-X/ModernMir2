@@ -72,6 +72,7 @@ class LogicRuntime {
       std::string_view character_name) const;
   [[nodiscard]] std::optional<CharacterRecord> snapshot_character_actor(
       std::string_view character_name) const;
+  [[nodiscard]] std::vector<CharacterRecord> snapshot_online_characters();
   [[nodiscard]] std::optional<MonsterSnapshot> legacy_monster_snapshot(
       std::string_view map_id, std::uint64_t actor_id) const;
   void add_legacy_shut_up(std::string_view character_name, std::uint64_t duration_ms,

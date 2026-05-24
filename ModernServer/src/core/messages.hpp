@@ -76,6 +76,7 @@ struct CharacterRecord {
   std::array<CharacterSlaveRecord, kMaxLegacySlaves> slaves{};
   double body_luck{0.0};
   bool birth_items_granted{true};
+  std::uint64_t save_version{0};
 };
 
 struct LegacyWeaponUpgradeRecord {
