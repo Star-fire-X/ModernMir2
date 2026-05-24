@@ -8,6 +8,8 @@
 
 namespace {
 
+constexpr std::uint64_t kDeletedCharacterSaveVersionBarrier = 1ULL << 62;
+
 int fail(const char* stage) {
   std::cerr << "persistence_version_smoke failed at " << stage << '\n';
   return 1;
@@ -115,7 +117,11 @@ bool stale_save_is_rejected(const std::filesystem::path& source_root,
   if (!repository.delete_character("guest", "VersionHero")) {
     return false;
   }
+  auto future = equal;
+  future.gold = 999;
+  future.save_version = 1000;
   if (repository.save_character(stale) || repository.save_character(equal) ||
+      repository.save_character(future) ||
       repository.load_character("guest", "VersionHero").has_value()) {
     return false;
   }
@@ -125,7 +131,8 @@ bool stale_save_is_rejected(const std::filesystem::path& source_root,
     return false;
   }
   loaded = repository.load_character("guest", "VersionHero");
-  return loaded.has_value() && loaded->gold == 400 && loaded->save_version == 3;
+  return loaded.has_value() && loaded->gold == 400 &&
+         loaded->save_version == kDeletedCharacterSaveVersionBarrier + 1;
 }
 
 }  // namespace

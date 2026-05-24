@@ -20,6 +20,8 @@ namespace mir2 {
 
 namespace {
 
+constexpr std::uint64_t kDeletedCharacterSaveVersionBarrier = 1ULL << 62;
+
 std::string read_text_file(const std::filesystem::path& path) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
@@ -1644,6 +1646,8 @@ bool Repository::delete_character(const std::string& account_id, const std::stri
   if (!save_version.has_value()) {
     return false;
   }
+  const auto tombstone_save_version =
+      std::max(*save_version + 1, kDeletedCharacterSaveVersionBarrier);
   exec_or_throw(database_, "BEGIN IMMEDIATE;");
   bool deleted = false;
   try {
@@ -1662,7 +1666,7 @@ bool Repository::delete_character(const std::string& account_id, const std::stri
     }
     bind_text(statement, 1, account_id);
     bind_text(statement, 2, character_name);
-    sqlite3_bind_int64(statement, 3, static_cast<sqlite3_int64>(*save_version));
+    sqlite3_bind_int64(statement, 3, static_cast<sqlite3_int64>(tombstone_save_version));
     if (sqlite3_step(statement) != SQLITE_DONE) {
       finalize_statement(statement);
       throw std::runtime_error("Failed to execute delete_character tombstone statement.");
