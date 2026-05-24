@@ -55,7 +55,7 @@ void test_magic_key_does_not_stick_across_blocked_frame() {
   scenes.change_scene(SceneId::world, context);
   reset_world(state);
   auto& world = state.world;
-  world.magics.push_back(MagicShortcutState{7, 1, 0, 0, 900, "Fire", 0, 0, 1});
+  world.magics.push_back(MagicShortcutState{7, 1, 0, 0, 900, "Fire", 0, 0, 1, 0, 0, 0});
 
   world.latest_spell_ms = detail::monotonic_ms();
   world.magic_delay_time_ms = 100000;
@@ -87,7 +87,7 @@ void test_source_only_magic_bypasses_action_gate_without_local_spell() {
   world.actors[1].current_action = ActorActionKind::walk;
   world.actors[1].action_started_ms = detail::monotonic_ms();
   world.actors[1].action_duration_ms = 10000;
-  world.magics.push_back(MagicShortcutState{26, 1, 0, 0, 1200, "FireSword", 0, 0, 0});
+  world.magics.push_back(MagicShortcutState{26, 1, 0, 0, 1200, "FireSword", 0, 0, 0, 0, 0, 0});
   world.action_key = 0;
 
   ClientConfig config;
@@ -124,7 +124,7 @@ void test_source_only_magic_bypasses_existing_action_lock() {
   world.actors[1].legacy_old_x = 50;
   world.actors[1].legacy_old_y = 50;
   world.actors[1].legacy_has_old_position = true;
-  world.magics.push_back(MagicShortcutState{26, 1, 0, 0, 1200, "FireSword", 0, 0, 0});
+  world.magics.push_back(MagicShortcutState{26, 1, 0, 0, 1200, "FireSword", 0, 0, 0, 0, 0, 0});
   world.action_key = 0;
   world.action_locked = true;
   world.action_lock_started_ms = detail::monotonic_ms();
@@ -148,7 +148,7 @@ void test_source_only_magic_bypasses_existing_action_lock() {
   assert(world.actors[1].y == 50);
 }
 
-void test_source_only_magic_preserves_prior_action_rollback() {
+void test_source_only_magic_refreshes_lock_time_and_preserves_prior_action_rollback() {
   ClientApp app;
   connect_for_test(app);
   auto& state = app.state_for_test();
@@ -169,7 +169,7 @@ void test_source_only_magic_preserves_prior_action_rollback() {
   const auto original_lock_started_ms = detail::monotonic_ms() - 8000U;
   world.action_lock_started_ms = original_lock_started_ms;
 
-  world.magics.push_back(MagicShortcutState{26, 1, 0, 0, 1200, "FireSword", 0, 0, 0});
+  world.magics.push_back(MagicShortcutState{26, 1, 0, 0, 1200, "FireSword", 0, 0, 0, 0, 0, 0});
   world.action_key = 0;
 
   ClientConfig config;
@@ -184,20 +184,20 @@ void test_source_only_magic_preserves_prior_action_rollback() {
   assert(frames.size() == 1);
   assert(decode_message<SpellIntent>(frames.front()).has_value());
   assert(world.pending_action_acks.size() == 2);
-  assert(world.action_lock_started_ms == original_lock_started_ms);
+  const auto refreshed_lock_started_ms = world.action_lock_started_ms;
+  assert(refreshed_lock_started_ms > original_lock_started_ms);
 
   state.apply(ActionAck{false, 1234});
   const auto expected_walk_fail_ident = static_cast<std::uint16_t>(3000U + legacy::kSmWalk);
   assert(world.actors[1].x == 50);
   assert(world.actors[1].y == 50);
-  assert(world.action_locked);
-  assert(world.action_lock_started_ms > original_lock_started_ms);
+  assert(!world.action_locked);
   assert(world.action_fail_lock);
   assert(world.fail_action_ident == expected_walk_fail_ident);
   assert(world.fail_dir == walk.dir);
   state.apply(ActionAck{false, 0});
   assert(world.pending_action_acks.size() == 1);
-  assert(world.action_locked);
+  assert(!world.action_locked);
   assert(world.action_fail_lock);
   assert(world.fail_action_ident == expected_walk_fail_ident);
   assert(world.fail_dir == walk.dir);
@@ -228,7 +228,7 @@ void test_source_only_magic_after_sm_movefail_ack_consumes_real_spell_failure() 
   const auto walk_frames = app.drain_sent_frames_for_test();
   assert(walk_frames.size() == 1);
 
-  world.magics.push_back(MagicShortcutState{26, 1, 0, 0, 1200, "FireSword", 0, 0, 0});
+  world.magics.push_back(MagicShortcutState{26, 1, 0, 0, 1200, "FireSword", 0, 0, 0, 0, 0, 0});
   world.action_key = 0;
 
   ClientConfig config;
@@ -246,7 +246,7 @@ void test_source_only_magic_after_sm_movefail_ack_consumes_real_spell_failure() 
 
   state.apply(ActionAck{false, 0});
   assert(world.pending_action_acks.size() == 1);
-  assert(world.action_locked);
+  assert(!world.action_locked);
   assert(!world.skip_next_move_fail_ack);
 
   state.apply(ActionAck{false, 0});
@@ -266,7 +266,7 @@ void test_source_only_magic_expires_stale_lock_before_send() {
   world.actors[1].legacy_old_x = 50;
   world.actors[1].legacy_old_y = 50;
   world.actors[1].legacy_has_old_position = true;
-  world.magics.push_back(MagicShortcutState{26, 1, 0, 0, 1200, "FireSword", 0, 0, 0});
+  world.magics.push_back(MagicShortcutState{26, 1, 0, 0, 1200, "FireSword", 0, 0, 0, 0, 0, 0});
   world.action_key = 0;
   world.action_locked = true;
   world.action_lock_started_ms = 1;
@@ -402,7 +402,7 @@ void test_rush_kung_confirmation_does_not_record_rush_cooldown() {
   state.start_legacy_actor_action(self, message, now_ms);
   assert(world.latest_rush_rush_ms == 0);
 
-  world.magics.push_back(MagicShortcutState{27, 1, 0, 0, 1200, "RushKung", 0, 0, 0});
+  world.magics.push_back(MagicShortcutState{27, 1, 0, 0, 1200, "RushKung", 0, 0, 0, 0, 0, 0});
   world.action_key = 0;
   ClientConfig config;
   InputState input;
@@ -425,7 +425,7 @@ void test_target_magic_uses_target_position_and_mouse_direction() {
   auto& state = app.state_for_test();
   reset_world(state);
   auto& world = state.world;
-  world.magics.push_back(MagicShortcutState{7, 1, 0, 0, 900, "Fire", 0, 0, 1});
+  world.magics.push_back(MagicShortcutState{7, 1, 0, 0, 900, "Fire", 0, 0, 1, 0, 0, 0});
   ActorState target;
   target.actor_id = 2;
   target.x = 52;
@@ -460,13 +460,13 @@ void test_target_magic_uses_target_position_and_mouse_direction() {
   assert(world.magic_pk_delay_ms <= 1399);
 }
 
-void test_target_magic_falls_back_to_selected_target() {
+void test_target_magic_does_not_fallback_to_selected_target() {
   ClientApp app;
   connect_for_test(app);
   auto& state = app.state_for_test();
   reset_world(state);
   auto& world = state.world;
-  world.magics.push_back(MagicShortcutState{7, 1, 0, 0, 900, "Fire", 0, 0, 1});
+  world.magics.push_back(MagicShortcutState{7, 1, 0, 0, 900, "Fire", 0, 0, 1, 0, 0, 0});
   ActorState target;
   target.actor_id = 2;
   target.x = 52;
@@ -492,19 +492,132 @@ void test_target_magic_falls_back_to_selected_target() {
   assert(frames.size() == 1);
   const auto spell = decode_message<SpellIntent>(frames.front());
   assert(spell.has_value());
-  assert(spell->x == 52);
-  assert(spell->y == 50);
-  assert(spell->target_actor_id == 2);
+  assert(spell->x == 50);
+  assert(spell->y == 52);
+  assert(spell->target_actor_id == 0);
   assert(spell->dir == legacy::next_direction(50, 50, 50, 52));
+  assert(world.magic_pk_delay_ms == 0);
 }
 
-void test_ground_magic_ignores_stale_target_actor() {
+void test_normal_magic_requires_delphi_mp_cost_before_lock() {
   ClientApp app;
   connect_for_test(app);
   auto& state = app.state_for_test();
   reset_world(state);
   auto& world = state.world;
-  world.magics.push_back(MagicShortcutState{22, 1, 0, 0, 1200, "FireWall", 0, 0, 4});
+  world.actors[1].mp = 99;
+  world.self_ability_detail.mp = 22;
+  world.magics.push_back(MagicShortcutState{7, 1, 1, 0, 900, "Fire", 0, 0, 1, 20, 3, 3});
+  world.action_key = 0;
+
+  auto [mouse_x, mouse_y] = mouse_for_tile(world.actors[1].x, world.actors[1].y, 50, 52);
+  ClientConfig config;
+  InputState input;
+  input.mouse_x = mouse_x;
+  input.mouse_y = mouse_y;
+  SceneManager scenes;
+  ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+  context.legacy_input_dispatched = true;
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+  scenes.process_action_messages(context, 0.016F);
+
+  const auto frames = app.drain_sent_frames_for_test();
+  assert(frames.empty());
+  assert(!world.action_locked);
+  assert(world.actors[1].current_action != ActorActionKind::spell);
+
+  world.self_ability_detail.mp = 23;
+  world.action_key = 0;
+  scenes.process_action_messages(context, 0.016F);
+  const auto allowed_frames = app.drain_sent_frames_for_test();
+  assert(allowed_frames.size() == 1);
+  assert(decode_message<SpellIntent>(allowed_frames.front()).has_value());
+  assert(world.action_locked);
+}
+
+void test_normal_magic_uses_client_raw_spell_cost_before_lock() {
+  ClientApp app;
+  connect_for_test(app);
+  auto& state = app.state_for_test();
+  reset_world(state);
+  auto& world = state.world;
+  world.self_ability_detail.mp = 2;
+  world.magics.push_back(MagicShortcutState{7, 1, 1, 0, 900, "Fire", 0, 0, 1, 5, 0, 3});
+  world.action_key = 0;
+
+  auto [mouse_x, mouse_y] = mouse_for_tile(world.actors[1].x, world.actors[1].y, 50, 52);
+  ClientConfig config;
+  InputState input;
+  input.mouse_x = mouse_x;
+  input.mouse_y = mouse_y;
+  SceneManager scenes;
+  ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+  context.legacy_input_dispatched = true;
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+  scenes.process_action_messages(context, 0.016F);
+
+  const auto frames = app.drain_sent_frames_for_test();
+  assert(frames.empty());
+  assert(!world.action_locked);
+
+  world.self_ability_detail.mp = 5;
+  world.action_key = 0;
+  scenes.process_action_messages(context, 0.016F);
+  const auto allowed_frames = app.drain_sent_frames_for_test();
+  assert(allowed_frames.size() == 1);
+  assert(decode_message<SpellIntent>(allowed_frames.front()).has_value());
+  assert(world.action_locked);
+}
+
+void test_self_buff_magic_uses_focus_target_like_delphi() {
+  ClientApp app;
+  connect_for_test(app);
+  auto& state = app.state_for_test();
+  reset_world(state);
+  auto& world = state.world;
+  world.magics.push_back(MagicShortcutState{31, 1, 0, 0, 900, "MagicShield", 0, 0, 31, 0, 0, 0});
+  ActorState target;
+  target.actor_id = 2;
+  target.x = 52;
+  target.y = 50;
+  target.actor_type = ActorType::player;
+  world.actors.emplace(2, target);
+  world.focus_actor_id = 2;
+  world.action_key = 0;
+
+  auto [mouse_x, mouse_y] = mouse_for_tile(world.actors[1].x, world.actors[1].y, 50, 52);
+  ClientConfig config;
+  InputState input;
+  input.mouse_x = mouse_x;
+  input.mouse_y = mouse_y;
+  SceneManager scenes;
+  ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+  context.legacy_input_dispatched = true;
+  scenes.initialize(context);
+  scenes.change_scene(SceneId::world, context);
+  scenes.process_action_messages(context, 0.016F);
+
+  const auto frames = app.drain_sent_frames_for_test();
+  assert(frames.size() == 1);
+  const auto spell = decode_message<SpellIntent>(frames.front());
+  assert(spell.has_value());
+  assert(spell->x == 52);
+  assert(spell->y == 50);
+  assert(spell->target_actor_id == 2);
+  assert(spell->dir == legacy::next_direction(50, 50, 50, 52));
+  assert(world.magic_pk_delay_ms >= 300);
+  assert(world.magic_pk_delay_ms <= 1399);
+}
+
+void test_ground_magic_uses_focus_target_actor() {
+  ClientApp app;
+  connect_for_test(app);
+  auto& state = app.state_for_test();
+  reset_world(state);
+  auto& world = state.world;
+  world.magics.push_back(MagicShortcutState{22, 1, 0, 0, 1200, "FireWall", 0, 0, 4, 0, 0, 0});
   ActorState target;
   target.actor_id = 2;
   target.x = 52;
@@ -531,12 +644,15 @@ void test_ground_magic_ignores_stale_target_actor() {
   assert(frames.size() == 1);
   const auto spell = decode_message<SpellIntent>(frames.front());
   assert(spell.has_value());
-  assert(spell->x == 50);
-  assert(spell->y == 52);
-  assert(spell->target_actor_id == 0);
+  assert(spell->x == 52);
+  assert(spell->y == 50);
+  assert(spell->target_actor_id == 2);
+  assert(spell->dir == legacy::next_direction(50, 50, 50, 52));
+  assert(world.magic_pk_delay_ms >= 300);
+  assert(world.magic_pk_delay_ms <= 1399);
 }
 
-void test_area_magic_uses_ground_tile() {
+void test_area_magic_uses_focus_target_actor() {
   const auto run_case = [](const MagicShortcutState& magic) {
     ClientApp app;
     connect_for_test(app);
@@ -570,14 +686,58 @@ void test_area_magic_uses_ground_tile() {
     assert(frames.size() == 1);
     const auto spell = decode_message<SpellIntent>(frames.front());
     assert(spell.has_value());
+    assert(spell->x == 52);
+    assert(spell->y == 50);
+    assert(spell->target_actor_id == 2);
+    assert(spell->dir == legacy::next_direction(50, 50, 50, 52));
+  };
+
+  run_case(MagicShortcutState{19, 1, 0, 0, 500, "GroupHide", 0, 0, 8, 0, 0, 0});
+  run_case(MagicShortcutState{23, 1, 0, 0, 600, "Explosion", 0, 0, 2, 0, 0, 0});
+  run_case(MagicShortcutState{29, 1, 0, 0, 400, "GroupHeal", 0, 0, 2, 0, 0, 0});
+}
+
+void test_area_magic_uses_ground_without_focus() {
+  const auto run_case = [](const MagicShortcutState& magic) {
+    ClientApp app;
+    connect_for_test(app);
+    auto& state = app.state_for_test();
+    reset_world(state);
+    auto& world = state.world;
+    world.magics.push_back(magic);
+    ActorState target;
+    target.actor_id = 2;
+    target.x = 52;
+    target.y = 50;
+    target.actor_type = ActorType::monster;
+    world.actors.emplace(2, target);
+    world.target_actor_id = 2;
+    world.action_key = 0;
+
+    auto [mouse_x, mouse_y] = mouse_for_tile(world.actors[1].x, world.actors[1].y, 50, 52);
+    ClientConfig config;
+    InputState input;
+    input.mouse_x = mouse_x;
+    input.mouse_y = mouse_y;
+    SceneManager scenes;
+    ClientContext context{&app, &config, &state, nullptr, nullptr, nullptr, &input};
+    context.legacy_input_dispatched = true;
+    scenes.initialize(context);
+    scenes.change_scene(SceneId::world, context);
+    scenes.process_action_messages(context, 0.016F);
+
+    const auto frames = app.drain_sent_frames_for_test();
+    assert(frames.size() == 1);
+    const auto spell = decode_message<SpellIntent>(frames.front());
+    assert(spell.has_value());
     assert(spell->x == 50);
     assert(spell->y == 52);
     assert(spell->target_actor_id == 0);
   };
 
-  run_case(MagicShortcutState{19, 1, 0, 0, 500, "GroupHide", 0, 0, 8});
-  run_case(MagicShortcutState{23, 1, 0, 0, 600, "Explosion", 0, 0, 2});
-  run_case(MagicShortcutState{29, 1, 0, 0, 400, "GroupHeal", 0, 0, 2});
+  run_case(MagicShortcutState{19, 1, 0, 0, 500, "GroupHide", 0, 0, 8, 0, 0, 0});
+  run_case(MagicShortcutState{23, 1, 0, 0, 600, "Explosion", 0, 0, 2, 0, 0, 0});
+  run_case(MagicShortcutState{29, 1, 0, 0, 400, "GroupHeal", 0, 0, 2, 0, 0, 0});
 }
 
 }  // namespace
@@ -586,7 +746,7 @@ int main() {
   test_magic_key_does_not_stick_across_blocked_frame();
   test_source_only_magic_bypasses_action_gate_without_local_spell();
   test_source_only_magic_bypasses_existing_action_lock();
-  test_source_only_magic_preserves_prior_action_rollback();
+  test_source_only_magic_refreshes_lock_time_and_preserves_prior_action_rollback();
   test_source_only_magic_after_sm_movefail_ack_consumes_real_spell_failure();
   test_source_only_magic_expires_stale_lock_before_send();
   test_attack_attempt_updates_move_suppression();
@@ -595,8 +755,12 @@ int main() {
   test_rush_confirmation_records_rush_cooldown();
   test_rush_kung_confirmation_does_not_record_rush_cooldown();
   test_target_magic_uses_target_position_and_mouse_direction();
-  test_target_magic_falls_back_to_selected_target();
-  test_ground_magic_ignores_stale_target_actor();
-  test_area_magic_uses_ground_tile();
+  test_target_magic_does_not_fallback_to_selected_target();
+  test_normal_magic_requires_delphi_mp_cost_before_lock();
+  test_normal_magic_uses_client_raw_spell_cost_before_lock();
+  test_self_buff_magic_uses_focus_target_like_delphi();
+  test_ground_magic_uses_focus_target_actor();
+  test_area_magic_uses_focus_target_actor();
+  test_area_magic_uses_ground_without_focus();
   return 0;
 }

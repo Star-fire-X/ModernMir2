@@ -32,10 +32,10 @@ void assert_bytes(const std::vector<std::uint8_t>& actual,
 int main() {
   using namespace mir2::client_v1;
 
-  const ClientHello hello{1, 0x01020304U, 0xA0B0C0D0U, 0x0F0E0D0CU};
+  const ClientHello hello{kProtocolVersion, 0x01020304U, 0xA0B0C0D0U, 0x0F0E0D0CU};
   const auto hello_bytes = encode_frame(make_frame(hello, 0x11223344U, 0x5566U));
   assert_bytes(hello_bytes, {0x18, 0x00, 0x00, 0x00, 0x01, 0x00, 0x66, 0x55,
-                             0x44, 0x33, 0x22, 0x11, 0x01, 0x00, 0x00, 0x00,
+                             0x44, 0x33, 0x22, 0x11, 0x02, 0x00, 0x00, 0x00,
                              0x04, 0x03, 0x02, 0x01, 0xD0, 0xC0, 0xB0, 0xA0,
                              0x0C, 0x0D, 0x0E, 0x0F});
 
@@ -80,7 +80,7 @@ int main() {
   assert(!decode_any(frames.front()).has_value());
 
   const auto decoded_hello = round_trip(hello, 1);
-  assert(decoded_hello.protocol_version == 1);
+  assert(decoded_hello.protocol_version == kProtocolVersion);
   assert(decoded_hello.client_build == 0x01020304U);
 
   LoginRequest request;
@@ -364,7 +364,7 @@ int main() {
   assert(decoded_death->dir == 4);
 
   MagicList magic_list;
-  magic_list.magics.push_back(MagicEntry{1, 1, 0, 0, 1000, "Fire", 15, 900, 1});
+  magic_list.magics.push_back(MagicEntry{1, 1, 0, 0, 1000, "Fire", 15, 900, 1, 20, 3, 3});
   const auto magic_frame = encode_frame(make_frame(magic_list, 22));
   buffer = magic_frame;
   frames = drain_frames(buffer);
@@ -375,6 +375,9 @@ int main() {
   assert(decoded_magic->magics.front().effect == 15);
   assert(decoded_magic->magics.front().max_train == 900);
   assert(decoded_magic->magics.front().effect_type == 1);
+  assert(decoded_magic->magics.front().spell == 20);
+  assert(decoded_magic->magics.front().def_spell == 3);
+  assert(decoded_magic->magics.front().max_train_level == 3);
 
   const auto self_ability =
       round_trip(SelfAbility{35, 1, 123456, 200000, 37, 60, 8888, 3}, 221);

@@ -7762,6 +7762,11 @@ class WorldScene final : public Scene {
     return nullptr;
   }
 
+  static int legacy_client_spell_point(const MagicShortcutState& magic) {
+    // Delphi UseMagic gates on TClientMagic.Def.Spell + DefSpell; server MP spend uses GetSpellPoint separately.
+    return magic.spell + magic.def_spell;
+  }
+
   static bool legacy_magic_shortcut_ready(const WorldViewState& world,
                                           const std::uint64_t now_ms) {
     return world.latest_spell_ms == 0 ||
@@ -8491,8 +8496,6 @@ class WorldScene final : public Scene {
         world.pending_action_acks.clear();
         world.skip_next_move_fail_ack = false;
       }
-      const auto preserve_lock_started = world.action_locked;
-      const auto action_lock_started_ms = world.action_lock_started_ms;
       if (magic_id == 26 && world.latest_fire_hit_ms != 0 &&
           elapsed_ms(input.tick, world.latest_fire_hit_ms) < 10000U) {
         return false;
@@ -8503,12 +8506,9 @@ class WorldScene final : public Scene {
       }
       send_spell(context, static_cast<int>(self_it->second.dir), 0, 0, self_it->second.dir,
                  magic_id, false, 0);
-      if (preserve_lock_started) {
-        world.action_lock_started_ms = action_lock_started_ms;
-      }
       return true;
     }
-    if (self_it->second.mp == 0) {
+    if (magic != nullptr && legacy_client_spell_point(*magic) > world.self_ability_detail.mp) {
       return false;
     }
     const auto animation_idle = self_actor_legacy_idle(world, input.tick);
@@ -8524,12 +8524,10 @@ class WorldScene final : public Scene {
     std::uint64_t target_actor_id = 0;
     auto spell_x = input.map_x;
     auto spell_y = input.map_y;
-    if (magic != nullptr && legacy_magic_uses_actor_target(*magic)) {
-      const auto candidate_target_id =
-          world.focus_actor_id != 0 ? world.focus_actor_id : world.target_actor_id;
-      if (const auto target_it = world.actors.find(candidate_target_id);
+    if (world.focus_actor_id != 0) {
+      if (const auto target_it = world.actors.find(world.focus_actor_id);
           target_it != world.actors.end()) {
-        target_actor_id = candidate_target_id;
+        target_actor_id = world.focus_actor_id;
         spell_x = target_it->second.x;
         spell_y = target_it->second.y;
       }
@@ -8557,17 +8555,6 @@ class WorldScene final : public Scene {
   bool self_actor_legacy_idle(const WorldViewState& world, const std::uint64_t now_ms) {
     animation_.sync_world(world, now_ms);
     return animation_.is_actor_legacy_idle(world.self_actor_id);
-  }
-
-  static bool legacy_magic_uses_actor_target(const MagicShortcutState& magic) {
-    if (magic.effect_type == 1 || magic.effect_type == 7) {
-      return true;
-    }
-    if (magic.effect_type == 8) {
-      return magic.magic_id != 19;
-    }
-    return magic.effect_type == 2 && magic.magic_id != 23 && magic.magic_id != 29 &&
-           magic.magic_id != 33;
   }
 
   static void send_spell(ClientContext& context, int x, int y, std::uint64_t target_actor_id,
