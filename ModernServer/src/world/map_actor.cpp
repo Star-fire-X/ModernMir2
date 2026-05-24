@@ -1238,6 +1238,7 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
                    std::vector<MapQuestConfig> map_quests,
                    CastleDialogContext castle_dialog_context,
                    std::unordered_map<std::string, MonsterDefConfig> monster_defs,
+                   std::unordered_map<std::string, MapEntryRuleConfig> map_entry_rules,
                    MakeIndexAllocator* make_index_allocator,
                    std::string black_stone_name,
                    bool legacy_approval_mode)
@@ -1247,6 +1248,7 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
       magic_configs_(std::move(magic_configs)),
       monster_defs_(std::move(monster_defs)),
       map_quests_(std::move(map_quests)),
+      map_entry_rules_(std::move(map_entry_rules)),
       black_stone_name_(std::move(black_stone_name)),
       legacy_approval_mode_(legacy_approval_mode),
       castle_dialog_context_(std::move(castle_dialog_context)),
@@ -1298,11 +1300,13 @@ bool MapActor::apply_merchant_state(const MerchantStateRecord& state) {
 
 bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, std::int32_t y,
                                        std::uint64_t now_ms, bool blocks_walk,
-                                       RuntimeDispatch* dispatch) {
+                                       RuntimeDispatch* dispatch,
+                                       LegacyEventType type) {
   const auto added = environment_.add_placeholder_object(x, y, LegacyMapObjectShape::event_object,
                                                         event_id, now_ms, blocks_walk);
   if (added) {
     event_objects_[event_id] = {x, y};
+    event_object_types_[event_id] = type;
     if (dispatch != nullptr) {
       sync_visibility_after_event_change(x, y, *dispatch);
     }
@@ -1310,11 +1314,17 @@ bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, s
   return added;
 }
 
+bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, std::int32_t y,
+                                       std::uint64_t now_ms, RuntimeDispatch* dispatch) {
+  return legacy_add_event_object(event_id, x, y, now_ms, false, dispatch);
+}
+
 void MapActor::legacy_remove_event_object(std::uint64_t event_id, std::int32_t x,
                                           std::int32_t y, RuntimeDispatch* dispatch) {
   static_cast<void>(
       environment_.delete_from_map(x, y, LegacyMapObjectShape::event_object, event_id));
   event_objects_.erase(event_id);
+  event_object_types_.erase(event_id);
   if (dispatch != nullptr) {
     for (auto& [_, visibility] : visibility_) {
       visibility.events.erase(event_id);

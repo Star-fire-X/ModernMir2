@@ -220,6 +220,8 @@ class LogicRuntime {
   void process_merchants(std::uint64_t now_ms, RuntimeDispatch& dispatch);
   void process_npcs(std::uint64_t now_ms, RuntimeDispatch& dispatch);
   void process_user_engine_timers(std::uint64_t now_ms, RuntimeDispatch& dispatch);
+  [[nodiscard]] RuntimeDispatch relocate_no_reconnect_player(std::uint64_t session_id,
+                                                             std::uint64_t now_ms);
   void process_legacy_event_creates(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void process_legacy_random_space_moves(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void process_cross_map_mails(RuntimeDispatch& dispatch);

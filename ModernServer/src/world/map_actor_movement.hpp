@@ -29,6 +29,99 @@ void MapActor::broadcast_close_doors(
   }
 }
 
+bool MapActor::has_event_at(std::int32_t x, std::int32_t y, LegacyEventType type) const {
+  for (const auto& [event_id, xy] : event_objects_) {
+    if (xy.first != x || xy.second != y) {
+      continue;
+    }
+    const auto type_it = event_object_types_.find(event_id);
+    if (type_it != event_object_types_.end() && type_it->second == type) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool MapActor::target_map_can_enter(const MapEntryRuleConfig& rule,
+                                    const LegacyMapGateState& gate) const {
+  if (rule.map_id == config_.id) {
+    return environment_.in_bounds(gate.target_x, gate.target_y) &&
+           environment_.can_walk(gate.target_x, gate.target_y, true);
+  }
+  if (!rule.source_map.empty()) {
+    if (const auto target_map = legacy::decode_map_file(rule.source_map);
+        target_map != nullptr) {
+      LegacyMapEnvironment target_environment(rule.width, rule.height, target_map);
+      return target_environment.can_walk(gate.target_x, gate.target_y, true);
+    }
+  }
+  if (rule.width > 0 && rule.height > 0) {
+    return gate.target_x >= 0 && gate.target_y >= 0 &&
+           gate.target_x < rule.width && gate.target_y < rule.height;
+  }
+  return true;
+}
+
+bool MapActor::target_entry_allowed(Player& player, const LegacyMapGateState& gate,
+                                    RuntimeDispatch& dispatch,
+                                    std::uint64_t current_tick,
+                                    std::uint64_t now_ms) {
+  const auto player_id = player.id();
+  auto* current_player = &player;
+  const auto rule_it = map_entry_rules_.find(gate.target_map_id);
+  if (rule_it == map_entry_rules_.end()) {
+    return map_entry_rules_.empty();
+  }
+  const auto& rule = rule_it->second;
+  if (rule.need_hole &&
+      !has_event_at(current_player->x(), current_player->y(), LegacyEventType::digout_zombi)) {
+    return false;
+  }
+  if (rule.need_level > 0 &&
+      static_cast<std::int32_t>(current_player->character().ability.level) < rule.need_level) {
+    return false;
+  }
+  if (rule.check_quest.has_value()) {
+    const auto& quest = *rule.check_quest;
+    if (quest.dialog_sections.empty()) {
+      ActorMail trace_mail;
+      trace_mail.kind = ActorMailKind::merchant_select;
+      trace_mail.map_id = config_.id;
+      trace_mail.actor_id = player.id();
+      trace_mail.session_id = player.session_id();
+      trace_mail.payload = "MapEntryQuest:" + quest.qfile;
+      add_legacy_trace(dispatch, "LegacyScript", "map_entry_missing_script", trace_mail,
+                       current_tick, now_ms, false, 0, 0, gate.target_map_id);
+    } else {
+      const auto npc_id = kMapQuestNpcObjectBase + 0x100000ULL +
+                          (std::hash<std::string>{}(gate.target_map_id) & 0xffffULL);
+      Npc quest_npc(npc_id,
+                    quest.qfile.empty() ? std::string("MapEntryQuest") : quest.qfile,
+                    config_.id, player.x(), player.y(), "none", {}, quest.dialog_sections);
+      ActorMail trace_mail;
+      trace_mail.kind = ActorMailKind::merchant_select;
+      trace_mail.map_id = config_.id;
+      trace_mail.actor_id = player.id();
+      trace_mail.session_id = player.session_id();
+      trace_mail.target_actor_id = quest_npc.id();
+      trace_mail.payload = "MapEntryQuest:" + quest.qfile;
+      add_legacy_trace(dispatch, "LegacyScript", "map_entry_checkquest", trace_mail,
+                       current_tick, now_ms, true, 0, 0, gate.target_map_id);
+      static_cast<void>(legacy_execute_npc_script(player, quest_npc, "@main", dispatch,
+                                                 current_tick, now_ms));
+      current_player = find_player(player_id);
+      if (current_player == nullptr) {
+        return false;
+      }
+    }
+  }
+  if (rule.need_set_number >= 0 &&
+      current_player->quest_mark(rule.need_set_number) != rule.need_set_value) {
+    return false;
+  }
+  return target_map_can_enter(rule, gate);
+}
+
 bool MapActor::try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
                                  std::uint64_t current_tick, std::uint64_t now_ms) {
   const auto* gate = environment_.gate_at(player.x(), player.y());
@@ -40,6 +133,10 @@ bool MapActor::try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
       !environment_.around_door_opened(player.x(), player.y())) {
     const auto opened = environment_.open_doors_around(player.x(), player.y(), now_ms);
     broadcast_open_doors(opened, dispatch);
+    return false;
+  }
+
+  if (!target_entry_allowed(player, gate->gate, dispatch, current_tick, now_ms)) {
     return false;
   }
 

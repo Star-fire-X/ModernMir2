@@ -254,6 +254,7 @@ constexpr std::int32_t kRcDualAxeSkeleton = 87;
 constexpr std::int32_t kRcBigKudeki = 90;
 constexpr std::int32_t kRcMagCowFaceMon = 91;
 constexpr std::int32_t kRcThornDark = 93;
+constexpr std::int32_t kRcDigOutZombi = 95;
 constexpr std::int32_t kRcToxicGhost = 127;
 constexpr std::int32_t kRcBeeQueen = 103;
 constexpr std::int32_t kRcArcherMon = 104;
@@ -2150,6 +2151,11 @@ Monster::Monster(std::uint64_t id, std::string name, std::string map_id, std::in
       dig_up_range_ = 4;
       dig_down_range_ = 4;
       run_next_tick_ms_ = 250;
+      break;
+    case kRcDigOutZombi:
+      hide_mode_ = true;
+      dig_up_range_ = 3;
+      search_rate_ms_ = search_rate_ms != 0 ? search_rate_ms : 2500;
       break;
     case kRcCentipedeKing:
       hide_mode_ = true;

@@ -444,6 +444,10 @@ struct ImportedMapInfo {
   std::int32_t mine_map{0};
   std::string back_map{};
   std::vector<ImportedGate> gates{};
+  bool quiz_zone{false};
+  std::string check_quest{};
+  std::int32_t need_set_number{-1};
+  std::int32_t need_set_value{-1};
 };
 
 void apply_mapinfo_flags(ImportedMapInfo& info, const std::string& tail) {
@@ -464,11 +468,21 @@ void apply_mapinfo_flags(ImportedMapInfo& info, const std::string& tail) {
       info.fight3_zone = true;
     } else if (lower == "day") {
       info.daylight = true;
+    } else if (lower == "quiz") {
+      info.quiz_zone = true;
     } else if (lower == "dark") {
       info.darkness = true;
     } else if (util::starts_with(lower, "noreconnect")) {
       info.no_reconnect = true;
       info.back_map = option_payload(token);
+    } else if (util::starts_with(lower, "checkquest")) {
+      info.check_quest = option_payload(token);
+    } else if (util::starts_with(lower, "needset_on")) {
+      info.need_set_number = parse_int32(option_payload(token)).value_or(-1);
+      info.need_set_value = 1;
+    } else if (util::starts_with(lower, "needset_off")) {
+      info.need_set_number = parse_int32(option_payload(token)).value_or(-1);
+      info.need_set_value = 0;
     } else if (lower == "needhole") {
       info.need_hole = true;
     } else if (lower == "norecall") {
@@ -490,6 +504,10 @@ void apply_mapinfo_flags(ImportedMapInfo& info, const std::string& tail) {
     }
   }
 }
+
+std::string import_mapquest_script_asset(const std::filesystem::path& legacy_root,
+                                         const std::filesystem::path& output_root,
+                                         std::string_view qfile);
 
 void ensure_output_dirs(const std::filesystem::path& output_root) {
   std::filesystem::create_directories(output_root / "runtime");
@@ -671,6 +689,14 @@ LegacyImportReport import_maps_and_spawns(const std::filesystem::path& legacy_ro
     file << "need_level = " << info.need_level << "\n";
     file << "mine_map = " << info.mine_map << "\n";
     file << "back_map = " << quote(info.back_map) << "\n";
+    file << "quiz_zone = " << (info.quiz_zone ? "true" : "false") << "\n";
+    file << "need_set_number = " << info.need_set_number << "\n";
+    file << "need_set_value = " << info.need_set_value << "\n";
+    if (!info.check_quest.empty()) {
+      file << "check_quest = "
+           << quote(import_mapquest_script_asset(legacy_root, output_root, info.check_quest))
+           << "\n";
+    }
     file << "allow_pk = " << (info.law_full ? "false" : "true") << "\n";
     const auto point_it = start_points.find(map_id);
     if (point_it != start_points.end() && !point_it->second.empty()) {

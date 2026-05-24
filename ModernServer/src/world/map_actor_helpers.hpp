@@ -44,6 +44,7 @@ constexpr std::int32_t kRcKnightSkeleton = 89;
 constexpr std::int32_t kRcBigKudeki = 90;
 constexpr std::int32_t kRcMagCowFaceMon = 91;
 constexpr std::int32_t kRcThornDark = 93;
+constexpr std::int32_t kRcDigOutZombi = 95;
 constexpr std::int32_t kRcScultureKing = 102;
 constexpr std::int32_t kRcBeeQueen = 103;
 constexpr std::int32_t kRcArcherMon = 104;
@@ -65,6 +66,7 @@ enum class LegacyMonsterRaceBehavior {
   front_magic,
   fly_axe,
   stick_hide,
+  digout_zombi,
   centipede,
   summoner,
   sculture_king,
@@ -89,6 +91,8 @@ LegacyMonsterRaceBehavior legacy_monster_race_behavior(std::int32_t race_server)
       return LegacyMonsterRaceBehavior::fly_axe;
     case kRcKillingHerb:
       return LegacyMonsterRaceBehavior::stick_hide;
+    case kRcDigOutZombi:
+      return LegacyMonsterRaceBehavior::digout_zombi;
     case kRcCentipedeKing:
       return LegacyMonsterRaceBehavior::centipede;
     case kRcBeeQueen:

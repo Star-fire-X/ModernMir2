@@ -431,6 +431,26 @@ void merge_dialog_sections(std::vector<NpcDialogSectionConfig>& target,
   }
 }
 
+std::vector<NpcDialogSectionConfig> parse_dialog_sections_array(const toml::array* dialog_sections) {
+  std::vector<NpcDialogSectionConfig> sections;
+  if (dialog_sections == nullptr) {
+    return sections;
+  }
+  for (const auto& section_node : *dialog_sections) {
+    if (!section_node.is_table()) {
+      continue;
+    }
+    const auto& section_table = *section_node.as_table();
+    auto action = value_or<std::string>(section_table, "action", {});
+    auto text = value_or<std::string>(section_table, "text", {});
+    action = util::lower_copy(util::trim(std::move(action)));
+    if (!action.empty() && !text.empty()) {
+      sections.push_back({std::move(action), std::move(text)});
+    }
+  }
+  return sections;
+}
+
 void merge_legacy_npc_script(NpcConfig& npc, LegacyNpcScriptParseResult result) {
   merge_dialog_sections(npc, std::move(result.dialog_sections));
   if (result.price_rate_percent.has_value()) {
@@ -563,13 +583,14 @@ std::filesystem::path resolve_npc_script_path(const std::filesystem::path& root,
 }
 
 std::filesystem::path resolve_map_quest_script_path(const std::filesystem::path& root,
-                                                    const MapQuestConfig& quest) {
-  if (quest.qfile.empty()) {
+                                                    const std::string& map_id,
+                                                    const std::string& qfile) {
+  if (qfile.empty()) {
     return {};
   }
 
-  const auto script_path = std::filesystem::path(quest.qfile);
-  const auto map_specific = with_map_suffix(script_path, quest.map_id);
+  const auto script_path = std::filesystem::path(qfile);
+  const auto map_specific = with_map_suffix(script_path, map_id);
   const auto filename = script_path.filename();
   const auto map_specific_filename = map_specific.filename();
 
@@ -592,6 +613,11 @@ std::filesystem::path resolve_map_quest_script_path(const std::filesystem::path&
     }
   }
   return {};
+}
+
+std::filesystem::path resolve_map_quest_script_path(const std::filesystem::path& root,
+                                                    const MapQuestConfig& quest) {
+  return resolve_map_quest_script_path(root, quest.map_id, quest.qfile);
 }
 
 std::string infer_npc_service(const NpcConfig& npc) {
@@ -645,6 +671,7 @@ void load_maps(const std::filesystem::path& directory, HostConfig& config,
   if (!std::filesystem::exists(directory)) {
     return;
   }
+  const auto root = directory.parent_path();
 
   for (const auto& entry : std::filesystem::directory_iterator(directory)) {
     if (!entry.is_regular_file() || entry.path().extension() != ".toml") {
@@ -685,7 +712,31 @@ void load_maps(const std::filesystem::path& directory, HostConfig& config,
     map.mine_map = value_or<int>(table, "mine_map", value_or<int>(table, "mine", 0));
     map.back_map = value_or<std::string>(table, "back_map", {});
     map.quiz_zone = value_or<bool>(table, "quiz_zone", value_or<bool>(table, "quiz", false));
+    map.need_set_number = value_or<int>(
+        table, "need_set_number", value_or<int>(table, "need_set", -1));
+    map.need_set_value = value_or<int>(table, "need_set_value", -1);
     map.allow_pk = value_or<bool>(table, "allow_pk", !map.law_full);
+    if (auto qfile = table["check_quest"].value<std::string>()) {
+      MapEntryQuestConfig quest;
+      quest.qfile = *qfile;
+      if (const auto script_path = resolve_map_quest_script_path(root, map.id, quest.qfile);
+          !script_path.empty()) {
+        merge_dialog_sections(quest.dialog_sections, parse_npc_dialog_script(script_path));
+      }
+      map.check_quest = std::move(quest);
+    } else if (auto check_quest = table["check_quest"].as_table()) {
+      MapEntryQuestConfig quest;
+      quest.qfile = value_or<std::string>(*check_quest, "qfile", {});
+      quest.dialog_sections =
+          parse_dialog_sections_array((*check_quest)["dialog_sections"].as_array());
+      if (const auto script_path = resolve_map_quest_script_path(root, map.id, quest.qfile);
+          !script_path.empty()) {
+        merge_dialog_sections(quest.dialog_sections, parse_npc_dialog_script(script_path));
+      }
+      if (!quest.qfile.empty() || !quest.dialog_sections.empty()) {
+        map.check_quest = std::move(quest);
+      }
+    }
     if (auto safe_zones = table["safe_zones"].as_array()) {
       for (const auto& zone_node : *safe_zones) {
         if (!zone_node.is_table()) {
@@ -1100,20 +1151,8 @@ void load_map_quests(const std::filesystem::path& directory, HostConfig& config)
         quest.item_name = value_or<std::string>(quest_table, "item_name", {});
         quest.qfile = value_or<std::string>(quest_table, "qfile", {});
         quest.enable_group = value_or<bool>(quest_table, "enable_group", false);
-        if (auto dialog_sections = quest_table["dialog_sections"].as_array()) {
-          for (const auto& section_node : *dialog_sections) {
-            if (!section_node.is_table()) {
-              continue;
-            }
-            const auto& section_table = *section_node.as_table();
-            auto action = value_or<std::string>(section_table, "action", {});
-            auto text = value_or<std::string>(section_table, "text", {});
-            action = util::lower_copy(util::trim(std::move(action)));
-            if (!action.empty() && !text.empty()) {
-              quest.dialog_sections.push_back({std::move(action), std::move(text)});
-            }
-          }
-        }
+        quest.dialog_sections =
+            parse_dialog_sections_array(quest_table["dialog_sections"].as_array());
         if (const auto script_path = resolve_map_quest_script_path(root, quest);
             !script_path.empty()) {
           merge_dialog_sections(quest.dialog_sections, parse_npc_dialog_script(script_path));

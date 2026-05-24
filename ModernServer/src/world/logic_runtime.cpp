@@ -548,11 +548,27 @@ void LogicRuntime::initialize() {
     default_map_id_ = config_.maps.front().id;
   }
 
+  std::unordered_map<std::string, MapEntryRuleConfig> map_entry_rules;
+  for (const auto& map : config_.maps) {
+    MapEntryRuleConfig rule;
+    rule.map_id = map.id;
+    rule.source_map = map.source_map;
+    rule.width = map.width;
+    rule.height = map.height;
+    rule.need_level = map.need_level;
+    rule.need_hole = map.need_hole;
+    rule.need_set_number = map.need_set_number;
+    rule.need_set_value = map.need_set_value;
+    rule.check_quest = map.check_quest;
+    map_entry_rules[map.id] = std::move(rule);
+  }
+
   for (const auto& map : config_.maps) {
     auto [map_it, inserted] = maps_.emplace(
         map.id, std::make_unique<MapActor>(map, config_.budgets, item_configs_, magic_configs_,
                                            config_.map_quests, castle_dialog_context_,
-                                           monster_defs_, &make_index_allocator_,
+                                           monster_defs_, map_entry_rules,
+                                           &make_index_allocator_,
                                            config_.runtime.black_stone_name,
                                            config_.runtime.legacy_approval_mode));
     map_it->second->set_legacy_random(&legacy_random_);
@@ -2097,6 +2113,39 @@ RuntimeDispatch LogicRuntime::enqueue_ready_user(LegacyReadyUser ready_user) {
   return dispatch;
 }
 
+RuntimeDispatch LogicRuntime::relocate_no_reconnect_player(std::uint64_t session_id,
+                                                           std::uint64_t now_ms) {
+  RuntimeDispatch dispatch;
+  const auto locator_it = session_index_.find(session_id);
+  if (locator_it == session_index_.end()) {
+    return dispatch;
+  }
+  const auto locator = locator_it->second;
+  const auto map_config_it =
+      std::find_if(config_.maps.begin(), config_.maps.end(), [&](const MapConfig& map) {
+        return map.id == locator.map_id;
+      });
+  if (map_config_it == config_.maps.end() || !map_config_it->no_reconnect ||
+      map_config_it->back_map.empty()) {
+    return dispatch;
+  }
+  const auto source_it = maps_.find(locator.map_id);
+  const auto target_it = maps_.find(map_config_it->back_map);
+  if (source_it == maps_.end() || target_it == maps_.end()) {
+    return dispatch;
+  }
+  const auto target = target_it->second->legacy_random_space_move_target(legacy_random_);
+  if (!target.has_value()) {
+    return dispatch;
+  }
+  append_dispatch(dispatch,
+                  source_it->second->legacy_space_move_player(
+                      locator.actor_id, map_config_it->back_map, target->first, target->second,
+                      false, current_tick_, now_ms));
+  process_cross_map_mails(dispatch);
+  return dispatch;
+}
+
 RuntimeDispatch LogicRuntime::mark_session_disconnected(std::uint64_t session_id,
                                                         std::string reason) {
   RuntimeDispatch dispatch;
@@ -2119,9 +2168,15 @@ RuntimeDispatch LogicRuntime::mark_session_disconnected(std::uint64_t session_id
     return dispatch;
   }
   remove_legacy_group_member(session_id);
-  if (auto map_it = maps_.find(locator_it->second.map_id); map_it != maps_.end()) {
-    append_dispatch(dispatch, map_it->second->legacy_disconnect_player(locator_it->second.actor_id,
-                                                                       last_now_ms_));
+  append_dispatch(dispatch, relocate_no_reconnect_player(session_id, last_now_ms_));
+  const auto relocated_locator_it = session_index_.find(session_id);
+  if (relocated_locator_it == session_index_.end()) {
+    return dispatch;
+  }
+  if (auto map_it = maps_.find(relocated_locator_it->second.map_id); map_it != maps_.end()) {
+    append_dispatch(dispatch,
+                    map_it->second->legacy_disconnect_player(
+                        relocated_locator_it->second.actor_id, last_now_ms_));
   }
   return dispatch;
 }
@@ -2188,7 +2243,8 @@ std::uint64_t LogicRuntime::enqueue_legacy_event(LegacyEventRecord record) {
   if (event_id != 0) {
     if (auto map_it = maps_.find(record.map_id); map_it != maps_.end()) {
       static_cast<void>(map_it->second->legacy_add_event_object(
-          event_id, record.x, record.y, last_now_ms_, record.blocks_walk));
+          event_id, record.x, record.y, last_now_ms_, record.blocks_walk, nullptr,
+          record.type));
     }
   }
   return event_id;

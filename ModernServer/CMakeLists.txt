@@ -361,6 +361,18 @@ if(BUILD_TESTING)
   add_test(NAME mir2_cross_map_gate_transfer_smoke
     COMMAND mir2_cross_map_gate_transfer_smoke)
 
+  add_executable(mir2_map_gate_entry_legacy_smoke
+    tests/map_gate_entry_legacy_smoke.cpp)
+  target_link_libraries(mir2_map_gate_entry_legacy_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_map_gate_entry_legacy_smoke
+    COMMAND mir2_map_gate_entry_legacy_smoke)
+
+  add_executable(mir2_no_reconnect_legacy_smoke
+    tests/no_reconnect_legacy_smoke.cpp)
+  target_link_libraries(mir2_no_reconnect_legacy_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_no_reconnect_legacy_smoke
+    COMMAND mir2_no_reconnect_legacy_smoke)
+
   add_executable(mir2_legacy_player_lifecycle_smoke tests/legacy_player_lifecycle_smoke.cpp)
   target_link_libraries(mir2_legacy_player_lifecycle_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_player_lifecycle_smoke COMMAND mir2_legacy_player_lifecycle_smoke)

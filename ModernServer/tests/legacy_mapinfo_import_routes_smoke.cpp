@@ -40,10 +40,15 @@ int main() {
              "0 330 270\n"
              "1 50 60\n");
   write_text(legacy / "Envir" / "MapInfo.txt",
-             "[0 Bichon Province 0] SAFE DAY NORECALL L7\n"
+             "[0 Bichon Province 0] SAFE DAY NORECALL NEEDSET_OFF(9) L7\n"
              "0 331 270 -> 1 50 60\n"
-             "[1 Cave Path 0] FIGHT3 DARK NODRUG NORECONNECT(0)\n"
+             "[1 Cave Path 0] FIGHT3 DARK QUIZ NODRUG NORECONNECT(0) "
+             "CHECKQUEST(entry.txt) NEEDSET_ON(12)\n"
              "1 49 60 -> 0 330 270\n");
+  write_text(legacy / "Envir" / "MapQuest_def" / "entry.txt",
+             "[@main]\n"
+             "#ACT\n"
+             "SET [12] 1\n");
   write_text(legacy / "Envir" / "MonZen.txt", "");
 
   mir2::LegacyImporter importer;
@@ -59,6 +64,8 @@ int main() {
   assert(home->law_full);
   assert(home->daylight);
   assert(home->need_level == 7);
+  assert(home->need_set_number == 9);
+  assert(home->need_set_value == 0);
   assert(!home->allow_pk);
   assert(home->safe_zones.size() == 1);
   assert(home->safe_zones.front().x == 320 && home->safe_zones.front().y == 260);
@@ -70,9 +77,15 @@ int main() {
 
   assert(cave->fight3_zone);
   assert(cave->darkness);
+  assert(cave->quiz_zone);
   assert(cave->no_drug);
   assert(cave->no_reconnect);
   assert(cave->back_map == "0");
+  assert(cave->need_set_number == 12);
+  assert(cave->need_set_value == 1);
+  assert(cave->check_quest.has_value());
+  assert(cave->check_quest->qfile.find("entry.txt") != std::string::npos);
+  assert(!cave->check_quest->dialog_sections.empty());
   assert(cave->gates.size() == 1);
 
   const auto repeat = importer.import_tree(legacy, output);

@@ -136,6 +136,16 @@ struct MapGateConfig {
   bool require_doors_open{true};
 };
 
+struct NpcDialogSectionConfig {
+  std::string action{};
+  std::string text{};
+};
+
+struct MapEntryQuestConfig {
+  std::string qfile{};
+  std::vector<NpcDialogSectionConfig> dialog_sections{};
+};
+
 struct MapConfig {
   std::string id{};
   std::string title{};
@@ -162,6 +172,21 @@ struct MapConfig {
   std::string back_map{};
   std::vector<MapGateConfig> gates{};
   bool quiz_zone{false};
+  std::int32_t need_set_number{-1};
+  std::int32_t need_set_value{-1};
+  std::optional<MapEntryQuestConfig> check_quest{};
+};
+
+struct MapEntryRuleConfig {
+  std::string map_id{};
+  std::filesystem::path source_map{};
+  std::int32_t width{0};
+  std::int32_t height{0};
+  std::int32_t need_level{0};
+  bool need_hole{false};
+  std::int32_t need_set_number{-1};
+  std::int32_t need_set_value{-1};
+  std::optional<MapEntryQuestConfig> check_quest{};
 };
 
 struct SpawnConfig {
@@ -309,11 +334,6 @@ struct MagicConfig {
   std::int32_t slow_percent{0};
   std::int32_t shield_amount{0};
   LegacyMagicDefinition legacy{};
-};
-
-struct NpcDialogSectionConfig {
-  std::string action{};
-  std::string text{};
 };
 
 struct MerchantProductConfig {
