@@ -2175,9 +2175,15 @@ void ClientV1GameGatewayService::translate_legacy_packet(
     case kSmClearObjects:
       messages.push_back(client_v1::WorldClearObjects{});
       break;
-    case kSmChangeMap:
-      messages.push_back(client_v1::MapChange{legacy_decode_string(decoded->body)});
+    case kSmChangeMap: {
+      const auto map_id = legacy_decode_string(decoded->body);
+      {
+        std::scoped_lock lock(mutex_);
+        sessions_[session_id].map_change_pending = true;
+      }
+      messages.push_back(client_v1::MapChange{map_id});
       break;
+    }
     case kSmOpenDoorOk:
       messages.push_back(client_v1::MapDoorState{decoded->message.param,
                                                  decoded->message.tag, true});
@@ -2188,15 +2194,32 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       break;
     case kSmNewMap: {
       const auto map_id = legacy_decode_string(decoded->body);
-      std::scoped_lock lock(mutex_);
-      auto& current = sessions_[session_id];
-      current.actor_id = actor_id;
-      current.character.map_id = map_id;
-      current.character.x = decoded->message.param;
-      current.character.y = decoded->message.tag;
-      state = current;
+      auto emit_map_entered = false;
+      {
+        std::scoped_lock lock(mutex_);
+        auto& current = sessions_[session_id];
+        current.actor_id = actor_id;
+        current.character.map_id = map_id;
+        current.character.x = decoded->message.param;
+        current.character.y = decoded->message.tag;
+        current.character.dir = static_cast<std::uint8_t>(decoded->message.series & 0xFFU);
+        emit_map_entered = current.world_result_sent || current.map_change_pending;
+        current.map_change_pending = false;
+        state = current;
+      }
+      if (emit_map_entered) {
+        messages.push_back(client_v1::MapEntered{
+            map_id,
+            actor_id,
+            decoded->message.param,
+            decoded->message.tag,
+            static_cast<std::uint8_t>(decoded->message.series & 0xFFU)});
+      }
       break;
     }
+    case kSmMapDescription:
+      messages.push_back(client_v1::MapDescription{legacy_decode_string(decoded->body)});
+      break;
     case kSmLogon: {
       auto desc = decode_body_wl_prefix(decoded->body);
       client_v1::WorldSnapshot snapshot;
@@ -2222,6 +2245,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
           enter_result.y = current.character.y;
           current.world_result_sent = true;
         }
+        current.map_change_pending = false;
         snapshot.map_id = current.character.map_id;
         if (const auto map = find_map(snapshot.map_id); map.has_value()) {
           snapshot.width = map->width;
@@ -3004,6 +3028,32 @@ void ClientV1GameGatewayService::translate_legacy_packet(
           static_cast<std::uint8_t>(decoded->message.series)});
       break;
     case kSmUsername:
+      messages.push_back(client_v1::ActorIdentityUpdate{
+          actor_id,
+          static_cast<std::uint8_t>(client_v1::kActorIdentityName |
+                                    client_v1::kActorIdentityNameColor),
+          legacy_decode_string(decoded->body),
+          static_cast<std::uint32_t>(decoded->message.param),
+          0,
+          0});
+      break;
+    case kSmFeatureChanged:
+      messages.push_back(client_v1::ActorIdentityUpdate{
+          actor_id,
+          client_v1::kActorIdentityFeature,
+          {},
+          0xFFFFFFFFU,
+          make_long(decoded->message.param, decoded->message.tag),
+          0});
+      break;
+    case kSmCharStatusChanged:
+      messages.push_back(client_v1::ActorIdentityUpdate{
+          actor_id,
+          client_v1::kActorIdentityStatus,
+          {},
+          0xFFFFFFFFU,
+          0,
+          make_long(decoded->message.param, decoded->message.tag)});
       break;
     case kSmAddMagic: {
       const auto legacy_magic = decode_client_magic(decoded->body);

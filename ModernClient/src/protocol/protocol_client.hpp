@@ -112,8 +112,12 @@ class ProtocolClient {
   void push_message_for_test(const T& message) {
     events_.push_back(ProtocolFrameEvent{client_v1::make_frame(message, 0)});
   }
+  void push_frame_for_test(client_v1::Frame frame);
   void push_disconnected_for_test(std::string reason);
   [[nodiscard]] std::vector<client_v1::Frame> drain_sent_frames_for_test();
+  [[nodiscard]] const std::string& last_disconnect_reason_for_test() const {
+    return last_disconnect_reason_;
+  }
   [[nodiscard]] const std::vector<ConnectAttempt>& connect_attempts_for_test() const {
     return connect_attempts_;
   }
@@ -144,6 +148,7 @@ class ProtocolClient {
   bool test_mode_{false};
   std::vector<ConnectAttempt> connect_attempts_{};
   std::vector<client_v1::Frame> sent_frames_{};
+  std::string last_disconnect_reason_{};
 #endif
 };
 
