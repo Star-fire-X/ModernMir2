@@ -14,9 +14,9 @@ enum class LegacyMapDrawLayer : std::uint8_t {
   large_object,
   ground_item,
   actor,
-  actor_overlay,
   fly_effect,
   selection_blend,
+  actor_overlay,
   debug_overlay,
   overlay_effects,
   actor_screen_overlay,
@@ -79,9 +79,9 @@ inline int legacy_map_draw_layer_rank(const LegacyMapDrawLayer layer) {
       return 6;
     case LegacyMapDrawLayer::fly_effect:
       return 7;
-    case LegacyMapDrawLayer::actor_overlay:
-      return 8;
     case LegacyMapDrawLayer::selection_blend:
+      return 8;
+    case LegacyMapDrawLayer::actor_overlay:
       return 9;
     case LegacyMapDrawLayer::debug_overlay:
       return 10;
