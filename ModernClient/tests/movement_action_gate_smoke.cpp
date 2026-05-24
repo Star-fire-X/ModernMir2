@@ -15,6 +15,8 @@ int main() {
 
   world.action_locked = true;
   world.action_lock_started_ms = 1000;
+  world.pending_action_acks.push_back(
+      PendingActionAckState{mir2::legacy::kCmHit, 2, true, 12, 10, 2, 1000});
   assert(!server_accept_next_action(world, 1100));
   assert(!can_next_action(world, self, 1100));
   assert(!server_accept_next_action(world, 11000));
@@ -22,6 +24,7 @@ int main() {
   assert(!server_accept_next_action(world, 11001));
   assert(!world.action_locked);
   assert(world.action_lock_timeout_cleared_ms == 11001);
+  assert(world.pending_action_acks.empty());
   assert(can_next_action(world, self, 11001));
   assert(server_accept_next_action(world, 11002));
   self.action_started_ms = 1000;
@@ -56,6 +59,12 @@ int main() {
   state.apply(ActionAck{true, 0});
   assert(!state.world.action_locked);
   assert(!state.world.action_fail_lock);
+  state.world.action_locked = true;
+  state.world.pending_action_acks.push_back(
+      PendingActionAckState{mir2::legacy::kCmHit, 2, true, 12, 10, 2, 1200});
+  state.clear_world_ui_state();
+  assert(!state.world.action_locked);
+  assert(state.world.pending_action_acks.empty());
 
   WorldSnapshot snapshot;
   snapshot.self_actor_id = 1;
@@ -74,5 +83,9 @@ int main() {
   assert(!state.world.action_locked);
   assert(actor.x == 29 && actor.y == 20);
   assert(state.world.action_fail_lock);
+  state.world.pending_action_acks.push_back(
+      PendingActionAckState{mir2::legacy::kCmHit, 2, true, 29, 20, 2, 1300});
+  state.complete_map_transition("1");
+  assert(state.world.pending_action_acks.empty());
   return 0;
 }

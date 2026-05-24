@@ -8485,6 +8485,14 @@ class WorldScene final : public Scene {
     }
     const auto source_only_magic = magic != nullptr && magic->effect_type == 0;
     if (source_only_magic) {
+      if (world.action_locked && elapsed_ms(input.tick, world.action_lock_started_ms) > 10000U) {
+        world.action_locked = false;
+        world.action_lock_timeout_cleared_ms = input.tick;
+        world.pending_action_acks.clear();
+        world.skip_next_move_fail_ack = false;
+      }
+      const auto preserve_lock_started = world.action_locked;
+      const auto action_lock_started_ms = world.action_lock_started_ms;
       if (magic_id == 26 && world.latest_fire_hit_ms != 0 &&
           elapsed_ms(input.tick, world.latest_fire_hit_ms) < 10000U) {
         return false;
@@ -8493,11 +8501,11 @@ class WorldScene final : public Scene {
           elapsed_ms(input.tick, world.latest_rush_rush_ms) < 3000U) {
         return false;
       }
-      if (!server_accept_next_action(world, input.tick)) {
-        return false;
-      }
-      send_spell(context, self_it->second, static_cast<int>(self_it->second.dir), 0, 0,
+      send_spell(context, static_cast<int>(self_it->second.dir), 0, 0, self_it->second.dir,
                  magic_id, false, 0);
+      if (preserve_lock_started) {
+        world.action_lock_started_ms = action_lock_started_ms;
+      }
       return true;
     }
     if (self_it->second.mp == 0) {
@@ -8513,9 +8521,24 @@ class WorldScene final : public Scene {
     if (!legacy::in_bounds(width, height, input.map_x, input.map_y)) {
       return false;
     }
-    send_spell(context, self_it->second, input.map_x, input.map_y,
-               world.focus_actor_id != 0 ? world.focus_actor_id : world.target_actor_id, magic_id,
-               true, static_cast<std::uint64_t>(200 + (magic != nullptr ? magic->delay_ms : 0)));
+    std::uint64_t target_actor_id = 0;
+    auto spell_x = input.map_x;
+    auto spell_y = input.map_y;
+    if (magic != nullptr && legacy_magic_uses_actor_target(*magic)) {
+      const auto candidate_target_id =
+          world.focus_actor_id != 0 ? world.focus_actor_id : world.target_actor_id;
+      if (const auto target_it = world.actors.find(candidate_target_id);
+          target_it != world.actors.end()) {
+        target_actor_id = candidate_target_id;
+        spell_x = target_it->second.x;
+        spell_y = target_it->second.y;
+      }
+    }
+    const auto spell_dir =
+        direction_between(self_it->second.x, self_it->second.y, input.map_x, input.map_y,
+                          self_it->second.dir);
+    send_spell(context, spell_x, spell_y, target_actor_id, spell_dir, magic_id, true,
+               static_cast<std::uint64_t>(200 + (magic != nullptr ? magic->delay_ms : 0)));
     return true;
   }
 
@@ -8536,13 +8559,24 @@ class WorldScene final : public Scene {
     return animation_.is_actor_legacy_idle(world.self_actor_id);
   }
 
-  static void send_spell(ClientContext& context, const ActorState& self, int x, int y,
-                         std::uint64_t target_actor_id, std::uint16_t magic_id,
-                         const bool play_local_action, const std::uint64_t magic_delay_time_ms) {
+  static bool legacy_magic_uses_actor_target(const MagicShortcutState& magic) {
+    if (magic.effect_type == 1 || magic.effect_type == 7) {
+      return true;
+    }
+    if (magic.effect_type == 8) {
+      return magic.magic_id != 19;
+    }
+    return magic.effect_type == 2 && magic.magic_id != 23 && magic.magic_id != 29 &&
+           magic.magic_id != 33;
+  }
+
+  static void send_spell(ClientContext& context, int x, int y, std::uint64_t target_actor_id,
+                         std::uint8_t dir, std::uint16_t magic_id, const bool play_local_action,
+                         const std::uint64_t magic_delay_time_ms) {
     client_v1::SpellIntent spell;
     spell.x = x;
     spell.y = y;
-    spell.dir = play_local_action ? direction_between(self.x, self.y, x, y, self.dir) : self.dir;
+    spell.dir = dir;
     spell.target_actor_id = target_actor_id;
     spell.magic_id = magic_id;
     context.app->request_spell(spell, play_local_action, magic_delay_time_ms);

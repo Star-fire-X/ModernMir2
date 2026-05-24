@@ -2921,12 +2921,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           if (cleared_transparent) {
             broadcast_legacy_char_status_changed(dispatch, *attacker);
           }
-          attacker->mark_legacy_rush(now_ms);
           queue_packet(dispatch, attacker->session_id(),
                        make_ack_packet(attacker->session_id(), true));
           const auto rushed = handle_legacy_rush_rush(*attacker, *user_magic, magic_it->second,
                                                       mail, dispatch, current_tick, now_ms);
           if (rushed) {
+            attacker->mark_legacy_rush(now_ms);
             LegacyRandom fallback_random;
             auto& random = legacy_random_ != nullptr ? *legacy_random_ : fallback_random;
             const auto training =
