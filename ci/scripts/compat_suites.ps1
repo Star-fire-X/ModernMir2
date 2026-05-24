@@ -87,6 +87,7 @@ function Get-CiBuildTargets {
     "mir2_npc_instance_click_guard_smoke",
     "mir2_scripted_merchant_smoke",
     "mir2_scripted_npc_dialog_smoke",
+    "mir2_legacy_mapquest_import_trigger_smoke",
     "mir2_npc_shop_protocol_golden_smoke",
     "mir2_npc_shop_interleaving_fuzz_smoke",
     "mir2_special_consumables_legacy_smoke",
@@ -404,11 +405,6 @@ function Get-CiQuarantinedTests {
     [pscustomobject]@{
       Project = "ModernServer"
       Test = "mir2_equipment_derived_upgrade_stats_smoke"
-      Reason = "Local phase3 validation asserts in Debug/MSVC and then waits for the assertion path until timeout."
-    },
-    [pscustomobject]@{
-      Project = "ModernServer"
-      Test = "mir2_legacy_mapquest_import_trigger_smoke"
       Reason = "Local phase3 validation asserts in Debug/MSVC and then waits for the assertion path until timeout."
     },
     [pscustomobject]@{

@@ -100,6 +100,19 @@ bool has_mapquest_trace(const mir2::RuntimeDispatch& dispatch, std::string_view 
                      });
 }
 
+std::optional<std::size_t> trace_index(const mir2::RuntimeDispatch& dispatch,
+                                       std::string_view stage, std::string_view action,
+                                       std::string_view label = {}) {
+  for (std::size_t i = 0; i < dispatch.legacy_traces.size(); ++i) {
+    const auto& trace = dispatch.legacy_traces[i];
+    if (trace.stage == stage && trace.action == action &&
+        (label.empty() || trace.label == label)) {
+      return i;
+    }
+  }
+  return std::nullopt;
+}
+
 bool has_unsupported_script_trace(const mir2::RuntimeDispatch& dispatch) {
   return std::any_of(dispatch.legacy_traces.begin(), dispatch.legacy_traces.end(),
                      [](const mir2::LegacyRuntimeTrace& trace) {
@@ -126,7 +139,7 @@ int main() {
              "HomeY=10\n");
   write_text(legacy / "Envir" / "StartPoint.txt", "0 10 10\n");
   write_text(legacy / "Envir" / "MapInfo.txt", "[0 QuestMap 0]\n");
-  write_text(legacy / "Envir" / "MonGen.txt", "0 10 9 Oma 0 1 1 0\n");
+  write_text(legacy / "Envir" / "MonGen.txt", "0 11 11 Oma 0 1 1 0\n");
   write_text(legacy / "Envir" / "MonZen.txt", "");
   write_text(legacy / "Envir" / "merchant.txt", "");
   write_text(legacy / "Envir" / "Npcs.txt", "");
@@ -183,8 +196,8 @@ int main() {
   spawn.map_id = "0";
   spawn.actor_type = "monster";
   spawn.name = "Oma";
-  spawn.x = 10;
-  spawn.y = 9;
+  spawn.x = 11;
+  spawn.y = 11;
   spawn.count = 1;
   spawn.legacy_group = true;
   config.spawns.push_back(spawn);
@@ -197,14 +210,29 @@ int main() {
   const auto enter_dispatch = runtime.tick(1020);
   assert(find_packet(enter_dispatch, mir2::kSmNewMap).has_value());
   assert(has_mapquest_trace(enter_dispatch, "enter"));
+  const auto enter_trigger = trace_index(enter_dispatch, "LegacyScript", "mapquest_trigger",
+                                         "enter");
+  const auto enter_user_begin = trace_index(enter_dispatch, "ProcessUserHumans", "begin");
+  assert(enter_trigger.has_value());
+  assert(enter_user_begin.has_value());
+  assert(*enter_trigger < *enter_user_begin);
   assert(!has_unsupported_script_trace(enter_dispatch));
   auto snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value() && snapshot->quest_marks[0] == 0x80);
 
-  static_cast<void>(runtime.route_logic_command(make_attack(10, 9)));
+  static_cast<void>(runtime.route_logic_command(make_attack(11, 11)));
   const auto kill_dispatch = runtime.tick(1040);
   assert(has_packet(kill_dispatch, mir2::kSmDeath));
   assert(has_mapquest_trace(kill_dispatch, "monster_die"));
+  const auto kill_user_begin = trace_index(kill_dispatch, "ProcessUserHumans", "begin");
+  const auto kill_trigger = trace_index(kill_dispatch, "LegacyScript", "mapquest_trigger",
+                                        "monster_die");
+  const auto kill_monster_begin = trace_index(kill_dispatch, "ProcessMonsters", "begin");
+  assert(kill_user_begin.has_value());
+  assert(kill_trigger.has_value());
+  assert(kill_monster_begin.has_value());
+  assert(*kill_user_begin < *kill_trigger);
+  assert(*kill_trigger < *kill_monster_begin);
   assert(!has_unsupported_script_trace(kill_dispatch));
   snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value() && snapshot->quest_marks[0] == 0xC0);
@@ -217,10 +245,23 @@ int main() {
   pickup.x = apple_show->message.param;
   pickup.y = apple_show->message.tag;
   static_cast<void>(runtime.route_logic_command(pickup));
-  const auto pickup_dispatch = runtime.tick(1060);
+  const auto pickup_dispatch = runtime.tick(2000);
   assert(has_packet(pickup_dispatch, mir2::kSmItemHide));
   assert(has_packet(pickup_dispatch, mir2::kSmAddItem));
   assert(has_mapquest_trace(pickup_dispatch, "pickup"));
+  const auto pickup_user_begin = trace_index(pickup_dispatch, "ProcessUserHumans", "begin");
+  const auto pickup_success = trace_index(pickup_dispatch, "LegacyItem", "success",
+                                          "pickup_item");
+  const auto pickup_trigger = trace_index(pickup_dispatch, "LegacyScript", "mapquest_trigger",
+                                          "pickup");
+  const auto pickup_monster_begin = trace_index(pickup_dispatch, "ProcessMonsters", "begin");
+  assert(pickup_user_begin.has_value());
+  assert(pickup_success.has_value());
+  assert(pickup_trigger.has_value());
+  assert(pickup_monster_begin.has_value());
+  assert(*pickup_user_begin < *pickup_success);
+  assert(*pickup_success < *pickup_trigger);
+  assert(*pickup_trigger < *pickup_monster_begin);
   assert(!has_unsupported_script_trace(pickup_dispatch));
   snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value() && snapshot->quest_marks[0] == 0xE0);
