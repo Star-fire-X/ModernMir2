@@ -501,7 +501,6 @@ std::int32_t resolve_attack_range(std::uint16_t ident) {
 bool legacy_p14_sword_skill(std::int32_t magic_id) {
   switch (magic_id) {
     case 3:
-    case 4:
     case 7:
     case 12:
     case 25:
@@ -516,13 +515,10 @@ bool legacy_p14_sword_skill(std::int32_t magic_id) {
 
 std::uint16_t legacy_attack_ident_for_sword_skill(std::int32_t magic_id) {
   switch (magic_id) {
-    case 4:
-      return kCmPowerHit;
-    case 7:
-      return kCmLongHit;
     case 12:
-      return kCmWideHit;
+      return kCmLongHit;
     case 25:
+      return kCmWideHit;
     case 26:
       return kCmFireHit;
     case 34:
@@ -536,13 +532,13 @@ std::uint16_t legacy_attack_ident_for_sword_skill(std::int32_t magic_id) {
 std::int32_t legacy_sword_skill_for_attack_ident(std::uint16_t ident) {
   switch (ident) {
     case kCmPowerHit:
-      return 4;
-    case kCmLongHit:
       return 7;
-    case kCmWideHit:
+    case kCmLongHit:
       return 12;
-    case kCmFireHit:
+    case kCmWideHit:
       return 25;
+    case kCmFireHit:
+      return 26;
     case kCmCrossHit:
       return 34;
     default:
@@ -556,15 +552,6 @@ double resolve_attack_multiplier(std::uint16_t ident) {
       return 1.15;
     case kCmBigHit:
       return 1.25;
-    case kCmPowerHit:
-      return 1.5;
-    case kCmLongHit:
-      return 1.25;
-    case kCmWideHit:
-    case kCmCrossHit:
-      return 1.35;
-    case kCmFireHit:
-      return 1.4;
     default:
       return 1.0;
   }

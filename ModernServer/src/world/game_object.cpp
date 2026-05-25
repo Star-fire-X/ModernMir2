@@ -1807,6 +1807,12 @@ StatusTickResult Player::mark_dead(std::uint64_t now_ms) {
   }
   auto result = clear_legacy_buffs_on_death(0);
   clear_legacy_sword_skill();
+  legacy_power_hit_ready_ = false;
+  legacy_power_hit_count_ = 0;
+  legacy_power_hit_point_count_ = 0;
+  legacy_power_hit_level_ = -1;
+  legacy_long_hit_enabled_ = false;
+  legacy_wide_hit_enabled_ = false;
   legacy_cross_hit_enabled_ = false;
   next_move_tick_ = std::numeric_limits<std::uint64_t>::max();
   return result;
@@ -1937,6 +1943,42 @@ std::int32_t Player::consume_legacy_sword_skill(std::uint64_t current_tick) {
 void Player::clear_legacy_sword_skill() {
   legacy_prepared_sword_magic_id_ = 0;
   legacy_prepared_sword_expire_tick_ = 0;
+}
+
+bool Player::consume_legacy_power_hit() {
+  if (!legacy_power_hit_ready_) {
+    return false;
+  }
+  legacy_power_hit_ready_ = false;
+  return true;
+}
+
+bool Player::legacy_power_hit_counter_matches(std::int32_t level) const {
+  return legacy_power_hit_level_ == level && legacy_power_hit_count_ > 0;
+}
+
+void Player::reset_legacy_power_hit_counter(std::int32_t level,
+                                            std::int32_t random_point) {
+  const auto count = std::max(1, 7 - level);
+  legacy_power_hit_level_ = level;
+  legacy_power_hit_count_ = count;
+  legacy_power_hit_point_count_ = std::clamp(random_point, 0, count - 1);
+}
+
+bool Player::advance_legacy_power_hit_counter() {
+  if (legacy_power_hit_count_ <= 0) {
+    return false;
+  }
+  --legacy_power_hit_count_;
+  if (legacy_power_hit_point_count_ == legacy_power_hit_count_) {
+    legacy_power_hit_ready_ = true;
+    return true;
+  }
+  return false;
+}
+
+bool Player::legacy_power_hit_counter_expired() const {
+  return legacy_power_hit_count_ <= 0;
 }
 
 bool Player::legacy_fire_hit_ready(std::uint64_t now_ms) const {

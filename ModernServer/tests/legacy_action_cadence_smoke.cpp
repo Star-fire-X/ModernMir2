@@ -89,7 +89,7 @@ mir2::ItemConfig speed_weapon_config(std::int32_t id) {
 
 mir2::MagicConfig long_hit_magic() {
   mir2::MagicConfig magic;
-  magic.id = 7;
+  magic.id = 12;
   magic.name = "LongHit";
   magic.legacy.legacy_present = true;
   magic.legacy.is_sword_skill = true;
@@ -307,7 +307,7 @@ void assert_repeated_fast_attack_disconnects() {
   assert(has_force_disconnect(combined, 104, "speed_hack_attack"));
 }
 
-void assert_rejected_attack_keeps_prepared_sword_skill() {
+void assert_rejected_attack_keeps_toggled_sword_skill() {
   auto config = base_config();
   config.magics.push_back(long_hit_magic());
   config.spawns.push_back(target("LongTarget", 10, 8));
@@ -315,7 +315,7 @@ void assert_rejected_attack_keeps_prepared_sword_skill() {
   runtime.initialize();
 
   auto hero = character("LongHero");
-  hero.magics[0].magic_id = 7;
+  hero.magics[0].magic_id = 12;
   hero.magics[0].level = 0;
   enter_player(runtime, 105, std::move(hero));
 
@@ -323,9 +323,9 @@ void assert_rejected_attack_keeps_prepared_sword_skill() {
   auto dispatch = tick_player(runtime, 2000);
   assert(count_ack(dispatch, 105, true) == 1);
 
-  static_cast<void>(runtime.route_logic_command(spell(105, 7)));
+  static_cast<void>(runtime.route_logic_command(spell(105, 12)));
   dispatch = tick_player(runtime, 2100);
-  assert(has_trace(dispatch, "LegacySkill", "sword_prepare"));
+  assert(has_trace(dispatch, "LegacySkill", "sword_toggle"));
 
   static_cast<void>(runtime.route_logic_command(attack(105, 10, 8, mir2::kCmLongHit)));
   dispatch = tick_player(runtime, 2110);
@@ -349,6 +349,6 @@ int main() {
   assert_equipped_hit_speed_reduces_interval();
   assert_no_target_attack_consumes_cooldown();
   assert_repeated_fast_attack_disconnects();
-  assert_rejected_attack_keeps_prepared_sword_skill();
+  assert_rejected_attack_keeps_toggled_sword_skill();
   return 0;
 }

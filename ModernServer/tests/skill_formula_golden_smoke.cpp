@@ -81,6 +81,10 @@ int main() {
     }
   }
 
+  assert(mir2::legacy_is_sword_skill(3));
+  assert(!mir2::legacy_is_sword_skill(4));
+  assert(mir2::legacy_is_sword_skill(7));
+  assert(mir2::legacy_is_sword_skill(12));
   assert(mir2::legacy_is_sword_skill(25));
   assert(mir2::legacy_is_sword_skill(26));
   assert(mir2::legacy_is_sword_skill(27));

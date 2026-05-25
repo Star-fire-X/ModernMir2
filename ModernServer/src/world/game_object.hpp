@@ -518,10 +518,20 @@ class Player : public GameObject {
   [[nodiscard]] std::int32_t pending_legacy_sword_skill(std::uint64_t current_tick) const;
   [[nodiscard]] std::int32_t consume_legacy_sword_skill(std::uint64_t current_tick);
   void clear_legacy_sword_skill();
+  [[nodiscard]] bool legacy_power_hit_ready() const { return legacy_power_hit_ready_; }
+  [[nodiscard]] bool consume_legacy_power_hit();
+  [[nodiscard]] bool legacy_power_hit_counter_matches(std::int32_t level) const;
+  void reset_legacy_power_hit_counter(std::int32_t level, std::int32_t random_point);
+  [[nodiscard]] bool advance_legacy_power_hit_counter();
+  [[nodiscard]] bool legacy_power_hit_counter_expired() const;
   [[nodiscard]] bool legacy_fire_hit_ready(std::uint64_t now_ms) const;
   void mark_legacy_fire_hit(std::uint64_t now_ms);
   [[nodiscard]] bool legacy_rush_ready(std::uint64_t now_ms) const;
   void mark_legacy_rush(std::uint64_t now_ms);
+  [[nodiscard]] bool legacy_long_hit_enabled() const { return legacy_long_hit_enabled_; }
+  void set_legacy_long_hit_enabled(bool value) { legacy_long_hit_enabled_ = value; }
+  [[nodiscard]] bool legacy_wide_hit_enabled() const { return legacy_wide_hit_enabled_; }
+  void set_legacy_wide_hit_enabled(bool value) { legacy_wide_hit_enabled_ = value; }
   [[nodiscard]] bool legacy_cross_hit_enabled() const { return legacy_cross_hit_enabled_; }
   void set_legacy_cross_hit_enabled(bool value) { legacy_cross_hit_enabled_ = value; }
   [[nodiscard]] bool legacy_open_health_active(std::uint64_t current_tick) const;
@@ -589,8 +599,14 @@ class Player : public GameObject {
   LegacyBuffContainer legacy_buffs_{};
   std::int32_t legacy_prepared_sword_magic_id_{0};
   std::uint64_t legacy_prepared_sword_expire_tick_{0};
+  bool legacy_power_hit_ready_{false};
+  std::int32_t legacy_power_hit_count_{0};
+  std::int32_t legacy_power_hit_point_count_{0};
+  std::int32_t legacy_power_hit_level_{-1};
   std::uint64_t legacy_latest_fire_hit_time_ms_{0};
   std::uint64_t legacy_latest_rush_time_ms_{0};
+  bool legacy_long_hit_enabled_{false};
+  bool legacy_wide_hit_enabled_{false};
   bool legacy_cross_hit_enabled_{false};
   std::uint64_t legacy_open_health_expire_tick_{0};
   std::int32_t legacy_inc_health_{0};

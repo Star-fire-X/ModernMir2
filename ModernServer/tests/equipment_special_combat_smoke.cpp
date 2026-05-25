@@ -41,6 +41,18 @@ mir2::ItemConfig item(std::int32_t id, std::string name, std::int32_t std_mode,
   return config;
 }
 
+mir2::MagicConfig sword_magic(std::int32_t id) {
+  mir2::MagicConfig magic;
+  magic.id = id;
+  magic.name = "Sword" + std::to_string(id);
+  magic.legacy.legacy_present = true;
+  magic.legacy.is_sword_skill = true;
+  magic.legacy.need_level = {1, 1, 1, 1};
+  magic.legacy.max_train = {2, 500, 1000, 1000};
+  magic.legacy.max_train_level = 3;
+  return magic;
+}
+
 mir2::LegacyUserItem user_item(std::int32_t make_index, std::int32_t id,
                                std::uint16_t dura = 1000) {
   mir2::LegacyUserItem item;
@@ -88,7 +100,8 @@ mir2::LogicCommand enter(std::uint64_t session_id, mir2::CharacterRecord record)
 }
 
 mir2::LogicCommand attack(std::uint64_t session_id, std::uint64_t target_actor_id,
-                          std::int32_t x = 10, std::int32_t y = 9) {
+                          std::int32_t x = 10, std::int32_t y = 9,
+                          std::uint16_t ident = mir2::kCmHit) {
   mir2::LogicCommand command;
   command.kind = mir2::LogicCommandKind::attack;
   command.session_id = session_id;
@@ -96,7 +109,16 @@ mir2::LogicCommand attack(std::uint64_t session_id, std::uint64_t target_actor_i
   command.x = x;
   command.y = y;
   command.dir = 0;
-  command.game_message.ident = mir2::kCmHit;
+  command.game_message.ident = ident;
+  return command;
+}
+
+mir2::LogicCommand spell(std::uint64_t session_id, std::int32_t magic_id) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::spell;
+  command.session_id = session_id;
+  command.game_message.ident = mir2::kCmSpell;
+  command.game_message.tag = static_cast<std::uint16_t>(magic_id);
   return command;
 }
 
@@ -131,6 +153,13 @@ std::size_t action_index(const mir2::RuntimeDispatch& dispatch, const std::strin
     }
   }
   return dispatch.legacy_traces.size();
+}
+
+std::int32_t action_count(const mir2::RuntimeDispatch& dispatch,
+                          const std::string& action) {
+  return static_cast<std::int32_t>(std::count_if(
+      dispatch.legacy_traces.begin(), dispatch.legacy_traces.end(),
+      [&](const mir2::LegacyRuntimeTrace& trace) { return trace.action == action; }));
 }
 
 mir2::HostConfig combat_config(std::uint32_t seed) {
@@ -314,6 +343,78 @@ int main() {
       applied = trace != nullptr && trace->success;
     }
     assert(applied);
+  }
+
+  {
+    auto observed_break = false;
+    for (std::uint32_t seed = 1; seed <= 256 && !observed_break; ++seed) {
+      auto config = combat_config(seed);
+      auto ring = item(90, "Mana Health Ring", 22, mir2::kLegacyRingManaToHealthItem);
+      ring.ani_count = 50;
+      config.items.push_back(ring);
+      mir2::LogicRuntime runtime(config);
+      runtime.initialize();
+
+      auto attacker = character("RecalcAttacker", 10, 10);
+      attacker.ability.dc = mir2::make_word(10, 10);
+      static_cast<void>(enter_actor(runtime, 601, std::move(attacker)));
+      auto target = character("RecalcTarget", 10, 9);
+      target.ability.hp = 150;
+      target.ability.max_hp = 100;
+      target.ability.mp = 100;
+      target.ability.max_mp = 100;
+      target.equipped_items[mir2::kEquipRingLeft] = user_item(1090, 90, 1);
+      const auto target_id = enter_actor(runtime, 602, std::move(target));
+
+      static_cast<void>(runtime.route_logic_command(attack(601, target_id)));
+      static_cast<void>(runtime.tick(3000));
+      const auto snapshot = runtime.snapshot_character_actor("RecalcTarget");
+      assert(snapshot.has_value());
+      if (snapshot->equipped_items[mir2::kEquipRingLeft].dura == 0) {
+        observed_break = true;
+        assert(snapshot->ability.max_hp == 100);
+        assert(snapshot->ability.hp == 90);
+      }
+    }
+    assert(observed_break);
+  }
+
+  {
+    auto config = combat_config(1);
+    config.magics.push_back(sword_magic(25));
+    auto stone = item(91, "Make Stone Ring", 22, mir2::kLegacyRingMakeStoneItem);
+    auto suck = item(92, "Suck Health Ring", 22, mir2::kLegacyRingSuckHealthItem);
+    suck.ani_count = 100;
+    config.items.push_back(stone);
+    config.items.push_back(suck);
+    config.spawns.push_back(
+        mir2::SpawnConfig{"0", "monster", "WideSpecialMain", 10, 9, 30000, 1, 200,
+                          0, 0, 0, 20});
+    config.spawns.push_back(
+        mir2::SpawnConfig{"0", "monster", "WideSpecialLeft", 9, 9, 30000, 1, 200,
+                          0, 0, 0, 20});
+    config.spawns.push_back(
+        mir2::SpawnConfig{"0", "monster", "WideSpecialRight", 11, 9, 30000, 1, 200,
+                          0, 0, 0, 20});
+
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto hero = character("WideSpecial", 10, 10);
+    hero.ability.hp = 50;
+    hero.ability.max_hp = 100;
+    hero.magics[0].magic_id = 25;
+    hero.equipped_items[mir2::kEquipRingLeft] = user_item(1091, 91);
+    hero.equipped_items[mir2::kEquipRingRight] = user_item(1092, 92);
+    static_cast<void>(enter_actor(runtime, 701, std::move(hero)));
+
+    static_cast<void>(runtime.route_logic_command(spell(701, 25)));
+    static_cast<void>(runtime.tick(2000));
+    static_cast<void>(runtime.route_logic_command(
+        attack(701, 0, 10, 9, mir2::kCmWideHit)));
+    const auto dispatch = runtime.tick(3000);
+    assert(action_count(dispatch, "struck") == 3);
+    assert(action_count(dispatch, "make_stone") == 1);
+    assert(action_count(dispatch, "suck_health") == 1);
   }
 
   {
