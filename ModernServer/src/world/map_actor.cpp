@@ -950,6 +950,19 @@ void queue_player_status_tick_result(
   }
 }
 
+void queue_legacy_death_packet(
+    std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
+    RuntimeDispatch& dispatch, const GameObject& target) {
+  for_each_player(objects, [&](std::uint64_t, const Player& watcher) {
+    if (watcher.id() != target.id() && !is_legacy_visible_to(watcher, target)) {
+      return;
+    }
+    queue_packet(dispatch, watcher.session_id(),
+                 make_death_packet(watcher.session_id(), target,
+                                   watcher.id() == target.id()));
+  });
+}
+
 LegacyMagicDamageResult apply_legacy_magic_damage(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
@@ -991,16 +1004,16 @@ LegacyMagicDamageResult apply_legacy_magic_damage(
     return result;
   }
 
-  for_each_player(objects, [&](std::uint64_t, const Player& watcher) {
-    if (watcher.id() != target.id() && !is_legacy_visible_to(watcher, target)) {
-      return;
-    }
-    queue_packet(dispatch, watcher.session_id(),
-                 result.target_died ? make_death_packet(watcher.session_id(), target,
-                                                        watcher.id() == target.id())
-                                    : make_struck_packet(watcher.session_id(), target, caster.id(),
-                                                         result.applied_damage, true));
-  });
+  if (!result.target_died) {
+    for_each_player(objects, [&](std::uint64_t, const Player& watcher) {
+      if (watcher.id() != target.id() && !is_legacy_visible_to(watcher, target)) {
+        return;
+      }
+      queue_packet(dispatch, watcher.session_id(),
+                   make_struck_packet(watcher.session_id(), target, caster.id(),
+                                      result.applied_damage, true));
+    });
+  }
   return result;
 }
 
@@ -1413,10 +1426,12 @@ RuntimeDispatch MapActor::legacy_apply_fire_burn_event(const LegacyEventRecord& 
         apply_bad_kill_penalty(*caster, *player_target, dispatch, current_tick, now_ms,
                                "LegacyFireBurn");
         static_cast<void>(settle_player_death(*player_target, dispatch, current_tick, now_ms));
+        queue_legacy_death_packet(objects_, dispatch, target);
       }
     }
     if (result.slain_monster_id != 0) {
       finalize_monster_death(result.slain_monster_id, caster->id(), dispatch, current_tick);
+      queue_legacy_death_packet(objects_, dispatch, target);
       add_legacy_trace(dispatch, "LegacyEventManager", "fire_burn_exp", ActorMail{},
                        current_tick, now_ms, true, static_cast<std::int32_t>(event.id),
                        result.applied_damage, "WinExp");
@@ -3408,6 +3423,10 @@ bool MapActor::settle_player_death(Player& player, RuntimeDispatch& dispatch,
     ground_item.looks = item_looks(item, item_configs_);
     if (const auto* config = find_item_config(item_configs_, item.index); config != nullptr) {
       ground_item.ani_count = config->ani_count;
+      if (config->std_mode == 40) {
+        ground_item.item.dura =
+            clamp_dura_value(static_cast<std::int32_t>(ground_item.item.dura) - 2000);
+      }
     }
     ground_item.drop_time_ms = now_ms;
     ground_item.expire_time_ms = now_ms + kLegacyGroundItemExpireMs;

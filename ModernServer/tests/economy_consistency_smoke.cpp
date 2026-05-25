@@ -11,6 +11,7 @@
 #include "protocol/legacy_game_codec.hpp"
 #include "protocol/legacy_types.hpp"
 #include "util/string_utils.hpp"
+#include "world/legacy_item_rules.hpp"
 #include "world/legacy_map_environment.hpp"
 #include "world/logic_runtime.hpp"
 
@@ -154,6 +155,48 @@ int count_bag_make_index(mir2::LogicRuntime& runtime, std::uint64_t session_id,
   return static_cast<int>(std::count_if(bag.begin(), bag.end(), [&](const auto& item) {
     return item.make_index == make_index;
   }));
+}
+
+std::optional<mir2::LegacyClientItem> decode_client_item(std::string_view body) {
+  mir2::LegacyClientItem item;
+  if (!mir2::legacy_decode_buffer(body, &item, sizeof(item))) {
+    return std::nullopt;
+  }
+  return item;
+}
+
+std::optional<std::pair<std::int32_t, std::int32_t>> item_show_position(
+    const mir2::RuntimeDispatch& dispatch, std::string_view name) {
+  for (const auto& event : dispatch.session_events) {
+    const auto decoded = mir2::decode_legacy_game_packet(event.packet);
+    if (decoded.has_value() && decoded->message.ident == mir2::kSmItemShow &&
+        mir2::legacy_decode_string(decoded->body) == name) {
+      return std::pair{decoded->message.param, decoded->message.tag};
+    }
+  }
+  return std::nullopt;
+}
+
+mir2::LogicCommand attack_command(std::uint64_t session_id,
+                                  std::uint64_t target_actor_id) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::attack;
+  command.session_id = session_id;
+  command.target_actor_id = target_actor_id;
+  command.x = 10;
+  command.y = 9;
+  command.game_message.ident = mir2::kCmHit;
+  return command;
+}
+
+mir2::LogicCommand pickup_command(std::uint64_t session_id, std::int32_t x,
+                                  std::int32_t y) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::pickup_item;
+  command.session_id = session_id;
+  command.x = x;
+  command.y = y;
+  return command;
 }
 
 mir2::HostConfig make_trade_config() {
@@ -318,6 +361,157 @@ int storage_failure_does_not_persist_or_reorder() {
   return 0;
 }
 
+mir2::HostConfig make_death_drop_config() {
+  mir2::HostConfig config;
+  config.runtime.legacy_random_seed = 7;
+  config.budgets.tick_ms = kTestTickMs;
+  mir2::MapConfig map{"0", "DeathDropMap", {}, 0, 0, 20, 20};
+  map.allow_pk = true;
+  config.maps.push_back(map);
+  auto make_death_item = [](std::int32_t id, std::string name, std::int32_t std_mode,
+                            std::int32_t item_desc = 0) {
+    mir2::ItemConfig item;
+    item.id = id;
+    item.name = std::move(name);
+    item.std_mode = std_mode;
+    item.item_desc = item_desc;
+    item.weight = 1;
+    item.dura_max = 1000;
+    item.price = 10;
+    item.stock = 1;
+    return item;
+  };
+  auto sword = make_death_item(1, "Heavy Sword", 5);
+  sword.dc = mir2::make_word(100, 100);
+  config.items.push_back(sword);
+  config.items.push_back(
+      make_death_item(2, "Fragile Ring", 22, mir2::kLegacyItemDieAndBreak));
+  config.items.push_back(make_death_item(3, "Drop Gem", 41));
+  config.items.push_back(
+      make_death_item(4, "Soul Token", 41, mir2::kLegacyItemNeverLose));
+  config.items.push_back(make_death_item(5, "Raw Meat", 40));
+  return config;
+}
+
+mir2::CharacterRecord make_death_character(std::string account, std::string name,
+                                           std::int32_t x, std::int32_t y) {
+  mir2::CharacterRecord character;
+  character.account_id = std::move(account);
+  character.character_name = std::move(name);
+  character.map_id = "0";
+  character.x = x;
+  character.y = y;
+  character.gold = 1234;
+  character.ability.level = 30;
+  character.ability.hp = 100;
+  character.ability.max_hp = 100;
+  character.ability.mp = 20;
+  character.ability.max_mp = 20;
+  character.ability.dc = mir2::make_word(120, 120);
+  character.ability.max_exp = 1000;
+  character.ability.max_weight = 100;
+  character.ability.max_wear_weight = 100;
+  character.ability.max_hand_weight = 100;
+  character.attack_mode = 0;
+  return character;
+}
+
+int player_death_drop_conserves_item_domains() {
+  mir2::LogicRuntime runtime(make_death_drop_config());
+  runtime.initialize();
+
+  auto killer = make_death_character("death_a", "DeathKiller", 10, 10);
+  killer.equipped_items[mir2::kEquipWeapon] = make_item(1, 1001);
+  static_cast<void>(runtime.route_logic_command(enter_command(20, killer)));
+  static_cast<void>(tick_players(runtime));
+
+  auto victim = make_death_character("death_b", "DeathVictim", 10, 9);
+  victim.ability.hp = 10;
+  victim.ability.max_hp = 10;
+  victim.pk_point = 250;
+  victim.equipped_items[mir2::kEquipRingLeft] = make_item(2, 2001);
+  victim.bag_items[0] = make_item(5, 2002);
+  victim.bag_items[0].dura = 3500;
+  victim.bag_items[0].dura_max = 3500;
+  victim.bag_items[1] = make_item(3, 2003);
+  victim.bag_items[2] = make_item(4, 2004);
+  static_cast<void>(runtime.route_logic_command(enter_command(23, victim)));
+  const auto enter_victim = tick_players(runtime);
+  const auto victim_map = find_packet(enter_victim, 23, mir2::kSmNewMap);
+  if (!victim_map.has_value()) {
+    return fail("death drop victim enter");
+  }
+  const auto victim_actor_id =
+      static_cast<std::uint64_t>(static_cast<std::uint32_t>(victim_map->message.recog));
+
+  static_cast<void>(runtime.route_logic_command(attack_command(20, victim_actor_id)));
+  const auto death = runtime.tick(100000);
+  const auto victim_after = runtime.snapshot_character_actor("DeathVictim");
+  if (!find_packet(death, 20, mir2::kSmDeath).has_value() ||
+      !find_packet(death, 23, mir2::kSmNowDeath).has_value()) {
+    return fail("death drop packets");
+  }
+  const auto gem_position = item_show_position(death, "Drop Gem");
+  const auto meat_position = item_show_position(death, "Raw Meat");
+  if (!gem_position.has_value() || !meat_position.has_value()) {
+    return fail("death drop positions");
+  }
+  if (find_packet(death, 23, mir2::kSmGoldChanged).has_value()) {
+    return fail("death drop gold changed");
+  }
+  if (!has_save_character(death, "DeathVictim")) {
+    return fail("death drop save");
+  }
+  if (!victim_after.has_value() || victim_after->gold != 1234) {
+    return fail("death drop victim gold snapshot");
+  }
+  if (!mir2::is_empty(victim_after->equipped_items[mir2::kEquipRingLeft]) ||
+      victim_after->bag_items[0].make_index != 2004 ||
+      !mir2::is_empty(victim_after->bag_items[1])) {
+    return fail("death drop source domains");
+  }
+
+  auto gem_looter = make_death_character("death_gem", "GemLooter",
+                                         gem_position->first, gem_position->second);
+  static_cast<void>(runtime.route_logic_command(enter_command(21, gem_looter)));
+  static_cast<void>(tick_players(runtime));
+  auto meat_looter = make_death_character("death_meat", "MeatLooter",
+                                          meat_position->first, meat_position->second);
+  static_cast<void>(runtime.route_logic_command(enter_command(22, meat_looter)));
+  static_cast<void>(tick_players(runtime));
+
+  static_cast<void>(runtime.route_logic_command(
+      pickup_command(21, gem_position->first, gem_position->second)));
+  const auto gem_pickup = tick_players(runtime);
+  const auto gem_add = find_packet(gem_pickup, 21, mir2::kSmAddItem);
+  static_cast<void>(runtime.route_logic_command(
+      pickup_command(22, meat_position->first, meat_position->second)));
+  const auto meat_pickup = tick_players(runtime);
+  const auto meat_add = find_packet(meat_pickup, 22, mir2::kSmAddItem);
+  const auto gem = gem_add.has_value() ? decode_client_item(gem_add->body) : std::nullopt;
+  const auto meat = meat_add.has_value() ? decode_client_item(meat_add->body) : std::nullopt;
+  if (!find_packet(gem_pickup, 21, mir2::kSmItemHide).has_value() ||
+      !find_packet(meat_pickup, 22, mir2::kSmItemHide).has_value()) {
+    return fail("death drop pickup hide");
+  }
+  if (!gem.has_value() || !meat.has_value()) {
+    return fail("death drop pickup add");
+  }
+  if (gem->make_index != 2003 || meat->make_index != 2002 ||
+      meat->item.std_mode != 40 || meat->dura != 1500) {
+    return fail("death drop pickup items");
+  }
+  const auto victim_after_pickup = runtime.snapshot_character_actor("DeathVictim");
+  if (count_bag_make_index(runtime, 21, 2003) != 1 ||
+      count_bag_make_index(runtime, 22, 2002) != 1 || !victim_after_pickup.has_value() ||
+      !mir2::is_empty(victim_after_pickup->equipped_items[mir2::kEquipRingLeft]) ||
+      victim_after_pickup->bag_items[0].make_index != 2004 ||
+      !mir2::is_empty(victim_after_pickup->bag_items[1])) {
+    return fail("death drop pickup domains");
+  }
+  return 0;
+}
+
 mir2::HostConfig make_script_config() {
   mir2::HostConfig config;
   config.maps.push_back(mir2::MapConfig{"0", "ScriptMap", {}, 0, 0, 20, 20});
@@ -436,6 +630,9 @@ int main() {
     return result;
   }
   if (const auto result = storage_failure_does_not_persist_or_reorder(); result != 0) {
+    return result;
+  }
+  if (const auto result = player_death_drop_conserves_item_domains(); result != 0) {
     return result;
   }
   if (const auto result = script_take_failure_keeps_order(); result != 0) {

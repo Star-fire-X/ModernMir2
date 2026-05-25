@@ -3255,13 +3255,18 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                     now_ms));
             }
           }
+          if (result.slain_monster_id != 0) {
+            finalize_monster_death(result.slain_monster_id, attacker->id(), dispatch,
+                                   current_tick);
+          }
+          if (result.target_died) {
+            queue_legacy_death_packet(objects_, dispatch, hit_target);
+          }
           add_legacy_trace(dispatch, "LegacySpell",
                            result.target_died ? "death" : "mag_struck", mail,
                            current_tick, now_ms, result.applied_damage > 0, magic_id,
                            result.applied_damage, std::string(label));
           if (result.slain_monster_id != 0) {
-            finalize_monster_death(result.slain_monster_id, attacker->id(), dispatch,
-                                   current_tick);
             add_legacy_trace(dispatch, "LegacySpell", "exp", mail, current_tick, now_ms,
                              true, magic_id, result.applied_damage, "WinExp");
           }
@@ -3880,6 +3885,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                       if (result.slain_monster_id != 0) {
                         finalize_monster_death(result.slain_monster_id, attacker->id(),
                                                dispatch, current_tick);
+                        queue_legacy_death_packet(objects_, dispatch, *monster_target);
                       }
                       add_legacy_trace(dispatch, "LegacySlave", "lighting_shock_death",
                                        mail, current_tick, now_ms, result.target_died,
@@ -3894,6 +3900,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                       if (result.slain_monster_id != 0) {
                         finalize_monster_death(result.slain_monster_id, attacker->id(),
                                                dispatch, current_tick);
+                        queue_legacy_death_packet(objects_, dispatch, *monster_target);
                       }
                       add_legacy_trace(dispatch, "LegacySlave", "lighting_shock_death",
                                        mail, current_tick, now_ms, result.target_died,
@@ -4128,6 +4135,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                   if (result.slain_monster_id != 0) {
                     finalize_monster_death(result.slain_monster_id, attacker->id(), dispatch,
                                            current_tick);
+                    queue_legacy_death_packet(objects_, dispatch, *monster_target);
                     add_legacy_trace(dispatch, "LegacySpell", "exp", mail, current_tick,
                                      now_ms, true, magic_id, damage, "WinExp");
                   }

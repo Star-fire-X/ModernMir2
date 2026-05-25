@@ -224,6 +224,30 @@ std::optional<std::size_t> first_packet_index(const mir2::RuntimeDispatch& dispa
   return std::nullopt;
 }
 
+std::optional<std::size_t> last_packet_index(const mir2::RuntimeDispatch& dispatch,
+                                             std::uint16_t ident) {
+  const auto packets = decoded_packets(dispatch);
+  std::optional<std::size_t> result;
+  for (std::size_t index = 0; index < packets.size(); ++index) {
+    if (packets[index].message.ident == ident) {
+      result = index;
+    }
+  }
+  return result;
+}
+
+std::optional<std::size_t> first_death_packet_index(const mir2::RuntimeDispatch& dispatch) {
+  const auto death = first_packet_index(dispatch, mir2::kSmDeath);
+  const auto now_death = first_packet_index(dispatch, mir2::kSmNowDeath);
+  if (!death.has_value()) {
+    return now_death;
+  }
+  if (!now_death.has_value()) {
+    return death;
+  }
+  return std::min(*death, *now_death);
+}
+
 bool has_packet(const mir2::RuntimeDispatch& dispatch, std::uint16_t ident) {
   return first_packet_index(dispatch, ident).has_value();
 }
@@ -277,6 +301,34 @@ mir2::CharacterRecord snapshot(mir2::LogicRuntime& runtime, std::string_view nam
   const auto record = runtime.snapshot_character_actor(name);
   assert(record.has_value());
   return *record;
+}
+
+mir2::ItemConfig death_item(std::int32_t id, std::string name, std::int32_t std_mode) {
+  mir2::ItemConfig item;
+  item.id = id;
+  item.name = std::move(name);
+  item.std_mode = std_mode;
+  item.dura_max = 1000;
+  item.weight = 1;
+  return item;
+}
+
+mir2::LegacyUserItem death_user_item(std::int32_t index, std::int32_t make_index,
+                                     std::uint16_t dura) {
+  mir2::LegacyUserItem item;
+  item.index = static_cast<std::uint16_t>(index);
+  item.make_index = make_index;
+  item.dura = dura;
+  item.dura_max = dura;
+  return item;
+}
+
+void assert_before_death(const mir2::RuntimeDispatch& dispatch, std::uint16_t ident) {
+  const auto before = last_packet_index(dispatch, ident);
+  const auto death = first_death_packet_index(dispatch);
+  assert(before.has_value());
+  assert(death.has_value());
+  assert(*before < *death);
 }
 
 }  // namespace
@@ -429,6 +481,39 @@ int main() {
     assert(located->first == "0");
     assert(has_packet(dispatch, mir2::kSmSpaceMoveHide2));
     assert(has_packet(dispatch, mir2::kSmSpaceMoveShow2));
+  }
+
+  {
+    auto config = base_config(7);
+    config.maps[0].fight_zone = false;
+    config.items.push_back(death_item(901, "Burn Meat", 40));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(
+        make_enter(1661, make_character("FireMage", "0", 10, 10, {22}))));
+    static_cast<void>(runtime.tick());
+    auto victim = make_character("BurnVictim", "0", 11, 10, {}, 0, 40, false);
+    victim.ability.hp = 5;
+    victim.ability.max_hp = 5;
+    victim.pk_point = 250;
+    victim.bag_items[0] = death_user_item(901, 9901, 3500);
+    static_cast<void>(runtime.route_logic_command(make_enter(1662, victim)));
+    static_cast<void>(runtime.tick());
+
+    auto dispatch = runtime.route_logic_command(make_spell(1661, 22, 10, 10));
+    append(dispatch, runtime.tick());
+    assert(has_packet(dispatch, mir2::kSmMagicFire));
+    const auto burn = runtime.run_legacy_event_manager(5000);
+    assert(has_trace(burn, "fire_burn_death"));
+    assert_before_death(burn, mir2::kSmItemShow);
+    assert_before_death(burn, mir2::kSmDelItem);
+    assert_before_death(burn, mir2::kSmSendUseItems);
+    assert_before_death(burn, mir2::kSmWeightChanged);
+    assert_before_death(burn, mir2::kSmAbility);
+    assert_before_death(burn, mir2::kSmSubAbility);
+    const auto dead = snapshot(runtime, "BurnVictim");
+    assert(mir2::is_empty(dead.bag_items[0]));
+    assert(dead.gold == 0);
   }
 
   return 0;
