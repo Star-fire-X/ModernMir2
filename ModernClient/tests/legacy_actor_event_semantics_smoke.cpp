@@ -106,24 +106,45 @@ void test_vitals_revive_clears_queued_death() {
   assert(actor.hp == 30);
 }
 
-void test_magic_fire_waits_for_current_action() {
+void test_spell_starts_waiting_for_magic_fire() {
   auto state = make_store();
   state.apply(MagicList{{MagicEntry{9, 1, 0, 0, 1000, "Fireball", 1, 900, 1}}});
-  state.apply(ActorAction{1, ActorActionKind::hit, 13, 10, 2, 2, 0, 17, 0, false, 0});
+  state.apply(ActorAction{1, ActorActionKind::spell, 13, 10, 2, 2, 0, 17, 9, true, 1});
   state.process_legacy_actor_queues(1000);
+  const auto& actor = state.world.actors[1];
+  assert(actor.current_action == ActorActionKind::spell);
+  assert(actor.action_magic);
+  assert(actor.action_magic_effect == 1);
+  assert(actor.action_magic_effect_type == -1);
+  assert(!actor.action_magic_failed);
+}
+
+void test_magic_fire_is_hurry_event() {
+  auto state = make_store();
+  state.apply(MagicList{{MagicEntry{9, 1, 0, 0, 1000, "Fireball", 1, 900, 1}}});
+  state.apply(ActorAction{1, ActorActionKind::spell, 13, 10, 2, 2, 0, 17, 9, true, 1});
+  state.process_legacy_actor_queues(1000);
+  assert(state.world.actors[1].action_magic_effect == 1);
+  assert(state.world.actors[1].action_magic_effect_type == -1);
   const auto before = state.world.actors[1].legacy_pending_actions.size();
   state.apply(ActorMagicFire{1, 2, 13, 10, 1, 1, 638});
   state.process_legacy_actor_queues(1001);
   assert(state.world.actors[1].legacy_pending_actions.size() == before);
-  assert(state.world.actors[1].legacy_action_queue.size() == 1);
-  assert(!state.world.actors[1].action_magic);
-  state.world.actors[1].action_started_ms = 0;
-  state.process_legacy_actor_queues(1200);
+  assert(state.world.actors[1].action_magic_effect_type == -1);
+  state.process_legacy_actor_hurry_queues(1001);
   assert(state.world.actors[1].legacy_pending_actions.size() == before + 1);
   assert(state.world.actors[1].legacy_pending_actions.back().legacy_event_priority ==
          LegacyEventPriority::hurry);
   assert(state.world.actors[1].action_magic);
-  assert(state.world.actors[1].action_magic_effect_type == 1);
+  assert(state.world.actors[1].action_magic_effect_type == 5);
+  state.apply(ActorMagicFireFail{1, 639});
+  state.process_legacy_actor_queues(1002);
+  assert(state.world.actors[1].action_magic);
+  state.process_legacy_actor_hurry_queues(1002);
+  assert(state.world.actors[1].legacy_pending_actions.back().legacy_event_priority ==
+         LegacyEventPriority::hurry);
+  assert(!state.world.actors[1].action_magic);
+  assert(state.world.actors[1].action_magic_failed);
 }
 
 void test_magic_fire_waits_behind_unstarted_spell() {
@@ -140,6 +161,7 @@ void test_magic_fire_waits_behind_unstarted_spell() {
   const auto before_events = state.world.actors[1].legacy_pending_actions.size();
 
   state.process_legacy_actor_queues(3000);
+  state.process_legacy_actor_hurry_queues(3000);
   const auto& actor = state.world.actors[1];
   assert(actor.current_action == ActorActionKind::hit);
   assert(!actor.action_magic);
@@ -151,20 +173,48 @@ void test_magic_fire_waits_behind_unstarted_spell() {
   assert(actor.legacy_pending_actions.size() == before_events);
 }
 
-void test_magic_fire_consumes_one_queue_entry_per_tick() {
+void test_active_spell_consumes_magic_fire_behind_normal_head() {
   auto state = make_store();
   state.apply(MagicList{{MagicEntry{9, 1, 0, 0, 1000, "Fireball", 1, 900, 1}}});
-  state.apply(ActorMagicFire{1, 2, 13, 10, 1, 1, 638});
-  state.apply(ActorMagicFireFail{1, 639});
+  state.apply(ActorAction{1, ActorActionKind::spell, 13, 10, 2, 2, 0, 17, 9, true, 1});
   state.process_legacy_actor_queues(1000);
-  assert(state.world.actors[1].action_magic);
-  assert(state.world.actors[1].action_magic_effect == 1);
-  assert(state.world.actors[1].action_magic_effect_type == 1);
-  assert(state.world.actors[1].legacy_action_queue.size() == 1);
-  state.process_legacy_actor_queues(1001);
-  assert(!state.world.actors[1].action_magic);
-  assert(state.world.actors[1].action_magic_failed);
-  assert(state.world.actors[1].legacy_action_queue.empty());
+  assert(state.world.actors[1].current_action == ActorActionKind::spell);
+  assert(state.world.actors[1].action_magic_effect_type == -1);
+
+  state.apply(ActorAction{1, ActorActionKind::turn, 10, 10, 2, 0, 0, 10, 0, false, 0});
+  state.apply(ActorMagicFire{1, 2, 13, 10, 1, 1, 638});
+  assert(state.world.actors[1].legacy_action_queue.size() == 2);
+  assert(state.world.actors[1].legacy_action_queue.front().kind == LegacyActorMessage::Kind::action);
+  const auto before_events = state.world.actors[1].legacy_pending_actions.size();
+
+  state.process_legacy_actor_queues(1100);
+  assert(state.world.actors[1].action_magic_effect_type == -1);
+  assert(state.world.actors[1].legacy_action_queue.size() == 2);
+  state.process_legacy_actor_hurry_queues(1100);
+  const auto& actor = state.world.actors[1];
+  assert(actor.current_action == ActorActionKind::spell);
+  assert(actor.action_magic);
+  assert(actor.action_magic_effect_type == 5);
+  assert(actor.legacy_action_queue.size() == 1);
+  assert(actor.legacy_action_queue.front().kind == LegacyActorMessage::Kind::action);
+  assert(actor.legacy_pending_actions.size() == before_events + 1);
+  assert(actor.legacy_pending_actions.back().legacy_event_priority == LegacyEventPriority::hurry);
+}
+
+void test_spell_and_magic_fire_share_queue_tick() {
+  auto state = make_store();
+  state.apply(MagicList{{MagicEntry{9, 1, 0, 0, 1000, "Fireball", 1, 900, 1}}});
+  state.apply(ActorAction{1, ActorActionKind::spell, 13, 10, 2, 2, 0, 17, 9, true, 1});
+  state.apply(ActorMagicFire{1, 2, 13, 10, 1, 1, 638});
+  state.process_legacy_actor_queues(1000);
+  assert(state.world.actors[1].current_action == ActorActionKind::spell);
+  assert(state.world.actors[1].action_magic_effect_type == -1);
+  state.process_legacy_actor_hurry_queues(1000);
+  const auto& actor = state.world.actors[1];
+  assert(actor.current_action == ActorActionKind::spell);
+  assert(actor.action_magic);
+  assert(actor.action_magic_effect == 1);
+  assert(actor.action_magic_effect_type == 5);
 }
 
 void test_remove_delay_matches_legacy_hide() {
@@ -221,9 +271,11 @@ int main() {
   test_nowdeath_uses_play_death_mode();
   test_vitals_revive_clears_dead_state();
   test_vitals_revive_clears_queued_death();
-  test_magic_fire_waits_for_current_action();
+  test_spell_starts_waiting_for_magic_fire();
+  test_magic_fire_is_hurry_event();
   test_magic_fire_waits_behind_unstarted_spell();
-  test_magic_fire_consumes_one_queue_entry_per_tick();
+  test_active_spell_consumes_magic_fire_behind_normal_head();
+  test_spell_and_magic_fire_share_queue_tick();
   test_remove_delay_matches_legacy_hide();
   test_independent_visual_state_events();
   test_actor_action_queue_does_not_drop_fifo_after_64_messages();

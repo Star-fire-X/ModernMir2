@@ -818,7 +818,6 @@ struct GameStateStore {
       if (actor.action_magic_effect <= 0) {
         actor.action_magic_effect = magic->effect;
       }
-      actor.action_magic_effect_type = legacy_visual_effect_type(magic_id, magic->effect_type);
     }
   }
 
@@ -841,6 +840,14 @@ struct GameStateStore {
 
   static bool legacy_actor_message_is_death(const LegacyActorMessage& message) {
     return message.kind == LegacyActorMessage::Kind::death;
+  }
+
+  static bool legacy_actor_accepts_hurry_magic(const ActorState& actor) {
+    return actor.current_action == client_v1::ActorActionKind::spell &&
+           actor.action_magic &&
+           actor.magic_id != 0 &&
+           actor.action_started_ms != 0 &&
+           !actor.action_magic_failed;
   }
 
   static void clear_pending_death_messages(ActorState& actor) {
@@ -1053,6 +1060,27 @@ struct GameStateStore {
     }
   }
 
+  void process_legacy_hurry_messages_for_active_spell(ActorState& actor,
+                                                      const std::uint64_t now_ms) {
+    auto it = actor.legacy_action_queue.begin();
+    while (it != actor.legacy_action_queue.end() && legacy_actor_accepts_hurry_magic(actor)) {
+      if (!legacy_actor_message_is_hurry(*it)) {
+        ++it;
+        continue;
+      }
+      const auto message = *it;
+      it = actor.legacy_action_queue.erase(it);
+      apply_legacy_actor_message(actor, message, now_ms);
+    }
+  }
+
+  void process_legacy_actor_hurry_queues(const std::uint64_t now_ms) {
+    for (auto& [actor_id, actor] : world.actors) {
+      (void)actor_id;
+      process_legacy_hurry_messages_for_active_spell(actor, now_ms);
+    }
+  }
+
   static int estimated_legacy_text_width(const std::string& text) {
     auto width = 0;
     for (unsigned char ch : text) {
@@ -1146,6 +1174,13 @@ struct GameStateStore {
     for (auto& [actor_id, actor] : world.actors) {
       (void)actor_id;
       if (actor.legacy_action_queue.empty()) {
+        continue;
+      }
+      const auto hurry = legacy_actor_message_is_hurry(actor.legacy_action_queue.front());
+      if (hurry) {
+        if (!actor_action_animating(actor, now_ms)) {
+          actor.legacy_action_queue.pop_front();
+        }
         continue;
       }
       if (actor_action_animating(actor, now_ms)) {

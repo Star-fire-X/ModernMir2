@@ -7539,6 +7539,7 @@ class WorldScene final : public Scene {
     auto& world = context.state->world;
     const auto now_ms = detail::monotonic_ms();
     animation_.update(world, now_ms);
+    context.state->process_legacy_actor_hurry_queues(now_ms);
     if (context.audio != nullptr) {
       update_main_theme(*context.audio, delta_seconds, now_ms);
       audio_cues_.update(world, animation_, map_.get(), *context.audio, now_ms);

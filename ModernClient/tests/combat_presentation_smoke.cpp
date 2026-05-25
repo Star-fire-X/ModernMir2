@@ -62,6 +62,7 @@ int main() {
   animations.reset(1300);
   animations.sync_world(state.world, 1300);
   animations.update(state.world, 1300);
+  state.process_legacy_actor_hurry_queues(1301);
   assert(state.world.actors[1000].current_action == ActorActionKind::spell);
   assert(state.world.actors[1000].action_magic_effect_type == 1);
   assert(animations.effects().fly_count() + animations.effects().ground_count() +
