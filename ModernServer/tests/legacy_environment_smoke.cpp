@@ -95,7 +95,11 @@ int main() {
 
   mir2::LegacyMapEnvironment door_env(3, 3, make_door_map());
   assert(door_env.door_core_count() == 1);
-  assert(!door_env.static_can_move(1, 1));
+  assert(door_env.static_can_move(1, 1));
+  assert(door_env.static_can_fly(1, 1));
+  assert(door_env.can_walk(1, 1, false));
+  assert(door_env.can_fly_line(0, 1, 2, 1));
+  assert(door_env.can_fire_fly_line(0, 1, 2, 1));
   const auto opened = door_env.open_doors_around(1, 1, 400);
   assert(opened.size() == 1);
   assert(door_env.door_is_open(1, 1));
@@ -106,9 +110,9 @@ int main() {
   assert(door_env.can_fire_fly_line(0, 1, 2, 1));
   const auto closed = door_env.close_expired_doors(5401, 5000);
   assert(closed.size() == 1);
-  assert(!door_env.static_can_move(1, 1));
-  assert(!door_env.static_can_fly(1, 1));
-  assert(!door_env.can_fire_fly_line(0, 1, 2, 1));
+  assert(door_env.static_can_move(1, 1));
+  assert(door_env.static_can_fly(1, 1));
+  assert(door_env.can_fire_fly_line(0, 1, 2, 1));
 
   return 0;
 }

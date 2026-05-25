@@ -185,6 +185,37 @@ int main() {
     assert(visible.has_value());
     assert(!visible->hide_mode);
     assert(has_trace(dispatch, "MonsterSpecial", "dig_up", "RM_DIGUP"));
+    assert(!runtime.find_legacy_event("0", 10, 10,
+                                      mir2::LegacyEventType::digout_zombi).has_value());
+  }
+
+  {
+    auto config = base_config("DigOutZombi");
+    config.monsters.push_back(make_monster("DigOutZombi", 95));
+    config.spawns.push_back(make_spawn("DigOutZombi", 10, 10));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    const auto spawn_dispatch = runtime.tick(1000);
+    const auto zombie_id = spawned_actor_id(spawn_dispatch);
+    assert(zombie_id.has_value());
+    auto hidden = runtime.legacy_monster_snapshot("0", *zombie_id);
+    assert(hidden.has_value());
+    assert(hidden->hide_mode);
+    assert(hidden->dig_up_range == 3);
+    enter(runtime, 7, "Hero", 13, 10);
+    auto dispatch = run_until(runtime, 1020, 1800);
+    auto visible = runtime.legacy_monster_snapshot("0", *zombie_id);
+    assert(visible.has_value());
+    assert(!visible->hide_mode);
+    assert(has_trace(dispatch, "MonsterSpecial", "dig_up", "RM_DIGUP"));
+    auto event = runtime.find_legacy_event("0", 10, 10,
+                                           mir2::LegacyEventType::digout_zombi);
+    assert(event.has_value());
+    assert(!event->blocks_walk);
+    static_cast<void>(runtime.run_legacy_event_manager(
+        event->open_start_ms + event->continue_ms + 1ULL));
+    assert(!runtime.find_legacy_event("0", 10, 10,
+                                      mir2::LegacyEventType::digout_zombi).has_value());
   }
 
   {
