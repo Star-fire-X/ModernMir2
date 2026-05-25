@@ -718,6 +718,7 @@ bool legacy_spell_supported(std::int32_t magic_id, const MagicConfig& magic) {
     case 5:
     case 6:
     case 8:
+    case 37:
     case 9:
     case 10:
     case 11:

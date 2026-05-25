@@ -46,7 +46,8 @@ struct LegacyMagicTrainResult {
 [[nodiscard]] LegacyMagicTrainResult legacy_train_magic(Player& player,
                                                         LegacyUseMagicInfo& user_magic,
                                                         const MagicConfig& magic,
-                                                        LegacyRandom& random);
+                                                        LegacyRandom& random,
+                                                        std::int32_t fixed_train_amount = 0);
 void legacy_check_magic_special_ability(Player& player, const LegacyUseMagicInfo& user_magic);
 
 }  // namespace mir2
