@@ -101,6 +101,36 @@ mir2::LegacyPacket make_change_map_packet(std::uint64_t session_id) {
       mir2::legacy_encode_string("1"));
 }
 
+mir2::LegacyPacket make_new_map_packet(std::uint64_t session_id) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmNewMap, 42, 14, 15, 3),
+      mir2::legacy_encode_string("1"));
+}
+
+mir2::LegacyPacket make_map_description_packet(std::uint64_t session_id) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmMapDescription, 0, 0, 0, 0),
+      mir2::legacy_encode_string("Bichon"));
+}
+
+mir2::LegacyPacket make_username_packet(std::uint64_t session_id) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmUsername, 42, 196, 0, 0),
+      mir2::legacy_encode_string("Hero"));
+}
+
+mir2::LegacyPacket make_feature_changed_packet(std::uint64_t session_id) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0,
+      mir2::make_default_message(mir2::kSmFeatureChanged, 42, 0x0304, 0x0102, 0));
+}
+
+mir2::LegacyPacket make_char_status_changed_packet(std::uint64_t session_id) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0,
+      mir2::make_default_message(mir2::kSmCharStatusChanged, 42, 0x0008, 0x0000, 0));
+}
+
 mir2::LegacyPacket make_door_packet(std::uint64_t session_id, std::uint16_t ident) {
   return mir2::make_legacy_game_packet(
       session_id, 0, 0, mir2::make_default_message(ident, 0, 12, 13, 0));
@@ -262,6 +292,66 @@ int main() {
   assert(map_change->map_id == "1");
 
   messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_new_map_packet(kSessionId),
+                                           messages);
+  assert(messages.size() == 1);
+  const auto* map_entered = std::get_if<mir2::client_v1::MapEntered>(&messages.front());
+  assert(map_entered != nullptr);
+  assert(map_entered->map_id == "1");
+  assert(map_entered->self_actor_id == 42);
+  assert(map_entered->x == 14 && map_entered->y == 15);
+  assert(map_entered->dir == 3);
+
+  service.seed_session_for_test(kSessionId);
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_new_map_packet(kSessionId),
+                                           messages);
+  assert(messages.empty());
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_map_description_packet(kSessionId),
+                                           messages);
+  assert(messages.size() == 1);
+  const auto* map_description =
+      std::get_if<mir2::client_v1::MapDescription>(&messages.front());
+  assert(map_description != nullptr);
+  assert(map_description->title == "Bichon");
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_username_packet(kSessionId),
+                                           messages);
+  assert(messages.size() == 1);
+  const auto* username =
+      std::get_if<mir2::client_v1::ActorIdentityUpdate>(&messages.front());
+  assert(username != nullptr);
+  assert(username->actor_id == 42);
+  assert((username->mask & mir2::client_v1::kActorIdentityName) != 0U);
+  assert((username->mask & mir2::client_v1::kActorIdentityNameColor) != 0U);
+  assert(username->name == "Hero");
+  assert(username->name_color == 196);
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_feature_changed_packet(kSessionId),
+                                           messages);
+  assert(messages.size() == 1);
+  const auto* feature =
+      std::get_if<mir2::client_v1::ActorIdentityUpdate>(&messages.front());
+  assert(feature != nullptr);
+  assert(feature->mask == mir2::client_v1::kActorIdentityFeature);
+  assert(feature->feature == 0x01020304);
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId,
+                                           make_char_status_changed_packet(kSessionId),
+                                           messages);
+  assert(messages.size() == 1);
+  const auto* status =
+      std::get_if<mir2::client_v1::ActorIdentityUpdate>(&messages.front());
+  assert(status != nullptr);
+  assert(status->mask == mir2::client_v1::kActorIdentityStatus);
+  assert(status->status == 8);
+
+  messages.clear();
   service.translate_legacy_packet_for_test(
       kSessionId, make_door_packet(kSessionId, mir2::kSmOpenDoorOk), messages);
   assert(messages.size() == 1);
@@ -282,11 +372,14 @@ int main() {
                                            messages);
   service.translate_legacy_packet_for_test(kSessionId, make_change_map_packet(kSessionId),
                                            messages);
+  service.translate_legacy_packet_for_test(kSessionId, make_new_map_packet(kSessionId),
+                                           messages);
   service.translate_legacy_packet_for_test(
       kSessionId, make_door_packet(kSessionId, mir2::kSmOpenDoorOk), messages);
-  assert(messages.size() == 3);
+  assert(messages.size() == 4);
   assert(std::holds_alternative<mir2::client_v1::WorldClearObjects>(messages[0]));
   assert(std::holds_alternative<mir2::client_v1::MapChange>(messages[1]));
-  assert(std::holds_alternative<mir2::client_v1::MapDoorState>(messages[2]));
+  assert(std::holds_alternative<mir2::client_v1::MapEntered>(messages[2]));
+  assert(std::holds_alternative<mir2::client_v1::MapDoorState>(messages[3]));
   return 0;
 }

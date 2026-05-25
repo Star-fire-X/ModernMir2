@@ -55,6 +55,7 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
     bool entered_world{false};
     bool pending_login_notice{false};
     bool world_result_sent{false};
+    bool map_change_pending{false};
     std::string account_id{};
     std::string character_name{};
     std::uint64_t actor_id{0};

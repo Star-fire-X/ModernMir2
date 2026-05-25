@@ -112,6 +112,7 @@ mir2::LogicCommand trade_try(std::uint64_t session_id, std::string target_name) 
 
 int main() {
   mir2::HostConfig config;
+  config.budgets.tick_ms = 20;
   config.maps.push_back(mir2::MapConfig{"0", "NpcClickGuards", {}, 0, 0, 40, 40});
   config.items.push_back(mir2::ItemConfig{1, "Potion", 1, 10});
   config.npcs.push_back(make_shop("near_shop", "Near Shop", 11));

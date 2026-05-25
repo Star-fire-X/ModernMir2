@@ -207,6 +207,7 @@ int main() {
   auto fail = [](int stage) { return stage; };
 
   mir2::HostConfig config;
+  config.budgets.tick_ms = 20;
   config.maps.push_back(mir2::MapConfig{"0", "TradeMap", {}, 0, 0, 30, 30});
   config.items.push_back(mir2::ItemConfig{1, "Ruby", 1, 40, 0, 2, 1, 1000, 10, 0, 0});
   config.items.push_back(mir2::ItemConfig{2, "Sapphire", 1, 41, 0, 3, 1, 1000, 10, 0, 0});

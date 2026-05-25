@@ -92,17 +92,24 @@ change_scene_play_game
 send_query_bag_items
 
 [play.render_order]
-map_tiles
+background_tiles
+middle_tiles
 small_objects
 ground_effects
-row_large_objects_items_actors_fly_effects
+large_object
+ground_item
+actor
+fly_effect
+selection_blend
+actor_overlay
+debug_overlay
 overlay_effects
-actor_overlays
-ui_direct_paint
-top_system_messages
-hint
+actor_screen_overlay
+ui_windows_dwin_direct_paint
+top_system_messages_draw_screen_top
+hint_tooltip_draw_hint
 moving_item_cursor
-flip
+present
 
 [play.exit_cleanup]
 silence_sound
@@ -124,17 +131,18 @@ preserve_dynamic_map_objects_until_self_ready
 recv_change_map
 set_pending_map_id
 wait_self_action_before_map_apply
+recv_new_map
 defer_runtime_deltas_during_map_wait
 apply_map_after_self_action
 clear_dynamic_map_objects
 recv_world_snapshot
 apply_new_map_snapshot
-resume_runtime_deltas
+resume_runtime_fifo
 
 [play.map_door_state]
 recv_open_door
 door_open_visible
 recv_close_door
 door_close_override_kept
-missed_close_expiry
-stale_open_removed
+open_door_no_client_expiry
+stale_open_kept_until_close

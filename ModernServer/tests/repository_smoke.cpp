@@ -77,7 +77,10 @@ int main() {
   updated.slaves[0].mp = 3;
   updated.body_luck = 12500.0;
   updated.birth_items_granted = true;
-  repository.save_character(updated);
+  updated.save_version = 1;
+  if (!repository.save_character(updated)) {
+    return 1;
+  }
 
   const auto loaded = repository.load_character("guest", "Mage");
   if (!loaded.has_value() || loaded->guild_name != "DragonSlayers" ||
@@ -94,7 +97,8 @@ int main() {
       loaded->slaves[0].slave_make_level != 1 ||
       loaded->slaves[0].remain_royalty_sec != 86400 ||
       loaded->slaves[0].hp != 77 || loaded->slaves[0].mp != 3 ||
-      loaded->body_luck != 12500.0 || !loaded->birth_items_granted) {
+      loaded->body_luck != 12500.0 || !loaded->birth_items_granted ||
+      loaded->save_version != 1) {
     return 1;
   }
 

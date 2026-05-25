@@ -30,7 +30,6 @@ mir2::HostConfig make_config(const std::filesystem::path& temp_root) {
   config.runtime.status_file = temp_root / "runtime" / "status.json";
   config.runtime.default_queue_capacity = 128;
   config.runtime.castle_context_refresh_ms = 0;
-  config.budgets.tick_ms = 5;
   config.maps.push_back(mir2::MapConfig{"0", "CadenceMap", {}, 64, 64, 10, 10});
   return config;
 }

@@ -59,6 +59,7 @@ class MapActor {
            std::vector<MapQuestConfig> map_quests = {},
            CastleDialogContext castle_dialog_context = {},
            std::unordered_map<std::string, MonsterDefConfig> monster_defs = {},
+           std::unordered_map<std::string, MapEntryRuleConfig> map_entry_rules = {},
            MakeIndexAllocator* make_index_allocator = nullptr,
            std::string black_stone_name = "BlackStone",
            bool legacy_approval_mode = false);
@@ -99,7 +100,11 @@ class MapActor {
   [[nodiscard]] bool legacy_add_event_object(std::uint64_t event_id, std::int32_t x,
                                              std::int32_t y, std::uint64_t now_ms,
                                              bool blocks_walk = false,
-                                             RuntimeDispatch* dispatch = nullptr);
+                                             RuntimeDispatch* dispatch = nullptr,
+                                             LegacyEventType type = LegacyEventType::stone_mine);
+  [[nodiscard]] bool legacy_add_event_object(std::uint64_t event_id, std::int32_t x,
+                                             std::int32_t y, std::uint64_t now_ms,
+                                             RuntimeDispatch* dispatch);
   void legacy_remove_event_object(std::uint64_t event_id, std::int32_t x, std::int32_t y,
                                   RuntimeDispatch* dispatch = nullptr);
   [[nodiscard]] RuntimeDispatch legacy_apply_fire_burn_event(const LegacyEventRecord& event,
@@ -127,6 +132,8 @@ class MapActor {
       std::uint64_t actor_id) const;
   [[nodiscard]] std::int64_t legacy_player_run_time_ms(std::uint64_t actor_id) const;
   [[nodiscard]] std::optional<CharacterRecord> snapshot_player(std::uint64_t actor_id) const;
+  [[nodiscard]] std::optional<CharacterRecord> persistent_snapshot_player(
+      std::uint64_t actor_id, std::uint64_t now_ms);
   [[nodiscard]] std::optional<MonsterSnapshot> legacy_monster_snapshot(
       std::uint64_t actor_id) const;
   [[nodiscard]] bool legacy_set_player_slave_relax(std::uint64_t actor_id, bool value);
@@ -319,6 +326,14 @@ class MapActor {
   void remove_expired_ground_items(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   bool try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
                          std::uint64_t current_tick, std::uint64_t now_ms);
+  [[nodiscard]] bool target_entry_allowed(Player& player, const LegacyMapGateState& gate,
+                                          RuntimeDispatch& dispatch,
+                                          std::uint64_t current_tick,
+                                          std::uint64_t now_ms);
+  [[nodiscard]] bool target_map_can_enter(const MapEntryRuleConfig& rule,
+                                          const LegacyMapGateState& gate) const;
+  [[nodiscard]] bool has_event_at(std::int32_t x, std::int32_t y,
+                                  LegacyEventType type) const;
   bool try_item_map_move(Player& player, std::string target_map_id, std::int32_t target_x,
                          std::int32_t target_y, RuntimeDispatch& dispatch,
                          std::uint64_t current_tick, std::uint64_t now_ms);
@@ -419,6 +434,7 @@ class MapActor {
   std::unordered_map<std::int32_t, MagicConfig> magic_configs_{};
   std::unordered_map<std::string, MonsterDefConfig> monster_defs_{};
   std::vector<MapQuestConfig> map_quests_{};
+  std::unordered_map<std::string, MapEntryRuleConfig> map_entry_rules_{};
   std::string black_stone_name_{"BlackStone"};
   bool legacy_approval_mode_{false};
   std::shared_ptr<const legacy::MapDocument> movement_map_{};
@@ -437,6 +453,7 @@ class MapActor {
   std::unordered_map<std::uint64_t, TradeSession> trade_sessions_{};
   std::unordered_map<std::uint64_t, std::uint64_t> trade_session_by_actor_{};
   std::unordered_map<std::uint64_t, std::pair<std::int32_t, std::int32_t>> event_objects_{};
+  std::unordered_map<std::uint64_t, LegacyEventType> event_object_types_{};
   std::unordered_map<std::uint64_t, PlayerVisibility> visibility_{};
   std::unordered_map<std::string, std::unordered_set<std::string>> script_name_lists_{};
   std::uint64_t next_ground_item_id_{1};

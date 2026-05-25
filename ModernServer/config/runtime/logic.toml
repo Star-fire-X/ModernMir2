@@ -1,4 +1,4 @@
-tick_ms = 20
+tick_ms = 10
 player_budget_ms = 30
 monster_budget_ms = 30
 spawn_budget_ms = 30

@@ -448,13 +448,14 @@ int main() {
          state.world.map_doors.end());
   state.apply(MapDoorState{12, 13, true});
   assert(state.map_door_open(12, 13));
+  const auto open_sequence =
+      state.world.map_doors[GameStateStore::map_door_key(12, 13)].sequence;
   state.world.map_doors[GameStateStore::map_door_key(12, 13)].updated_ms = 1;
-  state.expire_map_door_states(1 + kLegacyMapDoorOpenExpireMs);
-  assert(!state.map_door_open(12, 13));
-  assert(state.world.map_doors.find(GameStateStore::map_door_key(12, 13)) ==
-         state.world.map_doors.end());
+  assert(state.map_door_open(12, 13));
   state.apply(MapDoorState{12, 13, true});
   assert(state.map_door_open(12, 13));
+  assert(state.world.map_doors[GameStateStore::map_door_key(12, 13)].sequence >
+         open_sequence);
 
   state.apply(WorldClearObjects{});
   assert(state.world.map_transition_pending);
@@ -467,8 +468,21 @@ int main() {
   assert(state.world.equipment[1].name == "Sword");
   assert(state.world.magics.size() == 1);
 
-  state.world.actors[1000].action_started_ms = mir2::client::detail::monotonic_ms();
-  state.world.actors[1000].action_duration_ms = 1000;
+  auto& transitioning_self = state.world.actors[1000];
+  transitioning_self.current_action = ActorActionKind::spell;
+  transitioning_self.legacy_action_ident = 17;
+  transitioning_self.magic_id = 9;
+  transitioning_self.action_target_actor_id = 2000;
+  transitioning_self.action_target_x = 335;
+  transitioning_self.action_target_y = 272;
+  transitioning_self.action_magic = true;
+  transitioning_self.action_magic_effect = 3;
+  transitioning_self.action_magic_effect_type = 1;
+  transitioning_self.action_magic_failed = true;
+  transitioning_self.legacy_pending_actions.push_back(transitioning_self);
+  transitioning_self.pending_remove = true;
+  transitioning_self.action_started_ms = mir2::client::detail::monotonic_ms();
+  transitioning_self.action_duration_ms = 1000;
   state.apply(MapChange{"1"});
   assert(state.world.map_transition_pending);
   assert(!state.world.map_clear_waiting_for_change);
@@ -476,11 +490,33 @@ int main() {
   assert(state.world.pending_map_id == "1");
   assert(state.world.map_id != "1");
   assert(!state.world.actors.empty());
+  state.apply(MapEntered{"1", 1000, 5, 5, 2});
+  assert(state.world.map_transition_pending);
+  assert(state.world.map_entered_waiting);
+  assert(state.world.map_id != "1");
+  assert(!state.finish_pending_map_transition_if_ready(mir2::client::detail::monotonic_ms()));
   state.world.actors[1000].action_started_ms = 0;
   assert(state.finish_pending_map_transition_if_ready(mir2::client::detail::monotonic_ms()));
   assert(state.world.map_id == "1");
-  assert(state.world.map_transition_pending);
-  assert(state.world.actors.empty());
+  assert(!state.world.map_transition_pending);
+  assert(state.world.actors.size() == 1);
+  assert(state.world.actors[1000].x == 5);
+  assert(state.world.actors[1000].y == 5);
+  assert(state.world.actors[1000].current_action == ActorActionKind::turn);
+  assert(state.world.actors[1000].legacy_action_ident == legacy_sm::kTurn);
+  assert(state.world.actors[1000].magic_id == 0);
+  assert(state.world.actors[1000].action_target_actor_id == 0);
+  assert(state.world.actors[1000].action_target_x == -1);
+  assert(state.world.actors[1000].action_target_y == -1);
+  assert(!state.world.actors[1000].action_magic);
+  assert(state.world.actors[1000].action_magic_effect == 0);
+  assert(state.world.actors[1000].action_magic_effect_type == -1);
+  assert(!state.world.actors[1000].action_magic_failed);
+  assert(state.world.actors[1000].legacy_pending_actions.empty());
+  assert(!state.world.actors[1000].pending_remove);
+  assert(!state.map_door_open(12, 13));
+  state.apply(MapDescription{"OldTitle"});
+  assert(state.world.map_title == "OldTitle");
   WorldSnapshot changed_snapshot;
   changed_snapshot.map_id = "1";
   changed_snapshot.width = 500;
@@ -492,13 +528,16 @@ int main() {
   assert(!state.world.map_transition_pending);
   assert(state.world.map_id == "1");
   assert(state.world.width == 500);
+  assert(state.world.map_title.empty());
+  state.apply(MapDescription{"Bichon"});
+  assert(state.world.map_title == "Bichon");
   assert(state.world.actors.size() == 1);
-  assert(state.world.bag_items[0].name == "Potion");
-  assert(state.world.equipment[1].name == "Sword");
-  assert(state.world.magics.size() == 1);
+  assert(state.world.bag_items[0].name.empty());
+  assert(state.world.equipment[1].name.empty());
+  assert(state.world.magics.empty());
   assert(!state.world.minimap.visible);
-  assert(state.world.group.visible);
-  assert(state.world.guild.visible);
+  assert(!state.world.group.visible);
+  assert(!state.world.guild.visible);
 
   state.world.npc_dialog.visible = true;
   state.world.merchant_shop.visible = true;

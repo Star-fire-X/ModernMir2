@@ -7,7 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(MSVC)
-  add_compile_options(/utf-8 /bigobj)
+  add_compile_options(/utf-8 /bigobj /FS)
+elseif(MINGW)
+  add_compile_options(-Wa,-mbig-obj)
 endif()
 
 if(WIN32)
@@ -184,7 +186,6 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_legacy_bag_flow_target_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_bag_flow_target_smoke
     COMMAND mir2_legacy_bag_flow_target_smoke)
-  set_tests_properties(mir2_legacy_bag_flow_target_smoke PROPERTIES DISABLED TRUE)
 
   add_executable(mir2_trade_protocol_golden_smoke
     tests/trade_protocol_golden_smoke.cpp)
@@ -197,6 +198,12 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_trade_interleaving_fuzz_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_trade_interleaving_fuzz_smoke
     COMMAND mir2_trade_interleaving_fuzz_smoke)
+
+  add_executable(mir2_economy_consistency_smoke
+    tests/economy_consistency_smoke.cpp)
+  target_link_libraries(mir2_economy_consistency_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_economy_consistency_smoke
+    COMMAND mir2_economy_consistency_smoke)
 
   add_executable(mir2_npc_shop_protocol_golden_smoke
     tests/npc_shop_protocol_golden_smoke.cpp)
@@ -353,6 +360,18 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_cross_map_gate_transfer_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_cross_map_gate_transfer_smoke
     COMMAND mir2_cross_map_gate_transfer_smoke)
+
+  add_executable(mir2_map_gate_entry_legacy_smoke
+    tests/map_gate_entry_legacy_smoke.cpp)
+  target_link_libraries(mir2_map_gate_entry_legacy_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_map_gate_entry_legacy_smoke
+    COMMAND mir2_map_gate_entry_legacy_smoke)
+
+  add_executable(mir2_no_reconnect_legacy_smoke
+    tests/no_reconnect_legacy_smoke.cpp)
+  target_link_libraries(mir2_no_reconnect_legacy_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_no_reconnect_legacy_smoke
+    COMMAND mir2_no_reconnect_legacy_smoke)
 
   add_executable(mir2_legacy_player_lifecycle_smoke tests/legacy_player_lifecycle_smoke.cpp)
   target_link_libraries(mir2_legacy_player_lifecycle_smoke PRIVATE mir2_hostlib)
@@ -687,6 +706,16 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_repository_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_repository_smoke COMMAND mir2_repository_smoke)
 
+  add_executable(mir2_persistence_version_smoke tests/persistence_version_smoke.cpp)
+  target_link_libraries(mir2_persistence_version_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_persistence_version_smoke COMMAND mir2_persistence_version_smoke)
+
+  add_executable(mir2_world_shutdown_persistence_smoke
+    tests/world_shutdown_persistence_smoke.cpp)
+  target_link_libraries(mir2_world_shutdown_persistence_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_world_shutdown_persistence_smoke
+    COMMAND mir2_world_shutdown_persistence_smoke)
+
   add_executable(mir2_legacy_character_import_smoke
     tests/legacy_character_import_smoke.cpp)
   target_link_libraries(mir2_legacy_character_import_smoke PRIVATE mir2_hostlib)
@@ -999,6 +1028,9 @@ if(BUILD_TESTING)
       mir2_legacy_protocol_command_golden_smoke
       mir2_trade_protocol_golden_smoke
       mir2_trade_interleaving_fuzz_smoke
+      mir2_economy_consistency_smoke
+      mir2_persistence_version_smoke
+      mir2_world_shutdown_persistence_smoke
       mir2_npc_shop_protocol_golden_smoke
       mir2_npc_shop_interleaving_fuzz_smoke
       mir2_canonical_legacy_command_smoke
@@ -1048,11 +1080,14 @@ if(BUILD_TESTING)
       mir2_npc_instance_click_guard_smoke
       mir2_scripted_merchant_smoke
       mir2_scripted_npc_dialog_smoke
+      mir2_legacy_mapquest_import_trigger_smoke
       mir2_special_consumables_legacy_smoke
       mir2_guild_manager_smoke
       mir2_castle_manager_smoke
       mir2_guild_protocol_golden_smoke
       mir2_monster_legacy_drop_scatter_smoke
+      mir2_legacy_event_manager_smoke
+      mir2_legacy_user_engine_timer_smoke
       mir2_client_v1_auth_boundary_smoke
       mir2_client_v1_login_to_world_flow_smoke
       mir2_client_v1_game_command_bridge_smoke

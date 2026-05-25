@@ -107,17 +107,19 @@ int main() {
   runtime.initialize();
 
   const auto first = runtime.tick(1000);
-  const auto first_spawns = spawn_traces(first);
+  assert(spawn_traces(first).empty());
+  const auto first_spawn_dispatch = runtime.tick(1201);
+  const auto first_spawns = spawn_traces(first_spawn_dispatch);
   assert(first_spawns.size() == 1);
 
   static_cast<void>(runtime.route_logic_command(make_enter_hero()));
-  assert(find_packet(runtime.tick(1020), mir2::kSmNewMap).has_value());
+  assert(find_packet(runtime.tick(1220), mir2::kSmNewMap).has_value());
 
   static_cast<void>(runtime.route_logic_command(make_attack(first_spawns.front().actor_id)));
-  const auto kill = runtime.tick(1040);
+  const auto kill = runtime.tick(1240);
   assert(find_packet(kill, mir2::kSmDeath).has_value());
 
-  const auto refill = runtime.tick(1301);
+  const auto refill = runtime.tick(1402);
   const auto refill_spawns = spawn_traces(refill);
   assert(refill_spawns.size() == 1);
   assert(refill_spawns.front().actor_id != first_spawns.front().actor_id);

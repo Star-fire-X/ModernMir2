@@ -104,10 +104,14 @@ std::vector<std::string> run_map_transfer_trace() {
   assert(state.world.pending_map_id == "1");
   push(calls, "set_pending_map_id");
   push(calls, "wait_self_action_before_map_apply");
+  push(calls, "recv_new_map");
+  state.apply(MapEntered{"1", 1000, 5, 5, 2});
+  assert(state.world.map_entered_waiting);
 
   const auto stale_actor = ActorUpsert{
       WorldActor{2000, "Guard", 332, 270, 0, 0, 0, ActorType::npc}};
-  if (state.world.map_change_waiting) {
+  if (state.should_defer_runtime_for_map_transition(
+          mir2::client::detail::monotonic_ms())) {
     push(calls, "defer_runtime_deltas_during_map_wait");
   } else {
     state.apply(stale_actor);
@@ -117,7 +121,8 @@ std::vector<std::string> run_map_transfer_trace() {
   state.world.actors[1000].action_started_ms = 0;
   assert(state.finish_pending_map_transition_if_ready(mir2::client::detail::monotonic_ms()));
   assert(state.world.map_id == "1");
-  assert(state.world.actors.empty());
+  assert(state.world.actors.size() == 1U);
+  assert(state.world.actors.count(1000) == 1U);
   assert(state.world.ground_items.empty());
   assert(!state.map_door_open(12, 13));
   push(calls, "apply_map_after_self_action");
@@ -131,7 +136,7 @@ std::vector<std::string> run_map_transfer_trace() {
   assert(state.world.map_id == "1");
   assert(state.world.actors.size() == 1U);
   push(calls, "apply_new_map_snapshot");
-  push(calls, "resume_runtime_deltas");
+  push(calls, "resume_runtime_fifo");
   return calls;
 }
 
@@ -153,13 +158,11 @@ std::vector<std::string> run_map_door_state_trace() {
          state.world.map_doors.end());
   push(calls, "door_close_override_kept");
 
-  push(calls, "missed_close_expiry");
+  push(calls, "open_door_no_client_expiry");
   state.apply(MapDoorState{12, 13, true});
   state.world.map_doors[mir2::client::GameStateStore::map_door_key(12, 13)].updated_ms = 1;
-  state.expire_map_door_states(1 + mir2::client::kLegacyMapDoorOpenExpireMs);
-  assert(!state.map_door_open(12, 13));
-  assert(state.world.map_doors.empty());
-  push(calls, "stale_open_removed");
+  assert(state.map_door_open(12, 13));
+  push(calls, "stale_open_kept_until_close");
   return calls;
 }
 

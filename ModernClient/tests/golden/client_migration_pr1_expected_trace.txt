@@ -14,11 +14,12 @@ defer_runtime_actor_upsert_until_map_change
 recv_map_change
 set_pending_map_id
 wait_self_action_before_map_apply
+recv_new_map
 defer_runtime_actor_upsert_during_transition
 self_action_done_apply_pending_map
+apply_deferred_runtime_before_snapshot
 recv_world_snapshot
-snapshot_clears_map_transition
-apply_deferred_runtime_after_snapshot
+snapshot_clears_deferred_runtime
 apply_runtime_actor_upsert_after_snapshot
 
 # cpp-current-baseline: Current LegacyFrameScheduler order for a renderable
@@ -89,8 +90,10 @@ ground_effects
 large_object
 ground_item
 actor
-actor_overlay
 fly_effect
+selection_blend
+actor_overlay
+debug_overlay
 overlay_effects
 actor_screen_overlay
 ui_windows_dwin_direct_paint

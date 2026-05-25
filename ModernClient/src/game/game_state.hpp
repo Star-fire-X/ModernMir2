@@ -192,6 +192,9 @@ struct MagicShortcutState {
   int effect{0};            ///< 魔法图标索引基数（Delphi WMagIcon[effect*2]）
   int max_train{0};         ///< 当前等级熟练度上限
   int effect_type{0};
+  int spell{0};
+  int def_spell{0};
+  int max_train_level{0};
 };
 
 /// 模态对话框状态
@@ -237,6 +240,16 @@ struct PendingItemActionState {
   int target_slot{-1};
   client_v1::ItemState item{};
   std::uint64_t started_ms{0};
+};
+
+struct PendingActionAckState {
+  std::uint16_t action_ident{0};
+  std::uint8_t dir{0};
+  bool rollback_position{false};
+  int old_x{0};
+  int old_y{0};
+  std::uint8_t old_dir{0};
+  std::uint64_t lock_started_ms{0};
 };
 
 /// 聊天板行：对应 Delphi DScreen.ChatStrs + ChatBks
@@ -448,6 +461,7 @@ struct LobbyViewState {
 struct MapDoorRuntimeState {
   bool open{false};
   std::uint64_t updated_ms{0};
+  std::uint64_t sequence{0};
 };
 
 /// 世界视图状态：包含所有动态游戏数据
@@ -455,16 +469,23 @@ struct MapDoorRuntimeState {
 /// 大量全局变量（Actor列表、物品列表、魔法列表、战斗状态等）
 struct WorldViewState {
   std::string map_id{"0"};
+  std::string map_title{};
   int width{800};   ///< 地图宽度（瓦片数）
   int height{600};  ///< 地图高度（瓦片数）
   bool map_transition_pending{false};
   bool map_clear_waiting_for_change{false};
   bool map_change_waiting{false};
+  bool map_entered_waiting{false};
   std::string pending_map_id{};
+  std::uint64_t pending_self_actor_id{0};
+  int pending_self_x{0};
+  int pending_self_y{0};
+  std::uint8_t pending_self_dir{0};
   std::uint64_t self_actor_id{0};                                 ///< 自己的 actor_id
   std::unordered_map<std::uint64_t, ActorState> actors{};         ///< 所有在线角色（key = actor_id）
   std::unordered_map<std::uint64_t, client_v1::GroundItemState> ground_items{};  ///< 地面物品
   std::unordered_map<std::uint64_t, MapDoorRuntimeState> map_doors{};  ///< 动态门状态（key = x/y）
+  std::uint64_t map_door_sequence{0};
   std::vector<std::uint64_t> actor_draw_order{};       ///< Delphi ActorList-equivalent draw order
   std::vector<std::uint64_t> ground_item_draw_order{}; ///< Delphi DropedItemList-equivalent draw order
   std::vector<SysMessageState> sys_messages{}; ///< DrawScreenTop 系统消息短提示
@@ -501,6 +522,8 @@ struct WorldViewState {
   std::uint64_t fail_action_time_ms{0};
   std::uint16_t last_sent_action_ident{0};
   std::uint8_t last_sent_action_dir{0};
+  std::deque<PendingActionAckState> pending_action_acks{};
+  bool skip_next_move_fail_ack{false};
   std::uint64_t dizzy_delay_start_ms{0};
   std::uint64_t dizzy_delay_time_ms{0};
   int skip_tick{0};
@@ -545,8 +568,6 @@ inline std::uint64_t elapsed_ms(const std::uint64_t now, const std::uint64_t the
   return now >= then ? now - then : 0;
 }
 
-constexpr std::uint64_t kLegacyMapDoorOpenExpireMs = 6000U;
-
 /// 检查动作锁定是否仍然有效
 /// 锁定超过 10 秒自动解除（安全措施，避免锁死）
 inline bool action_lock_active(const WorldViewState& world, const std::uint64_t now) {
@@ -563,6 +584,8 @@ inline bool server_accept_next_action(WorldViewState& world, const std::uint64_t
   if (elapsed_ms(now, world.action_lock_started_ms) > 10000U) {
     world.action_locked = false;
     world.action_lock_timeout_cleared_ms = now;
+    world.pending_action_acks.clear();
+    world.skip_next_move_fail_ack = false;
     return false;
   }
   return false;
@@ -674,19 +697,32 @@ inline bool is_unlock_action(WorldViewState& world, const std::uint16_t action_i
   return true;
 }
 
+inline bool is_queued_move_action(const std::uint16_t action_ident) {
+  return action_ident == static_cast<std::uint16_t>(3000U + legacy::kSmWalk) ||
+         action_ident == static_cast<std::uint16_t>(3000U + legacy::kSmRun);
+}
+
 inline void legacy_action_failed(WorldViewState& world, ActorState& self,
-                                 const std::uint64_t now) {
+                                 const std::uint64_t now,
+                                 const PendingActionAckState* pending_ack = nullptr) {
   world.legacy_target_x = -1;
   world.legacy_target_y = -1;
   world.legacy_chr_action = LegacyChrAction::none;
   world.action_fail_lock = true;
-  world.fail_action_ident = world.last_sent_action_ident;
-  world.fail_dir = world.last_sent_action_dir;
+  world.fail_action_ident =
+      pending_ack != nullptr ? pending_ack->action_ident : world.last_sent_action_ident;
+  world.fail_dir = pending_ack != nullptr ? pending_ack->dir : world.last_sent_action_dir;
   world.fail_action_time_ms = now;
-  self.x = self.legacy_has_old_position ? self.legacy_old_x : self.from_x;
-  self.y = self.legacy_has_old_position ? self.legacy_old_y : self.from_y;
-  if (self.legacy_has_old_position) {
-    self.dir = self.legacy_old_dir;
+  if (pending_ack != nullptr && pending_ack->rollback_position) {
+    self.x = pending_ack->old_x;
+    self.y = pending_ack->old_y;
+    self.dir = pending_ack->old_dir;
+  } else {
+    self.x = self.legacy_has_old_position ? self.legacy_old_x : self.from_x;
+    self.y = self.legacy_has_old_position ? self.legacy_old_y : self.from_y;
+    if (self.legacy_has_old_position) {
+      self.dir = self.legacy_old_dir;
+    }
   }
   self.from_x = self.x;
   self.from_y = self.y;
@@ -863,9 +899,6 @@ struct GameStateStore {
   void enqueue_legacy_actor_message(ActorState& actor, LegacyActorMessage message) {
     actor.actor_id = message.actor_id;
     actor.legacy_action_queue.push_back(std::move(message));
-    if (actor.legacy_action_queue.size() > 64U) {
-      actor.legacy_action_queue.pop_front();
-    }
   }
 
   /// 根据动作类型返回动画持续时间（毫秒）
@@ -970,8 +1003,8 @@ struct GameStateStore {
         world.latest_struck_ms = actor.action_started_ms;
       }
     }
-    if (actor.actor_id == world.self_actor_id &&
-        (legacy_ident == legacy::kSmRush || legacy_ident == legacy::kSmRushKung)) {
+    // Delphi ClMain.pas updates LatestRushRushTime only for SM_RUSH, not SM_RUSHKUNG.
+    if (actor.actor_id == world.self_actor_id && legacy_ident == legacy::kSmRush) {
       world.latest_rush_rush_ms = actor.action_started_ms;
     }
   }
@@ -1403,6 +1436,8 @@ struct GameStateStore {
     world.action_lock_timeout_cleared_ms = 0;
     world.last_sent_action_ident = 0;
     world.last_sent_action_dir = 0;
+    world.pending_action_acks.clear();
+    world.skip_next_move_fail_ack = false;
     world.dizzy_delay_start_ms = 0;
     world.dizzy_delay_time_ms = 0;
     world.skip_tick = 0;
@@ -1455,6 +1490,8 @@ struct GameStateStore {
     world.action_lock_timeout_cleared_ms = 0;
     world.last_sent_action_ident = 0;
     world.last_sent_action_dir = 0;
+    world.pending_action_acks.clear();
+    world.skip_next_move_fail_ack = false;
     world.legacy_target_x = -1;
     world.legacy_target_y = -1;
     world.legacy_chr_action = LegacyChrAction::none;
@@ -1462,22 +1499,65 @@ struct GameStateStore {
     world.mouse_down_ms = 0;
   }
 
-  void complete_map_transition(const std::string& map_id) {
-    clear_map_objects_for_transition();
-    if (!map_id.empty()) {
-      world.map_id = map_id;
+  void complete_map_entered_transition() {
+    auto self = ActorState{};
+    if (const auto it = world.actors.find(world.self_actor_id); it != world.actors.end()) {
+      self = it->second;
     }
-    world.map_transition_pending = true;
+    clear_map_objects_for_transition();
+    if (!world.pending_map_id.empty()) {
+      world.map_id = world.pending_map_id;
+    }
+    if (world.pending_self_actor_id != 0) {
+      self.actor_id = world.pending_self_actor_id;
+      self.x = world.pending_self_x;
+      self.y = world.pending_self_y;
+      self.from_x = world.pending_self_x;
+      self.from_y = world.pending_self_y;
+      self.dir = world.pending_self_dir;
+      self.actor_type = client_v1::ActorType::player;
+      self.move_started_ms = 0;
+      self.move_duration_ms = 0;
+      self.current_action = client_v1::ActorActionKind::turn;
+      self.legacy_action_ident = legacy_sm::kTurn;
+      self.magic_id = 0;
+      self.action_target_actor_id = 0;
+      self.action_target_x = -1;
+      self.action_target_y = -1;
+      self.action_magic = false;
+      self.action_magic_effect = 0;
+      self.action_magic_effect_type = -1;
+      self.action_magic_failed = false;
+      self.action_started_ms = 0;
+      self.action_duration_ms = 0;
+      self.legacy_old_x = world.pending_self_x;
+      self.legacy_old_y = world.pending_self_y;
+      self.legacy_old_dir = world.pending_self_dir;
+      self.legacy_has_old_position = false;
+      self.legacy_event_priority = LegacyEventPriority::normal;
+      self.legacy_action_queue.clear();
+      self.legacy_pending_actions.clear();
+      self.pending_remove = false;
+      world.self_actor_id = world.pending_self_actor_id;
+      world.actors[self.actor_id] = std::move(self);
+      world.actor_draw_order.push_back(world.self_actor_id);
+    }
+    world.map_transition_pending = false;
     world.map_clear_waiting_for_change = false;
     world.map_change_waiting = false;
+    world.map_entered_waiting = false;
     world.pending_map_id.clear();
+    world.pending_self_actor_id = 0;
+    world.pending_self_x = 0;
+    world.pending_self_y = 0;
+    world.pending_self_dir = 0;
   }
 
   bool finish_pending_map_transition_if_ready(const std::uint64_t now_ms) {
-    if (!world.map_change_waiting || !self_actor_action_finished(now_ms)) {
+    if (!world.map_entered_waiting || !self_actor_action_finished(now_ms)) {
       return false;
     }
-    complete_map_transition(world.pending_map_id);
+    complete_map_entered_transition();
     return true;
   }
 
@@ -1554,25 +1634,6 @@ struct GameStateStore {
   /// 应用世界快照消息：重置整个世界状态
   /// 这是进入游戏时最重要的消息，包含地图信息和所有可见角色
   void apply(const client_v1::WorldSnapshot& message) {
-    const auto preserve_runtime = world.map_transition_pending;
-    const auto bag_items = world.bag_items;
-    const auto equipment = world.equipment;
-    const auto magics = world.magics;
-    const auto next_time_power_hit = world.next_time_power_hit;
-    const auto can_long_hit = world.can_long_hit;
-    const auto can_wide_hit = world.can_wide_hit;
-    const auto can_cross_hit = world.can_cross_hit;
-    const auto next_time_fire_hit = world.next_time_fire_hit;
-    const auto latest_fire_hit_ms = world.latest_fire_hit_ms;
-    const auto latest_rush_rush_ms = world.latest_rush_rush_ms;
-    const auto self_ability = world.self_ability;
-    const auto self_ability_detail = world.self_ability_detail;
-    const auto sys_messages = world.sys_messages;
-    const auto chat_lines = world.chat_lines;
-    const auto chat_board_top = world.chat_board_top;
-    const auto whisper_name = world.whisper_name;
-    const auto group = world.group;
-    const auto guild = world.guild;
     clear_play_scene_state();
     world.map_id = message.map_id;
     world.width = message.width;
@@ -1607,27 +1668,14 @@ struct GameStateStore {
     world.focus_ground_item_id = 0;
     world.target_actor_id = 0;
     world.pending_pickup_item_id = 0;
-    if (preserve_runtime) {
-      world.bag_items = bag_items;
-      world.equipment = equipment;
-      world.magics = magics;
-      world.next_time_power_hit = next_time_power_hit;
-      world.can_long_hit = can_long_hit;
-      world.can_wide_hit = can_wide_hit;
-      world.can_cross_hit = can_cross_hit;
-      world.next_time_fire_hit = next_time_fire_hit;
-      world.latest_fire_hit_ms = latest_fire_hit_ms;
-      world.latest_rush_rush_ms = latest_rush_rush_ms;
-      world.self_ability = self_ability;
-      world.self_ability_detail = self_ability_detail;
-      world.sys_messages = sys_messages;
-      world.chat_lines = chat_lines;
-      world.chat_board_top = chat_board_top;
-      world.whisper_name = whisper_name;
-      world.group = group;
-      world.guild = guild;
-    }
     world.map_transition_pending = false;
+    world.map_change_waiting = false;
+    world.map_entered_waiting = false;
+    world.pending_map_id.clear();
+    world.pending_self_actor_id = 0;
+    world.pending_self_x = 0;
+    world.pending_self_y = 0;
+    world.pending_self_dir = 0;
     for (const auto& actor : message.actors) {
       world.actors[actor.actor_id] = ActorState{actor.actor_id, actor.name, actor.x, actor.y,
                                                 actor.x, actor.y, actor.dir, actor.feature,
@@ -1640,21 +1688,40 @@ struct GameStateStore {
   void apply(const client_v1::WorldClearObjects& /*message*/) {
     world.map_transition_pending = true;
     world.map_clear_waiting_for_change = true;
+    world.map_entered_waiting = false;
   }
 
   void apply(const client_v1::MapChange& message) {
     world.map_transition_pending = true;
     world.map_clear_waiting_for_change = false;
     world.map_change_waiting = true;
+    world.map_entered_waiting = false;
     world.pending_map_id = message.map_id;
+  }
+
+  void apply(const client_v1::MapEntered& message) {
+    world.map_transition_pending = true;
+    world.map_clear_waiting_for_change = false;
+    world.map_change_waiting = false;
+    world.map_entered_waiting = true;
+    world.pending_map_id = message.map_id;
+    world.pending_self_actor_id = message.self_actor_id;
+    world.pending_self_x = message.x;
+    world.pending_self_y = message.y;
+    world.pending_self_dir = message.dir;
     if (self_actor_action_finished(detail::monotonic_ms())) {
-      complete_map_transition(world.pending_map_id);
+      complete_map_entered_transition();
     }
+  }
+
+  void apply(const client_v1::MapDescription& message) {
+    world.map_title = message.title;
   }
 
   void apply(const client_v1::MapDoorState& message) {
     const auto key = map_door_key(message.x, message.y);
-    world.map_doors[key] = MapDoorRuntimeState{message.open, detail::monotonic_ms()};
+    world.map_doors[key] =
+        MapDoorRuntimeState{message.open, detail::monotonic_ms(), ++world.map_door_sequence};
   }
 
   /// 应用角色增量更新消息（坐标/方向变化）
@@ -1689,17 +1756,6 @@ struct GameStateStore {
     return it != world.map_doors.end() && it->second.open;
   }
 
-  void expire_map_door_states(const std::uint64_t now_ms) {
-    for (auto it = world.map_doors.begin(); it != world.map_doors.end();) {
-      if (it->second.open &&
-          elapsed_ms(now_ms, it->second.updated_ms) >= kLegacyMapDoorOpenExpireMs) {
-        it = world.map_doors.erase(it);
-      } else {
-        ++it;
-      }
-    }
-  }
-
   /// 应用角色新增/更新消息
   /// 服务端通知有新的角色进入视野或更新已有角色
   void apply(const client_v1::ActorUpsert& message) {
@@ -1725,6 +1781,26 @@ struct GameStateStore {
     }
     if (inserted) {
       world.actor_draw_order.push_back(message.actor.actor_id);
+    }
+  }
+
+  void apply(const client_v1::ActorIdentityUpdate& message) {
+    const auto it = world.actors.find(message.actor_id);
+    if (it == world.actors.end()) {
+      return;
+    }
+    auto& actor = it->second;
+    if ((message.mask & client_v1::kActorIdentityName) != 0U) {
+      actor.name = message.name;
+    }
+    if ((message.mask & client_v1::kActorIdentityNameColor) != 0U) {
+      actor.name_color = message.name_color;
+    }
+    if ((message.mask & client_v1::kActorIdentityFeature) != 0U) {
+      actor.feature = message.feature;
+    }
+    if ((message.mask & client_v1::kActorIdentityStatus) != 0U) {
+      actor.status = message.status;
     }
   }
 
@@ -1865,7 +1941,8 @@ struct GameStateStore {
       world.magics.push_back(MagicShortcutState{entry.magic_id, entry.key, entry.level,
                                                 entry.train, entry.delay_ms, entry.name,
                                                 entry.effect, entry.max_train,
-                                                entry.effect_type});
+                                                entry.effect_type, entry.spell,
+                                                entry.def_spell, entry.max_train_level});
     }
   }
 
@@ -2084,14 +2161,54 @@ struct GameStateStore {
   /// ok=true 表示服务端接受了动作；ok=false 表示拒绝，
   /// 客户端需要回滚到动作之前的状态。
   void apply(const client_v1::ActionAck& message) {
-    world.action_locked = false;
+    const auto ack_ms = detail::monotonic_ms();
+    const auto skip_duplicate_move_fail =
+        !message.ok && message.server_time_ms == 0 && world.skip_next_move_fail_ack &&
+        !world.pending_action_acks.empty() &&
+        !world.pending_action_acks.front().rollback_position;
     world.action_lock_timeout_cleared_ms = 0;
-    world.last_action_ack_ms = detail::monotonic_ms();
+    world.last_action_ack_ms = ack_ms;
     world.last_action_ack_ok = message.ok;
+    if (skip_duplicate_move_fail) {
+      world.skip_next_move_fail_ack = false;
+      return;
+    }
+    world.skip_next_move_fail_ack = false;
+    PendingActionAckState pending_ack;
+    const bool has_pending_ack = !world.pending_action_acks.empty();
+    if (has_pending_ack) {
+      pending_ack = world.pending_action_acks.front();
+      world.pending_action_acks.pop_front();
+    }
+    const auto lock_ack =
+        std::find_if(world.pending_action_acks.begin(), world.pending_action_acks.end(),
+                     [](const PendingActionAckState& ack) { return ack.rollback_position; });
+    world.action_locked = lock_ack != world.pending_action_acks.end();
+    if (world.action_locked) {
+      world.action_lock_started_ms = lock_ack->lock_started_ms;
+    }
+    if (!message.ok && has_pending_ack && pending_ack.rollback_position &&
+        is_queued_move_action(pending_ack.action_ident) && message.server_time_ms != 0 &&
+        !world.pending_action_acks.empty()) {
+      world.skip_next_move_fail_ack = true;
+    }
     // 动作被服务端拒绝时，客户端需要回滚
     if (!message.ok) {
       if (auto it = world.actors.find(world.self_actor_id); it != world.actors.end()) {
-        legacy_action_failed(world, it->second, world.last_action_ack_ms);
+        if (has_pending_ack && !pending_ack.rollback_position) {
+          const auto preserve_fail_lock =
+              world.action_fail_lock &&
+              elapsed_ms(world.last_action_ack_ms, world.fail_action_time_ms) < 1000U;
+          if (!preserve_fail_lock) {
+            world.action_fail_lock = true;
+            world.fail_action_ident = pending_ack.action_ident;
+            world.fail_dir = pending_ack.dir;
+            world.fail_action_time_ms = world.last_action_ack_ms;
+          }
+        } else {
+          legacy_action_failed(world, it->second, world.last_action_ack_ms,
+                               has_pending_ack ? &pending_ack : nullptr);
+        }
       }
     }
   }

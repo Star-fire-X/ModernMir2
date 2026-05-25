@@ -83,8 +83,10 @@ std::unordered_map<std::string, std::string> PersistenceService::snapshot() cons
 }
 
 void PersistenceService::run() {
-  while (running_.load(std::memory_order_relaxed)) {
-    auto message = endpoint_->queue->wait_pop_for(std::chrono::milliseconds(100));
+  while (running_.load(std::memory_order_relaxed) || endpoint_->queue->size() > 0) {
+    const auto timeout = running_.load(std::memory_order_relaxed) ? std::chrono::milliseconds(100)
+                                                                 : std::chrono::milliseconds(1);
+    auto message = endpoint_->queue->wait_pop_for(timeout);
     if (!message.has_value()) {
       continue;
     }
@@ -302,8 +304,8 @@ void PersistenceService::handle_request(const PersistRequest& request) {
         break;
       }
       case PersistRequestKind::save_character:
-        repository_->save_character(request.character);
         {
+          const auto saved = repository_->save_character(request.character);
           PersistResult result;
           result.kind = PersistResultKind::character_saved;
           result.reply_to = request.reply_to;
@@ -311,6 +313,7 @@ void PersistenceService::handle_request(const PersistRequest& request) {
           result.character_name = request.character.character_name;
           result.character = request.character;
           result.request_id = request.request_id;
+          result.result_code = saved ? 1 : 0;
           post_result(std::move(result));
         }
         break;

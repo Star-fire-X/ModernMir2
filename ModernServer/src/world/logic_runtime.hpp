@@ -72,6 +72,7 @@ class LogicRuntime {
       std::string_view character_name) const;
   [[nodiscard]] std::optional<CharacterRecord> snapshot_character_actor(
       std::string_view character_name) const;
+  [[nodiscard]] std::vector<CharacterRecord> snapshot_online_characters();
   [[nodiscard]] std::optional<MonsterSnapshot> legacy_monster_snapshot(
       std::string_view map_id, std::uint64_t actor_id) const;
   void add_legacy_shut_up(std::string_view character_name, std::uint64_t duration_ms,
@@ -219,6 +220,8 @@ class LogicRuntime {
   void process_merchants(std::uint64_t now_ms, RuntimeDispatch& dispatch);
   void process_npcs(std::uint64_t now_ms, RuntimeDispatch& dispatch);
   void process_user_engine_timers(std::uint64_t now_ms, RuntimeDispatch& dispatch);
+  [[nodiscard]] RuntimeDispatch relocate_no_reconnect_player(std::uint64_t session_id,
+                                                             std::uint64_t now_ms);
   void process_legacy_event_creates(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void process_legacy_random_space_moves(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void process_cross_map_mails(RuntimeDispatch& dispatch);
@@ -256,6 +259,7 @@ class LogicRuntime {
   std::size_t npc_cur_{0};
   std::uint64_t last_ready_process_ms_{0};
   std::uint64_t one_zen_time_ms_{0};
+  bool one_zen_time_initialized_{false};
   std::uint64_t mission_time_ms_{0};
   std::uint64_t open_door_check_ms_{0};
   std::uint64_t timer10min_ms_{0};

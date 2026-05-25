@@ -23,7 +23,7 @@
 
 namespace mir2::client_v1 {
 
-constexpr std::uint32_t kProtocolVersion = 1;
+constexpr std::uint32_t kProtocolVersion = 2;
 
 /// 消息 ID 枚举：每个消息类型对应唯一的 16 位 ID
 /// 分组规则：1-99 会话，100-199 登录/账号，200-299 角色选择，
@@ -72,6 +72,9 @@ enum class MessageId : std::uint16_t {
   world_clear_objects = 318,
   map_change = 319,
   map_door_state = 320,
+  map_entered = 321,
+  actor_identity_update = 322,
+  map_description = 323,
   move_intent = 400,
   action_intent = 401,
   spell_intent = 402,
@@ -413,6 +416,32 @@ struct MapDoorState {
   bool open{false};
 };
 
+struct MapEntered {
+  std::string map_id{};
+  std::uint64_t self_actor_id{0};
+  std::int32_t x{0};
+  std::int32_t y{0};
+  std::uint8_t dir{0};
+};
+
+constexpr std::uint8_t kActorIdentityName = 1U;
+constexpr std::uint8_t kActorIdentityNameColor = 2U;
+constexpr std::uint8_t kActorIdentityFeature = 4U;
+constexpr std::uint8_t kActorIdentityStatus = 8U;
+
+struct ActorIdentityUpdate {
+  std::uint64_t actor_id{0};
+  std::uint8_t mask{0};
+  std::string name{};
+  std::uint32_t name_color{0xFFFFFFFFU};
+  std::int32_t feature{0};
+  std::int32_t status{0};
+};
+
+struct MapDescription {
+  std::string title{};
+};
+
 /// 主角能力摘要：驱动底部 HUD 的等级、经验、负重、金币和饥饿图标
 struct SelfAbility {
   std::uint16_t level{1};
@@ -557,6 +586,9 @@ struct MagicEntry {
   std::int32_t effect{0};
   std::int32_t max_train{0};
   std::int32_t effect_type{0};
+  std::int32_t spell{0};
+  std::int32_t def_spell{0};
+  std::int32_t max_train_level{0};
 };
 
 /// 魔法列表：服务端同步角色的所有魔法
@@ -1035,6 +1067,9 @@ using Message = std::variant<ClientHello,
                              WorldClearObjects,
                              MapChange,
                              MapDoorState,
+                             MapEntered,
+                             ActorIdentityUpdate,
+                             MapDescription,
                              ActorStateDelta,
                              LoginNotice,
                              LoginNoticeOk,
@@ -1295,6 +1330,9 @@ MIR2_CLIENT_V1_TRAIT(WorldSnapshot, world_snapshot);
 MIR2_CLIENT_V1_TRAIT(WorldClearObjects, world_clear_objects);
 MIR2_CLIENT_V1_TRAIT(MapChange, map_change);
 MIR2_CLIENT_V1_TRAIT(MapDoorState, map_door_state);
+MIR2_CLIENT_V1_TRAIT(MapEntered, map_entered);
+MIR2_CLIENT_V1_TRAIT(ActorIdentityUpdate, actor_identity_update);
+MIR2_CLIENT_V1_TRAIT(MapDescription, map_description);
 MIR2_CLIENT_V1_TRAIT(ActorStateDelta, actor_state_delta);
 MIR2_CLIENT_V1_TRAIT(LoginNotice, login_notice);
 MIR2_CLIENT_V1_TRAIT(LoginNoticeOk, login_notice_ok);
@@ -1443,6 +1481,9 @@ inline void encode(ByteWriter& writer, const MagicEntry& value) {
   writer.write_i32(value.effect);
   writer.write_i32(value.max_train);
   writer.write_i32(value.effect_type);
+  writer.write_i32(value.spell);
+  writer.write_i32(value.def_spell);
+  writer.write_i32(value.max_train_level);
 }
 
 inline bool decode(ByteReader& reader, MagicEntry& value) {
@@ -1450,7 +1491,8 @@ inline bool decode(ByteReader& reader, MagicEntry& value) {
          reader.read_u8(value.level) && reader.read_i32(value.train) &&
          reader.read_i32(value.delay_ms) && reader.read_string(value.name) &&
          reader.read_i32(value.effect) && reader.read_i32(value.max_train) &&
-         reader.read_i32(value.effect_type);
+         reader.read_i32(value.effect_type) && reader.read_i32(value.spell) &&
+         reader.read_i32(value.def_spell) && reader.read_i32(value.max_train_level);
 }
 
 inline void encode(ByteWriter& writer, const ClientHello& value) {
@@ -1806,6 +1848,42 @@ inline bool decode(ByteReader& reader, MapDoorState& value) {
   }
   value.open = open != 0U;
   return true;
+}
+
+inline void encode(ByteWriter& writer, const MapEntered& value) {
+  writer.write_string(value.map_id);
+  writer.write_u64(value.self_actor_id);
+  writer.write_i32(value.x);
+  writer.write_i32(value.y);
+  writer.write_u8(value.dir);
+}
+
+inline bool decode(ByteReader& reader, MapEntered& value) {
+  return reader.read_string(value.map_id) && reader.read_u64(value.self_actor_id) &&
+         reader.read_i32(value.x) && reader.read_i32(value.y) && reader.read_u8(value.dir);
+}
+
+inline void encode(ByteWriter& writer, const ActorIdentityUpdate& value) {
+  writer.write_u64(value.actor_id);
+  writer.write_u8(value.mask);
+  writer.write_string(value.name);
+  writer.write_u32(value.name_color);
+  writer.write_i32(value.feature);
+  writer.write_i32(value.status);
+}
+
+inline bool decode(ByteReader& reader, ActorIdentityUpdate& value) {
+  return reader.read_u64(value.actor_id) && reader.read_u8(value.mask) &&
+         reader.read_string(value.name) && reader.read_u32(value.name_color) &&
+         reader.read_i32(value.feature) && reader.read_i32(value.status);
+}
+
+inline void encode(ByteWriter& writer, const MapDescription& value) {
+  writer.write_string(value.title);
+}
+
+inline bool decode(ByteReader& reader, MapDescription& value) {
+  return reader.read_string(value.title);
 }
 
 inline void encode(ByteWriter& writer, const SelfAbility& value) {
@@ -3021,6 +3099,15 @@ inline std::optional<Message> decode_any(const Frame& frame) {
       break;
     case MessageId::map_door_state:
       if (auto value = decode_message<MapDoorState>(frame); value.has_value()) return Message{*value};
+      break;
+    case MessageId::map_entered:
+      if (auto value = decode_message<MapEntered>(frame); value.has_value()) return Message{*value};
+      break;
+    case MessageId::actor_identity_update:
+      if (auto value = decode_message<ActorIdentityUpdate>(frame); value.has_value()) return Message{*value};
+      break;
+    case MessageId::map_description:
+      if (auto value = decode_message<MapDescription>(frame); value.has_value()) return Message{*value};
       break;
     case MessageId::actor_state_delta:
       if (auto value = decode_message<ActorStateDelta>(frame); value.has_value()) return Message{*value};

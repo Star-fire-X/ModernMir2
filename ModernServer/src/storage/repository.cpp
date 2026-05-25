@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -19,6 +20,18 @@
 namespace mir2 {
 
 namespace {
+
+constexpr std::uint64_t kDeletedCharacterSaveVersionStride = 1ULL << 48;
+constexpr std::uint64_t kMaxSqliteSaveVersion =
+    static_cast<std::uint64_t>((std::numeric_limits<sqlite3_int64>::max)());
+
+std::uint64_t deleted_character_save_version_barrier(std::uint64_t save_version) {
+  if (save_version >= kMaxSqliteSaveVersion - kDeletedCharacterSaveVersionStride) {
+    return kMaxSqliteSaveVersion - 1;
+  }
+  return ((save_version / kDeletedCharacterSaveVersionStride) + 1) *
+         kDeletedCharacterSaveVersionStride;
+}
 
 std::string read_text_file(const std::filesystem::path& path) {
   std::ifstream file(path, std::ios::binary);
@@ -73,6 +86,27 @@ void finalize_statement(sqlite3_stmt* statement) {
 
 void bind_text(sqlite3_stmt* statement, int index, const std::string& value) {
   sqlite3_bind_text(statement, index, value.c_str(), -1, SQLITE_TRANSIENT);
+}
+
+std::optional<std::uint64_t> load_save_version(sqlite3* database, const std::string& account_id,
+                                               const std::string& character_name,
+                                               const char* table_name) {
+  sqlite3_stmt* statement = nullptr;
+  const auto sql = std::string("SELECT save_version FROM ") + table_name +
+                   " WHERE account_id = ?1 AND character_name = ?2 LIMIT 1;";
+  if (sqlite3_prepare_v2(database, sql.c_str(), -1, &statement, nullptr) != SQLITE_OK) {
+    throw std::runtime_error("Failed to prepare save_version statement.");
+  }
+
+  bind_text(statement, 1, account_id);
+  bind_text(statement, 2, character_name);
+  std::optional<std::uint64_t> version;
+  if (sqlite3_step(statement) == SQLITE_ROW) {
+    version =
+        static_cast<std::uint64_t>(std::max<sqlite3_int64>(0, sqlite3_column_int64(statement, 0)));
+  }
+  finalize_statement(statement);
+  return version;
 }
 
 template <typename T, std::size_t N>
@@ -675,6 +709,8 @@ CharacterRecord read_character_row(sqlite3_stmt* statement) {
   decode_slave_blob(statement, 45, record.slaves);
   record.body_luck = sqlite3_column_double(statement, 46);
   record.birth_items_granted = sqlite3_column_int(statement, 47) != 0;
+  record.save_version =
+      static_cast<std::uint64_t>(std::max<sqlite3_int64>(0, sqlite3_column_int64(statement, 48)));
   return record;
 }
 
@@ -776,6 +812,7 @@ void bind_character_fields(sqlite3_stmt* statement, const CharacterRecord& chara
   bind_blob_vector(statement, 46, slave_blob);
   sqlite3_bind_double(statement, 47, character.body_luck);
   sqlite3_bind_int(statement, 48, character.birth_items_granted ? 1 : 0);
+  sqlite3_bind_int64(statement, 49, static_cast<sqlite3_int64>(character.save_version));
 }
 
 AccountRecord make_default_account(const std::string& account_id, const std::string& password) {
@@ -938,6 +975,8 @@ void ensure_characters_columns(sqlite3* database) {
                 "ALTER TABLE characters ADD COLUMN body_luck REAL NOT NULL DEFAULT 0;");
   ensure_column(database, "characters", "birth_items_granted",
                 "ALTER TABLE characters ADD COLUMN birth_items_granted INTEGER NOT NULL DEFAULT 0;");
+  ensure_column(database, "characters", "save_version",
+                "ALTER TABLE characters ADD COLUMN save_version INTEGER NOT NULL DEFAULT 0;");
 }
 
 void ensure_merchant_state_columns(sqlite3* database) {
@@ -1503,7 +1542,7 @@ std::optional<CharacterRecord> Repository::load_character(const std::string& acc
       " max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight, equipped_blob,"
       " bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode, pk_point,"
       " death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob, body_luck, birth_items_granted FROM characters"
+      " daily_quest, slave_blob, body_luck, birth_items_granted, save_version FROM characters"
       " WHERE account_id = ?1 AND character_name = ?2"
       " LIMIT 1;";
 
@@ -1534,7 +1573,7 @@ std::optional<CharacterRecord> Repository::load_character_by_name(
       " max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight, equipped_blob,"
       " bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode, pk_point,"
       " death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob, body_luck, birth_items_granted FROM characters"
+      " daily_quest, slave_blob, body_luck, birth_items_granted, save_version FROM characters"
       " WHERE character_name = ?1"
       " ORDER BY updated_at DESC, account_id ASC"
       " LIMIT 1;";
@@ -1562,7 +1601,7 @@ std::vector<CharacterRecord> Repository::list_characters(const std::string& acco
       " max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight, equipped_blob,"
       " bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode, pk_point,"
       " death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob, body_luck, birth_items_granted FROM characters WHERE account_id = ?1"
+      " daily_quest, slave_blob, body_luck, birth_items_granted, save_version FROM characters WHERE account_id = ?1"
       " ORDER BY updated_at DESC, character_name ASC;";
 
   sqlite3_stmt* statement = nullptr;
@@ -1581,6 +1620,13 @@ std::vector<CharacterRecord> Repository::list_characters(const std::string& acco
 
 bool Repository::create_character(const CharacterRecord& character) {
   ensure_account(database_, character.account_id);
+  auto character_to_create = character;
+  const auto tombstone_version =
+      load_save_version(database_, character.account_id, character.character_name,
+                        "character_save_tombstones");
+  if (tombstone_version.has_value() && *tombstone_version >= character_to_create.save_version) {
+    character_to_create.save_version = *tombstone_version + 1;
+  }
 
   static constexpr const char* kSql =
       "INSERT INTO characters(account_id, character_name, map_id, x, y, dir, light, job, sex, hair,"
@@ -1588,17 +1634,17 @@ bool Repository::create_character(const CharacterRecord& character) {
       " weight, max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight,"
       " equipped_blob, bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode,"
       " pk_point, death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob, body_luck, birth_items_granted)"
+      " daily_quest, slave_blob, body_luck, birth_items_granted, save_version)"
       " VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,"
       " ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36,"
-      " ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48);";
+      " ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49);";
 
   sqlite3_stmt* statement = nullptr;
   if (sqlite3_prepare_v2(database_, kSql, -1, &statement, nullptr) != SQLITE_OK) {
     throw std::runtime_error("Failed to prepare create_character statement.");
   }
 
-  bind_character_fields(statement, character);
+  bind_character_fields(statement, character_to_create);
 
   const auto result = sqlite3_step(statement);
   finalize_statement(statement);
@@ -1606,68 +1652,127 @@ bool Repository::create_character(const CharacterRecord& character) {
 }
 
 bool Repository::delete_character(const std::string& account_id, const std::string& character_name) {
-  static constexpr const char* kSql =
-      "DELETE FROM characters WHERE account_id = ?1 AND character_name = ?2;";
-
-  sqlite3_stmt* statement = nullptr;
-  if (sqlite3_prepare_v2(database_, kSql, -1, &statement, nullptr) != SQLITE_OK) {
-    throw std::runtime_error("Failed to prepare delete_character statement.");
+  const auto save_version =
+      load_save_version(database_, account_id, character_name, "characters");
+  if (!save_version.has_value()) {
+    return false;
   }
+  const auto tombstone_save_version = deleted_character_save_version_barrier(*save_version);
+  exec_or_throw(database_, "BEGIN IMMEDIATE;");
+  bool deleted = false;
+  try {
+    static constexpr const char* kTombstoneSql =
+        "INSERT INTO character_save_tombstones(account_id, character_name, save_version, deleted_at)"
+        " VALUES(?1, ?2, ?3, CURRENT_TIMESTAMP)"
+        " ON CONFLICT(account_id, character_name) DO UPDATE SET"
+        " save_version = MAX(character_save_tombstones.save_version, excluded.save_version),"
+        " deleted_at = CURRENT_TIMESTAMP;";
+    static constexpr const char* kDeleteSql =
+        "DELETE FROM characters WHERE account_id = ?1 AND character_name = ?2;";
 
-  bind_text(statement, 1, account_id);
-  bind_text(statement, 2, character_name);
-  const auto result = sqlite3_step(statement);
-  const auto changes = sqlite3_changes(database_);
-  finalize_statement(statement);
-  return result == SQLITE_DONE && changes > 0;
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2(database_, kTombstoneSql, -1, &statement, nullptr) != SQLITE_OK) {
+      throw std::runtime_error("Failed to prepare delete_character tombstone statement.");
+    }
+    bind_text(statement, 1, account_id);
+    bind_text(statement, 2, character_name);
+    sqlite3_bind_int64(statement, 3, static_cast<sqlite3_int64>(tombstone_save_version));
+    if (sqlite3_step(statement) != SQLITE_DONE) {
+      finalize_statement(statement);
+      throw std::runtime_error("Failed to execute delete_character tombstone statement.");
+    }
+    finalize_statement(statement);
+
+    if (sqlite3_prepare_v2(database_, kDeleteSql, -1, &statement, nullptr) != SQLITE_OK) {
+      throw std::runtime_error("Failed to prepare delete_character statement.");
+    }
+
+    bind_text(statement, 1, account_id);
+    bind_text(statement, 2, character_name);
+    const auto result = sqlite3_step(statement);
+    const auto changes = sqlite3_changes(database_);
+    finalize_statement(statement);
+    if (result != SQLITE_DONE) {
+      throw std::runtime_error("Failed to execute delete_character statement.");
+    }
+    deleted = changes > 0;
+    exec_or_throw(database_, deleted ? "COMMIT;" : "ROLLBACK;");
+  } catch (...) {
+    try {
+      exec_or_throw(database_, "ROLLBACK;");
+    } catch (...) {
+    }
+    throw;
+  }
+  return deleted;
 }
 
-void Repository::save_character(const CharacterRecord& character) {
+bool Repository::save_character(const CharacterRecord& character) {
   ensure_account(database_, character.account_id);
+  exec_or_throw(database_, "BEGIN IMMEDIATE;");
+  try {
+    const auto tombstone_version =
+        load_save_version(database_, character.account_id, character.character_name,
+                          "character_save_tombstones");
+    if (tombstone_version.has_value() && *tombstone_version >= character.save_version) {
+      exec_or_throw(database_, "ROLLBACK;");
+      return false;
+    }
 
-  static constexpr const char* kSql =
-      "INSERT INTO characters(account_id, character_name, map_id, x, y, dir, light, job, sex, hair,"
-      " gold, feature, status, level, hp, mp, max_hp, max_mp, ac, mac, dc, mc, sc, exp, max_exp,"
-      " weight, max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight,"
-      " equipped_blob, bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode,"
-      " pk_point, death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
-      " daily_quest, slave_blob, body_luck, birth_items_granted)"
-      " VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,"
-      " ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36,"
-      " ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48)"
-      " ON CONFLICT(account_id, character_name) DO UPDATE SET map_id = excluded.map_id,"
-      " x = excluded.x, y = excluded.y, dir = excluded.dir, light = excluded.light, job = excluded.job,"
-      " sex = excluded.sex, hair = excluded.hair, gold = excluded.gold,"
-      " feature = excluded.feature, status = excluded.status, level = excluded.level,"
-      " hp = excluded.hp, mp = excluded.mp, max_hp = excluded.max_hp,"
-      " max_mp = excluded.max_mp, ac = excluded.ac, mac = excluded.mac, dc = excluded.dc,"
-      " mc = excluded.mc, sc = excluded.sc, exp = excluded.exp, max_exp = excluded.max_exp,"
-      " weight = excluded.weight, max_weight = excluded.max_weight,"
-      " wear_weight = excluded.wear_weight, max_wear_weight = excluded.max_wear_weight,"
-      " hand_weight = excluded.hand_weight, max_hand_weight = excluded.max_hand_weight,"
-      " equipped_blob = excluded.equipped_blob, bag_blob = excluded.bag_blob,"
-      " storage_blob = excluded.storage_blob, magic_blob = excluded.magic_blob,"
-      " guild_name = excluded.guild_name, guild_title = excluded.guild_title,"
-      " attack_mode = excluded.attack_mode, pk_point = excluded.pk_point,"
-      " death_time_ms = excluded.death_time_ms, quest_blob = excluded.quest_blob,"
-      " quest_open_blob = excluded.quest_open_blob, quest_unit_blob = excluded.quest_unit_blob,"
-      " script_param_blob = excluded.script_param_blob, daily_quest = excluded.daily_quest,"
-      " slave_blob = excluded.slave_blob, body_luck = excluded.body_luck,"
-      " birth_items_granted = excluded.birth_items_granted,"
-      " updated_at = CURRENT_TIMESTAMP;";
+    static constexpr const char* kSql =
+        "INSERT INTO characters(account_id, character_name, map_id, x, y, dir, light, job, sex, hair,"
+        " gold, feature, status, level, hp, mp, max_hp, max_mp, ac, mac, dc, mc, sc, exp, max_exp,"
+        " weight, max_weight, wear_weight, max_wear_weight, hand_weight, max_hand_weight,"
+        " equipped_blob, bag_blob, storage_blob, magic_blob, guild_name, guild_title, attack_mode,"
+        " pk_point, death_time_ms, quest_blob, quest_open_blob, quest_unit_blob, script_param_blob,"
+        " daily_quest, slave_blob, body_luck, birth_items_granted, save_version)"
+        " VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,"
+        " ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36,"
+        " ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49)"
+        " ON CONFLICT(account_id, character_name) DO UPDATE SET map_id = excluded.map_id,"
+        " x = excluded.x, y = excluded.y, dir = excluded.dir, light = excluded.light, job = excluded.job,"
+        " sex = excluded.sex, hair = excluded.hair, gold = excluded.gold,"
+        " feature = excluded.feature, status = excluded.status, level = excluded.level,"
+        " hp = excluded.hp, mp = excluded.mp, max_hp = excluded.max_hp,"
+        " max_mp = excluded.max_mp, ac = excluded.ac, mac = excluded.mac, dc = excluded.dc,"
+        " mc = excluded.mc, sc = excluded.sc, exp = excluded.exp, max_exp = excluded.max_exp,"
+        " weight = excluded.weight, max_weight = excluded.max_weight,"
+        " wear_weight = excluded.wear_weight, max_wear_weight = excluded.max_wear_weight,"
+        " hand_weight = excluded.hand_weight, max_hand_weight = excluded.max_hand_weight,"
+        " equipped_blob = excluded.equipped_blob, bag_blob = excluded.bag_blob,"
+        " storage_blob = excluded.storage_blob, magic_blob = excluded.magic_blob,"
+        " guild_name = excluded.guild_name, guild_title = excluded.guild_title,"
+        " attack_mode = excluded.attack_mode, pk_point = excluded.pk_point,"
+        " death_time_ms = excluded.death_time_ms, quest_blob = excluded.quest_blob,"
+        " quest_open_blob = excluded.quest_open_blob, quest_unit_blob = excluded.quest_unit_blob,"
+        " script_param_blob = excluded.script_param_blob, daily_quest = excluded.daily_quest,"
+        " slave_blob = excluded.slave_blob, body_luck = excluded.body_luck,"
+        " birth_items_granted = excluded.birth_items_granted,"
+        " save_version = excluded.save_version, updated_at = CURRENT_TIMESTAMP"
+        " WHERE excluded.save_version >= characters.save_version;";
 
-  sqlite3_stmt* statement = nullptr;
-  if (sqlite3_prepare_v2(database_, kSql, -1, &statement, nullptr) != SQLITE_OK) {
-    throw std::runtime_error("Failed to prepare save_character statement.");
-  }
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2(database_, kSql, -1, &statement, nullptr) != SQLITE_OK) {
+      throw std::runtime_error("Failed to prepare save_character statement.");
+    }
 
-  bind_character_fields(statement, character);
+    bind_character_fields(statement, character);
 
-  if (sqlite3_step(statement) != SQLITE_DONE) {
+    if (sqlite3_step(statement) != SQLITE_DONE) {
+      finalize_statement(statement);
+      throw std::runtime_error("Failed to execute save_character statement.");
+    }
+    const auto saved = sqlite3_changes(database_) > 0;
     finalize_statement(statement);
-    throw std::runtime_error("Failed to execute save_character statement.");
+    exec_or_throw(database_, "COMMIT;");
+    return saved;
+  } catch (...) {
+    try {
+      exec_or_throw(database_, "ROLLBACK;");
+    } catch (...) {
+    }
+    throw;
   }
-  finalize_statement(statement);
 }
 
 void Repository::record_legacy_import(const LegacyImportRecord& record) {

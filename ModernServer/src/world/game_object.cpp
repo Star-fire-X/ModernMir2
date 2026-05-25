@@ -254,6 +254,7 @@ constexpr std::int32_t kRcDualAxeSkeleton = 87;
 constexpr std::int32_t kRcBigKudeki = 90;
 constexpr std::int32_t kRcMagCowFaceMon = 91;
 constexpr std::int32_t kRcThornDark = 93;
+constexpr std::int32_t kRcDigOutZombi = 95;
 constexpr std::int32_t kRcToxicGhost = 127;
 constexpr std::int32_t kRcBeeQueen = 103;
 constexpr std::int32_t kRcArcherMon = 104;
@@ -604,6 +605,17 @@ const LegacyUserItem* Player::bag_item(
   return nullptr;
 }
 
+std::optional<std::size_t> Player::bag_item_index(
+    std::int32_t make_index, std::string_view expected_name,
+    const std::unordered_map<std::int32_t, ItemConfig>& item_configs) const {
+  for (std::size_t index = 0; index < character_.bag_items.size(); ++index) {
+    if (matches_item(character_.bag_items[index], make_index, expected_name, item_configs)) {
+      return index;
+    }
+  }
+  return std::nullopt;
+}
+
 const LegacyUserItem* Player::storage_item(
     std::int32_t make_index, std::string_view expected_name,
     const std::unordered_map<std::int32_t, ItemConfig>& item_configs) const {
@@ -736,6 +748,7 @@ std::optional<LegacyUserItem> Player::remove_bag_item(
     if (matches_item(item, make_index, expected_name, item_configs)) {
       const auto removed = item;
       item = LegacyUserItem{};
+      compact_legacy_items(character_.bag_items);
       return removed;
     }
   }
@@ -748,6 +761,7 @@ std::optional<LegacyUserItem> Player::remove_bag_item_at(std::size_t slot) {
   }
   const auto removed = character_.bag_items[slot];
   character_.bag_items[slot] = LegacyUserItem{};
+  compact_legacy_items(character_.bag_items);
   return removed;
 }
 
@@ -2137,6 +2151,11 @@ Monster::Monster(std::uint64_t id, std::string name, std::string map_id, std::in
       dig_up_range_ = 4;
       dig_down_range_ = 4;
       run_next_tick_ms_ = 250;
+      break;
+    case kRcDigOutZombi:
+      hide_mode_ = true;
+      dig_up_range_ = 3;
+      search_rate_ms_ = search_rate_ms != 0 ? search_rate_ms : 2500;
       break;
     case kRcCentipedeKing:
       hide_mode_ = true;

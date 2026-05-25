@@ -1651,6 +1651,19 @@ bool MapActor::legacy_monster_special_run(Monster& monster, RuntimeDispatch& dis
       trace_mail.actor_id = monster.id();
       add_legacy_trace(dispatch, "MonsterSpecial", "dig_up", trace_mail,
                        current_tick, now_ms, true, monster.race_server(), 0, "RM_DIGUP");
+      if (behavior == LegacyMonsterRaceBehavior::digout_zombi) {
+        LegacyEventRecord event;
+        event.map_id = config_.id;
+        event.x = monster.x();
+        event.y = monster.y();
+        event.type = LegacyEventType::digout_zombi;
+        event.open_start_ms = now_ms;
+        event.continue_ms = 5ULL * 60ULL * 1000ULL;
+        event.run_start_ms = now_ms;
+        event.run_tick_ms = 500;
+        event.blocks_walk = false;
+        dispatch.legacy_event_creates.push_back(event);
+      }
     }
     return true;
   }

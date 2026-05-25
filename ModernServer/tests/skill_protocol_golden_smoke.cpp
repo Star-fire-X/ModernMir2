@@ -158,6 +158,7 @@ int main() {
   assert(fireball.legacy.legacy_present);
 
   mir2::HostConfig config;
+  config.budgets.tick_ms = 20;
   config.maps.push_back(mir2::MapConfig{"0", "ProtocolMap", {}, 20, 20, 10, 10});
   config.magics.push_back(fireball);
 
@@ -193,6 +194,7 @@ int main() {
 
   {
     mir2::HostConfig spell_config;
+    spell_config.budgets.tick_ms = 20;
     spell_config.runtime.legacy_random_seed = 1;
     spell_config.maps.push_back(mir2::MapConfig{"0", "UndeadMagicMap", {}, 20, 20, 10, 10});
     spell_config.spawns.push_back(

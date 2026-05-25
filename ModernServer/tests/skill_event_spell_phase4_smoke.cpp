@@ -245,10 +245,27 @@ bool has_trace_success(const mir2::RuntimeDispatch& dispatch, const std::string&
 
 bool has_event_trace(const mir2::RuntimeDispatch& dispatch, const std::string& action,
                      mir2::LegacyEventType type) {
-  const auto type_name = type == mir2::LegacyEventType::fire_burn ? "fire_burn" :
-                         type == mir2::LegacyEventType::holy_curtain ? "holy_curtain" :
-                         type == mir2::LegacyEventType::stone_mine ? "stone_mine" :
-                                                                      "pile_stones";
+  std::string type_name;
+  switch (type) {
+    case mir2::LegacyEventType::stone_mine:
+      type_name = "stone_mine";
+      break;
+    case mir2::LegacyEventType::digout_zombi:
+      type_name = "digout_zombi";
+      break;
+    case mir2::LegacyEventType::pile_stones:
+      type_name = "pile_stones";
+      break;
+    case mir2::LegacyEventType::holy_curtain:
+      type_name = "holy_curtain";
+      break;
+    case mir2::LegacyEventType::fire_burn:
+      type_name = "fire_burn";
+      break;
+    case mir2::LegacyEventType::sculp_piece:
+      type_name = "sculp_piece";
+      break;
+  }
   return std::any_of(dispatch.legacy_traces.begin(), dispatch.legacy_traces.end(),
                      [&](const mir2::LegacyRuntimeTrace& trace) {
                        return trace.stage == "LegacyEventManager" &&

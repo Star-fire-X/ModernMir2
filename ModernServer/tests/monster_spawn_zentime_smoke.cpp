@@ -113,16 +113,18 @@ int main() {
     runtime.initialize();
 
     const auto first = runtime.tick(1000);
-    const auto first_spawns = spawn_traces(first);
+    assert(spawn_traces(first).empty());
+    const auto first_spawn_dispatch = runtime.tick(1201);
+    const auto first_spawns = spawn_traces(first_spawn_dispatch);
     assert(first_spawns.size() == 1);
 
     queue_enter(runtime, 7, "Hero", 10, 10);
-    assert(find_packet(runtime.tick(1020), mir2::kSmNewMap).has_value());
+    assert(find_packet(runtime.tick(1220), mir2::kSmNewMap).has_value());
     queue_attack(runtime, 7, first_spawns.front().actor_id);
-    assert(find_packet(runtime.tick(1040), mir2::kSmDeath).has_value());
+    assert(find_packet(runtime.tick(1240), mir2::kSmDeath).has_value());
 
-    assert(spawn_traces(runtime.tick(1200)).empty());
-    assert(spawn_traces(runtime.tick(1201)).size() == 1);
+    assert(spawn_traces(runtime.tick(1401)).empty());
+    assert(spawn_traces(runtime.tick(1402)).size() == 1);
   }
 
   {
@@ -130,15 +132,17 @@ int main() {
     runtime.initialize();
 
     const auto first = runtime.tick(1000);
-    const auto first_spawns = spawn_traces(first);
+    assert(spawn_traces(first).empty());
+    const auto first_spawn_dispatch = runtime.tick(1201);
+    const auto first_spawns = spawn_traces(first_spawn_dispatch);
     assert(first_spawns.size() == 1);
 
-    assert(spawn_traces(runtime.tick(1201)).empty());
+    assert(spawn_traces(runtime.tick(1402)).empty());
 
     queue_enter(runtime, 7, "Hero", 10, 10);
-    assert(find_packet(runtime.tick(1220), mir2::kSmNewMap).has_value());
+    assert(find_packet(runtime.tick(1420), mir2::kSmNewMap).has_value());
     queue_attack(runtime, 7, first_spawns.front().actor_id);
-    assert(find_packet(runtime.tick(1240), mir2::kSmDeath).has_value());
+    assert(find_packet(runtime.tick(1440), mir2::kSmDeath).has_value());
 
     assert(spawn_traces(runtime.tick(1603)).empty());
     assert(spawn_traces(runtime.tick(1804)).size() == 1);
@@ -152,18 +156,20 @@ int main() {
     runtime.initialize();
 
     const auto first = runtime.tick(1000);
-    const auto first_spawns = spawn_traces(first);
+    assert(spawn_traces(first).empty());
+    const auto first_spawn_dispatch = runtime.tick(1201);
+    const auto first_spawns = spawn_traces(first_spawn_dispatch);
     assert(first_spawns.size() == 1);
 
     for (std::int32_t i = 0; i < 6; ++i) {
       queue_enter(runtime, static_cast<std::uint64_t>(20 + i), "Hero" + std::to_string(i),
                   10 + i, 12);
     }
-    assert(find_packet(runtime.tick(1020), mir2::kSmNewMap).has_value());
+    assert(find_packet(runtime.tick(1220), mir2::kSmNewMap).has_value());
 
     queue_attack(runtime, 20, first_spawns.front().actor_id);
-    assert(find_packet(runtime.tick(1040), mir2::kSmDeath).has_value());
-    assert(spawn_traces(runtime.tick(1201)).size() == 1);
+    assert(find_packet(runtime.tick(1240), mir2::kSmDeath).has_value());
+    assert(spawn_traces(runtime.tick(1402)).size() == 1);
   }
 
   return 0;

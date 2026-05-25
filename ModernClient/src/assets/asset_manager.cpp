@@ -70,6 +70,31 @@ bool is_antihack_map_id(const std::string& map_id) {
          upper == "LABY04" || upper == "SNAKE";
 }
 
+void apply_legacy_map_unblock_patch(const std::string& map_id, MapDocument& map) {
+  if (map_id != "3") {
+    return;
+  }
+  constexpr std::array<std::pair<int, int>, 7> kMap3UnblockedCells{{
+      {624, 278},
+      {627, 278},
+      {634, 271},
+      {564, 287},
+      {564, 286},
+      {661, 277},
+      {578, 296},
+  }};
+  for (const auto& [x, y] : kMap3UnblockedCells) {
+    if (x < 0 || y < 0 || x >= map.width || y >= map.height) {
+      continue;
+    }
+    auto& cell = map.cells[static_cast<std::size_t>(y) *
+                               static_cast<std::size_t>(map.width) +
+                           static_cast<std::size_t>(x)];
+    cell.bk_img &= 0x7FFFU;
+    cell.fr_img &= 0x7FFFU;
+  }
+}
+
 // 将调色板颜色（BGR 各 8 位）转换为 32 位 BGRA 像素
 // 经典传奇客户端约定：纯黑色（0,0,0）为透明色
 // 故当 R=G=B=0 时返回 Alpha=0，否则 Alpha=255
@@ -485,6 +510,7 @@ std::shared_ptr<MapDocument> AssetManager::decode_map(const std::string& map_id)
       cell.light = bytes[source + 11U];
     }
   }
+  apply_legacy_map_unblock_patch(map_id, *map);
   return map;
 }
 

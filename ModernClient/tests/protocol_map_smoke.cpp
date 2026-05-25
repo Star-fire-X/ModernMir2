@@ -258,11 +258,12 @@ void assert_p0_protocol_goldens() {
   using namespace mir2::client_v1;
 
   Bytes payload;
-  append_u32(payload, 1);
+  append_u32(payload, kProtocolVersion);
   append_u32(payload, 0x01020304U);
   append_u32(payload, 0xA0B0C0D0U);
   append_u32(payload, 0x0F0E0D0CU);
-  assert_golden(ClientHello{1, 0x01020304U, 0xA0B0C0D0U, 0x0F0E0D0CU}, 1, 1, payload);
+  assert_golden(ClientHello{kProtocolVersion, 0x01020304U, 0xA0B0C0D0U, 0x0F0E0D0CU}, 1, 1,
+                payload);
 
   payload.clear();
   append_string(payload, "id");
@@ -371,6 +372,36 @@ void assert_p0_protocol_goldens() {
   append_i32(payload, 13);
   append_u8(payload, 1);
   assert_golden(MapDoorState{12, 13, true}, 320, 144, payload);
+
+  payload.clear();
+  append_string(payload, "1");
+  append_u64(payload, 1000);
+  append_i32(payload, 5);
+  append_i32(payload, 6);
+  append_u8(payload, 2);
+  assert_golden(MapEntered{"1", 1000, 5, 6, 2}, 321, 145, payload);
+
+  payload.clear();
+  append_u64(payload, 1000);
+  append_u8(payload, kActorIdentityName | kActorIdentityNameColor |
+                         kActorIdentityFeature | kActorIdentityStatus);
+  append_string(payload, "Hero");
+  append_u32(payload, 196);
+  append_i32(payload, 0x01020304);
+  append_i32(payload, 8);
+  assert_golden(ActorIdentityUpdate{1000,
+                                    static_cast<std::uint8_t>(
+                                        kActorIdentityName | kActorIdentityNameColor |
+                                        kActorIdentityFeature | kActorIdentityStatus),
+                                    "Hero",
+                                    196,
+                                    0x01020304,
+                                    8},
+                322, 146, payload);
+
+  payload.clear();
+  append_string(payload, "Bichon");
+  assert_golden(MapDescription{"Bichon"}, 323, 147, payload);
 
   payload.clear();
   append_world_actor(payload, 2000, "Hen", 332, 271, 4, 0, 0, 2);
@@ -883,6 +914,50 @@ int main() {
   const auto decoded_map_change = decode_message<MapChange>(frames.front());
   assert(decoded_map_change.has_value());
   assert(decoded_map_change->map_id == "1");
+
+  frame_bytes = encode_frame(make_frame(MapEntered{"1", 1000, 5, 6, 2}, 215));
+  buffer = frame_bytes;
+  frames = drain_frames(buffer);
+  assert(frames.size() == 1);
+  assert(frames.front().message_id == MessageId::map_entered);
+  const auto decoded_map_entered = decode_message<MapEntered>(frames.front());
+  assert(decoded_map_entered.has_value());
+  assert(decoded_map_entered->map_id == "1");
+  assert(decoded_map_entered->self_actor_id == 1000);
+  assert(decoded_map_entered->x == 5 && decoded_map_entered->y == 6);
+  assert(decoded_map_entered->dir == 2);
+
+  frame_bytes = encode_frame(make_frame(
+      ActorIdentityUpdate{1000,
+                          static_cast<std::uint8_t>(kActorIdentityName |
+                                                    kActorIdentityNameColor |
+                                                    kActorIdentityFeature |
+                                                    kActorIdentityStatus),
+                          "Hero",
+                          196,
+                          0x01020304,
+                          8},
+      216));
+  buffer = frame_bytes;
+  frames = drain_frames(buffer);
+  assert(frames.size() == 1);
+  assert(frames.front().message_id == MessageId::actor_identity_update);
+  const auto decoded_identity = decode_message<ActorIdentityUpdate>(frames.front());
+  assert(decoded_identity.has_value());
+  assert(decoded_identity->actor_id == 1000);
+  assert(decoded_identity->name == "Hero");
+  assert(decoded_identity->name_color == 196);
+  assert(decoded_identity->feature == 0x01020304);
+  assert(decoded_identity->status == 8);
+
+  frame_bytes = encode_frame(make_frame(MapDescription{"Bichon"}, 217));
+  buffer = frame_bytes;
+  frames = drain_frames(buffer);
+  assert(frames.size() == 1);
+  assert(frames.front().message_id == MessageId::map_description);
+  const auto decoded_description = decode_message<MapDescription>(frames.front());
+  assert(decoded_description.has_value());
+  assert(decoded_description->title == "Bichon");
 
   frame_bytes = encode_frame(make_frame(MapDoorState{12, 13, true}, 214));
   buffer = frame_bytes;

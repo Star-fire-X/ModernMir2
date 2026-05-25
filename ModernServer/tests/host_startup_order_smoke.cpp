@@ -28,11 +28,20 @@ class RecordingModule final : public mir2::Module {
   }
 
   void stop() override {
+    if (!running_) {
+      return;
+    }
     running_ = false;
     events_.push_back("stop:" + module_name_);
   }
 
-  void join() override { events_.push_back("join:" + module_name_); }
+  void join() override {
+    if (joined_) {
+      return;
+    }
+    joined_ = true;
+    events_.push_back("join:" + module_name_);
+  }
 
   [[nodiscard]] std::unordered_map<std::string, std::string> snapshot() const override {
     return {{"running", running_ ? "true" : "false"}};
@@ -42,6 +51,7 @@ class RecordingModule final : public mir2::Module {
   std::string module_name_{};
   std::vector<std::string>& events_;
   bool running_{false};
+  bool joined_{false};
 };
 
 mir2::HostConfig make_config(const std::filesystem::path& temp_root) {
@@ -97,8 +107,8 @@ void check_runtime_sequence(const std::filesystem::path& temp_root,
 
   const std::vector<std::string> expected_prefix{
       "start:first", "start:second", "start:third",
-      "stop:first", "stop:second", "stop:third",
-      "join:first", "join:second", "join:third"};
+      "stop:third", "join:third", "stop:second", "join:second", "stop:first",
+      "join:first"};
   assert(events.size() >= expected_prefix.size());
   for (std::size_t index = 0; index < expected_prefix.size(); ++index) {
     assert(events[index] == expected_prefix[index]);

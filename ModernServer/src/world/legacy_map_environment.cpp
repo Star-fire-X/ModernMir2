@@ -39,10 +39,7 @@ bool LegacyMapEnvironment::static_can_move(std::int32_t x, std::int32_t y) const
   }
   if (movement_map_ != nullptr) {
     const auto* target = movement_map_->cell(x, y);
-    if (target == nullptr || legacy::MapDocument::terrain_blocks_move(*target)) {
-      return false;
-    }
-    return !legacy::MapDocument::door_blocks_move(*target) || door_is_open(x, y);
+    return target != nullptr && !legacy::MapDocument::terrain_blocks_move(*target);
   }
   return true;
 }
@@ -53,10 +50,7 @@ bool LegacyMapEnvironment::static_can_fly(std::int32_t x, std::int32_t y) const 
   }
   if (movement_map_ != nullptr) {
     const auto* target = movement_map_->cell(x, y);
-    if (target == nullptr || (target->fr_img & 0x8000U) != 0U) {
-      return false;
-    }
-    return !legacy::MapDocument::door_blocks_move(*target) || door_is_open(x, y);
+    return target != nullptr && (target->fr_img & 0x8000U) == 0U;
   }
   return true;
 }

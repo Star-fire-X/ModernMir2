@@ -167,9 +167,9 @@ int main() {
   assert(snapshot->gold == 1234);
   assert(snapshot->body_luck < 10000.0);
   assert(mir2::is_empty(snapshot->equipped_items[mir2::kEquipRingLeft]));
-  assert(mir2::is_empty(snapshot->bag_items[0]));
-  assert(!mir2::is_empty(snapshot->bag_items[1]));
-  assert(snapshot->bag_items[1].make_index == 2003);
+  assert(!mir2::is_empty(snapshot->bag_items[0]));
+  assert(snapshot->bag_items[0].make_index == 2003);
+  assert(mir2::is_empty(snapshot->bag_items[1]));
 
   const auto item_show_count = std::count_if(
       dispatch.session_events.begin(), dispatch.session_events.end(),

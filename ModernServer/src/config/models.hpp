@@ -111,7 +111,7 @@ struct PortConfig {
 };
 
 struct LogicBudgetConfig {
-  std::uint32_t tick_ms{20};
+  std::uint32_t tick_ms{10};
   std::uint32_t player_budget_ms{30};
   std::uint32_t player_input_budget_per_tick{1};
   std::uint32_t monster_budget_ms{30};
@@ -134,6 +134,16 @@ struct MapGateConfig {
   std::int32_t target_x{0};
   std::int32_t target_y{0};
   bool require_doors_open{true};
+};
+
+struct NpcDialogSectionConfig {
+  std::string action{};
+  std::string text{};
+};
+
+struct MapEntryQuestConfig {
+  std::string qfile{};
+  std::vector<NpcDialogSectionConfig> dialog_sections{};
 };
 
 struct MapConfig {
@@ -162,6 +172,21 @@ struct MapConfig {
   std::string back_map{};
   std::vector<MapGateConfig> gates{};
   bool quiz_zone{false};
+  std::int32_t need_set_number{-1};
+  std::int32_t need_set_value{-1};
+  std::optional<MapEntryQuestConfig> check_quest{};
+};
+
+struct MapEntryRuleConfig {
+  std::string map_id{};
+  std::filesystem::path source_map{};
+  std::int32_t width{0};
+  std::int32_t height{0};
+  std::int32_t need_level{0};
+  bool need_hole{false};
+  std::int32_t need_set_number{-1};
+  std::int32_t need_set_value{-1};
+  std::optional<MapEntryQuestConfig> check_quest{};
 };
 
 struct SpawnConfig {
@@ -309,11 +334,6 @@ struct MagicConfig {
   std::int32_t slow_percent{0};
   std::int32_t shield_amount{0};
   LegacyMagicDefinition legacy{};
-};
-
-struct NpcDialogSectionConfig {
-  std::string action{};
-  std::string text{};
 };
 
 struct MerchantProductConfig {

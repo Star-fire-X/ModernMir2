@@ -71,7 +71,9 @@ class WorldService : public Module {
   [[nodiscard]] RuntimeDispatch handle_persist_result(const PersistResult& result);
   void queue_gate_events(RuntimeDispatch& dispatch);
   [[nodiscard]] RuntimeDispatch run_legacy_socket_stage(std::uint64_t now_ms);
+  [[nodiscard]] RuntimeDispatch run_server_message_stage(std::uint64_t now_ms);
   bool post_gate_event(SessionEvent& event);
+  void assign_character_save_versions(RuntimeDispatch& dispatch);
   void flush_dispatch(RuntimeDispatch dispatch);
 
   HostContext* context_{nullptr};
@@ -87,6 +89,7 @@ class WorldService : public Module {
   std::unordered_map<std::int32_t, Admission> admissions_{};
   std::unordered_map<std::uint64_t, Admission> active_sessions_{};
   std::unordered_map<std::string, std::uint64_t> active_accounts_{};
+  std::unordered_map<std::string, std::uint64_t> character_save_versions_{};
   std::unordered_map<std::uint64_t, std::string> session_gateways_{};
   std::unordered_map<std::uint64_t, std::uint64_t> session_sequence_watermarks_{};
   std::unordered_set<std::uint64_t> session_actions_this_frame_{};

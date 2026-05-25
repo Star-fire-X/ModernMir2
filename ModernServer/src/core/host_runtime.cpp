@@ -61,10 +61,21 @@ void HostRuntime::start_all() {
 
 void HostRuntime::stop_all() {
   shutdown_.request_stop();
-  bus_.close_all();
-  for (auto& module : modules_) {
-    module->stop();
+  for (auto it = modules_.rbegin(); it != modules_.rend(); ++it) {
+    if ((*it)->name() == "persistence_service") {
+      continue;
+    }
+    (*it)->stop();
+    (*it)->join();
   }
+  for (auto& module : modules_) {
+    if (module->name() != "persistence_service") {
+      continue;
+    }
+    module->stop();
+    module->join();
+  }
+  bus_.close_all();
 }
 
 void HostRuntime::join_all() {

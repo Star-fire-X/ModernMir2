@@ -223,9 +223,38 @@ InputState input_for_legacy_event(const InputState& source, const LegacyInputEve
 }
 
 void merge_ui_input(ui::UiInputResult& merged, const ui::UiInputResult& next) {
+  const auto merged_non_hover_consumed = merged.consumed && !merged.hover_consumed;
+  const auto next_non_hover_consumed = next.consumed && !next.hover_consumed;
+  const auto any_hover_consumed = merged.hover_consumed || next.hover_consumed;
   merged.consumed = merged.consumed || next.consumed;
   merged.text_focus = merged.text_focus || next.text_focus;
   merged.dragging = merged.dragging || next.dragging;
+  merged.app_modal_visible = merged.app_modal_visible || next.app_modal_visible;
+  merged.hover_consumed = merged.consumed && any_hover_consumed &&
+                          !merged_non_hover_consumed && !next_non_hover_consumed;
+}
+
+bool ui_consumed_only_by_hover(const ui::UiInputResult& input) {
+  return input.consumed && input.hover_consumed && !input.text_focus && !input.dragging &&
+         !input.app_modal_visible;
+}
+
+bool ui_blocks_shortcuts(const ui::UiInputResult& input) {
+  return (input.consumed && !ui_consumed_only_by_hover(input)) || input.text_focus ||
+         input.dragging || input.app_modal_visible;
+}
+
+void clear_world_input_state(WorldViewState& world, const bool clear_action_key = true) {
+  world.focus_actor_id = 0;
+  world.focus_ground_item_id = 0;
+  world.legacy_target_x = -1;
+  world.legacy_target_y = -1;
+  world.legacy_chr_action = LegacyChrAction::none;
+  world.pending_pickup_item_id = 0;
+  if (clear_action_key) {
+    world.action_key = -1;
+  }
+  world.mouse_down_ms = 0;
 }
 
 void legacy_trace_map_layer(
@@ -7287,31 +7316,46 @@ class WorldScene final : public Scene {
       context.ui_input = result;
       merge_ui_input(merged, result);
 
-      const auto input_guard = result.consumed || result.text_focus || result.dragging;
-      if (!input_guard && !legacy_hud_.blocks_world_input()) {
-        auto& world = context.state->world;
-        if (!legacy_hud_.handle_shortcuts(context, ui_)) {
-          if (world.self_actor_id != 0) {
-            auto self_it = world.actors.find(world.self_actor_id);
-            if (self_it != world.actors.end()) {
-              const auto now_ms = detail::monotonic_ms();
-              for (int index = 0; index < 8; ++index) {
-                if (event_input.key_pressed[VK_F1 + index] &&
-                    magic_for_slot(world, index) != 0 &&
-                    legacy_magic_shortcut_ready(world, now_ms)) {
-                  world.action_key = index;
-                }
+      const auto shortcut_guard = ui_blocks_shortcuts(result);
+      const auto scene_guard =
+          result.consumed || result.text_focus || result.dragging || result.app_modal_visible;
+      auto& world = context.state->world;
+      const auto allow_guarded_escape =
+          event_input.key_pressed[VK_ESCAPE] && !result.text_focus && !result.app_modal_visible;
+      const auto hud_blocks_world = legacy_hud_.blocks_world_input();
+      if (scene_guard || hud_blocks_world) {
+        clear_world_input_state(world, hud_blocks_world || !ui_consumed_only_by_hover(result));
+        next_left_hold_ms_ = 0;
+        next_right_hold_ms_ = 0;
+      }
+      if (!shortcut_guard || allow_guarded_escape) {
+        if (legacy_hud_.handle_shortcuts(context, ui_)) {
+          context.input = previous_input;
+          continue;
+        }
+      }
+      if ((!shortcut_guard || allow_guarded_escape) && !hud_blocks_world) {
+        if (world.self_actor_id != 0) {
+          auto self_it = world.actors.find(world.self_actor_id);
+          if (self_it != world.actors.end()) {
+            const auto now_ms = detail::monotonic_ms();
+            for (int index = 0; index < 8; ++index) {
+              if (event_input.key_pressed[VK_F1 + index] && magic_for_slot(world, index) != 0 &&
+                  legacy_magic_shortcut_ready(world, now_ms)) {
+                world.action_key = index;
               }
+            }
+            if (event_input.key_pressed[VK_ESCAPE]) {
+              world.legacy_target_x = -1;
+              world.legacy_target_y = -1;
+              world.legacy_chr_action = LegacyChrAction::none;
+              world.target_actor_id = 0;
+              world.action_key = -1;
+            } else if (!scene_guard) {
               if (event_input.key_pressed['R']) {
                 if (context.app != nullptr) {
                   context.app->request_reselect_character();
                 }
-              } else if (event_input.key_pressed[VK_ESCAPE]) {
-                world.legacy_target_x = -1;
-                world.legacy_target_y = -1;
-                world.legacy_chr_action = LegacyChrAction::none;
-                world.target_actor_id = 0;
-                world.action_key = -1;
               } else {
                 const auto legacy_input = make_legacy_input(context, self_it->second, now_ms);
                 world.focus_actor_id = focused_actor_at(context, legacy_input);
@@ -7347,12 +7391,9 @@ class WorldScene final : public Scene {
     auto& world = context.state->world;
     const auto now_ms = detail::monotonic_ms();
     const auto escape_pressed = context.input != nullptr && context.input->key_pressed[VK_ESCAPE];
-    const auto key_consumed =
-        context.ui_input.consumed && !context.ui_input.hover_consumed;
-    const auto input_guard =
-        key_consumed || context.ui_input.text_focus || context.ui_input.dragging ||
-        context.ui_input.app_modal_visible;
-    const auto allow_guarded_escape = escape_pressed && !context.ui_input.app_modal_visible;
+    const auto input_guard = ui_blocks_shortcuts(context.ui_input);
+    const auto allow_guarded_escape =
+        escape_pressed && !context.ui_input.text_focus && !context.ui_input.app_modal_visible;
     if (input_guard && !allow_guarded_escape) {
       return;
     }
@@ -7400,15 +7441,9 @@ class WorldScene final : public Scene {
     const auto input_guard =
         context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging ||
         context.ui_input.app_modal_visible;
-    if (!context.legacy_input_dispatched && input_guard) {
-      world.focus_actor_id = 0;
-      world.focus_ground_item_id = 0;
-      world.legacy_target_x = -1;
-      world.legacy_target_y = -1;
-      world.legacy_chr_action = LegacyChrAction::none;
-      world.pending_pickup_item_id = 0;
-      world.action_key = -1;
-      world.mouse_down_ms = 0;
+    if ((!context.legacy_input_dispatched || context.ui_input.app_modal_visible) &&
+        input_guard) {
+      clear_world_input_state(world, !ui_consumed_only_by_hover(context.ui_input));
       next_left_hold_ms_ = 0;
       next_right_hold_ms_ = 0;
       return;
@@ -7503,7 +7538,6 @@ class WorldScene final : public Scene {
     legacy_hud_.sync(context);
     auto& world = context.state->world;
     const auto now_ms = detail::monotonic_ms();
-    context.state->expire_map_door_states(now_ms);
     animation_.update(world, now_ms);
     context.state->process_legacy_actor_hurry_queues(now_ms);
     if (context.audio != nullptr) {
@@ -7556,9 +7590,9 @@ class WorldScene final : public Scene {
                                          animation_.trace_now_ms());
     }
     render_world_rows(context, viewport);
-    render_actor_effect_overlays_after_rows(context, viewport);
     legacy_trace_map_layer(legacy::LegacyMapDrawLayer::selection_blend);
     render_actor_selection_blend_pass(context, viewport);
+    render_actor_effect_overlays_after_rows(context, viewport);
     legacy_trace_map_layer(legacy::LegacyMapDrawLayer::debug_overlay);
     render_map_debug_overlay(context, viewport);
     if (context.assets != nullptr) {
@@ -7764,6 +7798,11 @@ class WorldScene final : public Scene {
     return nullptr;
   }
 
+  static int legacy_client_spell_point(const MagicShortcutState& magic) {
+    // Delphi UseMagic gates on TClientMagic.Def.Spell + DefSpell; server MP spend uses GetSpellPoint separately.
+    return magic.spell + magic.def_spell;
+  }
+
   static bool legacy_magic_shortcut_ready(const WorldViewState& world,
                                           const std::uint64_t now_ms) {
     return world.latest_spell_ms == 0 ||
@@ -7886,6 +7925,9 @@ class WorldScene final : public Scene {
       world.legacy_target_y = -1;
       world.legacy_chr_action = LegacyChrAction::none;
     }
+    if (input.left_pressed || input.right_pressed) {
+      world.action_key = -1;
+    }
 
     if (left_action) {
       if (world.focus_actor_id != 0 && world.focus_actor_id != world.self_actor_id) {
@@ -7908,13 +7950,9 @@ class WorldScene final : public Scene {
         try_attack_target(context, world.target_actor_id, input.tick);
         return;
       }
+      world.target_actor_id = 0;
       if (input.shift) {
         try_attack_ground(context, input.map_x, input.map_y, input.tick);
-        return;
-      }
-      if (world.focus_ground_item_id != 0) {
-        world.pending_pickup_item_id = world.focus_ground_item_id;
-        world.target_actor_id = 0;
         return;
       }
       if (input.map_x == self.x && input.map_y == self.y) {
@@ -8016,12 +8054,6 @@ class WorldScene final : public Scene {
 
   std::optional<bool> dynamic_door_state_for(ClientContext& context, const MapCell& cell,
                                              int x, int y) const {
-    const auto exact = context.state->world.map_doors.find(
-        GameStateStore::map_door_key(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)));
-    if (exact != context.state->world.map_doors.end()) {
-      return exact->second.open;
-    }
-
     if (map_ == nullptr) {
       return std::nullopt;
     }
@@ -8031,18 +8063,25 @@ class WorldScene final : public Scene {
       return std::nullopt;
     }
 
+    std::optional<bool> result;
+    std::uint64_t best_sequence = 0;
     for (const auto& [key, state] : context.state->world.map_doors) {
       const auto door_x = GameStateStore::map_door_key_x(key);
       const auto door_y = GameStateStore::map_door_key_y(key);
-      if (std::abs(door_x - x) > 8 || std::abs(door_y - y) > 8) {
+      if (!legacy::legacy_map_door_state_reaches(state.open, door_x, door_y, x, y)) {
         continue;
       }
       const auto* door_cell = map_->cell(door_x, door_y);
-      if (door_cell != nullptr && (door_cell->door_index & 0x7FU) == door_id) {
-        return state.open;
+      if (door_cell == nullptr || (door_cell->door_index & 0x80U) == 0U ||
+          (door_cell->door_index & 0x7FU) != door_id) {
+        continue;
+      }
+      if (!result.has_value() || state.sequence > best_sequence) {
+        result = state.open;
+        best_sequence = state.sequence;
       }
     }
-    return std::nullopt;
+    return result;
   }
 
   bool crash_man(ClientContext& context, const ActorState& self, int x, int y) const {
@@ -8109,11 +8148,22 @@ class WorldScene final : public Scene {
       return false;
     }
     const auto animation_idle = self_actor_legacy_idle(world, now_ms);
-    if (!server_accept_next_action(world, now_ms) ||
-        !can_next_action(world, self_it->second, animation_idle, now_ms)) {
+    if (!server_accept_next_action(world, now_ms)) {
+      world.legacy_target_x = -1;
+      world.legacy_target_y = -1;
+      world.legacy_chr_action = LegacyChrAction::none;
+      return false;
+    }
+    if (!can_next_action(world, self_it->second, animation_idle, now_ms)) {
+      world.legacy_target_x = -1;
+      world.legacy_target_y = -1;
+      world.legacy_chr_action = LegacyChrAction::none;
       return false;
     }
     if (legacy_move_skip_due_to_slow(world)) {
+      world.legacy_target_x = -1;
+      world.legacy_target_y = -1;
+      world.legacy_chr_action = LegacyChrAction::none;
       return false;
     }
     const auto sent = send_move(context, self_it->second, world.legacy_target_x,
@@ -8351,23 +8401,36 @@ class WorldScene final : public Scene {
     }
     auto self_it = world.actors.find(world.self_actor_id);
     if (self_it == world.actors.end()) {
+      world.pending_pickup_item_id = 0;
       return false;
     }
     if (self_it->second.x == item_it->second.x && self_it->second.y == item_it->second.y) {
-      const auto sent = try_pickup(context, self_it->second, now_ms);
-      if (sent) {
+      const auto animation_idle = self_actor_legacy_idle(world, now_ms);
+      if (!server_accept_next_action(world, now_ms)) {
         world.pending_pickup_item_id = 0;
+        return false;
       }
-      return sent;
+      if (!can_next_action(world, self_it->second, animation_idle, now_ms)) {
+        world.pending_pickup_item_id = 0;
+        return false;
+      }
+      context.app->request_pickup(client_v1::PickupIntent{self_it->second.x, self_it->second.y});
+      world.pending_pickup_item_id = 0;
+      return true;
     }
     const auto animation_idle = self_actor_legacy_idle(world, now_ms);
-    if (!server_accept_next_action(world, now_ms) ||
-        !can_next_action(world, self_it->second, animation_idle, now_ms)) {
+    if (!server_accept_next_action(world, now_ms)) {
+      world.pending_pickup_item_id = 0;
+      return false;
+    }
+    if (!can_next_action(world, self_it->second, animation_idle, now_ms)) {
+      world.pending_pickup_item_id = 0;
       return false;
     }
     world.legacy_target_x = item_it->second.x;
     world.legacy_target_y = item_it->second.y;
     world.legacy_chr_action = LegacyChrAction::walk;
+    world.pending_pickup_item_id = 0;
     return false;
   }
 
@@ -8486,6 +8549,12 @@ class WorldScene final : public Scene {
     }
     const auto source_only_magic = magic != nullptr && magic->effect_type == 0;
     if (source_only_magic) {
+      if (world.action_locked && elapsed_ms(input.tick, world.action_lock_started_ms) > 10000U) {
+        world.action_locked = false;
+        world.action_lock_timeout_cleared_ms = input.tick;
+        world.pending_action_acks.clear();
+        world.skip_next_move_fail_ack = false;
+      }
       if (magic_id == 26 && world.latest_fire_hit_ms != 0 &&
           elapsed_ms(input.tick, world.latest_fire_hit_ms) < 10000U) {
         return false;
@@ -8494,14 +8563,11 @@ class WorldScene final : public Scene {
           elapsed_ms(input.tick, world.latest_rush_rush_ms) < 3000U) {
         return false;
       }
-      if (!server_accept_next_action(world, input.tick)) {
-        return false;
-      }
-      send_spell(context, self_it->second, static_cast<int>(self_it->second.dir), 0, 0,
+      send_spell(context, static_cast<int>(self_it->second.dir), 0, 0, self_it->second.dir,
                  magic_id, false, 0);
       return true;
     }
-    if (self_it->second.mp == 0) {
+    if (magic != nullptr && legacy_client_spell_point(*magic) > world.self_ability_detail.mp) {
       return false;
     }
     const auto animation_idle = self_actor_legacy_idle(world, input.tick);
@@ -8514,9 +8580,22 @@ class WorldScene final : public Scene {
     if (!legacy::in_bounds(width, height, input.map_x, input.map_y)) {
       return false;
     }
-    send_spell(context, self_it->second, input.map_x, input.map_y,
-               world.focus_actor_id != 0 ? world.focus_actor_id : world.target_actor_id, magic_id,
-               true, static_cast<std::uint64_t>(200 + (magic != nullptr ? magic->delay_ms : 0)));
+    std::uint64_t target_actor_id = 0;
+    auto spell_x = input.map_x;
+    auto spell_y = input.map_y;
+    if (world.focus_actor_id != 0) {
+      if (const auto target_it = world.actors.find(world.focus_actor_id);
+          target_it != world.actors.end()) {
+        target_actor_id = world.focus_actor_id;
+        spell_x = target_it->second.x;
+        spell_y = target_it->second.y;
+      }
+    }
+    const auto spell_dir =
+        direction_between(self_it->second.x, self_it->second.y, input.map_x, input.map_y,
+                          self_it->second.dir);
+    send_spell(context, spell_x, spell_y, target_actor_id, spell_dir, magic_id, true,
+               static_cast<std::uint64_t>(200 + (magic != nullptr ? magic->delay_ms : 0)));
     return true;
   }
 
@@ -8537,13 +8616,13 @@ class WorldScene final : public Scene {
     return animation_.is_actor_legacy_idle(world.self_actor_id);
   }
 
-  static void send_spell(ClientContext& context, const ActorState& self, int x, int y,
-                         std::uint64_t target_actor_id, std::uint16_t magic_id,
-                         const bool play_local_action, const std::uint64_t magic_delay_time_ms) {
+  static void send_spell(ClientContext& context, int x, int y, std::uint64_t target_actor_id,
+                         std::uint8_t dir, std::uint16_t magic_id, const bool play_local_action,
+                         const std::uint64_t magic_delay_time_ms) {
     client_v1::SpellIntent spell;
     spell.x = x;
     spell.y = y;
-    spell.dir = play_local_action ? direction_between(self.x, self.y, x, y, self.dir) : self.dir;
+    spell.dir = dir;
     spell.target_actor_id = target_actor_id;
     spell.magic_id = magic_id;
     context.app->request_spell(spell, play_local_action, magic_delay_time_ms);

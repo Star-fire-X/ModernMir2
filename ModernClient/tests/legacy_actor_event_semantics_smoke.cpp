@@ -235,12 +235,33 @@ void test_remove_delay_matches_legacy_hide() {
 
 void test_independent_visual_state_events() {
   auto state = make_store();
-  state.apply_actor_feature_changed(2, 777);
-  state.apply_actor_status_changed(2, 888);
-  state.apply_actor_name_color_changed(2, 0xFF00AA00U);
+  state.apply(ActorIdentityUpdate{2,
+                                  static_cast<std::uint8_t>(
+                                      kActorIdentityName | kActorIdentityNameColor |
+                                      kActorIdentityFeature | kActorIdentityStatus),
+                                  "Renamed",
+                                  0xFF00AA00U,
+                                  777,
+                                  888});
+  assert(state.world.actors[2].name == "Renamed");
   assert(state.world.actors[2].feature == 777);
   assert(state.world.actors[2].status == 888);
   assert(state.world.actors[2].name_color == 0xFF00AA00U);
+
+  state.apply(ActorIdentityUpdate{99, kActorIdentityName, "Ghost", 0, 0, 0});
+  assert(state.world.actors.find(99) == state.world.actors.end());
+}
+
+void test_actor_action_queue_does_not_drop_fifo_after_64_messages() {
+  auto state = make_store();
+  for (int index = 0; index < 65; ++index) {
+    state.apply(ActorAction{2, ActorActionKind::turn, 11, 10,
+                            static_cast<std::uint8_t>(index % 8), 0, 0,
+                            static_cast<std::uint16_t>(100 + index), 0, false, 0});
+  }
+  assert(state.world.actors[2].legacy_action_queue.size() == 65);
+  state.process_legacy_actor_queues(1000);
+  assert(state.world.actors[2].legacy_action_ident == 100);
 }
 
 }  // namespace
@@ -257,5 +278,6 @@ int main() {
   test_spell_and_magic_fire_share_queue_tick();
   test_remove_delay_matches_legacy_hide();
   test_independent_visual_state_events();
+  test_actor_action_queue_does_not_drop_fifo_after_64_messages();
   return 0;
 }
