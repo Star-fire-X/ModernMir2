@@ -1295,7 +1295,7 @@ LegacyImportReport LegacyImporter::import_tree(const std::filesystem::path& lega
   report.item_count = import_items_from_makeitem(legacy_root, output_root);
 
 #ifdef MIR2_ENABLE_ODBC
-  report.item_count = import_table_as_toml(
+  const auto odbc_item_count = import_table_as_toml(
       legacy_root / "Data.mdb", output_root / "items" / "imported_items.toml",
       "SELECT Idx, Name, StdMode, Shape, ImgIndex, DuraMax, Weight, Need, NeedLevel, "
       "Price, Stock, AtkSpd, Agility, Accurate, MgAvoid, Strong, Undead, HPADD, MPADD, "
@@ -1310,6 +1310,13 @@ LegacyImportReport LegacyImporter::import_tree(const std::filesystem::path& lega
        "strong", "undead", "hp_add", "mp_add", "exp_add", "eff_type1", "eff_rate1",
        "eff_value1", "eff_type2", "eff_rate2", "eff_value2"},
       report.warnings);
+  if (odbc_item_count > 0) {
+    report.item_count = odbc_item_count;
+  } else {
+    report.item_count = import_items_from_makeitem(legacy_root, output_root);
+    report.warnings.push_back(
+        "ODBC StdItems import returned no rows, MakeItem.txt fallback items were used.");
+  }
   report.magic_count = import_table_as_toml(legacy_root / "Data.mdb", output_root / "magic" / "imported_magic.toml",
                                             "SELECT ID, Name, DefSpell, DefPower FROM Magic", "magic",
                                             {"ID", "Name", "DefSpell", "DefPower"},
