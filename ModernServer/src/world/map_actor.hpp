@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -62,7 +63,8 @@ class MapActor {
            std::unordered_map<std::string, MapEntryRuleConfig> map_entry_rules = {},
            MakeIndexAllocator* make_index_allocator = nullptr,
            std::string black_stone_name = "BlackStone",
-           bool legacy_approval_mode = false);
+           bool legacy_approval_mode = false,
+           std::shared_ptr<std::array<std::int32_t, 10>> script_global_params = nullptr);
 
   void enqueue_mail(ActorMail mail);
   void set_legacy_random(LegacyRandom* legacy_random);
@@ -460,6 +462,7 @@ class MapActor {
   std::unordered_map<std::uint64_t, LegacyEventType> event_object_types_{};
   std::unordered_map<std::uint64_t, PlayerVisibility> visibility_{};
   std::unordered_map<std::string, std::unordered_set<std::string>> script_name_lists_{};
+  std::shared_ptr<std::array<std::int32_t, 10>> script_global_params_{};
   std::uint64_t next_ground_item_id_{1};
   std::uint64_t next_trade_session_id_{1};
   std::uint64_t next_script_monster_id_{0x6000000000000000ULL};

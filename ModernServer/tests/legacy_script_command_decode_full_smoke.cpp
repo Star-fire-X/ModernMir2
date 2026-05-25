@@ -98,6 +98,12 @@ bool has_notice(const mir2::RuntimeDispatch& dispatch, std::string_view text) {
                      });
 }
 
+std::string merchant_say_text(const mir2::RuntimeDispatch& dispatch) {
+  const auto packet = find_packet(dispatch, mir2::kSmMerchantSay);
+  assert(packet.has_value());
+  return mir2::legacy_decode_string(packet->body);
+}
+
 bool has_unsupported_script_trace(const mir2::RuntimeDispatch& dispatch) {
   return std::any_of(dispatch.legacy_traces.begin(), dispatch.legacy_traces.end(),
                      [](const mir2::LegacyRuntimeTrace& trace) {
@@ -150,6 +156,8 @@ SETOPEN [2] 1
 SETUNIT [3] 1
 MOV P1 10
 MOV P2 20
+MOV G0 30
+MOV D0 4
 SETDAILYQUEST 7
 ADDNAMELIST Names Hero
 ADDNAMELIST Ids acct
@@ -187,12 +195,34 @@ RANDOMEX 100 100
 EQUAL P1 10
 LARGE P2 P1
 SMALL P1 P2
+EQUAL G0 30
+EQUAL D0 4
+LARGE G0 P2
+SMALL D0 P1
 #ACT
 MOV P3 5
 INC P3 2
 DEC P3 1
-SUM P4 P1 P3
+SUM P3 P1
 MOVR P5 1
+MOV G1 7
+INC G1 2
+DEC G1 1
+SUM G0 G1
+MOV D0 11
+MOV D1 12
+MOV D2 13
+MOV D3 14
+MOV D4 15
+MOV D5 16
+MOV D6 17
+MOV D7 18
+MOV D8 19
+MOV D9 20
+INC D1 1
+DEC D1 1
+MOVR D2 1
+SUM D0 D1
 GIVE Gold 1
 TAKE Gold 1
 GIVE Apple 1
@@ -224,7 +254,10 @@ SAY Failed)"});
                                  R"(#ACT
 GOQUEST @after_go)"});
   npc.dialog_sections.push_back({"@after_go",
-                                 R"(#ACT
+                                 R"(#IF
+CHECKLEVEL 0
+#SAY Values <$STR(P9)> <$STR(G9)> <$STR(D9)>
+#ACT
 PLAYDICE 1 @done)"});
   npc.dialog_sections.push_back({"@done",
                                  R"(#ACT
@@ -266,8 +299,25 @@ BREAK)"});
   assert(has_trace(script_dispatch, "call"));
   assert(has_trace(script_dispatch, "goquest"));
   assert(has_trace(script_dispatch, "playdice"));
-  assert(has_trace(script_dispatch, "endquest"));
-  assert(has_trace_label(script_dispatch, "say", "OK"));
+  assert(!has_trace(script_dispatch, "endquest"));
+  assert(!has_trace_label(script_dispatch, "say", "OK"));
+  const auto values_text = merchant_say_text(script_dispatch);
+  assert(values_text.find("Rewarder/Values 16 38 23") == 0);
+  const auto dice_packet = find_packet(script_dispatch, mir2::kSmPlayDice);
+  assert(dice_packet.has_value());
+  assert(dice_packet->message.recog == 1);
+  assert(dice_packet->message.param == 1);
+  mir2::LegacyMessageBodyWL dice_body;
+  const auto encoded_dice_body_size = mir2::legacy_encode_buffer(&dice_body, sizeof(dice_body)).size();
+  assert(mir2::legacy_decode_buffer(dice_packet->body.substr(0, encoded_dice_body_size),
+                                    &dice_body, sizeof(dice_body)));
+  assert(dice_body.lparam1 == mir2::make_long(mir2::make_word(11, 12),
+                                              mir2::make_word(0, 14)));
+  assert(dice_body.lparam2 == mir2::make_long(mir2::make_word(15, 16),
+                                              mir2::make_word(17, 18)));
+  assert(dice_body.ltag1 == mir2::make_long(mir2::make_word(19, 23), 0));
+  assert(mir2::legacy_decode_string(dice_packet->body.substr(encoded_dice_body_size)) ==
+         "@done");
 
   const auto snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value());
@@ -277,7 +327,7 @@ BREAK)"});
   assert(snapshot->script_params[1] == 10);
   assert(snapshot->script_params[2] == 20);
   assert(snapshot->script_params[3] == 6);
-  assert(snapshot->script_params[4] == 16);
+  assert(snapshot->script_params[9] == 16);
   assert(snapshot->daily_quest == 9 || snapshot->daily_quest == 10);
   assert(snapshot->equipped_items[mir2::kEquipWeapon].index == 0);
 

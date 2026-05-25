@@ -1124,11 +1124,71 @@ std::string display_castle_wars(const CastleDialogContext& castle_dialog_context
 std::string display_castle_owner(const CastleDialogContext& castle_dialog_context);
 std::string display_castle_lord(const CastleDialogContext& castle_dialog_context);
 
+std::optional<std::pair<char, std::int32_t>> parse_legacy_script_variable_token(
+    std::string_view raw) {
+  auto token = util::trim(std::string(raw));
+  if (token.size() != 2 || std::isdigit(static_cast<unsigned char>(token[1])) == 0) {
+    return std::nullopt;
+  }
+  const auto group = static_cast<char>(std::toupper(static_cast<unsigned char>(token[0])));
+  if (group != 'P' && group != 'G' && group != 'D') {
+    return std::nullopt;
+  }
+  return std::pair{group, static_cast<std::int32_t>(token[1] - '0')};
+}
+
+std::string legacy_script_str_value(
+    const Player& player, const std::array<std::int32_t, 10>& script_global_params,
+    std::string_view raw) {
+  const auto variable = parse_legacy_script_variable_token(raw);
+  if (!variable.has_value()) {
+    return "0";
+  }
+  const auto [group, index] = *variable;
+  if (group == 'P') {
+    return std::to_string(player.script_param(index));
+  }
+  if (group == 'G') {
+    return std::to_string(script_global_params[static_cast<std::size_t>(index)]);
+  }
+  return std::to_string(player.script_dice_param(index));
+}
+
+void render_legacy_script_str_values(
+    std::string& text, const Player& player,
+    const std::array<std::int32_t, 10>& script_global_params) {
+  std::size_t pos = 0;
+  while ((pos = text.find("$STR(", pos)) != std::string::npos) {
+    const auto close = text.find(')', pos + 5);
+    if (close == std::string::npos) {
+      break;
+    }
+    auto start = pos;
+    auto length = close - pos + 1;
+    if (pos > 0 && text[pos - 1] == '<' && close + 1 < text.size() &&
+        text[close + 1] == '>') {
+      start = pos - 1;
+      length += 2;
+    }
+    const auto replacement = legacy_script_str_value(
+        player, script_global_params, std::string_view(text).substr(pos + 5, close - pos - 5));
+    text.replace(start, length, replacement);
+    pos = start + replacement.size();
+  }
+}
+
+const std::array<std::int32_t, 10>& empty_legacy_script_global_params() {
+  static const std::array<std::int32_t, 10> params{};
+  return params;
+}
+
 std::string render_npc_dialog_text(const Npc& merchant, const Player& requester,
                                    const MapConfig& map_config,
                                    const CastleDialogContext& castle_dialog_context,
                                    std::string text,
-                                   const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
+                                   const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
+                                   const std::array<std::int32_t, 10>& script_global_params =
+                                       empty_legacy_script_global_params()) {
   replace_all(text, "<$USERNAME>", requester.character().character_name);
   replace_all(text, "<$NPCNAME>", merchant.name());
   replace_all(text, "<$MAPID>", map_config.id);
@@ -1141,6 +1201,7 @@ std::string render_npc_dialog_text(const Npc& merchant, const Player& requester,
               std::to_string(castle_dialog_context.upgrade_weapon_fee));
   replace_all(text, "<$CASTLEWARDATE>", default_castle_war_date(castle_dialog_context));
   replace_all(text, "<$LISTOFWAR>", display_castle_wars(castle_dialog_context));
+  render_legacy_script_str_values(text, requester, script_global_params);
   return text;
 }
 
@@ -1149,12 +1210,16 @@ bool should_open_merchant_dialog(const Npc& merchant) {
          merchant.supports_castle() || merchant_service_group_count(merchant) > 1;
 }
 
-struct LegacyScriptBlock {
+struct LegacyScriptProc {
   std::vector<std::string> say_lines{};
   std::vector<std::string> conditions{};
   std::vector<std::string> act_lines{};
   std::vector<std::string> else_say_lines{};
   std::vector<std::string> else_act_lines{};
+};
+
+struct LegacyScriptBlock {
+  std::vector<LegacyScriptProc> procs{};
 };
 
 enum class LegacyScriptParseMode {
@@ -1235,44 +1300,59 @@ bool is_legacy_script_condition(std::string_view command_name) {
 
 LegacyScriptBlock parse_legacy_script_block(std::string_view text) {
   LegacyScriptBlock block;
+  LegacyScriptProc current;
   auto mode = LegacyScriptParseMode::say;
+  auto has_content = [](const LegacyScriptProc& proc) {
+    return !proc.say_lines.empty() || !proc.conditions.empty() || !proc.act_lines.empty() ||
+           !proc.else_say_lines.empty() || !proc.else_act_lines.empty();
+  };
+  auto flush = [&]() {
+    if (has_content(current)) {
+      block.procs.push_back(std::move(current));
+      current = LegacyScriptProc{};
+      mode = LegacyScriptParseMode::say;
+    }
+  };
   for (auto line : split_legacy_script_lines(text)) {
     const auto command_name = script_command_name(line);
     const auto payload = script_command_payload(line);
     const auto hashed = !line.empty() && line.front() == '#';
 
     if (hashed && command_name == "IF") {
+      if (has_content(current)) {
+        flush();
+      }
       mode = LegacyScriptParseMode::condition;
       if (!payload.empty()) {
-        block.conditions.push_back(payload);
+        current.conditions.push_back(payload);
       }
       continue;
     }
     if (hashed && command_name == "ACT") {
       mode = LegacyScriptParseMode::act;
       if (!payload.empty()) {
-        block.act_lines.push_back(payload);
+        current.act_lines.push_back(payload);
       }
       continue;
     }
     if (hashed && (command_name == "ELSEACT" || command_name == "ELESACT")) {
       mode = LegacyScriptParseMode::else_act;
       if (!payload.empty()) {
-        block.else_act_lines.push_back(payload);
+        current.else_act_lines.push_back(payload);
       }
       continue;
     }
     if (hashed && command_name == "SAY") {
       mode = LegacyScriptParseMode::say;
       if (!payload.empty()) {
-        block.say_lines.push_back(payload);
+        current.say_lines.push_back(payload);
       }
       continue;
     }
     if (hashed && command_name == "ELSESAY") {
       mode = LegacyScriptParseMode::else_say;
       if (!payload.empty()) {
-        block.else_say_lines.push_back(payload);
+        current.else_say_lines.push_back(payload);
       }
       continue;
     }
@@ -1280,19 +1360,20 @@ LegacyScriptBlock parse_legacy_script_block(std::string_view text) {
     auto normalized_line = hashed ? strip_script_hash(std::move(line)) : std::move(line);
     const auto normalized_command = script_command_name(normalized_line);
     if (mode == LegacyScriptParseMode::condition || is_legacy_script_condition(normalized_command)) {
-      block.conditions.push_back(std::move(normalized_line));
+      current.conditions.push_back(std::move(normalized_line));
       continue;
     }
     if (mode == LegacyScriptParseMode::act) {
-      block.act_lines.push_back(std::move(normalized_line));
+      current.act_lines.push_back(std::move(normalized_line));
     } else if (mode == LegacyScriptParseMode::else_act) {
-      block.else_act_lines.push_back(std::move(normalized_line));
+      current.else_act_lines.push_back(std::move(normalized_line));
     } else if (mode == LegacyScriptParseMode::else_say) {
-      block.else_say_lines.push_back(std::move(normalized_line));
+      current.else_say_lines.push_back(std::move(normalized_line));
     } else {
-      block.say_lines.push_back(std::move(normalized_line));
+      current.say_lines.push_back(std::move(normalized_line));
     }
   }
+  flush();
   return block;
 }
 

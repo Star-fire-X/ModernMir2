@@ -99,6 +99,7 @@ constexpr std::uint16_t kSmClearObjects = 633;
 constexpr std::uint16_t kSmChangeMap = 634;
 constexpr std::uint16_t kSmMerchantSay = 643;
 constexpr std::uint16_t kSmMerchantDlgClose = 644;
+constexpr std::uint16_t kSmPlayDice = 1200;
 constexpr std::uint16_t kSmSendGoodsList = 645;
 constexpr std::uint16_t kSmSendUserSell = 646;
 constexpr std::uint16_t kSmSendBuyPrice = 647;

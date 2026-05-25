@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <algorithm>
@@ -376,6 +377,10 @@ class Player : public GameObject {
   [[nodiscard]] std::uint8_t quest_open_unit(std::int32_t index) const;
   [[nodiscard]] std::uint8_t quest_unit(std::int32_t index) const;
   [[nodiscard]] std::int32_t script_param(std::int32_t index) const;
+  [[nodiscard]] std::int32_t script_dice_param(std::int32_t index) const;
+  [[nodiscard]] const std::array<std::int32_t, 10>& script_dice_params() const {
+    return script_dice_params_;
+  }
   [[nodiscard]] std::uint32_t daily_quest() const { return character_.daily_quest; }
   [[nodiscard]] const std::vector<std::uint64_t>& slave_actor_ids() const {
     return slave_actor_ids_;
@@ -473,6 +478,7 @@ class Player : public GameObject {
   bool set_quest_open_unit(std::int32_t index, std::uint8_t value);
   bool set_quest_unit(std::int32_t index, std::uint8_t value);
   bool set_script_param(std::int32_t index, std::int32_t value);
+  bool set_script_dice_param(std::int32_t index, std::int32_t value);
   void set_daily_quest(std::uint32_t value);
   void refresh_derived_state(const std::unordered_map<std::int32_t, ItemConfig>& item_configs);
   [[nodiscard]] StatusTickResult mark_dead(std::uint64_t now_ms);
@@ -600,6 +606,7 @@ class Player : public GameObject {
   std::deque<LegacyQueuedCommand> legacy_inbox_{};
   std::unordered_map<std::int32_t, std::uint32_t> legacy_magic_lvexp_generations_{};
   std::vector<std::uint64_t> slave_actor_ids_{};
+  std::array<std::int32_t, 10> script_dice_params_{};
 };
 
 struct MonsterSnapshot {
