@@ -32,10 +32,7 @@ mir2::MagicConfig make_sword_magic(std::int32_t id) {
   magic.legacy.need_level = {1, 1, 1, 1};
   magic.legacy.max_train = {2, 500, 1000, 1000};
   magic.legacy.max_train_level = 3;
-  if (id == 25) {
-    magic.legacy.spell = 4;
-    magic.legacy.def_spell = 1;
-  } else if (id == 26) {
+  if (id == 26) {
     magic.legacy.def_spell = 7;
   } else if (id == 27) {
     magic.legacy.spell = 15;
@@ -48,7 +45,7 @@ mir2::HostConfig base_config() {
   config.runtime.legacy_random_seed = 1;
   config.budgets.tick_ms = 20;
   config.maps.push_back(mir2::MapConfig{"0", "SwordPhase5", {}, 24, 24, 10, 10});
-  for (const auto id : {3, 4, 7, 12, 25, 26, 27, 34}) {
+  for (const auto id : {3, 7, 12, 25, 26, 27, 34}) {
     config.magics.push_back(make_sword_magic(id));
   }
   return config;
@@ -160,6 +157,17 @@ bool has_packet_ident(const mir2::RuntimeDispatch& dispatch, std::uint16_t ident
                      });
 }
 
+std::int32_t count_packet_ident_delay(const mir2::RuntimeDispatch& dispatch,
+                                      std::uint16_t ident, std::int32_t delay_ms) {
+  return static_cast<std::int32_t>(std::count_if(
+      dispatch.session_events.begin(), dispatch.session_events.end(),
+      [&](const mir2::SessionEvent& event) {
+        const auto decoded = mir2::decode_legacy_game_packet(event.packet);
+        return decoded.has_value() && decoded->message.ident == ident &&
+               event.delay_ms == delay_ms;
+      }));
+}
+
 bool has_raw_prefix(const mir2::RuntimeDispatch& dispatch, const std::string& prefix) {
   return std::any_of(dispatch.session_events.begin(), dispatch.session_events.end(),
                      [&](const mir2::SessionEvent& event) {
@@ -204,7 +212,9 @@ int main() {
   {
     auto config = base_config();
     config.spawns.push_back(spawn("CrossFront", 10, 9, 200));
-    config.spawns.push_back(spawn("CrossLeft", 9, 9, 200));
+    auto cross_left = spawn("CrossLeft", 9, 9, 200);
+    cross_left.defense = 200;
+    config.spawns.push_back(cross_left);
     mir2::LogicRuntime runtime(config);
     runtime.initialize();
     static_cast<void>(runtime.route_logic_command(enter(1511, character("Cross34", {34}))));
@@ -226,6 +236,61 @@ int main() {
     append(disabled, runtime.route_logic_command(attack(1511, 10, 9, mir2::kCmCrossHit)));
     append(disabled, runtime.tick());
     assert(has_trace(disabled, "sword_reject", 34));
+  }
+
+  {
+    auto config = base_config();
+    auto cross_left = spawn("CrossSideOnly", 9, 9, 200);
+    cross_left.defense = 200;
+    config.spawns.push_back(cross_left);
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(enter(1512, character("CrossSide", {34}))));
+    static_cast<void>(runtime.tick());
+    auto dispatch = runtime.route_logic_command(spell(1512, 34));
+    append(dispatch, runtime.tick());
+    append(dispatch, runtime.route_logic_command(attack(1512, 0, 0, mir2::kCmCrossHit)));
+    append(dispatch, runtime.tick());
+    assert(has_packet_ident(dispatch, mir2::legacy::kSmCrossHit));
+    assert(count_trace(dispatch, "struck") == 1);
+    assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 200) == 0);
+    assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 500) == 1);
+  }
+
+  {
+    auto config = base_config();
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(enter(1516, character("WideCross", {25, 34}))));
+    static_cast<void>(runtime.tick());
+    auto dispatch = runtime.route_logic_command(spell(1516, 25));
+    append(dispatch, runtime.tick());
+    append(dispatch, runtime.route_logic_command(spell(1516, 34)));
+    append(dispatch, runtime.tick());
+    assert(has_raw_prefix(dispatch, "+WID/"));
+    assert(has_raw_prefix(dispatch, "+CRS/"));
+    assert(!has_raw_prefix(dispatch, "+UWID/"));
+    assert(!has_raw_prefix(dispatch, "+UCRS/"));
+  }
+
+  {
+    auto config = base_config();
+    config.spawns.push_back(spawn("FireAfterCrossTarget", 10, 9, 160));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(
+        runtime.route_logic_command(enter(1517, character("FireAfterCross", {26, 34}))));
+    static_cast<void>(runtime.tick());
+    auto dispatch = runtime.route_logic_command(spell(1517, 26));
+    append(dispatch, runtime.tick());
+    append(dispatch, runtime.route_logic_command(spell(1517, 34)));
+    append(dispatch, runtime.tick());
+    assert(has_raw_prefix(dispatch, "+FIR/"));
+    assert(has_raw_prefix(dispatch, "+CRS/"));
+    append(dispatch, runtime.route_logic_command(attack(1517, 10, 9, mir2::kCmFireHit)));
+    append(dispatch, runtime.tick());
+    assert(has_packet_ident(dispatch, mir2::legacy::kSmFireHit));
+    assert(has_trace(dispatch, "fire_hit_bonus"));
   }
 
   {

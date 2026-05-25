@@ -501,7 +501,6 @@ bool target_in_attack_line(const GameObject& attacker, const GameObject& target,
 std::vector<GameObject*> collect_wide_hit_targets(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     const Player& attacker, const MapConfig& map_config, std::uint64_t now_ms) {
-  std::vector<std::pair<std::uint64_t, GameObject*>> ordered;
   const auto dir = actor_dir(attacker);
   const auto [fx, fy] = direction_delta(dir);
   const auto [lx, ly] = direction_delta(static_cast<std::uint8_t>((dir + 7) % 8));
@@ -512,29 +511,27 @@ std::vector<GameObject*> collect_wide_hit_targets(
       {attacker.x() + rx, attacker.y() + ry},
   }};
 
-  for (auto& [actor_id, object] : objects) {
-    if (actor_id == attacker.id() || !is_attackable_target(*object)) {
+  std::vector<GameObject*> targets;
+  targets.reserve(cells.size());
+  for (const auto& cell : cells) {
+    GameObject* target = nullptr;
+    for (auto& [actor_id, object] : objects) {
+      if (actor_id == attacker.id() || !is_attackable_target(*object)) {
+        continue;
+      }
+      if (object->x() == cell.first && object->y() == cell.second) {
+        target = object.get();
+        break;
+      }
+    }
+    if (target == nullptr) {
       continue;
     }
-    const auto in_fan = std::any_of(cells.begin(), cells.end(), [&](const auto& cell) {
-      return object->x() == cell.first && object->y() == cell.second;
-    });
-    if (!in_fan) {
-      continue;
-    }
-    if (const auto* player_target = as_player(object.get()); player_target != nullptr &&
+    if (const auto* player_target = as_player(target); player_target != nullptr &&
         !resolve_pk_block_reason(map_config, attacker, *player_target, now_ms).empty()) {
       continue;
     }
-    ordered.emplace_back(actor_id, object.get());
-  }
-
-  std::sort(ordered.begin(), ordered.end(),
-            [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
-  std::vector<GameObject*> targets;
-  targets.reserve(ordered.size());
-  for (const auto& entry : ordered) {
-    targets.push_back(entry.second);
+    targets.push_back(target);
   }
   return targets;
 }

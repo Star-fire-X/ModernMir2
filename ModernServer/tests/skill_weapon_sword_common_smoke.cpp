@@ -33,8 +33,7 @@ mir2::MagicConfig make_sword_magic(std::int32_t id) {
   magic.legacy.max_train = {2, 500, 1000, 1000};
   magic.legacy.max_train_level = 3;
   magic.legacy.delay_time = 0;
-  magic.legacy.spell = id == 25 ? 4 : 0;
-  magic.legacy.def_spell = id == 25 ? 1 : 0;
+  magic.legacy.def_spell = id == 26 ? 7 : 0;
   return magic;
 }
 
@@ -43,7 +42,7 @@ mir2::HostConfig base_config() {
   config.runtime.legacy_random_seed = 1;
   config.budgets.tick_ms = 20;
   config.maps.push_back(mir2::MapConfig{"0", "SwordMap", {}, 24, 24, 10, 10});
-  for (const auto id : {3, 4, 7, 12, 25}) {
+  for (const auto id : {3, 7, 12, 25, 26}) {
     config.magics.push_back(make_sword_magic(id));
   }
   return config;
@@ -67,6 +66,21 @@ mir2::SpawnConfig spawn(std::string name, std::int32_t x, std::int32_t y,
   return spawn;
 }
 
+mir2::HostConfig non_sword_seven_config() {
+  mir2::HostConfig config;
+  config.runtime.legacy_random_seed = 1;
+  config.budgets.tick_ms = 20;
+  config.maps.push_back(mir2::MapConfig{"0", "NonSwordSevenMap", {}, 24, 24, 10, 10});
+  config.spawns.push_back(spawn("NonSwordSevenTarget", 10, 9, 10000));
+  mir2::MagicConfig magic;
+  magic.id = 7;
+  magic.name = "NonSwordSeven";
+  magic.mp_cost = 1;
+  magic.power = 1;
+  config.magics.push_back(magic);
+  return config;
+}
+
 mir2::CharacterRecord character(std::string name, std::vector<std::int32_t> magics,
                                 std::int32_t x = 10, std::int32_t y = 10) {
   mir2::CharacterRecord record;
@@ -87,6 +101,10 @@ mir2::CharacterRecord character(std::string name, std::vector<std::int32_t> magi
   record.ability.max_weight = 30;
   record.ability.max_wear_weight = 100;
   record.ability.max_hand_weight = 100;
+  record.equipped_items[mir2::kEquipWeapon].index = 100;
+  record.equipped_items[mir2::kEquipWeapon].make_index = 1000;
+  record.equipped_items[mir2::kEquipWeapon].dura = 1000;
+  record.equipped_items[mir2::kEquipWeapon].dura_max = 1000;
   for (std::size_t index = 0; index < magics.size() && index < record.magics.size(); ++index) {
     record.magics[index].magic_id = static_cast<std::uint16_t>(magics[index]);
     record.magics[index].level = 0;
@@ -153,6 +171,35 @@ bool has_packet_ident(const mir2::RuntimeDispatch& dispatch, std::uint16_t ident
                      });
 }
 
+std::int32_t count_packet_ident_delay(const mir2::RuntimeDispatch& dispatch,
+                                      std::uint16_t ident, std::int32_t delay_ms) {
+  return static_cast<std::int32_t>(std::count_if(
+      dispatch.session_events.begin(), dispatch.session_events.end(),
+      [&](const mir2::SessionEvent& event) {
+        const auto decoded = mir2::decode_legacy_game_packet(event.packet);
+        return decoded.has_value() && decoded->message.ident == ident &&
+               event.delay_ms == delay_ms;
+      }));
+}
+
+bool has_raw_prefix(const mir2::RuntimeDispatch& dispatch, const std::string& prefix) {
+  return std::any_of(dispatch.session_events.begin(), dispatch.session_events.end(),
+                     [&](const mir2::SessionEvent& event) {
+                       const std::string body(event.packet.body.begin(), event.packet.body.end());
+                       return event.packet.header.ident == 0 && body.rfind(prefix, 0) == 0;
+                     });
+}
+
+std::int32_t count_raw_prefix(const mir2::RuntimeDispatch& dispatch,
+                              const std::string& prefix) {
+  return static_cast<std::int32_t>(std::count_if(
+      dispatch.session_events.begin(), dispatch.session_events.end(),
+      [&](const mir2::SessionEvent& event) {
+        const std::string body(event.packet.body.begin(), event.packet.body.end());
+        return event.packet.header.ident == 0 && body.rfind(prefix, 0) == 0;
+      }));
+}
+
 std::int32_t count_packet_ident(const mir2::RuntimeDispatch& dispatch, std::uint16_t ident) {
   return static_cast<std::int32_t>(std::count_if(
       dispatch.session_events.begin(), dispatch.session_events.end(),
@@ -173,22 +220,79 @@ std::int32_t count_trace(const mir2::RuntimeDispatch& dispatch, const std::strin
 int main() {
   {
     auto config = base_config();
-    config.spawns.push_back(spawn("PowerTarget", 10, 9));
+    config.spawns.push_back(spawn("PowerTarget", 10, 9, 10000));
     mir2::LogicRuntime runtime(config);
     runtime.initialize();
-    static_cast<void>(runtime.route_logic_command(enter(1201, character("Power", {4}))));
-    static_cast<void>(runtime.tick());
-    auto dispatch = runtime.route_logic_command(spell(1201, 4));
-    append(dispatch, runtime.tick());
-    assert(has_trace(dispatch, "sword_prepare", 4));
-    append(dispatch, runtime.route_logic_command(attack(1201, 10, 9)));
-    append(dispatch, runtime.tick());
-    assert(has_packet_ident(dispatch, mir2::legacy::kSmPowerHit));
-    assert(has_trace(dispatch, "struck"));
-    assert(has_trace(dispatch, "train_skill"));
+    static_cast<void>(runtime.route_logic_command(enter(1201, character("Power", {7}))));
+    static_cast<void>(runtime.tick(1000));
+    auto now_ms = 2000ULL;
+    auto dispatch = runtime.route_logic_command(attack(1201, 1, 1));
+    append(dispatch, runtime.tick(now_ms));
+    now_ms += 1000;
+    for (int attempt = 0; attempt < 8 && !has_raw_prefix(dispatch, "+PWR/"); ++attempt) {
+      append(dispatch, runtime.route_logic_command(attack(1201, 1, 1)));
+      append(dispatch, runtime.tick(now_ms));
+      now_ms += 1000;
+    }
+    assert(has_raw_prefix(dispatch, "+PWR/"));
+
+    mir2::RuntimeDispatch normal;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+      append(normal, runtime.route_logic_command(attack(1201, 10, 9)));
+      append(normal, runtime.tick(now_ms));
+      now_ms += 1000;
+    }
+    assert(count_raw_prefix(normal, "+PWR/") == 0);
+    assert(!has_packet_ident(normal, mir2::legacy::kSmPowerHit));
+
+    mir2::RuntimeDispatch power;
+    append(power, runtime.route_logic_command(attack(1201, 10, 9, mir2::kCmPowerHit)));
+    append(power, runtime.tick(now_ms));
+    assert(has_packet_ident(power, mir2::legacy::kSmPowerHit));
+    assert(has_trace(power, "power_hit_bonus"));
+    assert(has_trace(power, "struck"));
+    assert(has_trace(power, "train_skill"));
     const auto snapshot = runtime.snapshot_character_actor("Power");
     assert(snapshot.has_value() &&
            (snapshot->magics[0].cur_train > 0 || snapshot->magics[0].level > 0));
+  }
+
+  {
+    auto config = non_sword_seven_config();
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(enter(1203, character("NonSwordSeven", {7}))));
+    static_cast<void>(runtime.tick(1000));
+    auto now_ms = 2000ULL;
+    mir2::RuntimeDispatch dispatch;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+      append(dispatch, runtime.route_logic_command(attack(1203, 1, 1)));
+      append(dispatch, runtime.tick(now_ms));
+      now_ms += 1000;
+    }
+    assert(!has_raw_prefix(dispatch, "+PWR/"));
+
+    mir2::RuntimeDispatch power;
+    append(power, runtime.route_logic_command(attack(1203, 10, 9, mir2::kCmPowerHit)));
+    append(power, runtime.tick(now_ms));
+    assert(!has_packet_ident(power, mir2::legacy::kSmPowerHit));
+    assert(has_packet_ident(power, mir2::legacy::kSmHit));
+    assert(has_trace(power, "struck"));
+  }
+
+  {
+    auto config = base_config();
+    config.spawns.push_back(spawn("PowerNotReadyTarget", 10, 9));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(enter(1202, character("PowerNotReady", {7}))));
+    static_cast<void>(runtime.tick(1000));
+    auto dispatch = runtime.route_logic_command(attack(1202, 10, 9, mir2::kCmPowerHit));
+    append(dispatch, runtime.tick(2000));
+    assert(!has_packet_ident(dispatch, mir2::legacy::kSmPowerHit));
+    assert(has_packet_ident(dispatch, mir2::legacy::kSmHit));
+    assert(has_trace(dispatch, "struck"));
+    assert(!has_trace(dispatch, "power_hit_bonus"));
   }
 
   {
@@ -197,10 +301,10 @@ int main() {
     mir2::LogicRuntime runtime(config);
     runtime.initialize();
     static_cast<void>(runtime.route_logic_command(enter(1206, character("NoLong", {}))));
-    static_cast<void>(runtime.tick());
+    static_cast<void>(runtime.tick(1000));
     auto dispatch = runtime.route_logic_command(attack(1206, 10, 8, mir2::kCmLongHit));
-    append(dispatch, runtime.tick());
-    assert(has_trace(dispatch, "sword_reject", 7));
+    append(dispatch, runtime.tick(2000));
+    assert(has_trace(dispatch, "sword_reject", 12));
     assert(!has_packet_ident(dispatch, mir2::legacy::kSmLongHit));
     assert(!has_trace(dispatch, "train_skill"));
   }
@@ -208,15 +312,19 @@ int main() {
   {
     auto config = base_config();
     config.spawns.push_back(spawn("LongTarget", 10, 8));
+    config.spawns.back().defense = 200;
     mir2::LogicRuntime runtime(config);
     runtime.initialize();
-    static_cast<void>(runtime.route_logic_command(enter(1211, character("Long", {7}))));
-    static_cast<void>(runtime.tick());
-    auto dispatch = runtime.route_logic_command(spell(1211, 7));
-    append(dispatch, runtime.tick());
-    append(dispatch, runtime.route_logic_command(attack(1211, 10, 8)));
-    append(dispatch, runtime.tick());
+    static_cast<void>(runtime.route_logic_command(enter(1211, character("Long", {12}))));
+    static_cast<void>(runtime.tick(1000));
+    auto dispatch = runtime.route_logic_command(spell(1211, 12));
+    append(dispatch, runtime.tick(2000));
+    assert(has_raw_prefix(dispatch, "+LNG/"));
+    append(dispatch, runtime.route_logic_command(attack(1211, 10, 8, mir2::kCmLongHit)));
+    append(dispatch, runtime.tick(3000));
     assert(has_packet_ident(dispatch, mir2::legacy::kSmLongHit));
+    assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 200) == 0);
+    assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 500) == 1);
     assert(has_trace(dispatch, "struck"));
     assert(has_trace(dispatch, "train_skill"));
   }
@@ -224,44 +332,102 @@ int main() {
   {
     auto config = base_config();
     config.spawns.push_back(spawn("LongInvalid", 11, 9));
-    config.spawns.push_back(spawn("LongValid", 10, 8));
     mir2::LogicRuntime runtime(config);
     runtime.initialize();
-    static_cast<void>(runtime.route_logic_command(enter(1216, character("LongKeep", {7}))));
-    static_cast<void>(runtime.tick());
-    auto dispatch = runtime.route_logic_command(spell(1216, 7));
-    append(dispatch, runtime.tick());
-    append(dispatch, runtime.route_logic_command(attack(1216, 11, 9)));
-    append(dispatch, runtime.tick());
-    assert(!has_packet_ident(dispatch, mir2::legacy::kSmLongHit));
+    static_cast<void>(runtime.route_logic_command(enter(1216, character("LongKeep", {12}))));
+    static_cast<void>(runtime.tick(1000));
+    auto dispatch = runtime.route_logic_command(spell(1216, 12));
+    append(dispatch, runtime.tick(2000));
+    append(dispatch, runtime.route_logic_command(attack(1216, 11, 9, mir2::kCmLongHit)));
+    append(dispatch, runtime.tick(3000));
     assert(!has_trace(dispatch, "struck"));
     assert(!has_trace(dispatch, "train_skill"));
+  }
 
-    mir2::RuntimeDispatch second;
-    append(second, runtime.route_logic_command(attack(1216, 10, 8)));
-    append(second, runtime.tick());
-    assert(has_packet_ident(second, mir2::legacy::kSmLongHit));
-    assert(has_trace(second, "struck"));
-    assert(has_trace(second, "train_skill"));
+  {
+    auto config = base_config();
+    config.spawns.push_back(spawn("LongFrontBlocker", 10, 9));
+    config.spawns.push_back(spawn("LongBehindBlocker", 10, 8));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(enter(1217, character("LongExact", {12}))));
+    static_cast<void>(runtime.tick(1000));
+    auto dispatch = runtime.route_logic_command(spell(1217, 12));
+    append(dispatch, runtime.tick(2000));
+    append(dispatch, runtime.route_logic_command(attack(1217, 0, 0, mir2::kCmLongHit)));
+    append(dispatch, runtime.tick(3000));
+    assert(has_packet_ident(dispatch, mir2::legacy::kSmLongHit));
+    assert(count_trace(dispatch, "struck") == 1);
+    assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 500) == 1);
   }
 
   {
     auto config = base_config();
     config.spawns.push_back(spawn("WideA", 10, 9));
-    config.spawns.push_back(spawn("WideB", 9, 9));
-    config.spawns.push_back(spawn("WideC", 11, 9));
+    auto wide_b = spawn("WideB", 9, 9);
+    wide_b.defense = 200;
+    config.spawns.push_back(wide_b);
+    auto wide_c = spawn("WideC", 11, 9);
+    wide_c.defense = 200;
+    config.spawns.push_back(wide_c);
     config.spawns.push_back(spawn("WideOut", 10, 8));
     mir2::LogicRuntime runtime(config);
     runtime.initialize();
-    static_cast<void>(runtime.route_logic_command(enter(1221, character("Wide", {12}))));
-    static_cast<void>(runtime.tick());
-    auto dispatch = runtime.route_logic_command(spell(1221, 12));
-    append(dispatch, runtime.tick());
-    append(dispatch, runtime.route_logic_command(attack(1221, 10, 9)));
-    append(dispatch, runtime.tick());
+    static_cast<void>(runtime.route_logic_command(enter(1221, character("Wide", {25}))));
+    static_cast<void>(runtime.tick(1000));
+    auto dispatch = runtime.route_logic_command(spell(1221, 25));
+    append(dispatch, runtime.tick(2000));
+    assert(has_raw_prefix(dispatch, "+WID/"));
+    append(dispatch, runtime.route_logic_command(attack(1221, 10, 9, mir2::kCmWideHit)));
+    append(dispatch, runtime.tick(3000));
     assert(has_packet_ident(dispatch, mir2::legacy::kSmWideHit));
     assert(count_trace(dispatch, "struck") == 3);
+    assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 200) == 1);
+    assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 500) == 2);
     assert(count_trace(dispatch, "train_skill") == 1);
+  }
+
+  {
+    auto config = base_config();
+    auto left_first = spawn("WideLeftFirst", 9, 9, 80);
+    left_first.defense = 200;
+    config.spawns.push_back(left_first);
+    config.spawns.push_back(spawn("WideFrontSecond", 10, 9, 80));
+    config.spawns.push_back(spawn("WideRightThird", 11, 9, 80));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(enter(1222, character("WideOrder", {25}))));
+    static_cast<void>(runtime.tick(1000));
+    auto dispatch = runtime.route_logic_command(spell(1222, 25));
+    append(dispatch, runtime.tick(2000));
+    append(dispatch, runtime.route_logic_command(attack(1222, 10, 9, mir2::kCmWideHit)));
+    append(dispatch, runtime.tick(3000));
+    assert(count_trace(dispatch, "struck") == 3);
+    assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 200) == 1);
+    assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 500) == 2);
+    const auto left = runtime.legacy_monster_snapshot("0", 1);
+    assert(left.has_value() && left->hp < left->max_hp);
+  }
+
+  {
+    auto config = base_config();
+    auto left_only = spawn("WideLeftOnly", 9, 9, 80);
+    left_only.defense = 200;
+    config.spawns.push_back(left_only);
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(enter(1223, character("WideSideOnly", {25}))));
+    static_cast<void>(runtime.tick(1000));
+    auto dispatch = runtime.route_logic_command(spell(1223, 25));
+    append(dispatch, runtime.tick(2000));
+    append(dispatch, runtime.route_logic_command(attack(1223, 0, 0, mir2::kCmWideHit)));
+    append(dispatch, runtime.tick(3000));
+    assert(has_packet_ident(dispatch, mir2::legacy::kSmWideHit));
+    assert(count_trace(dispatch, "struck") == 1);
+    assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 200) == 0);
+    assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 500) == 1);
+    const auto left = runtime.legacy_monster_snapshot("0", 1);
+    assert(left.has_value() && left->hp < left->max_hp);
   }
 
   {
@@ -269,14 +435,14 @@ int main() {
     config.spawns.push_back(spawn("WideMonsterOnly", 10, 9));
     mir2::LogicRuntime runtime(config);
     runtime.initialize();
-    static_cast<void>(runtime.route_logic_command(enter(1226, character("WidePk", {12}))));
+    static_cast<void>(runtime.route_logic_command(enter(1226, character("WidePk", {25}))));
     static_cast<void>(runtime.route_logic_command(
         enter(1227, character("WideBlockedPlayer", {3}, 9, 9))));
-    static_cast<void>(runtime.tick());
-    auto dispatch = runtime.route_logic_command(spell(1226, 12));
-    append(dispatch, runtime.tick());
-    append(dispatch, runtime.route_logic_command(attack(1226, 10, 9)));
-    append(dispatch, runtime.tick());
+    static_cast<void>(runtime.tick(1000));
+    auto dispatch = runtime.route_logic_command(spell(1226, 25));
+    append(dispatch, runtime.tick(2000));
+    append(dispatch, runtime.route_logic_command(attack(1226, 10, 9, mir2::kCmWideHit)));
+    append(dispatch, runtime.tick(3000));
     assert(has_packet_ident(dispatch, mir2::legacy::kSmWideHit));
     assert(count_trace(dispatch, "struck") == 1);
     assert(count_trace(dispatch, "train_skill") == 1);
@@ -287,22 +453,22 @@ int main() {
     config.spawns.push_back(spawn("FireTarget", 10, 9));
     mir2::LogicRuntime runtime(config);
     runtime.initialize();
-    static_cast<void>(runtime.route_logic_command(enter(1231, character("Fire", {25}))));
-    static_cast<void>(runtime.tick());
-    auto dispatch = runtime.route_logic_command(spell(1231, 25));
-    append(dispatch, runtime.tick());
+    static_cast<void>(runtime.route_logic_command(enter(1231, character("Fire", {26}))));
+    static_cast<void>(runtime.tick(1000));
+    auto dispatch = runtime.route_logic_command(spell(1231, 26));
+    append(dispatch, runtime.tick(2000));
     auto before = runtime.snapshot_character_actor("Fire");
     assert(before.has_value() && before->ability.mp < before->ability.max_mp);
-    append(dispatch, runtime.route_logic_command(attack(1231, 10, 9)));
-    append(dispatch, runtime.tick());
+    append(dispatch, runtime.route_logic_command(attack(1231, 10, 9, mir2::kCmFireHit)));
+    append(dispatch, runtime.tick(3000));
     assert(has_packet_ident(dispatch, mir2::legacy::kSmFireHit));
-    assert(has_trace(dispatch, "sword_prepare", 25));
+    assert(has_trace(dispatch, "sword_prepare", 26));
     assert(has_trace(dispatch, "struck"));
     assert(has_trace(dispatch, "train_skill"));
 
     mir2::RuntimeDispatch second;
     append(second, runtime.route_logic_command(attack(1231, 10, 9)));
-    append(second, runtime.tick());
+    append(second, runtime.tick(4000));
     assert(!has_packet_ident(second, mir2::legacy::kSmFireHit));
   }
 
@@ -311,22 +477,46 @@ int main() {
     config.spawns.push_back(spawn("FireLater", 11, 10, 160));
     mir2::LogicRuntime runtime(config);
     runtime.initialize();
-    static_cast<void>(runtime.route_logic_command(enter(1236, character("FireKeep", {25}))));
-    static_cast<void>(runtime.tick());
-    auto dispatch = runtime.route_logic_command(spell(1236, 25));
-    append(dispatch, runtime.tick());
+    static_cast<void>(runtime.route_logic_command(enter(1236, character("FireKeep", {26}))));
+    static_cast<void>(runtime.tick(1000));
+    auto dispatch = runtime.route_logic_command(spell(1236, 26));
+    append(dispatch, runtime.tick(2000));
     append(dispatch, runtime.route_logic_command(attack(1236, 1, 1)));
-    append(dispatch, runtime.tick());
+    append(dispatch, runtime.tick(3000));
     assert(!has_packet_ident(dispatch, mir2::legacy::kSmFireHit));
     assert(!has_trace(dispatch, "struck"));
     assert(!has_trace(dispatch, "train_skill"));
 
     mir2::RuntimeDispatch second;
-    append(second, runtime.route_logic_command(attack(1236, 11, 10)));
-    append(second, runtime.tick());
+    append(second, runtime.route_logic_command(attack(1236, 11, 10, mir2::kCmFireHit)));
+    append(second, runtime.tick(4000));
     assert(has_packet_ident(second, mir2::legacy::kSmFireHit));
     assert(has_trace(second, "struck"));
     assert(has_trace(second, "train_skill"));
+  }
+
+  {
+    auto config = base_config();
+    config.budgets.tick_ms = 1000;
+    config.spawns.push_back(spawn("FireExpired", 10, 9, 160));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(enter(1237, character("FireExpire", {26}))));
+    static_cast<void>(runtime.tick(1000));
+    auto dispatch = runtime.route_logic_command(spell(1237, 26));
+    append(dispatch, runtime.tick(2000));
+    assert(has_trace(dispatch, "sword_prepare", 26));
+    for (auto now_ms = 3000ULL; now_ms <= 23000ULL; now_ms += 1000ULL) {
+      append(dispatch, runtime.tick(now_ms));
+    }
+
+    mir2::RuntimeDispatch expired;
+    append(expired, runtime.route_logic_command(attack(1237, 10, 9, mir2::kCmFireHit)));
+    append(expired, runtime.tick(24000));
+    assert(!has_packet_ident(expired, mir2::legacy::kSmFireHit));
+    assert(has_packet_ident(expired, mir2::legacy::kSmHit));
+    assert(has_trace(expired, "struck"));
+    assert(!has_trace(expired, "fire_hit_bonus"));
   }
 
   {
@@ -335,9 +525,9 @@ int main() {
     mir2::LogicRuntime runtime(config);
     runtime.initialize();
     static_cast<void>(runtime.route_logic_command(enter(1241, character("Basic", {3}))));
-    static_cast<void>(runtime.tick());
+    static_cast<void>(runtime.tick(1000));
     auto dispatch = runtime.route_logic_command(attack(1241, 10, 9));
-    append(dispatch, runtime.tick());
+    append(dispatch, runtime.tick(2000));
     assert(has_packet_ident(dispatch, mir2::legacy::kSmHit));
     assert(has_trace(dispatch, "struck"));
     assert(has_trace(dispatch, "train_skill"));

@@ -373,7 +373,7 @@ int main() {
       }
     }
     if (!weapon_trace.has_value() || !struck_trace.has_value() ||
-        *weapon_trace >= *struck_trace) {
+        *struck_trace >= *weapon_trace) {
       return fail(13);
     }
   }
