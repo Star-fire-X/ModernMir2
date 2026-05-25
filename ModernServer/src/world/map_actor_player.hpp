@@ -201,8 +201,8 @@ void MapActor::legacy_operate_player_running(std::uint64_t actor_id, Player& pla
                        player.legacy_has_commands(),
                        static_cast<std::int32_t>(player.legacy_inbox_size()));
   std::size_t processed_messages = 0;
-  const auto input_budget = std::max<std::size_t>(player_input_budget_per_tick, 1);
-  while (processed_messages < input_budget) {
+  while (player_input_budget_per_tick == 0 ||
+         processed_messages < player_input_budget_per_tick) {
     auto command = player.pop_legacy_command();
     if (!command.has_value()) {
       break;

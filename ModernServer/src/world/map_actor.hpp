@@ -69,6 +69,10 @@ class MapActor {
   bool apply_merchant_state(const MerchantStateRecord& state);
   void set_castle_dialog_context(CastleDialogContext castle_dialog_context);
   void set_guild_castle_snapshot(GuildCastleSnapshot guild_castle_snapshot);
+  [[nodiscard]] RuntimeDispatch drain_pending_mail(std::uint64_t current_tick,
+                                                   std::uint64_t now_ms);
+  [[nodiscard]] RuntimeDispatch run_maintenance_tick(std::uint64_t current_tick,
+                                                     std::uint64_t now_ms);
   [[nodiscard]] RuntimeDispatch tick(std::uint64_t current_tick);
   [[nodiscard]] RuntimeDispatch tick(std::uint64_t current_tick, std::uint64_t now_ms);
   [[nodiscard]] RuntimeDispatch close_expired_doors(std::uint64_t now_ms);
@@ -80,7 +84,7 @@ class MapActor {
                                                       std::uint64_t current_tick,
                                                       std::uint64_t now_ms,
                                                       bool persistence_overloaded,
-                                                      std::size_t player_input_budget_per_tick = 1);
+                                                      std::size_t player_input_budget_per_tick = 0);
   [[nodiscard]] RuntimeDispatch legacy_process_monster(std::uint64_t actor_id,
                                                        std::uint64_t current_tick,
                                                        std::uint64_t now_ms,

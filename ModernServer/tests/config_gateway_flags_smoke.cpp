@@ -16,6 +16,7 @@ void write_text(const std::filesystem::path& path, const char* text) {
 
 int main() {
   assert(mir2::LogicBudgetConfig{}.tick_ms == 10);
+  assert(mir2::LogicBudgetConfig{}.player_input_budget_per_tick == 0);
 
   const auto root = std::filesystem::temp_directory_path() / "mir2_config_gateway_flags_smoke";
   std::error_code ignored;
@@ -91,6 +92,17 @@ int main() {
              "net_flush_budget_ms = 30\n");
   const auto default_tick_config = loader.load(root);
   assert(default_tick_config.budgets.tick_ms == 10);
+  assert(default_tick_config.budgets.player_input_budget_per_tick == 2);
+
+  write_text(root / "runtime" / "logic.toml",
+             "player_budget_ms = 30\n"
+             "player_input_budget_per_tick = 0\n"
+             "monster_budget_ms = 30\n"
+             "spawn_budget_ms = 30\n"
+             "npc_budget_ms = 5\n"
+             "net_flush_budget_ms = 30\n");
+  const auto unlimited_input_config = loader.load(root);
+  assert(unlimited_input_config.budgets.player_input_budget_per_tick == 0);
 
   std::filesystem::remove_all(root, ignored);
   return 0;

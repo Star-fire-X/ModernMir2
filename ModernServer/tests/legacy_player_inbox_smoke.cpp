@@ -56,15 +56,6 @@ mir2::LogicCommand make_say(std::uint64_t session_id, std::string text,
   return command;
 }
 
-mir2::LogicCommand make_spell(std::uint64_t session_id, std::uint64_t session_seq) {
-  mir2::LogicCommand command;
-  command.kind = mir2::LogicCommandKind::spell;
-  command.session_id = session_id;
-  command.session_seq = session_seq;
-  command.game_message = mir2::make_default_message(mir2::kCmSpell, 0, 0, 0, 0);
-  return command;
-}
-
 std::vector<std::string> hear_lines(const mir2::RuntimeDispatch& dispatch) {
   std::vector<std::string> lines;
   for (const auto& event : dispatch.session_events) {
@@ -109,34 +100,28 @@ int main() {
           std::vector<std::uint64_t>{1, 2}));
   assert(runtime.legacy_session_run_time_ms(31) < before_move_run_time);
   const auto move_dispatch = runtime.tick(1502);
-  assert(runtime.legacy_session_inbox_size(31) == 1);
-  assert(runtime.legacy_session_inbox_sequences(31) == std::vector<std::uint64_t>{2});
+  assert(runtime.legacy_session_inbox_size(31) == 0);
   snapshot = runtime.snapshot_character_actor("Hero");
   assert(snapshot.has_value());
   assert(snapshot->x == 11 && snapshot->y == 10);
   assert(!move_dispatch.session_events.empty());
-  const auto second_move_dispatch = runtime.tick(1753);
-  assert(runtime.legacy_session_inbox_size(31) == 0);
-  assert(!second_move_dispatch.session_events.empty());
 
   const auto before_say_run_time = runtime.legacy_session_run_time_ms(31);
   static_cast<void>(runtime.route_logic_command(make_say(31, "first", 3)));
   static_cast<void>(runtime.route_logic_command(make_say(31, "second", 4)));
-  static_cast<void>(runtime.route_logic_command(make_spell(31, 5)));
+  static_cast<void>(runtime.route_logic_command(make_say(31, "third", 5)));
   assert(runtime.legacy_session_run_time_ms(31) == before_say_run_time);
   assert(runtime.legacy_session_inbox_size(31) == 3);
   assert((runtime.legacy_session_inbox_sequences(31) ==
           std::vector<std::uint64_t>{3, 4, 5}));
-  const auto early_say_dispatch = runtime.tick(1900);
+  const auto early_say_dispatch = runtime.tick(1700);
   assert(runtime.legacy_session_inbox_size(31) == 3);
   assert(hear_lines(early_say_dispatch).empty());
   auto say_dispatch = runtime.tick(2004);
-  assert((hear_lines(say_dispatch) == std::vector<std::string>{"Hero: first"}));
-  assert((runtime.legacy_session_inbox_sequences(31) == std::vector<std::uint64_t>{4, 5}));
-  say_dispatch = runtime.tick(2255);
-  assert((hear_lines(say_dispatch) == std::vector<std::string>{"Hero: second"}));
-  assert(runtime.legacy_session_inbox_sequences(31) == std::vector<std::uint64_t>{5});
-  static_cast<void>(runtime.tick(2506));
+  assert((hear_lines(say_dispatch) == std::vector<std::string>{
+                                      "Hero: first",
+                                      "Hero: second",
+                                      "Hero: third"}));
   assert(runtime.legacy_session_inbox_size(31) == 0);
 
   return 0;

@@ -113,7 +113,7 @@ struct PortConfig {
 struct LogicBudgetConfig {
   std::uint32_t tick_ms{10};
   std::uint32_t player_budget_ms{30};
-  std::uint32_t player_input_budget_per_tick{1};
+  std::uint32_t player_input_budget_per_tick{0};
   std::uint32_t monster_budget_ms{30};
   std::uint32_t spawn_budget_ms{30};
   std::uint32_t npc_budget_ms{5};
