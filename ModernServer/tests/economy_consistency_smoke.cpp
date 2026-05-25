@@ -16,6 +16,12 @@
 
 namespace {
 
+constexpr int kLegacyTradeStableMs = 1000;
+constexpr int kTestTickMs = 10;
+constexpr int kTradeStableSafetyTicks = 10;
+constexpr int kTradeStableTicks =
+    (kLegacyTradeStableMs + kTestTickMs - 1) / kTestTickMs + kTradeStableSafetyTicks;
+
 int fail(std::string_view stage) {
   std::cerr << "economy_consistency_smoke failed at " << stage << '\n';
   return 1;
@@ -36,6 +42,10 @@ mir2::RuntimeDispatch tick_players(mir2::LogicRuntime& runtime, int count = 40) 
     append_dispatch(dispatch, runtime.tick());
   }
   return dispatch;
+}
+
+mir2::RuntimeDispatch tick_past_trade_stable_window(mir2::LogicRuntime& runtime) {
+  return tick_players(runtime, kTradeStableTicks);
 }
 
 std::optional<mir2::DecodedLegacyGamePacket> find_packet(
@@ -148,6 +158,7 @@ int count_bag_make_index(mir2::LogicRuntime& runtime, std::uint64_t session_id,
 
 mir2::HostConfig make_trade_config() {
   mir2::HostConfig config;
+  config.budgets.tick_ms = kTestTickMs;
   config.maps.push_back(mir2::MapConfig{"0", "TradeMap", {}, 0, 0, 30, 30});
   config.items.push_back(mir2::ItemConfig{1, "Ruby", 1, 40, 0, 2, 1, 1000, 10, 0, 0});
   config.items.push_back(mir2::ItemConfig{2, "Sapphire", 1, 41, 0, 3, 1, 1000, 10, 0, 0});
@@ -190,7 +201,7 @@ int trade_duplicate_make_index_cancels_and_restores() {
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_add_item, 7, 1001, "Ruby")));
   static_cast<void>(tick_players(runtime));
-  static_cast<void>(tick_players(runtime, 60));
+  static_cast<void>(tick_past_trade_stable_window(runtime));
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_accept, 7)));
   static_cast<void>(tick_players(runtime));
