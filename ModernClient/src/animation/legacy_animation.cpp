@@ -928,7 +928,9 @@ void begin_magic_explosion(LegacyEffectManager::Effect& effect,
   effect.repetition = false;
   effect.start_frame = 0;
   effect.current_frame = 0;
-  effect.frame_count = std::max(1, effect.explosion_frame_count);
+  effect.frame_count = effect.magic_type == LegacyMagicType::ready
+      ? effect.explosion_frame_count
+      : std::max(1, effect.explosion_frame_count);
   effect.ry = effect.target_y;
   effect.fly_x = map_to_world_x(effect.target_x);
   effect.fly_y = map_to_world_y(effect.target_y);
@@ -977,7 +979,9 @@ bool run_magic_effect(LegacyEffectManager::Effect& effect, const std::uint64_t n
     return false;  // 超时移除（防止卡住的飞行弹道永久残留）
   }
 
-  if (!advance_effect_frame(effect, now_ms)) {
+  const auto ready_zero_frame =
+      effect.magic_type == LegacyMagicType::ready && effect.frame_count <= 0;
+  if (!ready_zero_frame && !advance_effect_frame(effect, now_ms)) {
     return false;  // 帧播放完毕
   }
 
@@ -990,13 +994,18 @@ bool run_magic_effect(LegacyEffectManager::Effect& effect, const std::uint64_t n
   auto crash = false;
   auto target_world_x = map_to_world_x(effect.target_x);
   auto target_world_y = map_to_world_y(effect.target_y);
-  if (effect.target_actor_id != 0) {
-    if (const auto target = actor_poses.find(effect.target_actor_id);
-        target != actor_poses.end()) {
-      target_world_x = map_to_world_x(target->second.rx) + target->second.shift_x;
-      target_world_y = map_to_world_y(target->second.ry) + target->second.shift_y;
-      effect.target_x = target->second.rx;
-      effect.target_y = target->second.ry;
+  const auto target_pose = effect.target_actor_id != 0
+      ? actor_poses.find(effect.target_actor_id)
+      : actor_poses.end();
+  const auto has_target_actor = target_pose != actor_poses.end();
+  const auto ready_without_target =
+      effect.magic_type == LegacyMagicType::ready && !has_target_actor;
+  if (effect.target_actor_id != 0 && !ready_without_target) {
+    if (has_target_actor) {
+      target_world_x = map_to_world_x(target_pose->second.rx) + target_pose->second.shift_x;
+      target_world_y = map_to_world_y(target_pose->second.ry) + target_pose->second.shift_y;
+      effect.target_x = target_pose->second.rx;
+      effect.target_y = target_pose->second.ry;
     }
     const auto ms = elapsed_ms(now_ms, effect.move_step_ms);
     effect.move_step_ms = now_ms;
@@ -1043,7 +1052,7 @@ bool run_magic_effect(LegacyEffectManager::Effect& effect, const std::uint64_t n
   }
 
   // 到达目标附近或已越过目标 → 触发爆炸
-  if ((distance_x < 15 && distance_y < 15) || passed_target || crash) {
+  if (!ready_without_target && ((distance_x < 15 && distance_y < 15) || passed_target || crash)) {
     begin_magic_explosion(effect, audio_cues);
     lock_effect_to_target_pose(effect, actor_poses);
   }
@@ -3408,6 +3417,11 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
       effect.explosion_frame_count = (create.effect == 11 || create.effect == 12) ? 16 : 10;
       break;
     case LegacyMagicType::ready:
+      effect.frame_count = 0;
+      effect.fixed_effect = false;
+      effect.repetition = false;
+      effect.explosion_frame_count = 0;
+      break;
     case LegacyMagicType::fire_wind:
     case LegacyMagicType::kyul_kai:
     default:
@@ -3921,7 +3935,7 @@ void AnimationManager::spawn_spell_effect_for_actor(const WorldViewState& world,
       actor.action_started_ms == 0) {
     return;
   }
-  if (actor.action_magic_failed || actor.action_magic_effect_type <= 0 ||
+  if (actor.action_magic_failed || actor.action_magic_effect_type < 0 ||
       actor.action_magic_effect <= 0) {
     return;
   }

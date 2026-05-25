@@ -360,6 +360,8 @@ int main() {
   assert(state.world.actors[1000].action_target_actor_id == 2000);
   state.apply(ActorMagicFire{1000, 2000, 336, 273, 7, 32});
   state.process_legacy_actor_queues(mir2::client::detail::monotonic_ms());
+  assert(state.world.actors[1000].action_magic_effect_type == -1);
+  state.process_legacy_actor_hurry_queues(mir2::client::detail::monotonic_ms());
   assert(state.world.actors[1000].action_magic_effect_type == 7);
   assert(state.world.actors[1000].action_magic_effect == 32);
   assert(state.world.actors[1000].action_target_x == 336);

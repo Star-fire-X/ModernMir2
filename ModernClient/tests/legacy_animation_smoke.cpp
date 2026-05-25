@@ -1001,6 +1001,22 @@ int main() {
   world.actors[1].action_magic_effect = 0;
   world.actors[1].action_magic_effect_type = -1;
 
+  animations.reset(3300);
+  world.actors[1].action_started_ms = 3300;
+  world.actors[1].action_magic_effect = 1;
+  world.actors[1].action_magic_effect_type = 0;
+  animations.update(world, 3300);
+  assert(animations.effects().fly_count() == 0);
+  for (std::uint64_t now = 3361; now <= 3788; now += 61) {
+    animations.update(world, now);
+    assert(animations.effects().fly_count() == 0);
+  }
+  animations.update(world, 3849);
+  assert(animations.effects().fly_count() == 1);
+  assert(animations.effects().fly_effects().front().magic_type == LegacyMagicType::ready);
+  world.actors[1].action_magic_effect = 0;
+  world.actors[1].action_magic_effect_type = -1;
+
   animations.reset(6000);
   auto queued_actor = actor;
   queued_actor.current_action = mir2::client_v1::ActorActionKind::hit;
@@ -1369,6 +1385,23 @@ int main() {
   assert(fireball_effect.explosion_base == 170);
   assert(!fireball_effect.fixed_effect);
   assert(fireball_effect.frame_count == 6);
+
+  auto ready_matrix = spawn_matrix_magic(0, 1, 1);
+  assert(ready_matrix.fly_count() == 1);
+  const auto& ready_effect = ready_matrix.fly_effects().front();
+  assert(ready_effect.magic_type == LegacyMagicType::ready);
+  assert(!ready_effect.fixed_effect);
+  assert(ready_effect.frame_count == 0);
+  assert(ready_effect.explosion_frame_count == 0);
+  assert(!ready_effect.repetition);
+  ready_matrix.update(8051);
+  assert(ready_matrix.fly_count() == 1);
+  ready_matrix.update(9000);
+  assert(ready_matrix.fly_count() == 1);
+  assert(!ready_matrix.fly_effects().front().fixed_effect);
+  assert(ready_matrix.fly_effects().front().frame_count == 0);
+  ready_matrix.update(18001);
+  assert(ready_matrix.fly_count() == 0);
 
   auto firegun_matrix = spawn_matrix_magic(5, 9, 9);
   assert(firegun_matrix.fly_count() == 1);
