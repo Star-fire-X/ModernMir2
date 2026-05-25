@@ -708,6 +708,12 @@ if(BUILD_TESTING)
   add_test(NAME mir2_legacy_mapquest_import_trigger_smoke
     COMMAND mir2_legacy_mapquest_import_trigger_smoke)
 
+  add_executable(mir2_legacy_gbk_import_smoke
+    tests/legacy_gbk_import_smoke.cpp)
+  target_link_libraries(mir2_legacy_gbk_import_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_gbk_import_smoke
+    COMMAND mir2_legacy_gbk_import_smoke)
+
   add_executable(mir2_legacy_user_engine_timer_smoke tests/legacy_user_engine_timer_smoke.cpp)
   target_link_libraries(mir2_legacy_user_engine_timer_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_user_engine_timer_smoke COMMAND mir2_legacy_user_engine_timer_smoke)
@@ -1095,6 +1101,7 @@ if(BUILD_TESTING)
       mir2_scripted_merchant_smoke
       mir2_scripted_npc_dialog_smoke
       mir2_legacy_mapquest_import_trigger_smoke
+      mir2_legacy_gbk_import_smoke
       mir2_special_consumables_legacy_smoke
       mir2_guild_manager_smoke
       mir2_castle_manager_smoke
