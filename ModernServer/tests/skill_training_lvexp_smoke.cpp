@@ -255,7 +255,10 @@ int main() {
     missing_target_spell.y = 0;
     static_cast<void>(runtime.route_logic_command(missing_target_spell));
     const auto dispatch = runtime.tick();
-    assert(has_trace(dispatch, "spell_fail"));
+    assert(has_trace(dispatch, "target_reject"));
+    assert(!has_trace(dispatch, "spell_fail"));
+    assert(has_packet(dispatch, mir2::kSmMagicFire));
+    assert(!has_packet(dispatch, mir2::kSmMagicFireFail));
     const auto snapshot = runtime.snapshot_character_actor("MissingTarget");
     assert(snapshot.has_value());
     assert(snapshot->magics[0].cur_train == 9);

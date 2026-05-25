@@ -1884,6 +1884,10 @@ std::int32_t Player::legacy_magic_bubble_level() const {
   return bubble != nullptr ? bubble->level : 0;
 }
 
+bool Player::legacy_poison_stone_active(std::uint64_t current_tick) const {
+  return legacy_buffs_.active(LegacyBuffKind::poison_stone, current_tick);
+}
+
 bool Player::activate_legacy_magic_bubble(std::int32_t level, std::uint64_t current_tick,
                                           std::uint64_t expire_tick) {
   if (legacy_magic_bubble_active(current_tick)) {

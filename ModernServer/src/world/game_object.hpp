@@ -526,6 +526,7 @@ class Player : public GameObject {
   void set_legacy_repair_mode(LegacyRepairMode mode) { legacy_repair_mode_ = mode; }
   [[nodiscard]] bool legacy_magic_bubble_active(std::uint64_t current_tick) const;
   [[nodiscard]] std::int32_t legacy_magic_bubble_level() const;
+  [[nodiscard]] bool legacy_poison_stone_active(std::uint64_t current_tick) const;
   [[nodiscard]] bool activate_legacy_magic_bubble(std::int32_t level,
                                                   std::uint64_t current_tick,
                                                   std::uint64_t expire_tick);
