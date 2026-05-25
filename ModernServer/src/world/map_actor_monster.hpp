@@ -802,7 +802,9 @@ bool MapActor::legacy_try_monster_walk(Monster& monster, std::uint8_t dir,
                                        RuntimeDispatch& dispatch,
                                        std::uint64_t current_tick,
                                        std::uint64_t now_ms) {
-  const auto [dx, dy] = direction_delta(dir);
+  const auto walk_dir = static_cast<std::uint8_t>(dir % 8);
+  monster.set_dir(walk_dir);
+  const auto [dx, dy] = direction_delta(walk_dir);
   const auto old_x = monster.x();
   const auto old_y = monster.y();
   const auto next_x = monster.x() + dx;
@@ -818,8 +820,7 @@ bool MapActor::legacy_try_monster_walk(Monster& monster, std::uint8_t dir,
   move_mail.actor_id = monster.id();
   move_mail.x = next_x;
   move_mail.y = next_y;
-  move_mail.dir = static_cast<std::uint8_t>(dir % 8);
-  monster.set_dir(move_mail.dir);
+  move_mail.dir = walk_dir;
 
   MapContext context;
   context.tick = current_tick;
@@ -1820,7 +1821,13 @@ void MapActor::handle_monster_ai(Monster& monster, RuntimeDispatch& dispatch,
     monster.lose_target();
   }
 
-  if (!monster.is_slave()) {
+  const auto returning_home =
+      !monster.is_slave() && !legacy_monster_has_special_behavior(monster.race_server()) &&
+      monster.home_area() > 0 && !monster.inside_home_area();
+  if (returning_home) {
+    monster.lose_target();
+    monster.set_target_xy(monster.home_x(), monster.home_y());
+  } else if (!monster.is_slave()) {
     legacy_active_search(monster, dispatch, current_tick, now_ms);
   }
   if (legacy_monster_think(monster, dispatch, current_tick, now_ms)) {
@@ -1856,6 +1863,11 @@ void MapActor::handle_monster_ai(Monster& monster, RuntimeDispatch& dispatch,
   }
 
   if (handle_slave_follow(monster, dispatch, current_tick, now_ms)) {
+    return;
+  }
+
+  if (returning_home) {
+    static_cast<void>(legacy_goto_target_xy(monster, dispatch, current_tick, now_ms));
     return;
   }
 

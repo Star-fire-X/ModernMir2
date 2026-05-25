@@ -648,6 +648,7 @@ struct MonsterSnapshot {
   std::string map_id{};
   std::int32_t x{0};
   std::int32_t y{0};
+  std::uint8_t dir{0};
   std::int32_t level{1};
   std::int32_t hp{0};
   std::int32_t max_hp{0};
