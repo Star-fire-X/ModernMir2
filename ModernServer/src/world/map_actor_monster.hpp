@@ -621,14 +621,31 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
     }
   }
 
+  const auto death_dropper_id = monster->id();
+  const auto death_dropper_name = monster->name();
+  const auto death_x = monster->x();
+  const auto death_y = monster->y();
+  const auto death_drop_gold = monster->drop_gold();
+  const auto death_drop_items = monster->drop_items();
+
+  if (reward_actor_id != 0) {
+    const auto attacker_it = objects_.find(reward_actor_id);
+    if (attacker_it != objects_.end()) {
+      if (auto* attacker = as_player(attacker_it->second.get()); attacker != nullptr) {
+        static_cast<void>(trigger_map_quest(*attacker, death_dropper_name, {}, false,
+                                            "monster_die", dispatch, current_tick, now_ms));
+      }
+    }
+  }
+
   auto drop_position = [&](std::int32_t wide) -> std::pair<std::int32_t, std::int32_t> {
     std::optional<std::pair<std::int32_t, std::int32_t>> best;
     std::size_t best_count = 999;
     for (std::int32_t k = 1; k <= wide; ++k) {
       for (std::int32_t dy = -k; dy <= k; ++dy) {
         for (std::int32_t dx = -k; dx <= k; ++dx) {
-          const auto try_x = monster->x() + dx;
-          const auto try_y = monster->y() + dy;
+          const auto try_x = death_x + dx;
+          const auto try_y = death_y + dy;
           const auto item_count = environment_.item_object_count(try_x, try_y);
           if (!item_count.has_value()) {
             continue;
@@ -646,7 +663,7 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
     if (best.has_value() && best_count < 8) {
       return *best;
     }
-    return {monster->x(), monster->y()};
+    return {death_x, death_y};
   };
 
   auto prepare_death_drop = [&](GroundItem& ground_item) {
@@ -656,8 +673,8 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
       ground_item.ownership_expire_ms = now_ms + kLegacyDropOwnerMs;
     }
     ground_item.expire_time_ms = now_ms + kLegacyGroundItemExpireMs;
-    ground_item.dropper_actor_id = monster->id();
-    ground_item.dropper_name = monster->name();
+    ground_item.dropper_actor_id = death_dropper_id;
+    ground_item.dropper_name = death_dropper_name;
     ground_item.death_drop = true;
   };
 
@@ -699,7 +716,7 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
     return true;
   };
 
-  auto remaining_gold = monster->drop_gold();
+  auto remaining_gold = death_drop_gold;
   for (std::int32_t index = 0;
        index < kLegacyMonsterGoldDropMaxChunks && remaining_gold > 0; ++index) {
     const auto gold_amount = std::min(remaining_gold, kLegacyMonsterGoldDropChunk);
@@ -716,7 +733,7 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
         place_ground_item(ground_item, LegacyMapItemState{true, ground_item.gold_amount}, 3));
   }
 
-  for (const auto& item : monster->drop_items()) {
+  for (const auto& item : death_drop_items) {
     if (is_empty(item)) {
       continue;
     }
@@ -731,16 +748,6 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
     }
     prepare_death_drop(ground_item);
     static_cast<void>(place_ground_item(ground_item, LegacyMapItemState{}, 3));
-  }
-
-  if (reward_actor_id != 0) {
-    const auto attacker_it = objects_.find(reward_actor_id);
-    if (attacker_it != objects_.end()) {
-      if (auto* attacker = as_player(attacker_it->second.get()); attacker != nullptr) {
-        static_cast<void>(trigger_map_quest(*attacker, monster->name(), {}, false, "monster_die",
-                                            dispatch, current_tick, now_ms));
-      }
-    }
   }
 
 }
