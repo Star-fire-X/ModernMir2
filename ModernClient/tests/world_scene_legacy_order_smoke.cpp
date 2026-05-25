@@ -303,7 +303,7 @@ void test_legacy_raw_input_events() {
   assert(context.legacy_input_dispatched);
   assert(context.ui_input.consumed);
   assert(context.ui_input.hover_consumed);
-  assert(world.action_key == -1);
+  assert(world.action_key == 0);
   assert(world.focus_actor_id == 0);
   assert(world.focus_ground_item_id == 0);
   assert(world.legacy_target_x == -1);
@@ -315,6 +315,7 @@ void test_legacy_raw_input_events() {
   mir2::client_v1::ItemState moving_item;
   moving_item.make_index = 3001;
   moving_item.name = "Potion";
+  world.bag_items[0] = mir2::client_v1::ItemState{};
   world.moving_item = mir2::client::MovingItemState{
       true, mir2::client::MovingItemSource::bag, 0, moving_item};
   input.events.push_back(key_down_event(VK_F1, 520, 60));
@@ -336,7 +337,16 @@ void test_legacy_raw_input_events() {
   assert(world.legacy_chr_action == mir2::client::LegacyChrAction::none);
   assert(world.pending_pickup_item_id == 0);
   assert(world.mouse_down_ms == 0);
-  world.moving_item = mir2::client::MovingItemState{};
+  assert(world.moving_item.active);
+  reset_frame_input(input, context);
+
+  input.key_pressed[VK_ESCAPE] = true;
+  input.events.push_back(key_down_event(VK_ESCAPE, 520, 60));
+  scenes.dispatch_legacy_input_events(context);
+  assert(context.legacy_input_dispatched);
+  assert(!world.moving_item.active);
+  assert(world.bag_items[0].make_index == moving_item.make_index);
+  world.bag_items[0] = mir2::client_v1::ItemState{};
   reset_frame_input(input, context);
 
   auto* drag_window = ui_tree->root()->emplace_child<mir2::client::ui::Window>(
@@ -663,7 +673,23 @@ int main() {
   context.ui_input = mir2::client::ui::UiInputResult{true, false, false, false, true};
   world.action_key = -1;
   scenes.process_key_messages(context);
-  assert(world.action_key == -1);
+  assert(world.action_key == 0);
+  world.focus_actor_id = 1;
+  world.focus_ground_item_id = 900;
+  world.legacy_target_x = 52;
+  world.legacy_target_y = 50;
+  world.legacy_chr_action = mir2::client::LegacyChrAction::walk;
+  world.pending_pickup_item_id = 900;
+  world.mouse_down_ms = 123;
+  scenes.process_action_messages(context, 0.016F);
+  assert(world.focus_actor_id == 0);
+  assert(world.focus_ground_item_id == 0);
+  assert(world.legacy_target_x == -1);
+  assert(world.legacy_target_y == -1);
+  assert(world.legacy_chr_action == mir2::client::LegacyChrAction::none);
+  assert(world.pending_pickup_item_id == 0);
+  assert(world.action_key == 0);
+  assert(world.mouse_down_ms == 0);
 
   input = mir2::client::InputState{};
   input.key_pressed[VK_F1] = true;
