@@ -51,22 +51,21 @@ bool MapActor::handle_monster_status_effects(Monster& monster, RuntimeDispatch& 
     static_cast<void>(monster.mark_legacy_death(now_ms));
     refresh_moving_object_state(monster, now_ms);
   }
-  for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
-    if (!is_legacy_visible_to(watcher, monster)) {
-      return;
-    }
-    queue_packet(dispatch, watcher.session_id(),
-                 target_died
-                     ? make_death_packet(watcher.session_id(), monster)
-                     : make_struck_packet(watcher.session_id(), monster, source_actor_id,
-                                          tick_result.damage, true));
-  });
-
   if (!target_died) {
+    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+      if (!is_legacy_visible_to(watcher, monster)) {
+        return;
+      }
+      queue_packet(dispatch, watcher.session_id(),
+                   make_struck_packet(watcher.session_id(), monster, source_actor_id,
+                                      tick_result.damage, true));
+    });
     return false;
   }
 
+  auto pending_death_packets = collect_legacy_death_packets(objects_, monster);
   finalize_monster_death(monster.id(), source_actor_id, dispatch, current_tick);
+  queue_legacy_packets(dispatch, std::move(pending_death_packets));
   return true;
 }
 
@@ -1223,21 +1222,25 @@ void MapActor::legacy_monster_attack_monster(Monster& monster, Monster& target,
   }
 
   const auto died = target.is_dead();
-  for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
-    if (watcher.id() != target.id() && !is_legacy_visible_to(watcher, target)) {
-      return;
-    }
-    queue_packet(dispatch, watcher.session_id(),
-                 died ? make_death_packet(watcher.session_id(), target, false)
-                      : make_struck_packet(watcher.session_id(), target, monster.id(),
-                                           applied_damage, false));
-  });
+  auto pending_death_packets =
+      died ? collect_legacy_death_packets(objects_, target)
+           : std::vector<PendingLegacyPacket>{};
+  if (died) {
+    finalize_monster_death(target.id(), monster.id(), dispatch, current_tick);
+    queue_legacy_packets(dispatch, std::move(pending_death_packets));
+  } else {
+    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+      if (watcher.id() != target.id() && !is_legacy_visible_to(watcher, target)) {
+        return;
+      }
+      queue_packet(dispatch, watcher.session_id(),
+                   make_struck_packet(watcher.session_id(), target, monster.id(),
+                                      applied_damage, false));
+    });
+  }
   add_legacy_trace(dispatch, "MonsterCombat", died ? "death" : "struck",
                    trace_mail, current_tick, now_ms, true, 0, applied_damage,
                    died ? "SM_DEATH" : "SM_STRUCK");
-  if (died) {
-    finalize_monster_death(target.id(), monster.id(), dispatch, current_tick);
-  }
 }
 
 Player* MapActor::legacy_nearest_player_target(const Monster& monster,

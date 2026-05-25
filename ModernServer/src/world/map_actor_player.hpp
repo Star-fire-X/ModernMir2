@@ -138,8 +138,9 @@ void MapActor::handle_player_status_effects(Player& player, RuntimeDispatch& dis
     return;
   }
 
+  auto died = false;
   if (tick_result.damage > 0) {
-    auto died = player.is_dead();
+    died = player.is_dead();
     if (died) {
       died = !try_legacy_revival(
           player, dispatch, current_tick,
@@ -153,15 +154,16 @@ void MapActor::handle_player_status_effects(Player& player, RuntimeDispatch& dis
       dispatch_player_status_tick_result(player, death_clear, dispatch, false);
       static_cast<void>(settle_player_death(player, dispatch, current_tick, now_ms));
     }
-    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
-      if (watcher.id() != player.id() && !is_legacy_visible_to(watcher, player)) {
-        return;
-      }
-      queue_packet(dispatch, watcher.session_id(),
-                   died ? make_death_packet(watcher.session_id(), player, watcher.id() == player.id())
-                        : make_struck_packet(watcher.session_id(), player, tick_result.source_actor_id,
-                                             tick_result.damage, true));
-    });
+    if (!died) {
+      for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+        if (watcher.id() != player.id() && !is_legacy_visible_to(watcher, player)) {
+          return;
+        }
+        queue_packet(dispatch, watcher.session_id(),
+                     make_struck_packet(watcher.session_id(), player,
+                                        tick_result.source_actor_id, tick_result.damage, true));
+      });
+    }
   }
 
   dispatch_player_status_tick_result(player, tick_result, dispatch, true);
@@ -172,6 +174,15 @@ void MapActor::handle_player_status_effects(Player& player, RuntimeDispatch& dis
   if (tick_result.shield_expired) {
     notify_player_and_watchers(dispatch, player, make_shield_fade_self_notice(tick_result.shield_name),
                                make_shield_fade_watcher_notice(player, tick_result.shield_name));
+  }
+  if (died) {
+    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+      if (watcher.id() != player.id() && !is_legacy_visible_to(watcher, player)) {
+        return;
+      }
+      queue_packet(dispatch, watcher.session_id(),
+                   make_death_packet(watcher.session_id(), player, watcher.id() == player.id()));
+    });
   }
 }
 

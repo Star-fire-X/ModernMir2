@@ -167,9 +167,9 @@ int main() {
   assert(exp_index.has_value());
   assert(mapquest_index.has_value());
   assert(drop_index.has_value());
-  assert(*death_index < *exp_index);
   assert(*exp_index < *mapquest_index);
   assert(*mapquest_index < *drop_index);
+  assert(*drop_index < *death_index);
   const auto sword_show = find_packet_by_body(kill_dispatch, mir2::kSmItemShow, "Wooden Sword");
   const auto gold_show = find_packet_by_body(kill_dispatch, mir2::kSmItemShow, "Gold");
   assert(sword_show.has_value());
