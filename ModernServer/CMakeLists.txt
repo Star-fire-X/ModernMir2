@@ -659,6 +659,14 @@ if(BUILD_TESTING)
   add_executable(mir2_player_death_revive_smoke tests/player_death_revive_smoke.cpp)
   target_link_libraries(mir2_player_death_revive_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_player_death_revive_smoke COMMAND mir2_player_death_revive_smoke)
+  add_executable(mir2_player_death_operation_guard_smoke
+    tests/player_death_operation_guard_smoke.cpp)
+  target_link_libraries(mir2_player_death_operation_guard_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_player_death_operation_guard_smoke
+    COMMAND mir2_player_death_operation_guard_smoke)
+  add_executable(mir2_death_pk_exp_order_smoke tests/death_pk_exp_order_smoke.cpp)
+  target_link_libraries(mir2_death_pk_exp_order_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_death_pk_exp_order_smoke COMMAND mir2_death_pk_exp_order_smoke)
 
   add_executable(mir2_experience_levelup_legacy_smoke
     tests/experience_levelup_legacy_smoke.cpp)

@@ -951,17 +951,37 @@ void queue_player_status_tick_result(
   }
 }
 
-void queue_legacy_death_packet(
+struct PendingLegacyPacket {
+  std::uint64_t session_id{0};
+  LegacyPacket packet{};
+};
+
+std::vector<PendingLegacyPacket> collect_legacy_death_packets(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
-    RuntimeDispatch& dispatch, const GameObject& target) {
+    const GameObject& target) {
+  std::vector<PendingLegacyPacket> packets;
   for_each_player(objects, [&](std::uint64_t, const Player& watcher) {
     if (watcher.id() != target.id() && !is_legacy_visible_to(watcher, target)) {
       return;
     }
-    queue_packet(dispatch, watcher.session_id(),
-                 make_death_packet(watcher.session_id(), target,
-                                   watcher.id() == target.id()));
+    packets.push_back(PendingLegacyPacket{
+        watcher.session_id(),
+        make_death_packet(watcher.session_id(), target, watcher.id() == target.id())});
   });
+  return packets;
+}
+
+void queue_legacy_packets(RuntimeDispatch& dispatch,
+                          std::vector<PendingLegacyPacket> packets) {
+  for (auto& packet : packets) {
+    queue_packet(dispatch, packet.session_id, std::move(packet.packet));
+  }
+}
+
+void queue_legacy_death_packet(
+    std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
+    RuntimeDispatch& dispatch, const GameObject& target) {
+  queue_legacy_packets(dispatch, collect_legacy_death_packets(objects, target));
 }
 
 LegacyMagicDamageResult apply_legacy_magic_damage(
@@ -1436,11 +1456,12 @@ RuntimeDispatch MapActor::legacy_apply_fire_burn_event(const LegacyEventRecord& 
       }
     }
     if (result.slain_monster_id != 0) {
+      auto pending_death_packets = collect_legacy_death_packets(objects_, target);
       finalize_monster_death(result.slain_monster_id, caster->id(), dispatch, current_tick);
-      queue_legacy_death_packet(objects_, dispatch, target);
       add_legacy_trace(dispatch, "LegacyEventManager", "fire_burn_exp", ActorMail{},
                        current_tick, now_ms, true, static_cast<std::int32_t>(event.id),
                        result.applied_damage, "WinExp");
+      queue_legacy_packets(dispatch, std::move(pending_death_packets));
     }
     if (result.applied_damage > 0) {
       add_legacy_trace(dispatch, "LegacyEventManager",
@@ -2816,24 +2837,31 @@ bool MapActor::handle_legacy_rush_rush(Player& attacker, LegacyUseMagicInfo& use
     if (applied_damage <= 0) {
       return 0;
     }
-    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
-      if (watcher.id() != target.id() && !is_legacy_visible_to(watcher, target)) {
-        return;
-      }
-      queue_packet(dispatch, watcher.session_id(),
-                   target_died ? make_death_packet(watcher.session_id(), target,
-                                                   watcher.id() == target.id())
-                               : make_struck_packet(watcher.session_id(), target, hitter_id,
-                                                    applied_damage, false));
-    });
-    add_legacy_trace(dispatch, "LegacyCombat", target_died ? "death" : "struck", mail,
-                     current_tick, now_ms, true, magic.id, applied_damage,
-                     target_died ? "SM_DEATH" : "SM_STRUCK");
+    auto pending_death_packets =
+        target_died && slain_monster != nullptr
+            ? collect_legacy_death_packets(objects_, target)
+            : std::vector<PendingLegacyPacket>{};
+    if (!target_died || slain_monster == nullptr) {
+      for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+        if (watcher.id() != target.id() && !is_legacy_visible_to(watcher, target)) {
+          return;
+        }
+        queue_packet(dispatch, watcher.session_id(),
+                     target_died ? make_death_packet(watcher.session_id(), target,
+                                                     watcher.id() == target.id())
+                                 : make_struck_packet(watcher.session_id(), target, hitter_id,
+                                                      applied_damage, false));
+      });
+    }
     if (slain_monster != nullptr) {
       finalize_monster_death(slain_monster->id(), attacker.id(), dispatch, current_tick);
       add_legacy_trace(dispatch, "LegacyCombat", "exp", mail, current_tick, now_ms,
                        true, magic.id, applied_damage, "WinExp");
+      queue_legacy_packets(dispatch, std::move(pending_death_packets));
     }
+    add_legacy_trace(dispatch, "LegacyCombat", target_died ? "death" : "struck", mail,
+                     current_tick, now_ms, true, magic.id, applied_damage,
+                     target_died ? "SM_DEATH" : "SM_STRUCK");
     return applied_damage;
   };
 
