@@ -12,6 +12,12 @@
 
 namespace {
 
+constexpr int kLegacyTradeStableMs = 1000;
+constexpr int kTestTickMs = 10;
+constexpr int kTradeStableSafetyTicks = 10;
+constexpr int kTradeStableTicks =
+    (kLegacyTradeStableMs + kTestTickMs - 1) / kTestTickMs + kTradeStableSafetyTicks;
+
 struct TradeEvent {
   std::uint64_t session_id{0};
   std::uint16_t ident{0};
@@ -37,6 +43,10 @@ mir2::RuntimeDispatch tick_players(mir2::LogicRuntime& runtime, int count = 30) 
     append_dispatch(dispatch, runtime.tick());
   }
   return dispatch;
+}
+
+mir2::RuntimeDispatch tick_past_trade_stable_window(mir2::LogicRuntime& runtime) {
+  return tick_players(runtime, kTradeStableTicks);
 }
 
 mir2::LegacyUserItem make_item(std::int32_t index, std::int32_t make_index) {
@@ -137,6 +147,7 @@ bool same_event(const TradeEvent& actual, const TradeEvent& expected) {
 
 int main() {
   mir2::HostConfig config;
+  config.budgets.tick_ms = kTestTickMs;
   config.maps.push_back(mir2::MapConfig{"0", "TradeMap", {}, 0, 0, 30, 30});
   config.items.push_back(mir2::ItemConfig{1, "Ruby", 1, 40, 0, 2, 1, 1000, 10, 0, 0});
   config.items.push_back(mir2::ItemConfig{2, "Sapphire", 1, 41, 0, 3, 1, 1000, 10, 0, 0});
@@ -164,7 +175,7 @@ int main() {
       trade_command(mir2::LogicCommandKind::trade_set_gold, 8, 0, {}, 7)));
   collect_trade_events(tick_players(runtime), actual);
 
-  static_cast<void>(tick_players(runtime, 60));
+  static_cast<void>(tick_past_trade_stable_window(runtime));
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_accept, 7)));
   collect_trade_events(tick_players(runtime), actual);
