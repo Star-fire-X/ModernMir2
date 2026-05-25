@@ -2150,6 +2150,7 @@ RuntimeDispatch LogicRuntime::relocate_no_reconnect_player(std::uint64_t session
 RuntimeDispatch LogicRuntime::mark_session_disconnected(std::uint64_t session_id,
                                                         std::string reason) {
   RuntimeDispatch dispatch;
+  legacy_time_recalls_.erase(session_id);
   for (auto it = ready_users_.begin(); it != ready_users_.end(); ++it) {
     if (it->session_id != session_id) {
       continue;
@@ -2225,6 +2226,10 @@ RuntimeDispatch LogicRuntime::tick(std::uint64_t now_ms, LegacyRuntimeContext co
   process_legacy_event_creates(combined, now_ms);
   process_legacy_random_space_moves(combined, now_ms);
   process_cross_map_mails(combined);
+  process_legacy_time_recall_requests(combined, now_ms);
+  process_legacy_time_recalls(combined, now_ms);
+  process_cross_map_mails(combined);
+  process_legacy_time_recall_requests(combined, now_ms);
   return combined;
 }
 
@@ -2321,6 +2326,87 @@ void LogicRuntime::process_legacy_random_space_moves(RuntimeDispatch& dispatch,
                           request.actor_id, target_map_id, target->first, target->second,
                           true, current_tick_, now_ms));
     }
+  }
+}
+
+void LogicRuntime::process_legacy_time_recall_requests(RuntimeDispatch& dispatch,
+                                                       std::uint64_t now_ms) {
+  while (!dispatch.legacy_time_recall_requests.empty()) {
+    auto requests = std::move(dispatch.legacy_time_recall_requests);
+    dispatch.legacy_time_recall_requests.clear();
+    for (const auto& request : requests) {
+      LegacyRuntimeTrace trace;
+      trace.stage = "LegacyTimeRecall";
+      trace.map_id = request.map_id;
+      trace.actor_id = request.actor_id;
+      trace.now_ms = now_ms;
+      trace.current_tick = current_tick_;
+      trace.value = static_cast<std::int32_t>(std::min<std::uint64_t>(
+          request.delay_ticks, static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())));
+      if (request.kind == LegacyTimeRecallRequestKind::cancel) {
+        trace.action = "cancel";
+        trace.success = legacy_time_recalls_.erase(request.session_id) > 0;
+        dispatch.legacy_traces.push_back(std::move(trace));
+        continue;
+      }
+
+      const auto generation = next_legacy_time_recall_generation_++;
+      legacy_time_recalls_[request.session_id] =
+          LegacyTimeRecallState{generation, request.session_id, request.actor_id,
+                                resolve_map_id(request.map_id), request.x, request.y};
+      legacy_time_recall_wheel_.schedule(
+          current_tick_, std::max<std::uint64_t>(request.delay_ticks, 1),
+          LegacyTimeRecallDue{request.session_id, generation});
+      trace.action = "schedule";
+      trace.success = true;
+      dispatch.legacy_traces.push_back(std::move(trace));
+    }
+  }
+}
+
+void LogicRuntime::process_legacy_time_recalls(RuntimeDispatch& dispatch,
+                                               std::uint64_t now_ms) {
+  for (const auto& due : legacy_time_recall_wheel_.pop_ready(current_tick_)) {
+    auto state_it = legacy_time_recalls_.find(due.session_id);
+    if (state_it == legacy_time_recalls_.end() ||
+        state_it->second.generation != due.generation) {
+      continue;
+    }
+
+    const auto state = state_it->second;
+    legacy_time_recalls_.erase(state_it);
+
+    LegacyRuntimeTrace trace;
+    trace.stage = "LegacyTimeRecall";
+    trace.action = "recall";
+    trace.map_id = state.map_id;
+    trace.actor_id = state.actor_id;
+    trace.now_ms = now_ms;
+    trace.current_tick = current_tick_;
+    trace.value = state.x;
+    trace.damage = state.y;
+
+    const auto locator_it = session_index_.find(state.session_id);
+    if (locator_it == session_index_.end()) {
+      trace.success = false;
+      trace.command = "missing_session";
+      dispatch.legacy_traces.push_back(std::move(trace));
+      continue;
+    }
+    const auto map_it = maps_.find(locator_it->second.map_id);
+    if (map_it == maps_.end()) {
+      trace.success = false;
+      trace.command = "missing_map";
+      dispatch.legacy_traces.push_back(std::move(trace));
+      continue;
+    }
+
+    append_dispatch(dispatch,
+                    map_it->second->legacy_space_move_player(
+                        locator_it->second.actor_id, state.map_id, state.x, state.y,
+                        false, current_tick_, now_ms));
+    trace.success = true;
+    dispatch.legacy_traces.push_back(std::move(trace));
   }
 }
 
@@ -2541,6 +2627,7 @@ void LogicRuntime::process_user_humans(std::uint64_t now_ms,
                                                           player_input_budget_per_tick));
     const auto state = map_it->second->legacy_player_state(locator.actor_id);
     if (!state.has_value() || *state == LegacyPlayerState::closed) {
+      legacy_time_recalls_.erase(session_id);
       close_records_[util::lower_copy(locator.character_name)] =
           CloseRecord{session_id, locator.account_id, locator.character_name, now_ms,
                       "closed"};
@@ -3240,6 +3327,10 @@ void LogicRuntime::append_dispatch(RuntimeDispatch& target, RuntimeDispatch sour
       target.legacy_random_space_moves.end(),
       std::make_move_iterator(source.legacy_random_space_moves.begin()),
       std::make_move_iterator(source.legacy_random_space_moves.end()));
+  target.legacy_time_recall_requests.insert(
+      target.legacy_time_recall_requests.end(),
+      std::make_move_iterator(source.legacy_time_recall_requests.begin()),
+      std::make_move_iterator(source.legacy_time_recall_requests.end()));
   target.legacy_traces.insert(target.legacy_traces.end(),
                               std::make_move_iterator(source.legacy_traces.begin()),
                               std::make_move_iterator(source.legacy_traces.end()));

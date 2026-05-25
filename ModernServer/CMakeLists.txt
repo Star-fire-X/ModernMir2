@@ -688,6 +688,12 @@ if(BUILD_TESTING)
   add_test(NAME mir2_legacy_script_command_decode_full_smoke
     COMMAND mir2_legacy_script_command_decode_full_smoke)
 
+  add_executable(mir2_legacy_script_time_recall_smoke
+    tests/legacy_script_time_recall_smoke.cpp)
+  target_link_libraries(mir2_legacy_script_time_recall_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_script_time_recall_smoke
+    COMMAND mir2_legacy_script_time_recall_smoke)
+
   add_executable(mir2_legacy_mapquest_import_trigger_smoke
     tests/legacy_mapquest_import_trigger_smoke.cpp)
   target_link_libraries(mir2_legacy_mapquest_import_trigger_smoke PRIVATE mir2_hostlib)
