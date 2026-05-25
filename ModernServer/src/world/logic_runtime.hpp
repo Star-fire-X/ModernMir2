@@ -12,6 +12,7 @@
 
 #include "config/models.hpp"
 #include "core/messages.hpp"
+#include "core/wheel_timer.hpp"
 #include "world/game_object.hpp"
 #include "world/legacy_chat_parser.hpp"
 #include "world/legacy_event_manager.hpp"
@@ -169,6 +170,20 @@ class LogicRuntime {
     std::vector<std::uint64_t> members{};
   };
 
+  struct LegacyTimeRecallState {
+    std::uint64_t generation{0};
+    std::uint64_t session_id{0};
+    std::uint64_t actor_id{0};
+    std::string map_id{};
+    std::int32_t x{0};
+    std::int32_t y{0};
+  };
+
+  struct LegacyTimeRecallDue {
+    std::uint64_t session_id{0};
+    std::uint64_t generation{0};
+  };
+
   [[nodiscard]] std::string resolve_map_id(const std::string& requested_map) const;
   [[nodiscard]] bool has_live_or_closing_character(std::string_view character_name) const;
   [[nodiscard]] LegacyUserDegree resolve_legacy_user_degree(
@@ -225,6 +240,8 @@ class LogicRuntime {
                                                              std::uint64_t now_ms);
   void process_legacy_event_creates(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void process_legacy_random_space_moves(RuntimeDispatch& dispatch, std::uint64_t now_ms);
+  void process_legacy_time_recall_requests(RuntimeDispatch& dispatch, std::uint64_t now_ms);
+  void process_legacy_time_recalls(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void process_cross_map_mails(RuntimeDispatch& dispatch);
   void refresh_legacy_holy_curtain_groups(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void cleanup_close_records(std::uint64_t now_ms);
@@ -243,6 +260,9 @@ class LogicRuntime {
   std::unordered_map<std::string, LegacyUserDegree> legacy_admin_degrees_{};
   std::uint64_t next_legacy_group_id_{1};
   std::unordered_map<std::uint64_t, LegacyGroupState> legacy_groups_{};
+  std::unordered_map<std::uint64_t, LegacyTimeRecallState> legacy_time_recalls_{};
+  WheelTimer<LegacyTimeRecallDue> legacy_time_recall_wheel_{1024};
+  std::uint64_t next_legacy_time_recall_generation_{1};
   std::unordered_map<std::string, std::unique_ptr<MapActor>> maps_{};
   std::vector<std::string> map_order_{};
   std::unordered_map<std::uint64_t, ActorLocator> session_index_{};

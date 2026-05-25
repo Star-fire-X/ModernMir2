@@ -368,8 +368,9 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     }
     if (command_name == "CHECKLUCKYPOINT") {
       const auto value = int_token(0, 0);
-      const auto success = value <= 0;
-      trace("condition", success, 0, condition_line);
+      const auto lucky = player.body_luck_level();
+      const auto success = lucky >= value;
+      trace("condition", success, lucky, condition_line);
       return success;
     }
     if (command_name == "CHECKMONMAP" || command_name == "CHECKMONAREA") {
@@ -979,8 +980,32 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("monclear", true, static_cast<std::int32_t>(remove_ids.size()), action_line);
       return std::nullopt;
     }
-    if (command_name == "TIMERECALL" || command_name == "BREAKTIMERECALL" ||
-        command_name == "EXCHANGEMAP" || command_name == "RECALLMAP" ||
+    if (command_name == "TIMERECALL") {
+      const auto minutes = int_token(0, 0);
+      const auto tick_ms =
+          static_cast<std::uint64_t>(std::max<std::uint32_t>(budgets_.tick_ms, 1));
+      const auto delay_ticks =
+          minutes <= 0
+              ? 1ULL
+              : std::max<std::uint64_t>(
+                    1, (static_cast<std::uint64_t>(minutes) * 60'000ULL + tick_ms - 1) /
+                           tick_ms);
+      dispatch.legacy_time_recall_requests.push_back(
+          LegacyTimeRecallRequest{LegacyTimeRecallRequestKind::schedule,
+                                  player.session_id(), player.id(), config_.id,
+                                  player.x(), player.y(), delay_ticks});
+      trace("time_recall", true, minutes, action_line);
+      return std::nullopt;
+    }
+    if (command_name == "BREAKTIMERECALL") {
+      dispatch.legacy_time_recall_requests.push_back(
+          LegacyTimeRecallRequest{LegacyTimeRecallRequestKind::cancel,
+                                  player.session_id(), player.id(), config_.id,
+                                  player.x(), player.y(), 0});
+      trace("time_recall_cancel", true, 0, action_line);
+      return std::nullopt;
+    }
+    if (command_name == "EXCHANGEMAP" || command_name == "RECALLMAP" ||
         command_name == "ADDBATCH" || command_name == "BATCHDELAY" ||
         command_name == "BATCHMOVE") {
       trace("deferred_action", true, 0, action_line);

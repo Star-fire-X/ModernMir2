@@ -58,6 +58,10 @@ void append_runtime_dispatch(RuntimeDispatch& target, RuntimeDispatch source) {
       target.legacy_random_space_moves.end(),
       std::make_move_iterator(source.legacy_random_space_moves.begin()),
       std::make_move_iterator(source.legacy_random_space_moves.end()));
+  target.legacy_time_recall_requests.insert(
+      target.legacy_time_recall_requests.end(),
+      std::make_move_iterator(source.legacy_time_recall_requests.begin()),
+      std::make_move_iterator(source.legacy_time_recall_requests.end()));
   target.legacy_traces.insert(target.legacy_traces.end(),
                               std::make_move_iterator(source.legacy_traces.begin()),
                               std::make_move_iterator(source.legacy_traces.end()));

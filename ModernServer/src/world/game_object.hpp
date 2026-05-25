@@ -92,6 +92,21 @@ struct LegacyRandomSpaceMoveRequest {
   std::int32_t magic_id{0};
 };
 
+enum class LegacyTimeRecallRequestKind {
+  schedule,
+  cancel
+};
+
+struct LegacyTimeRecallRequest {
+  LegacyTimeRecallRequestKind kind{LegacyTimeRecallRequestKind::schedule};
+  std::uint64_t session_id{0};
+  std::uint64_t actor_id{0};
+  std::string map_id{};
+  std::int32_t x{0};
+  std::int32_t y{0};
+  std::uint64_t delay_ticks{1};
+};
+
 struct RuntimeDispatch {
   std::vector<SessionEvent> session_events{};
   std::vector<AuditEvent> audit_events{};
@@ -100,6 +115,7 @@ struct RuntimeDispatch {
   std::vector<LegacyEventRecord> legacy_event_creates{};
   std::vector<LegacyHolyCurtainGroup> legacy_holy_curtain_groups{};
   std::vector<LegacyRandomSpaceMoveRequest> legacy_random_space_moves{};
+  std::vector<LegacyTimeRecallRequest> legacy_time_recall_requests{};
   std::vector<LegacyRuntimeTrace> legacy_traces{};
 };
 

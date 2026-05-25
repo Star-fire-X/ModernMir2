@@ -294,6 +294,8 @@ BREAK)"});
   assert(has_trace(script_dispatch, "takew"));
   assert(has_trace(script_dispatch, "mongen"));
   assert(has_trace(script_dispatch, "monclear"));
+  assert(has_trace(script_dispatch, "time_recall"));
+  assert(has_trace(script_dispatch, "time_recall_cancel"));
   assert(has_trace(script_dispatch, "deferred_action"));
   assert(has_trace(script_dispatch, "goto"));
   assert(has_trace(script_dispatch, "call"));

@@ -31,6 +31,7 @@ mir2::CharacterRecord make_character() {
   character.ability.hp = 15;
   character.ability.max_hp = 15;
   character.ability.max_weight = 100;
+  character.body_luck = 10000.0;
   character.bag_items[0] = make_apple(101);
   return character;
 }
@@ -138,6 +139,10 @@ int main() {
        "#ACT\\SET [5] 1"});
   npc.dialog_sections.push_back(
       {"@closesay", "#IF\\CHECKLEVEL 1\\#SAY ShouldNotSend\\#ACT\\CLOSE"});
+  npc.dialog_sections.push_back(
+      {"@luckok", "#IF\\CHECKLUCKYPOINT 2\\#SAY LuckyOk\\#ELSESAY LuckyFail"});
+  npc.dialog_sections.push_back(
+      {"@luckfail", "#IF\\CHECKLUCKYPOINT 3\\#SAY LuckyOk\\#ELSESAY LuckyFail"});
   config.npcs.push_back(npc);
 
   mir2::LogicRuntime runtime(config);
@@ -208,6 +213,12 @@ int main() {
   const auto closesay_dispatch = runtime.tick(4012);
   assert(find_packet(closesay_dispatch, mir2::kSmMerchantDlgClose).has_value());
   assert(!find_packet(closesay_dispatch, mir2::kSmMerchantSay).has_value());
+
+  static_cast<void>(runtime.route_logic_command(select_npc(12, "@luckok")));
+  assert(merchant_say_text(runtime.tick(4263)).find("Rewarder/LuckyOk") == 0);
+
+  static_cast<void>(runtime.route_logic_command(select_npc(12, "@luckfail")));
+  assert(merchant_say_text(runtime.tick(4514)).find("Rewarder/LuckyFail") == 0);
 
   return 0;
 }
