@@ -598,6 +598,10 @@ void WorldService::run() {
       // only after the frame dispatch has been queued for gateways.
       session_actions_this_frame_.clear();
       next_tick += tick_interval;
+      const auto after_frame = std::chrono::steady_clock::now();
+      if (after_frame >= next_tick + tick_interval) {
+        next_tick = after_frame + tick_interval;
+      }
     } else {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }

@@ -75,7 +75,7 @@ void prepare_running_player(mir2::LogicRuntime& runtime, std::uint64_t session_i
   assert(runtime.legacy_session_state(session_id) == mir2::LegacyPlayerState::running);
 }
 
-void assert_default_budget_one() {
+void assert_default_budget_unlimited() {
   mir2::HostConfig config;
   config.maps.push_back(mir2::MapConfig{"0", "BudgetMap", {}, 0, 0, 20, 20});
 
@@ -88,18 +88,11 @@ void assert_default_budget_one() {
   static_cast<void>(runtime.route_logic_command(make_say(51, "three", 3)));
   assert((runtime.legacy_session_inbox_sequences(51) == std::vector<std::uint64_t>{1, 2, 3}));
 
-  auto dispatch = runtime.tick(1502);
-  assert((hear_lines(dispatch) == std::vector<std::string>{"BudgetHero: one"}));
-  assert((runtime.legacy_session_inbox_sequences(51) == std::vector<std::uint64_t>{2, 3}));
-  assert(has_budget_exhausted_trace(dispatch, 2));
-
-  dispatch = runtime.tick(1753);
-  assert((hear_lines(dispatch) == std::vector<std::string>{"BudgetHero: two"}));
-  assert((runtime.legacy_session_inbox_sequences(51) == std::vector<std::uint64_t>{3}));
-  assert(has_budget_exhausted_trace(dispatch, 1));
-
-  dispatch = runtime.tick(2004);
-  assert((hear_lines(dispatch) == std::vector<std::string>{"BudgetHero: three"}));
+  const auto dispatch = runtime.tick(1502);
+  assert((hear_lines(dispatch) == std::vector<std::string>{
+                                      "BudgetHero: one",
+                                      "BudgetHero: two",
+                                      "BudgetHero: three"}));
   assert(runtime.legacy_session_inbox_size(51) == 0);
   assert(!has_budget_exhausted_trace(dispatch, 0));
 }
@@ -128,7 +121,7 @@ void assert_context_budget_two() {
 }  // namespace
 
 int main() {
-  assert_default_budget_one();
+  assert_default_budget_unlimited();
   assert_context_budget_two();
   return 0;
 }

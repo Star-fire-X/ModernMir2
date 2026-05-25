@@ -2202,6 +2202,15 @@ RuntimeDispatch LogicRuntime::tick(std::uint64_t now_ms, LegacyRuntimeContext co
   process_monsters(now_ms, combined);
   process_merchants(now_ms, combined);
   process_npcs(now_ms, combined);
+
+  for (const auto& map_id : map_order_) {
+    auto map_it = maps_.find(map_id);
+    if (map_it == maps_.end()) {
+      continue;
+    }
+    append_dispatch(combined, map_it->second->drain_pending_mail(current_tick_, now_ms));
+  }
+
   process_user_engine_timers(now_ms, combined);
 
   for (const auto& map_id : map_order_) {
@@ -2209,7 +2218,7 @@ RuntimeDispatch LogicRuntime::tick(std::uint64_t now_ms, LegacyRuntimeContext co
     if (map_it == maps_.end()) {
       continue;
     }
-    append_dispatch(combined, map_it->second->tick(current_tick_, now_ms));
+    append_dispatch(combined, map_it->second->run_maintenance_tick(current_tick_, now_ms));
   }
 
   process_legacy_event_creates(combined, now_ms);
@@ -2495,8 +2504,7 @@ void LogicRuntime::process_user_humans(std::uint64_t now_ms,
   const auto player_input_budget_per_tick =
       context.player_input_budget_per_tick != 0
           ? context.player_input_budget_per_tick
-          : std::max<std::size_t>(
-                1, static_cast<std::size_t>(config_.budgets.player_input_budget_per_tick));
+          : static_cast<std::size_t>(config_.budgets.player_input_budget_per_tick);
   std::size_t processed = 0;
   const auto initial_size = run_user_order_.size();
   while (!run_user_order_.empty() && processed < initial_size) {

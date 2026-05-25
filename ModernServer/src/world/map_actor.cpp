@@ -33,6 +33,36 @@ namespace mir2 {
 #include "world/map_actor_packets.hpp"
 
 namespace {
+void append_runtime_dispatch(RuntimeDispatch& target, RuntimeDispatch source) {
+  target.session_events.insert(target.session_events.end(),
+                               std::make_move_iterator(source.session_events.begin()),
+                               std::make_move_iterator(source.session_events.end()));
+  target.audit_events.insert(target.audit_events.end(),
+                             std::make_move_iterator(source.audit_events.begin()),
+                             std::make_move_iterator(source.audit_events.end()));
+  target.persist_requests.insert(target.persist_requests.end(),
+                                 std::make_move_iterator(source.persist_requests.begin()),
+                                 std::make_move_iterator(source.persist_requests.end()));
+  target.cross_map_mails.insert(target.cross_map_mails.end(),
+                                std::make_move_iterator(source.cross_map_mails.begin()),
+                                std::make_move_iterator(source.cross_map_mails.end()));
+  target.legacy_event_creates.insert(
+      target.legacy_event_creates.end(),
+      std::make_move_iterator(source.legacy_event_creates.begin()),
+      std::make_move_iterator(source.legacy_event_creates.end()));
+  target.legacy_holy_curtain_groups.insert(
+      target.legacy_holy_curtain_groups.end(),
+      std::make_move_iterator(source.legacy_holy_curtain_groups.begin()),
+      std::make_move_iterator(source.legacy_holy_curtain_groups.end()));
+  target.legacy_random_space_moves.insert(
+      target.legacy_random_space_moves.end(),
+      std::make_move_iterator(source.legacy_random_space_moves.begin()),
+      std::make_move_iterator(source.legacy_random_space_moves.end()));
+  target.legacy_traces.insert(target.legacy_traces.end(),
+                              std::make_move_iterator(source.legacy_traces.begin()),
+                              std::make_move_iterator(source.legacy_traces.end()));
+}
+
 std::int32_t compute_goods_price(const LegacyUserItem& item,
                                  const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
                                  std::optional<std::int32_t> dynamic_price = std::nullopt) {
@@ -1965,15 +1995,9 @@ RuntimeDispatch MapActor::tick(std::uint64_t current_tick) {
   return tick(current_tick, now_ms);
 }
 
-RuntimeDispatch MapActor::tick(std::uint64_t current_tick, std::uint64_t now_ms) {
+RuntimeDispatch MapActor::drain_pending_mail(std::uint64_t current_tick,
+                                             std::uint64_t now_ms) {
   RuntimeDispatch dispatch;
-  MapContext context;
-  context.tick = current_tick;
-  context.map_id = config_.id;
-  context.dispatch = &dispatch;
-  context.items = &item_configs_;
-  context.magics = &magic_configs_;
-
   for (auto& delayed_mail : delayed_mail_wheel_.pop_ready(current_tick)) {
     mailbox_.push_back(std::move(delayed_mail));
   }
@@ -1981,8 +2005,31 @@ RuntimeDispatch MapActor::tick(std::uint64_t current_tick, std::uint64_t now_ms)
   while (!mailbox_.empty()) {
     ActorMail mail = std::move(mailbox_.front());
     mailbox_.pop_front();
+    LegacyRuntimeTrace trace;
+    trace.stage = "MapMailbox";
+    trace.action = "drain";
+    trace.map_id = config_.id;
+    trace.actor_id = mail.actor_id;
+    trace.target_actor_id = mail.target_actor_id;
+    trace.now_ms = now_ms;
+    trace.current_tick = current_tick;
+    trace.success = true;
+    dispatch.legacy_traces.push_back(std::move(trace));
     handle_mail(mail, dispatch, current_tick, now_ms);
   }
+
+  return dispatch;
+}
+
+RuntimeDispatch MapActor::run_maintenance_tick(std::uint64_t current_tick,
+                                               std::uint64_t now_ms) {
+  RuntimeDispatch dispatch;
+  MapContext context;
+  context.tick = current_tick;
+  context.map_id = config_.id;
+  context.dispatch = &dispatch;
+  context.items = &item_configs_;
+  context.magics = &magic_configs_;
 
   remove_expired_ground_items(dispatch, now_ms);
 
@@ -2019,6 +2066,12 @@ RuntimeDispatch MapActor::tick(std::uint64_t current_tick, std::uint64_t now_ms)
     schedule_actor(current_tick, object);
   }
 
+  return dispatch;
+}
+
+RuntimeDispatch MapActor::tick(std::uint64_t current_tick, std::uint64_t now_ms) {
+  auto dispatch = drain_pending_mail(current_tick, now_ms);
+  append_runtime_dispatch(dispatch, run_maintenance_tick(current_tick, now_ms));
   return dispatch;
 }
 

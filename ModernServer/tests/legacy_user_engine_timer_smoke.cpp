@@ -2,6 +2,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "world/logic_runtime.hpp"
@@ -29,12 +30,44 @@ std::vector<std::string> timer_actions(const mir2::RuntimeDispatch& dispatch) {
   return actions;
 }
 
+std::vector<std::string> timer_and_mail_actions(const mir2::RuntimeDispatch& dispatch) {
+  std::vector<std::string> actions;
+  for (const auto& trace : dispatch.legacy_traces) {
+    if (trace.stage == "ProcessNpcs" || trace.stage == "MapMailbox" ||
+        trace.stage == "LegacyMission" || trace.stage == "LegacyTimer") {
+      actions.push_back(trace.stage + ":" + trace.action);
+    }
+  }
+  return actions;
+}
+
 mir2::LogicRuntime make_runtime() {
   mir2::HostConfig config;
   config.maps.push_back(mir2::MapConfig{"0", "TimerMap", {}, 0, 0, 20, 20});
   mir2::LogicRuntime runtime(config);
   runtime.initialize();
   return runtime;
+}
+
+mir2::LegacyReadyUser make_ready(std::uint64_t session_id) {
+  mir2::CharacterRecord character;
+  character.account_id = "acct_mailbox";
+  character.character_name = "MailboxHero";
+  character.map_id = "0";
+  character.x = 10;
+  character.y = 10;
+  character.ability.hp = 15;
+  character.ability.max_hp = 15;
+
+  mir2::LegacyReadyUser ready;
+  ready.session_id = session_id;
+  ready.account_id = character.account_id;
+  ready.character_name = character.character_name;
+  ready.map_id = character.map_id;
+  ready.x = character.x;
+  ready.y = character.y;
+  ready.character = std::move(character);
+  return ready;
 }
 
 void check_timer_boundaries() {
@@ -113,6 +146,32 @@ void check_same_frame_timer_order() {
   assert(timer_actions(dispatch) == expected);
 }
 
+void check_map_mailbox_runs_before_timers() {
+  auto runtime = make_runtime();
+  static_cast<void>(runtime.enqueue_ready_user(make_ready(51)));
+  static_cast<void>(runtime.tick(1000));
+  static_cast<void>(runtime.tick(1251));
+  assert(runtime.legacy_session_state(51) == mir2::LegacyPlayerState::running);
+
+  mir2::ActorMail notice;
+  notice.kind = mir2::ActorMailKind::system_notice;
+  notice.map_id = "0";
+  notice.actor_id = 1;
+  notice.session_id = 51;
+  notice.payload = "mailbox before timers";
+  static_cast<void>(runtime.route_actor_mail(notice));
+
+  const auto dispatch = runtime.tick(2001);
+  const std::vector<std::string> expected{
+      "ProcessNpcs:begin",
+      "MapMailbox:drain",
+      "LegacyMission:ProcessMissions",
+      "LegacyMission:CheckServerWaitTimeOut",
+      "LegacyMission:CheckHolySeizeValid",
+      "LegacyTimer:DoorTimer"};
+  assert(timer_and_mail_actions(dispatch) == expected);
+}
+
 void check_wraparound_delta_timers() {
   auto runtime = make_runtime();
   constexpr auto max_tick = std::numeric_limits<std::uint64_t>::max();
@@ -148,6 +207,7 @@ void check_wraparound_delta_timers() {
 int main() {
   check_timer_boundaries();
   check_same_frame_timer_order();
+  check_map_mailbox_runs_before_timers();
   check_wraparound_delta_timers();
   return 0;
 }
