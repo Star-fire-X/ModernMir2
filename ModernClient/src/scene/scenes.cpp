@@ -234,6 +234,16 @@ void merge_ui_input(ui::UiInputResult& merged, const ui::UiInputResult& next) {
                           !merged_non_hover_consumed && !next_non_hover_consumed;
 }
 
+bool ui_consumed_only_by_hover(const ui::UiInputResult& input) {
+  return input.consumed && input.hover_consumed && !input.text_focus && !input.dragging &&
+         !input.app_modal_visible;
+}
+
+bool ui_blocks_shortcuts(const ui::UiInputResult& input) {
+  return (input.consumed && !ui_consumed_only_by_hover(input)) || input.text_focus ||
+         input.dragging || input.app_modal_visible;
+}
+
 void clear_world_input_state(WorldViewState& world, const bool clear_action_key = true) {
   world.focus_actor_id = 0;
   world.focus_ground_item_id = 0;
@@ -7306,8 +7316,7 @@ class WorldScene final : public Scene {
       context.ui_input = result;
       merge_ui_input(merged, result);
 
-      const auto shortcut_guard =
-          result.consumed || result.text_focus || result.dragging || result.app_modal_visible;
+      const auto shortcut_guard = ui_blocks_shortcuts(result);
       const auto scene_guard =
           result.consumed || result.text_focus || result.dragging || result.app_modal_visible;
       auto& world = context.state->world;
@@ -7315,43 +7324,46 @@ class WorldScene final : public Scene {
           event_input.key_pressed[VK_ESCAPE] && !result.text_focus && !result.app_modal_visible;
       const auto hud_blocks_world = legacy_hud_.blocks_world_input();
       if (scene_guard || hud_blocks_world) {
-        clear_world_input_state(world);
+        clear_world_input_state(world, hud_blocks_world || !ui_consumed_only_by_hover(result));
         next_left_hold_ms_ = 0;
         next_right_hold_ms_ = 0;
       }
+      if (!shortcut_guard || allow_guarded_escape) {
+        if (legacy_hud_.handle_shortcuts(context, ui_)) {
+          context.input = previous_input;
+          continue;
+        }
+      }
       if ((!shortcut_guard || allow_guarded_escape) && !hud_blocks_world) {
-        if (!legacy_hud_.handle_shortcuts(context, ui_)) {
-          if (world.self_actor_id != 0) {
-            auto self_it = world.actors.find(world.self_actor_id);
-            if (self_it != world.actors.end()) {
-              const auto now_ms = detail::monotonic_ms();
-              for (int index = 0; index < 8; ++index) {
-                if (event_input.key_pressed[VK_F1 + index] &&
-                    magic_for_slot(world, index) != 0 &&
-                    legacy_magic_shortcut_ready(world, now_ms)) {
-                  world.action_key = index;
-                }
+        if (world.self_actor_id != 0) {
+          auto self_it = world.actors.find(world.self_actor_id);
+          if (self_it != world.actors.end()) {
+            const auto now_ms = detail::monotonic_ms();
+            for (int index = 0; index < 8; ++index) {
+              if (event_input.key_pressed[VK_F1 + index] && magic_for_slot(world, index) != 0 &&
+                  legacy_magic_shortcut_ready(world, now_ms)) {
+                world.action_key = index;
               }
-              if (event_input.key_pressed[VK_ESCAPE]) {
-                world.legacy_target_x = -1;
-                world.legacy_target_y = -1;
-                world.legacy_chr_action = LegacyChrAction::none;
-                world.target_actor_id = 0;
-                world.action_key = -1;
-              } else if (!scene_guard) {
-                if (event_input.key_pressed['R']) {
-                  if (context.app != nullptr) {
-                    context.app->request_reselect_character();
-                  }
-                } else {
-                  const auto legacy_input = make_legacy_input(context, self_it->second, now_ms);
-                  world.focus_actor_id = focused_actor_at(context, legacy_input);
-                  world.focus_ground_item_id =
-                      focused_ground_item_at(context, legacy_input.map_x, legacy_input.map_y);
-                  clear_invalid_targets(world);
-                  collect_keyboard_ops(context, legacy_input, self_it->second);
-                  collect_mouse_ops(context, legacy_input, self_it->second);
+            }
+            if (event_input.key_pressed[VK_ESCAPE]) {
+              world.legacy_target_x = -1;
+              world.legacy_target_y = -1;
+              world.legacy_chr_action = LegacyChrAction::none;
+              world.target_actor_id = 0;
+              world.action_key = -1;
+            } else if (!scene_guard) {
+              if (event_input.key_pressed['R']) {
+                if (context.app != nullptr) {
+                  context.app->request_reselect_character();
                 }
+              } else {
+                const auto legacy_input = make_legacy_input(context, self_it->second, now_ms);
+                world.focus_actor_id = focused_actor_at(context, legacy_input);
+                world.focus_ground_item_id =
+                    focused_ground_item_at(context, legacy_input.map_x, legacy_input.map_y);
+                clear_invalid_targets(world);
+                collect_keyboard_ops(context, legacy_input, self_it->second);
+                collect_mouse_ops(context, legacy_input, self_it->second);
               }
             }
           }
@@ -7379,9 +7391,7 @@ class WorldScene final : public Scene {
     auto& world = context.state->world;
     const auto now_ms = detail::monotonic_ms();
     const auto escape_pressed = context.input != nullptr && context.input->key_pressed[VK_ESCAPE];
-    const auto input_guard =
-        context.ui_input.consumed || context.ui_input.text_focus || context.ui_input.dragging ||
-        context.ui_input.app_modal_visible;
+    const auto input_guard = ui_blocks_shortcuts(context.ui_input);
     const auto allow_guarded_escape =
         escape_pressed && !context.ui_input.text_focus && !context.ui_input.app_modal_visible;
     if (input_guard && !allow_guarded_escape) {
@@ -7433,7 +7443,7 @@ class WorldScene final : public Scene {
         context.ui_input.app_modal_visible;
     if ((!context.legacy_input_dispatched || context.ui_input.app_modal_visible) &&
         input_guard) {
-      clear_world_input_state(world);
+      clear_world_input_state(world, !ui_consumed_only_by_hover(context.ui_input));
       next_left_hold_ms_ = 0;
       next_right_hold_ms_ = 0;
       return;
