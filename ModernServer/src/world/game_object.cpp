@@ -2276,6 +2276,7 @@ MonsterSnapshot Monster::snapshot() const {
                          .map_id = map_id(),
                          .x = x(),
                          .y = y(),
+                         .dir = dir(),
                          .level = level_,
                          .hp = hp_,
                          .max_hp = max_hp_,
