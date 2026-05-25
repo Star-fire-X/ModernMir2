@@ -518,6 +518,7 @@ void LogicRuntime::initialize() {
     make_index_allocator_.observe(merchant_state);
   }
   one_zen_time_ms_ = 0;
+  one_zen_time_initialized_ = false;
   default_map_id_.clear();
   apply_runtime_castle_defaults(config_.runtime, castle_dialog_context_);
   apply_runtime_castle_defaults(config_.runtime, guild_castle_snapshot_);
@@ -2822,11 +2823,15 @@ void LogicRuntime::process_monsters(std::uint64_t now_ms, RuntimeDispatch& dispa
     mon_cur_ = 0;
     mon_sub_cur_ = 0;
     gen_cur_ = 0;
+    one_zen_time_initialized_ = false;
     return;
   }
 
   constexpr std::uint64_t kZenIntervalMs = 200;
-  if (one_zen_time_ms_ == 0 || now_ms > one_zen_time_ms_ + kZenIntervalMs) {
+  if (!one_zen_time_initialized_) {
+    one_zen_time_ms_ = now_ms;
+    one_zen_time_initialized_ = true;
+  } else if (now_ms > one_zen_time_ms_ + kZenIntervalMs) {
     one_zen_time_ms_ = now_ms;
     add_stage_trace(dispatch, "ProcessMonsters", "gen_check", now_ms, gen_cur_, 0);
     process_monster_spawn_group(gen_cur_, now_ms, dispatch);

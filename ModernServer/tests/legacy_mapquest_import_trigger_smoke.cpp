@@ -205,9 +205,10 @@ int main() {
   mir2::LogicRuntime runtime(config);
   runtime.initialize();
   static_cast<void>(runtime.tick(1000));
+  static_cast<void>(runtime.tick(1201));
 
   static_cast<void>(runtime.route_logic_command(enter_world()));
-  const auto enter_dispatch = runtime.tick(1020);
+  const auto enter_dispatch = runtime.tick(1220);
   assert(find_packet(enter_dispatch, mir2::kSmNewMap).has_value());
   assert(has_mapquest_trace(enter_dispatch, "enter"));
   const auto enter_trigger = trace_index(enter_dispatch, "LegacyScript", "mapquest_trigger",
@@ -221,7 +222,7 @@ int main() {
   assert(snapshot.has_value() && snapshot->quest_marks[0] == 0x80);
 
   static_cast<void>(runtime.route_logic_command(make_attack(11, 11)));
-  const auto kill_dispatch = runtime.tick(1040);
+  const auto kill_dispatch = runtime.tick(1240);
   assert(has_packet(kill_dispatch, mir2::kSmDeath));
   assert(has_mapquest_trace(kill_dispatch, "monster_die"));
   const auto kill_user_begin = trace_index(kill_dispatch, "ProcessUserHumans", "begin");

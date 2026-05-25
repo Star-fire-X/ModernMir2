@@ -38,7 +38,8 @@ mir2::ActorMail make_monster(std::uint64_t actor_id, std::int32_t x, std::int32_
                              std::int32_t walk_step = 1,
                              std::int32_t walk_wait_ms = 0,
                              std::int32_t race_server = 0,
-                             std::int32_t attack_speed_ms = 200) {
+                             std::int32_t attack_speed_ms = 200,
+                             std::uint64_t search_rate_ms = 1500) {
   mir2::ActorMail mail;
   mail.kind = mir2::ActorMailKind::spawn_monster;
   mail.map_id = "0";
@@ -57,7 +58,7 @@ mir2::ActorMail make_monster(std::uint64_t actor_id, std::int32_t x, std::int32_
   mail.attack_speed_ms = attack_speed_ms;
   mail.monster_ai_profile = profile;
   mail.race_server = race_server;
-  mail.monster_search_rate_ms = 1500;
+  mail.monster_search_rate_ms = search_rate_ms;
   mail.dir = 4;
   mail.legacy_spawn_group = true;
   return mail;
@@ -99,6 +100,20 @@ mir2::ActorMail make_player(std::uint64_t actor_id, std::uint64_t session_id,
   mail.character = hero;
   mail.x = x;
   mail.y = y;
+  return mail;
+}
+
+mir2::ActorMail make_poison(std::uint64_t caster_id, std::uint64_t target_id,
+                            std::uint64_t duration_ticks) {
+  mir2::ActorMail mail;
+  mail.kind = mir2::ActorMailKind::legacy_delayed_effect;
+  mail.map_id = "0";
+  mail.actor_id = caster_id;
+  mail.target_actor_id = target_id;
+  mail.delayed_effect_kind = mir2::LegacyDelayedEffectKind::make_poison;
+  mail.poison_kind = 0;
+  mail.poison_level = 0;
+  mail.duration_ticks = duration_ticks;
   return mail;
 }
 
@@ -156,6 +171,30 @@ int main() {
     snapshot = map.legacy_monster_snapshot(monster_id);
     assert(snapshot.has_value());
     assert(snapshot->legacy_search_time_ms == 1751);
+  }
+
+  {
+    auto map = make_map();
+    constexpr std::uint64_t monster_id = 110;
+    spawn(map, make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::basic,
+                            1, 0, 0, 200, 200),
+          make_player(13, 130, "Poisoner", 10, 10));
+
+    static_cast<void>(map.legacy_process_monster(monster_id, 2, 251, 0, 0));
+    auto snapshot = map.legacy_monster_snapshot(monster_id);
+    assert(snapshot.has_value());
+    assert(snapshot->legacy_run_time_ms == 251);
+    assert(snapshot->legacy_search_time_ms == 251);
+
+    map.enqueue_mail(make_poison(13, monster_id, 300));
+    static_cast<void>(map.tick(10, 300));
+
+    const auto status = map.legacy_process_monster(monster_id, 135, 452, 0, 0);
+    assert(has_process_monster_action(status, monster_id, "status"));
+    snapshot = map.legacy_monster_snapshot(monster_id);
+    assert(snapshot.has_value());
+    assert(snapshot->legacy_run_time_ms == 251);
+    assert(snapshot->legacy_search_time_ms == 251);
   }
 
   {

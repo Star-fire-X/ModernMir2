@@ -257,6 +257,7 @@ class LogicRuntime {
   std::size_t npc_cur_{0};
   std::uint64_t last_ready_process_ms_{0};
   std::uint64_t one_zen_time_ms_{0};
+  bool one_zen_time_initialized_{false};
   std::uint64_t mission_time_ms_{0};
   std::uint64_t open_door_check_ms_{0};
   std::uint64_t timer10min_ms_{0};
