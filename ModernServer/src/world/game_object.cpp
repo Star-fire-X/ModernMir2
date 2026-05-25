@@ -720,6 +720,13 @@ std::int32_t Player::script_param(std::int32_t index) const {
   return character_.script_params[static_cast<std::size_t>(index)];
 }
 
+std::int32_t Player::script_dice_param(std::int32_t index) const {
+  if (index < 0 || static_cast<std::size_t>(index) >= script_dice_params_.size()) {
+    return 0;
+  }
+  return script_dice_params_[static_cast<std::size_t>(index)];
+}
+
 void Player::add_slave_actor_id(std::uint64_t actor_id) {
   if (actor_id == 0 ||
       std::find(slave_actor_ids_.begin(), slave_actor_ids_.end(), actor_id) !=
@@ -1590,6 +1597,14 @@ bool Player::set_script_param(std::int32_t index, std::int32_t value) {
     return false;
   }
   character_.script_params[static_cast<std::size_t>(index)] = value;
+  return true;
+}
+
+bool Player::set_script_dice_param(std::int32_t index, std::int32_t value) {
+  if (index < 0 || static_cast<std::size_t>(index) >= script_dice_params_.size()) {
+    return false;
+  }
+  script_dice_params_[static_cast<std::size_t>(index)] = value;
   return true;
 }
 

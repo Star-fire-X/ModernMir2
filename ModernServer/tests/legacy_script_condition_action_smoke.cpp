@@ -128,6 +128,16 @@ int main() {
   npc.dialog_sections.push_back(
       {"@elesact",
        "#IF\\CHECKLEVEL 99\\#ACT\\#SAY ShouldNotShow\\#ELESACT\\SAY ElesActOk"});
+  npc.dialog_sections.push_back(
+      {"@multiproc",
+       "#IF\\CHECKLEVEL 1\\#SAY Before <$STR(P0)>\\#ACT\\MOV P0 7\\#IF\\EQUAL P0 7\\"
+       "#SAY After <$STR(P0)>\\#ACT\\SET [4] 1"});
+  npc.dialog_sections.push_back(
+      {"@breakmulti",
+       "#IF\\CHECKLEVEL 1\\#SAY Keep\\#ACT\\BREAK\\#IF\\CHECKLEVEL 1\\#SAY Hidden\\"
+       "#ACT\\SET [5] 1"});
+  npc.dialog_sections.push_back(
+      {"@closesay", "#IF\\CHECKLEVEL 1\\#SAY ShouldNotSend\\#ACT\\CLOSE"});
   config.npcs.push_back(npc);
 
   mir2::LogicRuntime runtime(config);
@@ -175,6 +185,29 @@ int main() {
 
   static_cast<void>(runtime.route_logic_command(select_npc(12, "@elesact")));
   assert(merchant_say_text(runtime.tick(3259)).find("Rewarder/ElesActOk") == 0);
+
+  static_cast<void>(runtime.route_logic_command(select_npc(12, "@multiproc")));
+  const auto multiproc_dispatch = runtime.tick(3510);
+  const auto multiproc_text = merchant_say_text(multiproc_dispatch);
+  assert(multiproc_text.find("Rewarder/Before 7\\After 7") == 0);
+  const auto multiproc_snapshot = runtime.snapshot_character_actor("Hero");
+  assert(multiproc_snapshot.has_value());
+  assert(multiproc_snapshot->script_params[0] == 7);
+  assert((multiproc_snapshot->quest_marks[0] & 0x10) != 0);
+
+  static_cast<void>(runtime.route_logic_command(select_npc(12, "@breakmulti")));
+  const auto breakmulti_dispatch = runtime.tick(3761);
+  const auto breakmulti_text = merchant_say_text(breakmulti_dispatch);
+  assert(breakmulti_text.find("Rewarder/Keep") == 0);
+  assert(breakmulti_text.find("Hidden") == std::string::npos);
+  const auto breakmulti_snapshot = runtime.snapshot_character_actor("Hero");
+  assert(breakmulti_snapshot.has_value());
+  assert((breakmulti_snapshot->quest_marks[0] & 0x08) == 0);
+
+  static_cast<void>(runtime.route_logic_command(select_npc(12, "@closesay")));
+  const auto closesay_dispatch = runtime.tick(4012);
+  assert(find_packet(closesay_dispatch, mir2::kSmMerchantDlgClose).has_value());
+  assert(!find_packet(closesay_dispatch, mir2::kSmMerchantSay).has_value());
 
   return 0;
 }

@@ -1284,7 +1284,8 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
                    std::unordered_map<std::string, MapEntryRuleConfig> map_entry_rules,
                    MakeIndexAllocator* make_index_allocator,
                    std::string black_stone_name,
-                   bool legacy_approval_mode)
+                   bool legacy_approval_mode,
+                   std::shared_ptr<std::array<std::int32_t, 10>> script_global_params)
     : config_(std::move(config)),
       budgets_(std::move(budgets)),
       item_configs_(std::move(item_configs)),
@@ -1295,7 +1296,11 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
       black_stone_name_(std::move(black_stone_name)),
       legacy_approval_mode_(legacy_approval_mode),
       castle_dialog_context_(std::move(castle_dialog_context)),
-      make_index_allocator_(make_index_allocator) {
+      make_index_allocator_(make_index_allocator),
+      script_global_params_(std::move(script_global_params)) {
+  if (script_global_params_ == nullptr) {
+    script_global_params_ = std::make_shared<std::array<std::int32_t, 10>>();
+  }
   movement_map_ = legacy::decode_map_file(config_.source_map);
   if (movement_map_ != nullptr) {
     if (config_.width <= 0) {

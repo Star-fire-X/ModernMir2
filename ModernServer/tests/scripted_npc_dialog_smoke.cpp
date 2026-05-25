@@ -133,6 +133,7 @@ int main() {
              "@GREETING, <$USERNAME>\\\n"
              "<Ask about the ruins/@about>\\\n"
              "<Test call/@call>\\\n"
+             "<Test repeat/@repeat>\\\n"
              "<Say goodbye/@exit>\n"
              "\n"
              "[@about]\n"
@@ -144,7 +145,21 @@ int main() {
              "\n"
              "[~@done]\n"
              "That is all I can share, <$USERNAME>\\\n"
-             "<Back/@main>\n");
+             "<Back/@main>\n"
+             "\n"
+             "[@repeat]\n"
+             "#IF\n"
+             "CHECKLEVEL 0\n"
+             "#SAY\n"
+             "First <$STR(P0)>\n"
+             "#ACT\n"
+             "MOV P0 3\n"
+             "\n"
+             "[@repeat]\n"
+             "#IF\n"
+             "EQUAL P0 3\n"
+             "#SAY\n"
+             "Second <$STR(P0)>\n");
 
   mir2::ConfigLoader loader;
   auto config = loader.load(root);
@@ -244,6 +259,19 @@ int main() {
   }
   const auto done_text = decode_merchant_dialog(done_packet->body);
   if (done_text.find("Old Sage/That is all I can share, Hero\\") != 0) {
+    std::filesystem::remove_all(root, ec);
+    return 1;
+  }
+
+  const auto repeat_dispatch = route_due(runtime, now_ms, make_menu_command(12, 1, "@repeat"));
+  assert_script_sync_order(repeat_dispatch);
+  const auto repeat_packet = find_packet(repeat_dispatch, mir2::kSmMerchantSay);
+  if (!repeat_packet.has_value()) {
+    std::filesystem::remove_all(root, ec);
+    return 1;
+  }
+  const auto repeat_text = decode_merchant_dialog(repeat_packet->body);
+  if (repeat_text.find("Old Sage/First 3\\Second 3") != 0) {
     std::filesystem::remove_all(root, ec);
     return 1;
   }

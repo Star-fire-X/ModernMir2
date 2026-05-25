@@ -570,7 +570,8 @@ void LogicRuntime::initialize() {
                                            monster_defs_, map_entry_rules,
                                            &make_index_allocator_,
                                            config_.runtime.black_stone_name,
-                                           config_.runtime.legacy_approval_mode));
+                                           config_.runtime.legacy_approval_mode,
+                                           script_global_params_));
     map_it->second->set_legacy_random(&legacy_random_);
     if (inserted) {
       map_order_.push_back(map.id);

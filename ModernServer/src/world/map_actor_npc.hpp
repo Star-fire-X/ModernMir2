@@ -54,7 +54,8 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
                  make_merchant_say_packet(
                      player.session_id(), npc.id(), npc,
                      render_npc_dialog_text(npc, player, config_, castle_dialog_context_,
-                                            build_merchant_dialog_text(npc), item_configs_)));
+                                            build_merchant_dialog_text(npc), item_configs_,
+                                            *script_global_params_)));
     trace("say", true, 0, "default_merchant_dialog");
     return true;
   }
@@ -64,6 +65,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
   }
 
   const auto block = parse_legacy_script_block(*dialog);
+  auto& script_global_params = *script_global_params_;
 
   auto list_key = [&](std::string_view name) {
     auto key = util::lower_copy(util::trim(std::string(name)));
@@ -83,8 +85,15 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       return 0;
     }
     const auto upper = script_upper_copy(token);
-    if (upper.size() == 2 && upper[0] == 'P' && std::isdigit(static_cast<unsigned char>(upper[1])) != 0) {
-      return player.script_param(upper[1] - '0');
+    if (const auto variable = parse_legacy_script_variable_token(upper); variable.has_value()) {
+      const auto [group, index] = *variable;
+      if (group == 'P') {
+        return player.script_param(index);
+      }
+      if (group == 'G') {
+        return script_global_params[static_cast<std::size_t>(index)];
+      }
+      return player.script_dice_param(index);
     }
     if (upper == "LEVEL") {
       return player.character().ability.level;
@@ -107,14 +116,48 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
   auto set_script_value = [&](std::string_view raw, std::int32_t value) {
     auto token = util::trim(std::string(raw));
     const auto upper = script_upper_copy(token);
-    if (upper.size() == 2 && upper[0] == 'P' && std::isdigit(static_cast<unsigned char>(upper[1])) != 0) {
-      return player.set_script_param(upper[1] - '0', value);
+    if (const auto variable = parse_legacy_script_variable_token(upper); variable.has_value()) {
+      const auto [group, index] = *variable;
+      if (group == 'P') {
+        return player.set_script_param(index, value);
+      }
+      if (group == 'G') {
+        script_global_params[static_cast<std::size_t>(index)] = value;
+        return true;
+      }
+      return player.set_script_dice_param(index, value);
     }
     if (token.size() >= 2 && token.front() == '[' && token.back() == ']') {
       return player.set_quest_mark(parse_script_index(token).value_or(0),
                                    static_cast<std::uint8_t>(std::clamp(value, 0, 255)));
     }
     return false;
+  };
+
+  auto is_persistent_script_value = [](std::string_view raw) {
+    auto token = util::trim(std::string(raw));
+    const auto variable = parse_legacy_script_variable_token(token);
+    if (variable.has_value()) {
+      return variable->first == 'P';
+    }
+    return token.size() >= 2 && token.front() == '[' && token.back() == ']';
+  };
+
+  auto set_script_group_sum = [&](std::string_view raw, std::int32_t value) {
+    auto token = util::trim(std::string(raw));
+    const auto variable = parse_legacy_script_variable_token(token);
+    if (!variable.has_value()) {
+      return false;
+    }
+    const auto group = variable->first;
+    if (group == 'P') {
+      return player.set_script_param(9, value);
+    }
+    if (group == 'G') {
+      script_global_params[9] = value;
+      return true;
+    }
+    return player.set_script_dice_param(9, value);
   };
 
   auto evaluate_condition = [&](const std::string& condition_line) {
@@ -437,30 +480,34 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     return false;
   };
 
-  bool condition_result = true;
-  for (const auto& condition : block.conditions) {
-    if (!evaluate_condition(condition)) {
-      condition_result = false;
-      break;
+  auto evaluate_conditions = [&](const std::vector<std::string>& conditions) {
+    for (const auto& condition : conditions) {
+      if (!evaluate_condition(condition)) {
+        return false;
+      }
     }
-  }
-  trace("condition_result", condition_result, 0, action);
-
-  const auto& selected_say_lines =
-      condition_result ? block.say_lines : block.else_say_lines;
-  if (!selected_say_lines.empty()) {
-    queue_packet(dispatch, player.session_id(),
-                 make_merchant_say_packet(
-                     player.session_id(), npc.id(), npc,
-                     render_npc_dialog_text(npc, player, config_, castle_dialog_context_,
-                                            join_dialog_lines(selected_say_lines),
-                                            item_configs_)));
-    trace("say", true, static_cast<std::int32_t>(selected_say_lines.size()), action);
-  }
+    return true;
+  };
 
   bool script_state_mutated = false;
   bool stop_script = false;
   bool player_transferred = false;
+  bool suppress_pending_say = false;
+  std::vector<std::string> pending_say_lines;
+
+  auto flush_pending_say = [&]() {
+    if (pending_say_lines.empty() || player_transferred || suppress_pending_say) {
+      return;
+    }
+    queue_packet(dispatch, player.session_id(),
+                 make_merchant_say_packet(
+                     player.session_id(), npc.id(), npc,
+                     render_npc_dialog_text(npc, player, config_, castle_dialog_context_,
+                                            join_dialog_lines(pending_say_lines),
+                                            item_configs_, script_global_params)));
+    trace("say", true, static_cast<std::int32_t>(pending_say_lines.size()), action);
+    pending_say_lines.clear();
+  };
 
   auto remove_bag_item_by_name = [&](std::string_view item_name_text) -> std::optional<LegacyUserItem> {
     const auto wanted = util::lower_copy(util::trim(std::string(item_name_text)));
@@ -505,7 +552,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
                    make_merchant_say_packet(
                        player.session_id(), npc.id(), npc,
                        render_npc_dialog_text(npc, player, config_, castle_dialog_context_,
-                                              payload, item_configs_)));
+                                              payload, item_configs_, script_global_params)));
       trace("say", true, 0, payload);
       return std::nullopt;
     }
@@ -535,6 +582,8 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       return std::nullopt;
     }
     if (command_name == "CLOSE") {
+      pending_say_lines.clear();
+      suppress_pending_say = true;
       queue_packet(dispatch, player.session_id(),
                    make_merchant_dlg_close_packet(player.session_id()));
       trace("close", true, 0, action_line);
@@ -553,7 +602,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       }
       auto message = tokens.empty() ? std::string{} : join_tokens(tokens, message_start);
       message = render_npc_dialog_text(npc, player, config_, castle_dialog_context_,
-                                       std::move(message), item_configs_);
+                                       std::move(message), item_configs_, script_global_params);
       if (message.empty()) {
         trace(util::lower_copy(command_name) + "_reject", false, channel, action_line);
         return std::nullopt;
@@ -608,26 +657,29 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
         return std::nullopt;
       }
       const auto current = script_value(tokens[0]);
-      const auto operand = tokens.size() > 1 ? script_value(tokens[1]) : 1;
+      const auto operand = tokens.size() > 1 ? script_value(tokens[1])
+                                             : command_name == "SUM" ? 0 : 1;
       std::int32_t value = current;
+      bool ok = false;
       if (command_name == "MOV") {
         value = operand;
+        ok = set_script_value(tokens[0], value);
       } else if (command_name == "INC") {
         value = current + operand;
+        ok = set_script_value(tokens[0], value);
       } else if (command_name == "DEC") {
         value = current - operand;
+        ok = set_script_value(tokens[0], value);
       } else if (command_name == "SUM") {
-        value = 0;
-        for (std::size_t index = 1; index < tokens.size(); ++index) {
-          value += script_value(tokens[index]);
-        }
+        value = current + operand;
+        ok = set_script_group_sum(tokens[0], value);
       } else if (command_name == "MOVR") {
         const auto range = std::max(operand, 1);
         value = legacy_random_value(dispatch, "LegacyScript", "MOVR", range, player.id(),
                                     npc.id(), action_line, now_ms, current_tick);
+        ok = set_script_value(tokens[0], value);
       }
-      const auto ok = set_script_value(tokens[0], value);
-      script_state_mutated = script_state_mutated || ok;
+      script_state_mutated = script_state_mutated || (ok && is_persistent_script_value(tokens[0]));
       trace("variable", ok, value, action_line);
       return std::nullopt;
     }
@@ -838,16 +890,14 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       return std::nullopt;
     }
     if (command_name == "PLAYDICE") {
-      const auto sides = std::max(int_token(0, 6), 1);
-      const auto value = legacy_random_value(dispatch, "LegacyScript", "PLAYDICE", sides,
-                                             player.id(), npc.id(), action_line, now_ms,
-                                             current_tick) + 1;
-      if (tokens.size() > static_cast<std::size_t>(value)) {
-        const auto target = tokens[static_cast<std::size_t>(value)];
-        trace("playdice", true, value, target);
-        return target;
-      }
-      trace("playdice", true, value, action_line);
+      const auto dice_count = std::max(int_token(0, 0), 0);
+      const auto target = tokens.size() > 1 ? tokens[1] : std::string{};
+      flush_pending_say();
+      queue_packet(dispatch, player.session_id(),
+                   make_play_dice_packet(player.session_id(), npc.id(), dice_count,
+                                         player.script_dice_params(), target));
+      stop_script = true;
+      trace("playdice", true, dice_count, target.empty() ? action_line : target);
       return std::nullopt;
     }
     if (command_name == "MONGEN") {
@@ -941,18 +991,35 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     return std::nullopt;
   };
 
-  const auto& actions = condition_result ? block.act_lines : block.else_act_lines;
-  for (const auto& action_line : actions) {
-    const auto maybe_goto = execute_action(action_line);
+  for (std::size_t proc_index = 0; proc_index < block.procs.size(); ++proc_index) {
+    const auto& proc = block.procs[proc_index];
+    const auto condition_result = evaluate_conditions(proc.conditions);
+    trace("condition_result", condition_result, static_cast<std::int32_t>(proc_index), action);
+
+    const auto& selected_say_lines =
+        condition_result ? proc.say_lines : proc.else_say_lines;
+    pending_say_lines.insert(pending_say_lines.end(), selected_say_lines.begin(),
+                             selected_say_lines.end());
+
+    const auto& actions = condition_result ? proc.act_lines : proc.else_act_lines;
+    for (const auto& action_line : actions) {
+      const auto maybe_goto = execute_action(action_line);
+      if (stop_script || player_transferred) {
+        break;
+      }
+      if (maybe_goto.has_value()) {
+        flush_pending_say();
+        static_cast<void>(legacy_execute_npc_script(player, npc, *maybe_goto, dispatch,
+                                                   current_tick, now_ms, depth + 1));
+        stop_script = true;
+        break;
+      }
+    }
     if (stop_script || player_transferred) {
       break;
     }
-    if (maybe_goto.has_value()) {
-      static_cast<void>(legacy_execute_npc_script(player, npc, *maybe_goto, dispatch,
-                                                 current_tick, now_ms, depth + 1));
-      break;
-    }
   }
+  flush_pending_say();
 
   if (script_state_mutated && !player_transferred) {
     queue_save_character(dispatch, player);

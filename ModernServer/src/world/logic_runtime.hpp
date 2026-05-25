@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -270,6 +271,8 @@ class LogicRuntime {
   LegacyRandom legacy_random_{1};
   LegacyEventManager legacy_event_manager_{};
   MakeIndexAllocator make_index_allocator_{};
+  std::shared_ptr<std::array<std::int32_t, 10>> script_global_params_{
+      std::make_shared<std::array<std::int32_t, 10>>()};
   std::uint64_t next_actor_id_{1};
   std::string default_map_id_{};
 };

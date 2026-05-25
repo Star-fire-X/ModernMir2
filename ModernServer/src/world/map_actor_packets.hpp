@@ -701,6 +701,27 @@ LegacyPacket make_merchant_say_packet(std::uint64_t session_id, std::uint64_t me
       legacy_encode_string(body));
 }
 
+LegacyPacket make_play_dice_packet(std::uint64_t session_id, std::uint64_t merchant_actor_id,
+                                   std::int32_t dice_count,
+                                   const std::array<std::int32_t, 10>& dice_params,
+                                   std::string_view target_label) {
+  auto byte_value = [](std::int32_t value) {
+    return static_cast<std::uint8_t>(std::clamp(value, 0, 255));
+  };
+  LegacyMessageBodyWL body;
+  body.lparam1 = make_long(make_word(byte_value(dice_params[0]), byte_value(dice_params[1])),
+                           make_word(byte_value(dice_params[2]), byte_value(dice_params[3])));
+  body.lparam2 = make_long(make_word(byte_value(dice_params[4]), byte_value(dice_params[5])),
+                           make_word(byte_value(dice_params[6]), byte_value(dice_params[7])));
+  body.ltag1 = make_long(make_word(byte_value(dice_params[8]), byte_value(dice_params[9])), 0);
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmPlayDice, static_cast<std::int32_t>(merchant_actor_id),
+                           static_cast<std::uint16_t>(std::clamp(dice_count, 0, 65535)),
+                           0, 0),
+      legacy_encode_buffer(&body, sizeof(body)) + legacy_encode_string(target_label));
+}
+
 LegacyPacket make_merchant_dlg_close_packet(std::uint64_t session_id) {
   return make_legacy_game_packet(session_id, 0, 0,
                                  make_default_message(kSmMerchantDlgClose, 0, 0, 0, 0));

@@ -182,6 +182,16 @@ std::string normalize_dialog_text(const std::vector<std::string>& lines) {
   return text;
 }
 
+void append_dialog_section_text(std::string& target, std::string text) {
+  if (text.empty()) {
+    return;
+  }
+  if (!target.empty() && target.back() != '\\') {
+    target.push_back('\\');
+  }
+  target += std::move(text);
+}
+
 struct LegacyNpcScriptParseResult {
   std::vector<NpcDialogSectionConfig> dialog_sections{};
   std::optional<std::int32_t> price_rate_percent{};
@@ -408,7 +418,7 @@ void merge_dialog_sections(NpcConfig& npc, std::vector<NpcDialogSectionConfig> s
       npc.dialog_sections.push_back(std::move(section));
     } else {
       it->action = action;
-      it->text = std::move(section.text);
+      append_dialog_section_text(it->text, std::move(section.text));
     }
   }
 }
@@ -426,7 +436,7 @@ void merge_dialog_sections(std::vector<NpcDialogSectionConfig>& target,
       target.push_back(std::move(section));
     } else {
       it->action = action;
-      it->text = std::move(section.text);
+      append_dialog_section_text(it->text, std::move(section.text));
     }
   }
 }
