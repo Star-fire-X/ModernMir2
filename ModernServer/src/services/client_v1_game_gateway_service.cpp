@@ -398,6 +398,29 @@ std::optional<std::int32_t> first_empty_slot(const std::array<client_v1::ItemSta
   return std::nullopt;
 }
 
+template <std::size_t N>
+bool compact_item_slots(std::array<client_v1::ItemState, N>& items, std::size_t first_slot = 0) {
+  bool changed = false;
+  std::size_t write_index = std::min(first_slot, items.size());
+  for (std::size_t read_index = write_index; read_index < items.size(); ++read_index) {
+    if (empty_item_state(items[read_index])) {
+      continue;
+    }
+    if (write_index != read_index) {
+      items[write_index] = items[read_index];
+      changed = true;
+    }
+    ++write_index;
+  }
+  for (; write_index < items.size(); ++write_index) {
+    if (!empty_item_state(items[write_index])) {
+      changed = true;
+    }
+    items[write_index] = client_v1::ItemState{};
+  }
+  return changed;
+}
+
 std::vector<LegacyClientItem> decode_client_item_list(std::string_view encoded) {
   std::vector<LegacyClientItem> items;
   std::size_t start = 0;
@@ -2508,16 +2531,25 @@ void ClientV1GameGatewayService::translate_legacy_packet(
     case kSmDelItem:
       if (const auto item = decode_client_item(decoded->body); item.has_value()) {
         std::optional<std::int32_t> slot;
+        std::optional<client_v1::BagSnapshot> compacted_snapshot;
         {
           std::scoped_lock lock(mutex_);
           auto& bag = sessions_[session_id].bag_items;
           slot = find_item_slot(bag, item->make_index);
           if (slot.has_value()) {
             bag[static_cast<std::size_t>(*slot)] = client_v1::ItemState{};
+            if (compact_item_slots(bag, static_cast<std::size_t>(kClientV1VisibleBagFirstSlot))) {
+              client_v1::BagSnapshot snapshot;
+              snapshot.items = item_slot_snapshot(bag);
+              compacted_snapshot = std::move(snapshot);
+            }
           }
         }
         if (slot.has_value()) {
           messages.push_back(client_v1::InventoryRemove{*slot});
+          if (compacted_snapshot.has_value()) {
+            messages.push_back(std::move(*compacted_snapshot));
+          }
         }
       }
       break;
