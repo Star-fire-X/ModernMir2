@@ -156,6 +156,7 @@ struct MapConfig {
   std::int32_t home_y{0};
   bool allow_pk{true};
   std::vector<MapZoneConfig> safe_zones{};
+  std::vector<MapZoneConfig> badman_zones{};
   bool law_full{false};
   bool fight_zone{false};
   bool fight3_zone{false};

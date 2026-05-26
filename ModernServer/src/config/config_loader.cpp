@@ -770,6 +770,30 @@ void load_maps(const std::filesystem::path& directory, HostConfig& config,
         }
       }
     }
+    if (auto badman_zones = table["badman_zones"].as_array()) {
+      for (const auto& zone_node : *badman_zones) {
+        if (!zone_node.is_table()) {
+          continue;
+        }
+        const auto& zone_table = *zone_node.as_table();
+        MapZoneConfig zone;
+        zone.x = value_or<int>(zone_table, "x", value_or<int>(zone_table, "left", 0));
+        zone.y = value_or<int>(zone_table, "y", value_or<int>(zone_table, "top", 0));
+        zone.width = value_or<int>(zone_table, "width", 0);
+        zone.height = value_or<int>(zone_table, "height", 0);
+        if (zone.width <= 0) {
+          const auto right = value_or<int>(zone_table, "right", zone.x - 1);
+          zone.width = std::max(0, right - zone.x + 1);
+        }
+        if (zone.height <= 0) {
+          const auto bottom = value_or<int>(zone_table, "bottom", zone.y - 1);
+          zone.height = std::max(0, bottom - zone.y + 1);
+        }
+        if (zone.width > 0 && zone.height > 0) {
+          map.badman_zones.push_back(zone);
+        }
+      }
+    }
     if (auto gates = table["gates"].as_array()) {
       for (const auto& gate_node : *gates) {
         if (!gate_node.is_table()) {

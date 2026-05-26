@@ -639,6 +639,8 @@ LegacyImportReport import_maps_and_spawns(const std::filesystem::path& legacy_ro
     if (section.contains("HomeX")) home_x = section.at("HomeX");
     if (section.contains("HomeY")) home_y = section.at("HomeY");
   }
+  const auto setup_home_x = parse_int32(home_x).value_or(0);
+  const auto setup_home_y = parse_int32(home_y).value_or(0);
   maps.insert(home_map);
 
   std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> start_points;
@@ -784,6 +786,12 @@ LegacyImportReport import_maps_and_spawns(const std::filesystem::path& legacy_ro
            << "\n";
     }
     file << "allow_pk = " << (info.law_full ? "false" : "true") << "\n";
+    if (map_id == home_map && setup_home_x > 0 && setup_home_y > 0) {
+      file << "badman_zones = [\n";
+      file << "  { x = " << (setup_home_x - 10) << ", y = " << (setup_home_y - 10)
+           << ", width = 21, height = 21 }\n";
+      file << "]\n";
+    }
     const auto point_it = start_points.find(map_id);
     if (point_it != start_points.end() && !point_it->second.empty()) {
       file << "safe_zones = [\n";
@@ -820,6 +828,12 @@ LegacyImportReport import_maps_and_spawns(const std::filesystem::path& legacy_ro
     file << "height = 0\n";
     file << "home_x = " << home_x << "\n";
     file << "home_y = " << home_y << "\n";
+    if (setup_home_x > 0 && setup_home_y > 0) {
+      file << "badman_zones = [\n";
+      file << "  { x = " << (setup_home_x - 10) << ", y = " << (setup_home_y - 10)
+           << ", width = 21, height = 21 }\n";
+      file << "]\n";
+    }
     report.map_count = 1;
   }
 

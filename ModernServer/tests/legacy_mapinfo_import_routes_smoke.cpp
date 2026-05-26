@@ -68,6 +68,9 @@ int main() {
   assert(home->need_set_number == 9);
   assert(home->need_set_value == 0);
   assert(!home->allow_pk);
+  assert(home->badman_zones.size() == 1);
+  assert(home->badman_zones.front().x == 320 && home->badman_zones.front().y == 260);
+  assert(home->badman_zones.front().width == 21 && home->badman_zones.front().height == 21);
   assert(home->safe_zones.size() == 1);
   assert(home->safe_zones.front().x == 320 && home->safe_zones.front().y == 260);
   assert(home->safe_zones.front().width == 21 && home->safe_zones.front().height == 21);

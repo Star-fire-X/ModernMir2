@@ -80,7 +80,7 @@ mir2::LogicCommand make_enter(std::uint64_t session_id, const mir2::CharacterRec
   return command;
 }
 
-bool check_area_state_baseline() {
+bool check_area_state_compat_supported() {
   mir2::HostConfig config;
   mir2::MapConfig map;
   map.id = "0";
@@ -103,10 +103,7 @@ bool check_area_state_baseline() {
 
   const auto current_safe_bit = (area->message.recog & 1) != 0;
   constexpr bool kDelphiExpectedAreaSafeBitForGenericSafeZone = false;
-  if (!current_safe_bit) {
-    return false;
-  }
-  return current_safe_bit != kDelphiExpectedAreaSafeBitForGenericSafeZone;
+  return current_safe_bit == kDelphiExpectedAreaSafeBitForGenericSafeZone;
 }
 
 bool check_mapquest_empty_trigger_baseline() {
@@ -208,8 +205,8 @@ bool check_map3_patch_points_in_doc(const std::filesystem::path& modern_server_r
 int main() {
   const auto modern_server_root = std::filesystem::path(__FILE__).parent_path().parent_path();
 
-  if (!check_area_state_baseline()) {
-    return fail(1, "area-state baseline");
+  if (!check_area_state_compat_supported()) {
+    return fail(1, "area-state compatibility");
   }
   if (!check_mapquest_empty_trigger_baseline()) {
     return fail(2, "mapquest empty-mon-item enter baseline");

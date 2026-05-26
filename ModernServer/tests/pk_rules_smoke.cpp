@@ -97,7 +97,7 @@ int main() {
   const auto hero_login = runtime.tick();
   const auto hero_map = find_packet(hero_login, mir2::kSmNewMap);
   const auto hero_area = find_packet(hero_login, mir2::kSmAreaState);
-  if (!hero_map.has_value() || !hero_area.has_value() || hero_area->message.recog != 1) {
+  if (!hero_map.has_value() || !hero_area.has_value() || hero_area->message.recog != 0) {
     return fail(1);
   }
 
@@ -120,7 +120,7 @@ int main() {
 
   const auto rival_login = runtime.tick();
   const auto rival_area = find_packet(rival_login, mir2::kSmAreaState);
-  if (!rival_area.has_value() || rival_area->message.recog != 1) {
+  if (!rival_area.has_value() || rival_area->message.recog != 0) {
     return fail(2);
   }
 
