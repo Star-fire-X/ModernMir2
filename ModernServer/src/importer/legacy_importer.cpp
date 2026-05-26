@@ -149,6 +149,19 @@ std::optional<std::int32_t> parse_int32(std::string_view text) {
   return std::nullopt;
 }
 
+std::optional<std::pair<std::int32_t, std::int32_t>> parse_xy_token(std::string_view text) {
+  const auto comma = text.find(',');
+  if (comma == std::string_view::npos || comma == 0 || comma + 1 >= text.size()) {
+    return std::nullopt;
+  }
+  const auto x = parse_int32(text.substr(0, comma));
+  const auto y = parse_int32(text.substr(comma + 1));
+  if (!x.has_value() || !y.has_value()) {
+    return std::nullopt;
+  }
+  return std::pair<std::int32_t, std::int32_t>{*x, *y};
+}
+
 std::string legacy_name_key(std::string name) {
   return util::lower_copy(ascii_safe(std::move(name)));
 }
@@ -679,7 +692,26 @@ LegacyImportReport import_maps_and_spawns(const std::filesystem::path& legacy_ro
     }
 
     const auto tokens = split_ws(line);
-    if (tokens.size() >= 7 && tokens[3] == "->") {
+    bool gate_parsed = false;
+    if (tokens.size() >= 5 && tokens[2] == "->") {
+      const auto source = parse_xy_token(tokens[1]);
+      const auto target = parse_xy_token(tokens[4]);
+      if (source.has_value() && target.has_value()) {
+        const auto map_id = tokens[0];
+        auto& info = map_infos[map_id];
+        if (info.id.empty()) {
+          info.id = map_id;
+          info.title = map_id;
+          map_order.push_back(map_id);
+        }
+        info.gates.push_back(
+            ImportedGate{source->first, source->second, tokens[3], target->first, target->second});
+        maps.insert(map_id);
+        gate_parsed = true;
+      }
+    }
+
+    if (!gate_parsed && tokens.size() >= 7 && tokens[3] == "->") {
       const auto map_id = tokens[0];
       const auto x = parse_int32(tokens[1]);
       const auto y = parse_int32(tokens[2]);
@@ -697,6 +729,12 @@ LegacyImportReport import_maps_and_spawns(const std::filesystem::path& legacy_ro
       }
       info.gates.push_back(ImportedGate{*x, *y, tokens[4], *target_x, *target_y});
       maps.insert(map_id);
+      gate_parsed = true;
+    }
+
+    if (!gate_parsed &&
+        ((tokens.size() >= 5 && tokens[2] == "->") || (tokens.size() >= 7 && tokens[3] == "->"))) {
+      report.warnings.push_back("Skipped invalid gate line: " + line);
     }
   }
 

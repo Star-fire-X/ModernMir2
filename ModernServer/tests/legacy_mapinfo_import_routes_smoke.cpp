@@ -41,10 +41,10 @@ int main() {
              "1 50 60\n");
   write_text(legacy / "Envir" / "MapInfo.txt",
              "[0 Bichon Province 0] SAFE DAY NORECALL NEEDSET_OFF(9) L7\n"
-             "0 331 270 -> 1 50 60\n"
+             "0 331,270 -> 1 50,60\n"
              "[1 Cave Path 0] FIGHT3 DARK QUIZ NODRUG NORECONNECT(0) "
              "CHECKQUEST(entry.txt) NEEDSET_ON(12)\n"
-             "1 49 60 -> 0 330 270\n");
+             "1 49,60 -> 0 330,270\n");
   write_text(legacy / "Envir" / "MapQuest_def" / "entry.txt",
              "[@main]\n"
              "#ACT\n"
@@ -54,6 +54,7 @@ int main() {
   mir2::LegacyImporter importer;
   const auto report = importer.import_tree(legacy, output);
   assert(report.map_count == 2);
+  assert(report.warnings.empty());
 
   mir2::ConfigLoader loader;
   const auto config = loader.load(output);
