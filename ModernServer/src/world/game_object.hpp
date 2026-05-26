@@ -545,6 +545,8 @@ class Player : public GameObject {
   void mark_legacy_fire_hit(std::uint64_t now_ms);
   [[nodiscard]] bool legacy_rush_ready(std::uint64_t now_ms) const;
   void mark_legacy_rush(std::uint64_t now_ms);
+  [[nodiscard]] bool legacy_item_change_ready(std::uint64_t now_ms) const;
+  void mark_legacy_item_change(std::uint64_t now_ms);
   [[nodiscard]] bool legacy_long_hit_enabled() const { return legacy_long_hit_enabled_; }
   void set_legacy_long_hit_enabled(bool value) { legacy_long_hit_enabled_ = value; }
   [[nodiscard]] bool legacy_wide_hit_enabled() const { return legacy_wide_hit_enabled_; }
@@ -622,6 +624,7 @@ class Player : public GameObject {
   std::int32_t legacy_power_hit_level_{-1};
   std::uint64_t legacy_latest_fire_hit_time_ms_{0};
   std::uint64_t legacy_latest_rush_time_ms_{0};
+  std::uint64_t legacy_item_change_time_ms_{0};
   bool legacy_long_hit_enabled_{false};
   bool legacy_wide_hit_enabled_{false};
   bool legacy_cross_hit_enabled_{false};

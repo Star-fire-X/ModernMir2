@@ -174,13 +174,13 @@ int main() {
     static_cast<void>(full_runtime.tick(full_now_ms));
     static_cast<void>(full_runtime.route_logic_command(make_use(502, 1002, "Healing Potion")));
     dispatch = tick_due(full_runtime, full_now_ms);
-    assert(find_packet(dispatch, mir2::kSmEatFail).has_value());
+    assert(find_packet(dispatch, mir2::kSmEatOk).has_value());
+    assert(find_packet(dispatch, mir2::kSmDelItem).has_value());
     snapshot = full_runtime.snapshot_character_actor("PotionUser");
     assert(!snapshot.has_value());
     snapshot = full_runtime.snapshot_character_actor("FullPotionUser");
     assert(snapshot.has_value());
-    assert(snapshot->bag_items[0].make_index == 1002);
-    assert(snapshot->bag_items[0].dura == 3);
+    assert(!bag_has_make_index(*snapshot, 1002));
   }
 
   {
@@ -197,6 +197,23 @@ int main() {
     const auto snapshot = runtime.snapshot_character_actor("NoDrugUser");
     assert(snapshot.has_value());
     assert(bag_has_make_index(*snapshot, 2001));
+  }
+
+  {
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto character = base_character("NoDrugBundleUser", "0");
+    character.bag_items[0] = mir2::LegacyUserItem{2101, 4, 1, 1};
+    static_cast<void>(runtime.route_logic_command(make_enter(602, character)));
+    std::uint64_t now_ms = 20;
+    static_cast<void>(runtime.tick(now_ms));
+    static_cast<void>(runtime.route_logic_command(make_use(602, 2101, "Potion Bundle")));
+    const auto dispatch = tick_due(runtime, now_ms);
+    assert(find_packet(dispatch, mir2::kSmEatFail).has_value());
+    const auto snapshot = runtime.snapshot_character_actor("NoDrugBundleUser");
+    assert(snapshot.has_value());
+    assert(bag_has_make_index(*snapshot, 2101));
+    assert(bag_count_by_index(*snapshot, 1) == 0);
   }
 
   {

@@ -109,6 +109,9 @@ bool can_sell_item(const Npc& merchant, const LegacyUserItem& item,
   if (!merchant.deals_std_mode(config->std_mode)) {
     return false;
   }
+  if (config->std_mode == 51) {
+    return false;
+  }
   if ((config->std_mode == 25 || config->std_mode == 30) && item.dura < 4000) {
     return false;
   }

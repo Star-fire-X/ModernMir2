@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 
+#include "protocol/legacy_edcode.hpp"
 #include "protocol/legacy_game_codec.hpp"
 #include "protocol/legacy_types.hpp"
 #include "world/logic_runtime.hpp"
@@ -64,6 +65,14 @@ std::optional<mir2::DecodedLegacyGamePacket> find_packet(const mir2::RuntimeDisp
   return std::nullopt;
 }
 
+std::optional<mir2::LegacyClientItem> decode_client_item(std::string_view body) {
+  mir2::LegacyClientItem item;
+  if (!mir2::legacy_decode_buffer(body, &item, sizeof(item))) {
+    return std::nullopt;
+  }
+  return item;
+}
+
 bool has_trace(const mir2::RuntimeDispatch& dispatch, std::string action) {
   return std::any_of(dispatch.legacy_traces.begin(), dispatch.legacy_traces.end(),
                      [&](const mir2::LegacyRuntimeTrace& trace) {
@@ -77,7 +86,10 @@ mir2::RuntimeDispatch tick_due(mir2::LogicRuntime& runtime, std::uint64_t& now_m
   return runtime.tick(now_ms);
 }
 
-mir2::CharacterRecord make_character(std::string name, std::uint64_t make_index) {
+mir2::CharacterRecord make_character(std::string name, std::uint64_t make_index,
+                                     std::uint16_t item_index = 1,
+                                     std::uint16_t dura = 1,
+                                     std::uint16_t dura_max = 1) {
   mir2::CharacterRecord character;
   character.account_id = "acct_" + name;
   character.character_name = std::move(name);
@@ -91,9 +103,9 @@ mir2::CharacterRecord make_character(std::string name, std::uint64_t make_index)
   character.ability.max_hand_weight = 100;
   if (make_index != 0) {
     character.bag_items[0].make_index = static_cast<std::int32_t>(make_index);
-    character.bag_items[0].index = 1;
-    character.bag_items[0].dura = 1;
-    character.bag_items[0].dura_max = 1;
+    character.bag_items[0].index = item_index;
+    character.bag_items[0].dura = dura;
+    character.bag_items[0].dura_max = dura_max;
   }
   return character;
 }
@@ -106,6 +118,8 @@ int main() {
   mir2::ItemConfig token{1, "Token", 1, 1, 1, 0, 2, 1, -1, 0, 0};
   token.ani_count = 3;
   config.items.push_back(token);
+  config.items.push_back(mir2::ItemConfig{2, "Raw Meat", 1, 1, 40, 0, 2, 1, -1, 0, 0});
+  config.items.push_back(mir2::ItemConfig{3, "Event Token", 1, 1, 51, 0, 2, 1, -1, 0, 0});
 
   mir2::LogicRuntime runtime(config);
   runtime.initialize();
@@ -129,6 +143,15 @@ int main() {
   assert(has_trace(duplicate_pickup, "empty_cell"));
   assert(!find_packet(duplicate_pickup, mir2::kSmAddItem).has_value());
 
+  static_cast<void>(runtime.route_logic_command(make_drop(101, 1001, "Token")));
+  const auto throttled_drop = tick_due(runtime, now_ms);
+  assert(find_packet(throttled_drop, mir2::kSmDropItemFail).has_value());
+  assert(!find_packet(throttled_drop, mir2::kSmDelItem).has_value());
+  auto token_snapshot = runtime.snapshot_character_actor("Hero");
+  assert(token_snapshot.has_value());
+  assert(token_snapshot->bag_items[0].make_index == 1001);
+
+  static_cast<void>(tick_due(runtime, now_ms, 3001));
   static_cast<void>(runtime.route_logic_command(make_drop(101, 1001, "Token")));
   static_cast<void>(tick_due(runtime, now_ms));
   const auto expired = tick_due(runtime, now_ms, 10ULL * 60ULL * 1000ULL + 1ULL);
@@ -157,6 +180,41 @@ int main() {
   assert(gold_changed.has_value());
   assert(gold_changed->message.recog == 1000);
   assert(find_packet(merged_pickup, mir2::kSmItemHide).has_value());
+
+  mir2::LogicRuntime meat_runtime(config);
+  meat_runtime.initialize();
+  static_cast<void>(meat_runtime.route_logic_command(
+      make_enter(301, make_character("MeatHero", 3001, 2, 1500, 4000))));
+  std::uint64_t meat_now_ms = 20;
+  static_cast<void>(meat_runtime.tick(meat_now_ms));
+  static_cast<void>(meat_runtime.route_logic_command(make_drop(301, 3001, "Raw Meat")));
+  const auto meat_drop = tick_due(meat_runtime, meat_now_ms);
+  const auto meat_del = find_packet(meat_drop, mir2::kSmDelItem);
+  assert(meat_del.has_value());
+  const auto deleted_meat = decode_client_item(meat_del->body);
+  assert(deleted_meat.has_value());
+  assert(deleted_meat->dura == 0);
+  static_cast<void>(meat_runtime.route_logic_command(make_pickup(301, 10, 10)));
+  const auto meat_pickup = tick_due(meat_runtime, meat_now_ms);
+  const auto meat_add = find_packet(meat_pickup, mir2::kSmAddItem);
+  assert(meat_add.has_value());
+  const auto picked_meat = decode_client_item(meat_add->body);
+  assert(picked_meat.has_value());
+  assert(picked_meat->dura == 0);
+
+  mir2::LogicRuntime event_runtime(config);
+  event_runtime.initialize();
+  static_cast<void>(event_runtime.route_logic_command(
+      make_enter(401, make_character("EventHero", 4001, 3))));
+  std::uint64_t event_now_ms = 20;
+  static_cast<void>(event_runtime.tick(event_now_ms));
+  static_cast<void>(event_runtime.route_logic_command(make_drop(401, 4001, "Event Token")));
+  const auto event_drop = tick_due(event_runtime, event_now_ms);
+  assert(find_packet(event_drop, mir2::kSmDropItemFail).has_value());
+  assert(!find_packet(event_drop, mir2::kSmDelItem).has_value());
+  const auto event_snapshot = event_runtime.snapshot_character_actor("EventHero");
+  assert(event_snapshot.has_value());
+  assert(event_snapshot->bag_items[0].make_index == 4001);
 
   return 0;
 }

@@ -211,6 +211,7 @@ int main() {
   config.maps.push_back(mir2::MapConfig{"0", "TradeMap", {}, 0, 0, 30, 30});
   config.items.push_back(mir2::ItemConfig{1, "Ruby", 1, 40, 0, 2, 1, 1000, 10, 0, 0});
   config.items.push_back(mir2::ItemConfig{2, "Sapphire", 1, 41, 0, 3, 1, 1000, 10, 0, 0});
+  config.items.push_back(mir2::ItemConfig{3, "Event Token", 1, 1, 51, 0, 1, 1, -1, 0, 0});
 
   mir2::LogicRuntime runtime(config);
   runtime.initialize();
@@ -489,6 +490,28 @@ int main() {
       !find_packet(failed_commit, 18, mir2::kSmDealCancel).has_value() ||
       !find_packet(failed_commit, 18, mir2::kSmGoldChanged).has_value()) {
     return fail(23);
+  }
+
+  mir2::LogicRuntime event_runtime(config);
+  event_runtime.initialize();
+  auto event_a = make_character("guest_e", "EventA", 10, 100, make_item(3, 3001));
+  auto event_b = make_character("guest_f", "EventB", 11, 100, sapphire);
+  event_a.dir = 2;
+  event_b.dir = 6;
+  static_cast<void>(event_runtime.route_logic_command(enter_command(27, event_a)));
+  static_cast<void>(event_runtime.route_logic_command(enter_command(28, event_b)));
+  static_cast<void>(event_runtime.tick());
+  static_cast<void>(event_runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_try, 27, 0, "EventB")));
+  static_cast<void>(tick_players(event_runtime));
+  static_cast<void>(event_runtime.route_logic_command(
+      trade_command(mir2::LogicCommandKind::trade_add_item, 27, 3001, "Event Token")));
+  const auto event_add = tick_players(event_runtime);
+  const auto event_snapshot = event_runtime.snapshot_character_actor("EventA");
+  if (!find_packet(event_add, 27, mir2::kSmDealAddItemFail).has_value() ||
+      find_packet(event_add, 27, mir2::kSmDelItem).has_value() ||
+      !event_snapshot.has_value() || event_snapshot->bag_items[0].make_index != 3001) {
+    return fail(24);
   }
 
   return 0;
