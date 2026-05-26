@@ -87,7 +87,7 @@ std::optional<mir2::DecodedLegacyGamePacket> find_packet_by_body(
   for (const auto& event : dispatch.session_events) {
     const auto decoded = mir2::decode_legacy_game_packet(event.packet);
     if (decoded.has_value() && decoded->message.ident == ident &&
-        mir2::legacy_decode_string(decoded->body) == body) {
+        mir2::legacy_decode_text(decoded->body) == body) {
       return decoded;
     }
   }
