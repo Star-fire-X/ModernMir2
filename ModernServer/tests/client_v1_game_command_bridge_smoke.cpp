@@ -270,6 +270,36 @@ int main() {
     return fail("batched frame fifo");
   }
 
+  const auto split_walk_sequence = sequence++;
+  const auto split_pickup_sequence = sequence++;
+  auto split_walk_frame = encode_client_v1_message_with_sequence(
+      mir2::client_v1::MoveIntent{12, 10, mir2::client_v1::MoveMode::walk},
+      split_walk_sequence);
+  auto split_pickup_frame = encode_client_v1_message_with_sequence(
+      mir2::client_v1::PickupIntent{13, 14}, split_pickup_sequence);
+  const auto split_point = split_walk_frame.size() / 2U;
+  asio::write(*socket, asio::buffer(split_walk_frame.data(), split_point));
+  if (!wait_for_no_logic(world_endpoint)) {
+    stop_services();
+    return fail("partial frame held");
+  }
+  asio::write(*socket, asio::buffer(split_walk_frame.data() + split_point,
+                                    split_walk_frame.size() - split_point));
+  asio::write(*socket, asio::buffer(split_pickup_frame));
+
+  auto first_split_command = wait_for_logic(world_endpoint);
+  auto second_split_command = wait_for_logic(world_endpoint);
+  if (!first_split_command.has_value() || !second_split_command.has_value() ||
+      first_split_command->kind != mir2::LogicCommandKind::walk ||
+      second_split_command->kind != mir2::LogicCommandKind::pickup_item ||
+      first_split_command->session_seq != split_walk_sequence ||
+      second_split_command->session_seq != split_pickup_sequence ||
+      first_split_command->session_id != session_id ||
+      second_split_command->session_id != session_id) {
+    stop_services();
+    return fail("split frame fifo");
+  }
+
   mir2::tests::send_client_v1_message(
       *socket, mir2::client_v1::MoveIntent{11, 10, mir2::client_v1::MoveMode::walk},
       sequence);
