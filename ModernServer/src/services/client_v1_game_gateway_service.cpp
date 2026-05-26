@@ -2378,7 +2378,33 @@ void ClientV1GameGatewayService::translate_legacy_packet(
           actor_id, decoded->message.param, decoded->message.tag,
           static_cast<std::uint8_t>(decoded->message.series), decoded->message.ident});
       break;
+    case kSmSpaceMoveShow:
+    case kSmSpaceMoveShow2: {
+      const auto desc = decode_char_desc_prefix(decoded->body);
+      const auto dir = static_cast<std::uint8_t>(decoded->message.series & 0xFFU);
+      const auto feature = desc.has_value() ? desc->feature : 0;
+      const auto status = desc.has_value() ? desc->status : 0;
+      messages.push_back(client_v1::ActorUpsert{
+          make_actor(actor_id, {}, decoded->message.param, decoded->message.tag, dir,
+                     feature, status)});
+      if (actor_id == state.actor_id) {
+        std::scoped_lock lock(mutex_);
+        auto& current = sessions_[session_id];
+        current.character.x = decoded->message.param;
+        current.character.y = decoded->message.tag;
+        current.character.dir = dir;
+        current.character.feature = feature;
+        current.character.status = status;
+      }
+      break;
+    }
+    case kSmShowEvent:
+      messages.push_back(client_v1::ActorUpsert{
+          make_actor(actor_id, {}, decoded->message.param, decoded->message.tag, 0,
+                     static_cast<std::int32_t>(decoded->message.series), 0)});
+      break;
     case kSmDisappear:
+    case kSmHideEvent:
     case kSmSpaceMoveHide:
     case kSmSpaceMoveHide2:
       messages.push_back(client_v1::ActorRemove{actor_id, decoded->message.ident});

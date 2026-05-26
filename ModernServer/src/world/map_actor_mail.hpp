@@ -4258,11 +4258,6 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                              static_cast<std::int32_t>(user_magic->level),
                              "Random(11)");
             if (train) {
-              queue_actor_origin_packet(objects_, dispatch, *attacker, true,
-                                        [&](const Player& watcher) {
-                queue_packet(dispatch, watcher.session_id(),
-                             make_space_move_hide2_packet(watcher.session_id(), *attacker));
-              });
               dispatch.legacy_random_space_moves.push_back(LegacyRandomSpaceMoveRequest{
                   config_.id,
                   {},

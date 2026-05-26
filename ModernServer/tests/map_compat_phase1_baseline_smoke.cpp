@@ -167,16 +167,16 @@ bool check_itemshow_body_baseline() {
   return mir2::legacy_decode_string(show->body) == "Token";
 }
 
-bool check_event_wire_gap_baseline(const std::filesystem::path& modern_server_root) {
+bool check_event_wire_compat_supported(const std::filesystem::path& modern_server_root) {
   const auto legacy_types = read_text(modern_server_root / "src" / "protocol" / "legacy_types.hpp");
   const auto packets = read_text(modern_server_root / "src" / "world" / "map_actor_packets.hpp");
   if (legacy_types.empty() || packets.empty()) {
     return false;
   }
-  return legacy_types.find("kSmShowEvent") == std::string::npos &&
-         legacy_types.find("kSmHideEvent") == std::string::npos &&
-         packets.find("make_show_event_packet") == std::string::npos &&
-         packets.find("make_hide_event_packet") == std::string::npos;
+  return legacy_types.find("kSmShowEvent") != std::string::npos &&
+         legacy_types.find("kSmHideEvent") != std::string::npos &&
+         packets.find("make_show_event_packet") != std::string::npos &&
+         packets.find("make_hide_event_packet") != std::string::npos;
 }
 
 bool check_canfly_canfirefly_split() {
@@ -217,8 +217,8 @@ int main() {
   if (!check_itemshow_body_baseline()) {
     return fail(3, "itemshow body baseline");
   }
-  if (!check_event_wire_gap_baseline(modern_server_root)) {
-    return fail(4, "event wire gap baseline");
+  if (!check_event_wire_compat_supported(modern_server_root)) {
+    return fail(4, "event wire compatibility");
   }
   if (!check_canfly_canfirefly_split()) {
     return fail(5, "CanFly/CanFireFly baseline");

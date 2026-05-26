@@ -154,9 +154,31 @@ void MapActor::sync_player_visibility(Player& player, RuntimeDispatch& dispatch,
       continue;
     }
     current_events.insert(event_id);
+    if (force || !visibility.events.contains(event_id)) {
+      auto type = LegacyEventType::pile_stones;
+      if (const auto type_it = event_object_types_.find(event_id);
+          type_it != event_object_types_.end()) {
+        type = type_it->second;
+      }
+      queue_packet(dispatch, player.session_id(),
+                   make_show_event_packet(player.session_id(), event_id,
+                                          position.first, position.second, type));
+    }
   }
-  // EventObject wire show/hide is intentionally not emitted until the Delphi
-  // packet shape is confirmed; this tracks server-side visibility only.
+  for (const auto event_id : visibility.events) {
+    if (current_events.contains(event_id)) {
+      continue;
+    }
+    std::int32_t event_x = 0;
+    std::int32_t event_y = 0;
+    if (const auto position_it = event_objects_.find(event_id);
+        position_it != event_objects_.end()) {
+      event_x = position_it->second.first;
+      event_y = position_it->second.second;
+    }
+    queue_packet(dispatch, player.session_id(),
+                 make_hide_event_packet(player.session_id(), event_id, event_x, event_y));
+  }
   visibility.events = std::move(current_events);
 }
 
@@ -245,11 +267,44 @@ void MapActor::sync_visibility_after_event_change(std::int32_t event_x, std::int
 void MapActor::force_refresh_after_same_map_transfer(Player& player, std::int32_t old_x,
                                                      std::int32_t old_y,
                                                      RuntimeDispatch& dispatch,
-                                                     std::uint64_t now_ms) {
+                                                     std::uint64_t now_ms,
+                                                     std::uint16_t space_move_hide_ident,
+                                                     std::uint16_t space_move_show_ident) {
+  for_each_player(objects_, [&](std::uint64_t watcher_id, const Player& watcher) {
+    if (watcher.id() != player.id() &&
+        !in_legacy_view_range(watcher.x(), watcher.y(), old_x, old_y)) {
+      return;
+    }
+    if (space_move_hide_ident == kSmSpaceMoveHide2) {
+      queue_packet(dispatch, watcher.session_id(),
+                   make_space_move_hide2_packet(watcher.session_id(), player));
+    } else {
+      queue_packet(dispatch, watcher.session_id(),
+                   make_space_move_hide_packet(watcher.session_id(), player));
+    }
+    if (watcher_id != player.id()) {
+      visibility_[watcher_id].actors.erase(player.id());
+    }
+  });
   queue_packet(dispatch, player.session_id(), make_clear_objects_packet(player.session_id()));
   queue_packet(dispatch, player.session_id(), make_change_map_packet(player.session_id(), config_.id));
   dispatch_login_sequence(dispatch, player, config_, item_configs_, magic_configs_,
                           area_state_mask(config_, player.x(), player.y()));
+  for_each_player(objects_, [&](std::uint64_t watcher_id, const Player& watcher) {
+    if (watcher.id() != player.id() && !is_legacy_visible_to(watcher, player)) {
+      return;
+    }
+    if (space_move_show_ident == kSmSpaceMoveShow2) {
+      queue_packet(dispatch, watcher.session_id(),
+                   make_space_move_show2_packet(watcher.session_id(), player));
+    } else {
+      queue_packet(dispatch, watcher.session_id(),
+                   make_space_move_show_packet(watcher.session_id(), player));
+    }
+    if (watcher_id != player.id()) {
+      visibility_[watcher_id].actors.insert(player.id());
+    }
+  });
   sync_player_visibility(player, dispatch, true);
   sync_visibility_after_actor_move(player, old_x, old_y, player.x(), player.y(), dispatch);
   queue_save_character(dispatch, player);

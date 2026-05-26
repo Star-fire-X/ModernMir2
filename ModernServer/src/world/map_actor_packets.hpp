@@ -526,6 +526,26 @@ LegacyPacket make_item_hide_packet(std::uint64_t session_id, const MapActor::Gro
                            static_cast<std::uint16_t>(item.x), static_cast<std::uint16_t>(item.y), 0));
 }
 
+LegacyPacket make_show_event_packet(std::uint64_t session_id, std::uint64_t event_id,
+                                    std::int32_t x, std::int32_t y,
+                                    LegacyEventType type) {
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmShowEvent, static_cast<std::int32_t>(event_id),
+                           static_cast<std::uint16_t>(x),
+                           static_cast<std::uint16_t>(y),
+                           static_cast<std::uint16_t>(type)));
+}
+
+LegacyPacket make_hide_event_packet(std::uint64_t session_id, std::uint64_t event_id,
+                                    std::int32_t x, std::int32_t y) {
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmHideEvent, static_cast<std::int32_t>(event_id),
+                           static_cast<std::uint16_t>(x),
+                           static_cast<std::uint16_t>(y), 0));
+}
+
 LegacyPacket make_drop_result_packet(std::uint64_t session_id, bool ok, std::int32_t make_index,
                                      const std::string& item_name) {
   return make_legacy_game_packet(
@@ -879,6 +899,24 @@ LegacyPacket make_space_move_hide2_packet(std::uint64_t session_id, const GameOb
   return make_legacy_game_packet(
       session_id, 0, 0,
       make_default_message(kSmSpaceMoveHide2, static_cast<std::int32_t>(object.id()), 0, 0, 0));
+}
+
+LegacyPacket make_space_move_hide_packet(std::uint64_t session_id,
+                                         const GameObject& object) {
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmSpaceMoveHide, static_cast<std::int32_t>(object.id()), 0, 0, 0));
+}
+
+LegacyPacket make_space_move_show_packet(std::uint64_t session_id, const GameObject& object) {
+  const auto desc = make_char_desc(object);
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmSpaceMoveShow, static_cast<std::int32_t>(object.id()),
+                           static_cast<std::uint16_t>(object.x()),
+                           static_cast<std::uint16_t>(object.y()),
+                           make_word(actor_dir(object), actor_light(object))),
+      legacy_encode_buffer(&desc, sizeof(desc)));
 }
 
 LegacyPacket make_space_move_show2_packet(std::uint64_t session_id, const GameObject& object) {

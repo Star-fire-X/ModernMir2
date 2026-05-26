@@ -145,6 +145,8 @@ int main() {
   assert(mir2::kSmAreaState == 708);
   assert(mir2::kSmSpaceMoveHide == 800);
   assert(mir2::kSmSpaceMoveShow == 801);
+  assert(mir2::kSmShowEvent == 804);
+  assert(mir2::kSmHideEvent == 805);
   assert(mir2::kSmSpaceMoveHide2 == 806);
   assert(mir2::kSmSpaceMoveShow2 == 807);
   assert(mir2::legacy::kSmFireHit == 8);

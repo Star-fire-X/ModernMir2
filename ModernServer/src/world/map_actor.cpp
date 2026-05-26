@@ -1569,24 +1569,10 @@ RuntimeDispatch MapActor::legacy_space_move_player(
     context.items = &item_configs_;
     context.magics = &magic_configs_;
     player->on_mail(move_mail, context);
-    force_refresh_after_same_map_transfer(*player, old_x, old_y, dispatch, now_ms);
-    if (show2) {
-      bool sent_self = false;
-      for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
-        if (!is_legacy_visible_to(watcher, *player)) {
-          return;
-        }
-        if (watcher.session_id() == player->session_id()) {
-          sent_self = true;
-        }
-        queue_packet(dispatch, watcher.session_id(),
-                     make_space_move_show2_packet(watcher.session_id(), *player));
-      });
-      if (!sent_self) {
-        queue_packet(dispatch, player->session_id(),
-                     make_space_move_show2_packet(player->session_id(), *player));
-      }
-    }
+    force_refresh_after_same_map_transfer(
+        *player, old_x, old_y, dispatch, now_ms,
+        show2 ? kSmSpaceMoveHide2 : kSmSpaceMoveHide,
+        show2 ? kSmSpaceMoveShow2 : kSmSpaceMoveShow);
     recall_owned_slaves_to_master(*player, dispatch, current_tick, now_ms);
     dispatch.audit_events.push_back(AuditEvent{
         "world.space_move", snapshot.account_id + ":" + snapshot.character_name, config_.id});
@@ -1609,6 +1595,20 @@ RuntimeDispatch MapActor::legacy_space_move_player(
   transfer.legacy_buffs = player->legacy_buffs_for_transfer(current_tick);
   transfer.legacy_name_color = player->legacy_name_color();
   transfer.legacy_space_move_show2 = show2;
+
+  if (show2) {
+    queue_actor_origin_packet(objects_, dispatch, *player, true,
+                              [&](const Player& watcher) {
+      queue_packet(dispatch, watcher.session_id(),
+                   make_space_move_hide2_packet(watcher.session_id(), *player));
+    });
+  } else {
+    queue_actor_origin_packet(objects_, dispatch, *player, true,
+                              [&](const Player& watcher) {
+      queue_packet(dispatch, watcher.session_id(),
+                   make_space_move_hide_packet(watcher.session_id(), *player));
+    });
+  }
 
   queue_packet(dispatch, player->session_id(), make_clear_objects_packet(player->session_id()));
   queue_packet(dispatch, player->session_id(),
