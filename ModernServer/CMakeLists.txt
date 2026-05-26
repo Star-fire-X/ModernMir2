@@ -223,6 +223,10 @@ if(BUILD_TESTING)
   add_test(NAME mir2_npc_shop_interleaving_fuzz_smoke
     COMMAND mir2_npc_shop_interleaving_fuzz_smoke)
 
+  add_executable(mir2_npc_item_interlock_smoke tests/npc_item_interlock_smoke.cpp)
+  target_link_libraries(mir2_npc_item_interlock_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_npc_item_interlock_smoke COMMAND mir2_npc_item_interlock_smoke)
+
   add_executable(mir2_canonical_legacy_command_smoke
     tests/canonical_legacy_command_smoke.cpp)
   target_link_libraries(mir2_canonical_legacy_command_smoke PRIVATE mir2_hostlib)

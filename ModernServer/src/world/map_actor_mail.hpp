@@ -18,6 +18,18 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
     queue_system_notice(dispatch, *player, "Finish trade first.");
     return true;
   };
+  auto reject_npc_modal_item_change = [&](Player* player) {
+    if (player == nullptr || player->legacy_npc_item_mode() == LegacyNpcItemMode::none) {
+      return false;
+    }
+    queue_system_notice(dispatch, *player, "Close NPC dialog first.");
+    return true;
+  };
+  auto npc_mode_allows = [](Player* player, LegacyNpcItemMode mode, std::uint64_t actor_id) {
+    return player == nullptr || player->legacy_npc_item_mode() == LegacyNpcItemMode::none ||
+           (player->legacy_npc_item_mode() == mode &&
+            player->legacy_npc_item_actor_id() == actor_id);
+  };
 
   if (!from_legacy_operate && is_legacy_player_command(mail.kind)) {
     static_cast<void>(enqueue_legacy_player_command(mail, now_ms));
@@ -180,10 +192,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       if (merchant->supports_buy()) {
+        requester->set_legacy_npc_item_mode(LegacyNpcItemMode::buy, target_it->second->id());
         queue_packet(dispatch, requester->session_id(),
                      make_send_goods_list_packet(requester->session_id(), target_it->second->id(),
                                                  *merchant, item_configs_));
       } else if (merchant->supports_storage()) {
+        requester->set_legacy_npc_item_mode(LegacyNpcItemMode::storage, target_it->second->id());
         const auto storage_count = static_cast<std::uint16_t>(std::count_if(
             requester->character().storage_items.begin(), requester->character().storage_items.end(),
             [](const LegacyUserItem& item) { return !is_empty(item); }));
@@ -194,10 +208,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                      make_save_item_list_packet(requester->session_id(), target_it->second->id(),
                                                 *requester, item_configs_));
       } else if (merchant->supports_sell()) {
+        requester->set_legacy_npc_item_mode(LegacyNpcItemMode::sell, target_it->second->id());
         queue_packet(dispatch, requester->session_id(),
                      make_send_user_sell_packet(requester->session_id(), target_it->second->id()));
       } else if (merchant->supports_repair()) {
         requester->set_legacy_repair_mode(LegacyRepairMode::normal);
+        requester->set_legacy_npc_item_mode(LegacyNpcItemMode::repair, target_it->second->id());
         queue_packet(dispatch, requester->session_id(),
                      make_send_user_repair_packet(requester->session_id(), target_it->second->id()));
       }
@@ -847,10 +863,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
 
       if (lowered_payload == "@buy" && merchant->supports_buy()) {
+        requester->set_legacy_npc_item_mode(LegacyNpcItemMode::buy, target_it->second->id());
         queue_packet(dispatch, requester->session_id(),
                      make_send_goods_list_packet(requester->session_id(), target_it->second->id(),
                                                  *merchant, item_configs_));
       } else if (lowered_payload == "@sell" && merchant->supports_sell()) {
+        requester->set_legacy_npc_item_mode(LegacyNpcItemMode::sell, target_it->second->id());
         queue_packet(dispatch, requester->session_id(),
                      make_send_user_sell_packet(requester->session_id(), target_it->second->id()));
       } else if ((lowered_payload == "@repair" || lowered_payload == "@s_repair") &&
@@ -858,6 +876,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         requester->set_legacy_repair_mode(lowered_payload == "@s_repair"
                                               ? LegacyRepairMode::special
                                               : LegacyRepairMode::normal);
+        requester->set_legacy_npc_item_mode(LegacyNpcItemMode::repair, target_it->second->id());
         queue_packet(dispatch, requester->session_id(),
                      make_send_user_repair_packet(requester->session_id(), target_it->second->id()));
       } else if (lowered_payload == "@upgradenow" && merchant->supports_weapon_upgrade()) {
@@ -871,6 +890,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                            current_tick, now_ms));
         }
       } else if (lowered_payload == "@storage" && merchant->supports_storage()) {
+        requester->set_legacy_npc_item_mode(LegacyNpcItemMode::storage, target_it->second->id());
         const auto storage_count = static_cast<std::uint16_t>(std::count_if(
             requester->character().storage_items.begin(), requester->character().storage_items.end(),
             [](const LegacyUserItem& item) { return !is_empty(item); }));
@@ -878,6 +898,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                      make_send_user_storage_packet(requester->session_id(), target_it->second->id(),
                                                    storage_count));
       } else if (lowered_payload == "@getback" && merchant->supports_storage()) {
+        requester->set_legacy_npc_item_mode(LegacyNpcItemMode::storage, target_it->second->id());
         queue_packet(dispatch, requester->session_id(),
                      make_save_item_list_packet(requester->session_id(), target_it->second->id(),
                                                 *requester, item_configs_));
@@ -992,6 +1013,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                              mail.payload));
         break;
       }
+      if (reject_npc_modal_item_change(player)) {
+        queue_packet(dispatch, player->session_id(),
+                     make_drop_result_packet(player->session_id(), false, mail.item_make_index,
+                                             mail.payload));
+        break;
+      }
       if (!player->legacy_item_change_ready(now_ms)) {
         add_legacy_trace(dispatch, "LegacyItem", "item_change_throttle", mail, current_tick,
                          now_ms, false, mail.item_make_index, 0, "drop_item");
@@ -1098,6 +1125,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                          false, mail.amount, 0, "drop_gold");
         break;
       }
+      if (reject_npc_modal_item_change(player)) {
+        add_legacy_trace(dispatch, "LegacyItem", "npc_modal_locked", mail, current_tick, now_ms,
+                         false, mail.amount, 0, "drop_gold");
+        break;
+      }
 
       GroundItem ground_item;
       add_legacy_trace(dispatch, "LegacyItem", "validate", mail, current_tick, now_ms, true,
@@ -1185,6 +1217,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         fail_repair();
         break;
       }
+      if (!npc_mode_allows(requester, LegacyNpcItemMode::repair, target_it->second->id())) {
+        fail_repair();
+        break;
+      }
       auto* item = requester->bag_item_mutable(mail.item_make_index, mail.payload, item_configs_);
       if (item == nullptr) {
         fail_repair();
@@ -1230,6 +1266,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       if (reject_trade_locked_item_change(requester)) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_user_sell_result_packet(requester->session_id(), false, 0));
+        break;
+      }
+      if (!npc_mode_allows(requester, LegacyNpcItemMode::sell, target_it->second->id())) {
         queue_packet(dispatch, requester->session_id(),
                      make_user_sell_result_packet(requester->session_id(), false, 0));
         break;
@@ -1281,6 +1322,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       if (reject_trade_locked_item_change(requester)) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_buy_item_result_packet(requester->session_id(), false, 2, 0));
+        break;
+      }
+      if (!npc_mode_allows(requester, LegacyNpcItemMode::buy, target_it->second->id())) {
         queue_packet(dispatch, requester->session_id(),
                      make_buy_item_result_packet(requester->session_id(), false, 2, 0));
         break;
@@ -1358,6 +1404,16 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (!mutually_facing(*requester, *target) ||
           trade_session_for(requester->id()) != nullptr ||
           trade_session_for(target->id()) != nullptr) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_deal_simple_packet(requester->session_id(), kSmDealTryFail));
+        break;
+      }
+      if (reject_npc_modal_item_change(requester)) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_deal_simple_packet(requester->session_id(), kSmDealTryFail));
+        break;
+      }
+      if (reject_npc_modal_item_change(target)) {
         queue_packet(dispatch, requester->session_id(),
                      make_deal_simple_packet(requester->session_id(), kSmDealTryFail));
         break;
@@ -1582,6 +1638,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                      make_storage_result_packet(requester->session_id(), kSmStorageFail));
         break;
       }
+      if (!npc_mode_allows(requester, LegacyNpcItemMode::storage, target_it->second->id())) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_storage_result_packet(requester->session_id(), kSmStorageFail));
+        break;
+      }
       if (legacy_approval_mode_) {
         queue_packet(dispatch, requester->session_id(),
                      make_storage_result_packet(requester->session_id(), kSmStorageFail));
@@ -1660,6 +1721,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                           kSmTakeBackStorageItemFail, 0));
         break;
       }
+      if (!npc_mode_allows(requester, LegacyNpcItemMode::storage, target_it->second->id())) {
+        queue_packet(dispatch, requester->session_id(),
+                     make_take_back_storage_result_packet(requester->session_id(),
+                                                          kSmTakeBackStorageItemFail, 0));
+        break;
+      }
       if (legacy_approval_mode_) {
         queue_packet(dispatch, requester->session_id(),
                      make_take_back_storage_result_packet(requester->session_id(),
@@ -1726,6 +1793,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       if (reject_trade_locked_item_change(player)) {
         add_legacy_trace(dispatch, "LegacyItem", "trade_locked", mail, current_tick, now_ms,
+                         false, 0, 0, "pickup_item");
+        break;
+      }
+      if (reject_npc_modal_item_change(player)) {
+        add_legacy_trace(dispatch, "LegacyItem", "npc_modal_locked", mail, current_tick, now_ms,
                          false, 0, 0, "pickup_item");
         break;
       }
@@ -1820,6 +1892,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       if (reject_trade_locked_item_change(player)) {
+        queue_packet(dispatch, player->session_id(),
+                     make_take_on_result_packet(player->session_id(), false, 0));
+        break;
+      }
+      if (reject_npc_modal_item_change(player)) {
         queue_packet(dispatch, player->session_id(),
                      make_take_on_result_packet(player->session_id(), false, 0));
         break;
@@ -1983,6 +2060,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                      make_take_off_result_packet(player->session_id(), false, 0));
         break;
       }
+      if (reject_npc_modal_item_change(player)) {
+        queue_packet(dispatch, player->session_id(),
+                     make_take_off_result_packet(player->session_id(), false, 0));
+        break;
+      }
 
       add_legacy_trace(dispatch, "LegacyItem", "validate", mail, current_tick, now_ms, true,
                        mail.item_slot, 0, "take_off_item");
@@ -2066,6 +2148,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       if (reject_trade_locked_item_change(player)) {
+        queue_packet(dispatch, player->session_id(),
+                     make_eat_result_packet(player->session_id(), false));
+        break;
+      }
+      if (reject_npc_modal_item_change(player)) {
         queue_packet(dispatch, player->session_id(),
                      make_eat_result_packet(player->session_id(), false));
         break;
@@ -5389,6 +5476,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             effective_mail.dir = expected->dir;
             moved_player = true;
             cancel_trade_for(player->id(), dispatch, true);
+            player->clear_legacy_npc_item_mode();
           } else if (mail.kind == ActorMailKind::turn && effective_mail.dir >= 8) {
             reject_move(false);
             break;
