@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "asio.hpp"
 #include "client_v1_test_utils.hpp"
@@ -87,6 +88,12 @@ void send_client_v1_message_with_sequence(asio::ip::tcp::socket& socket, const T
                                           std::uint32_t sequence) {
   const auto bytes = mir2::client_v1::encode_frame(mir2::client_v1::make_frame(message, sequence));
   asio::write(socket, asio::buffer(bytes));
+}
+
+template <typename T>
+std::vector<std::uint8_t> encode_client_v1_message_with_sequence(const T& message,
+                                                                 std::uint32_t sequence) {
+  return mir2::client_v1::encode_frame(mir2::client_v1::make_frame(message, sequence));
 }
 
 std::optional<mir2::LogicCommand> wait_for_logic(
@@ -227,6 +234,70 @@ int main() {
       target_enter_command->character_name != "Other") {
     stop_services();
     return fail("target enter world command");
+  }
+
+  const auto batch_walk_sequence = sequence++;
+  const auto batch_attack_sequence = sequence++;
+  const auto batch_pickup_sequence = sequence++;
+  auto batch = encode_client_v1_message_with_sequence(
+      mir2::client_v1::MoveIntent{11, 10, mir2::client_v1::MoveMode::walk},
+      batch_walk_sequence);
+  auto attack_frame = encode_client_v1_message_with_sequence(
+      mir2::client_v1::ActionIntent{mir2::client_v1::WorldActionKind::attack, 12, 10, 4,
+                                    77, 0},
+      batch_attack_sequence);
+  batch.insert(batch.end(), attack_frame.begin(), attack_frame.end());
+  auto pickup_frame = encode_client_v1_message_with_sequence(
+      mir2::client_v1::PickupIntent{14, 15}, batch_pickup_sequence);
+  batch.insert(batch.end(), pickup_frame.begin(), pickup_frame.end());
+  asio::write(*socket, asio::buffer(batch));
+
+  auto first_batch_command = wait_for_logic(world_endpoint);
+  auto second_batch_command = wait_for_logic(world_endpoint);
+  auto third_batch_command = wait_for_logic(world_endpoint);
+  if (!first_batch_command.has_value() || !second_batch_command.has_value() ||
+      !third_batch_command.has_value() ||
+      first_batch_command->kind != mir2::LogicCommandKind::walk ||
+      second_batch_command->kind != mir2::LogicCommandKind::attack ||
+      third_batch_command->kind != mir2::LogicCommandKind::pickup_item ||
+      first_batch_command->session_seq != batch_walk_sequence ||
+      second_batch_command->session_seq != batch_attack_sequence ||
+      third_batch_command->session_seq != batch_pickup_sequence ||
+      first_batch_command->session_id != session_id ||
+      second_batch_command->session_id != session_id ||
+      third_batch_command->session_id != session_id) {
+    stop_services();
+    return fail("batched frame fifo");
+  }
+
+  const auto split_walk_sequence = sequence++;
+  const auto split_pickup_sequence = sequence++;
+  auto split_walk_frame = encode_client_v1_message_with_sequence(
+      mir2::client_v1::MoveIntent{12, 10, mir2::client_v1::MoveMode::walk},
+      split_walk_sequence);
+  auto split_pickup_frame = encode_client_v1_message_with_sequence(
+      mir2::client_v1::PickupIntent{13, 14}, split_pickup_sequence);
+  const auto split_point = split_walk_frame.size() / 2U;
+  asio::write(*socket, asio::buffer(split_walk_frame.data(), split_point));
+  if (!wait_for_no_logic(world_endpoint)) {
+    stop_services();
+    return fail("partial frame held");
+  }
+  asio::write(*socket, asio::buffer(split_walk_frame.data() + split_point,
+                                    split_walk_frame.size() - split_point));
+  asio::write(*socket, asio::buffer(split_pickup_frame));
+
+  auto first_split_command = wait_for_logic(world_endpoint);
+  auto second_split_command = wait_for_logic(world_endpoint);
+  if (!first_split_command.has_value() || !second_split_command.has_value() ||
+      first_split_command->kind != mir2::LogicCommandKind::walk ||
+      second_split_command->kind != mir2::LogicCommandKind::pickup_item ||
+      first_split_command->session_seq != split_walk_sequence ||
+      second_split_command->session_seq != split_pickup_sequence ||
+      first_split_command->session_id != session_id ||
+      second_split_command->session_id != session_id) {
+    stop_services();
+    return fail("split frame fifo");
   }
 
   mir2::tests::send_client_v1_message(

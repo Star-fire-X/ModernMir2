@@ -273,6 +273,62 @@ void test_runtime_fifo_barrier_survives_map_entered_same_drain() {
   assert(state.world.chat_lines[1].text == "second");
 }
 
+void test_runtime_state_apply_keeps_drain_order() {
+  using namespace mir2::client;
+  using namespace mir2::client_v1;
+
+  ClientApp app;
+  app.set_config_for_test(test_config());
+  app.enable_protocol_test_mode_for_test();
+
+  app.push_protocol_message_for_test(
+      EnterWorldResult{true, 1000, "Hero", "0", 330, 270, ""});
+  app.push_protocol_message_for_test(
+      WorldSnapshot{"0", 700, 700, 1000,
+                    {WorldActor{1000, "Hero", 330, 270, 0, 0, 0, ActorType::player}}});
+  app.pump_protocol_for_test();
+
+  ItemState potion;
+  potion.name = "Potion";
+  potion.make_index = 7001;
+  potion.looks = 3;
+  potion.std_mode = 0;
+  potion.dura = 1;
+  potion.dura_max = 1;
+
+  auto updated_potion = potion;
+  updated_potion.dura = 0;
+
+  app.push_protocol_message_for_test(ActionAck{true, 456});
+  app.push_protocol_message_for_test(GroundItemAdd{GroundItemState{9001, 331, 270, 7, "Gold"}});
+  app.push_protocol_message_for_test(InventoryAdd{ItemSlotState{6, potion}});
+  app.push_protocol_message_for_test(InventoryUpdate{ItemSlotState{6, updated_potion}});
+  app.push_protocol_message_for_test(SysMessage{"server notice", 1});
+  app.push_protocol_message_for_test(ChatLine{"player line", 0xFFFFFFFFU, 0});
+  app.pump_protocol_for_test();
+
+  auto& state = app.state_for_test();
+  assert(state.world.last_action_ack_ok);
+  const auto ground_item = state.world.ground_items.find(9001);
+  assert(ground_item != state.world.ground_items.end());
+  assert(ground_item->second.name == "Gold");
+  assert(!state.world.bag_items[6].empty());
+  assert(state.world.bag_items[6].name == "Potion");
+  assert(state.world.bag_items[6].dura == 0);
+  assert(state.world.sys_messages.size() == 1);
+  assert(state.world.sys_messages.front().text == "server notice");
+  assert(state.world.chat_lines.size() == 2);
+  assert(state.world.chat_lines[0].text == "server notice");
+  assert(state.world.chat_lines[1].text == "player line");
+
+  app.push_protocol_message_for_test(GroundItemRemove{9001, 331, 270});
+  app.push_protocol_message_for_test(InventoryRemove{6});
+  app.pump_protocol_for_test();
+
+  assert(state.world.ground_items.find(9001) == state.world.ground_items.end());
+  assert(state.world.bag_items[6].empty());
+}
+
 void test_bad_runtime_frame_during_map_transition_disconnects_immediately() {
   using namespace mir2::client;
   using namespace mir2::client_v1;
@@ -386,6 +442,7 @@ int main() {
   test_map_transition_defers_runtime_fifo_until_self_ready();
   test_runtime_before_snapshot_keeps_fifo_in_same_drain();
   test_runtime_fifo_barrier_survives_map_entered_same_drain();
+  test_runtime_state_apply_keeps_drain_order();
   test_bad_runtime_frame_during_map_transition_disconnects_immediately();
   test_disconnect_during_map_transition_is_not_deferred();
   test_typed_disconnect_reason_clears_deferred_map_runtime();

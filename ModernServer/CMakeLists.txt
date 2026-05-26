@@ -1027,6 +1027,10 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_client_v1_magic_gateway_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_client_v1_magic_gateway_smoke COMMAND mir2_client_v1_magic_gateway_smoke)
 
+  add_executable(mir2_client_v1_downlink_order_smoke tests/client_v1_downlink_order_smoke.cpp)
+  target_link_libraries(mir2_client_v1_downlink_order_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_client_v1_downlink_order_smoke COMMAND mir2_client_v1_downlink_order_smoke)
+
   add_executable(mir2_client_v1_world_entry_smoke tests/client_v1_world_entry_smoke.cpp)
   target_link_libraries(mir2_client_v1_world_entry_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_client_v1_world_entry_smoke COMMAND mir2_client_v1_world_entry_smoke)
@@ -1149,5 +1153,6 @@ if(BUILD_TESTING)
       mir2_client_v1_trade_group_guild_smoke
       mir2_client_v1_world_min_loop_smoke
       mir2_client_v1_magic_gateway_smoke
+      mir2_client_v1_downlink_order_smoke
   )
 endif()
