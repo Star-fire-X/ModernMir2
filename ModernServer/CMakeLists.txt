@@ -1059,6 +1059,10 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_client_v1_inventory_npc_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_client_v1_inventory_npc_smoke COMMAND mir2_client_v1_inventory_npc_smoke)
 
+  add_executable(mir2_client_v1_bag_projection_smoke tests/client_v1_bag_projection_smoke.cpp)
+  target_link_libraries(mir2_client_v1_bag_projection_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_client_v1_bag_projection_smoke COMMAND mir2_client_v1_bag_projection_smoke)
+
   add_executable(mir2_client_v1_trade_group_guild_smoke tests/client_v1_trade_group_guild_smoke.cpp)
   target_link_libraries(mir2_client_v1_trade_group_guild_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_client_v1_trade_group_guild_smoke COMMAND mir2_client_v1_trade_group_guild_smoke)
@@ -1150,6 +1154,7 @@ if(BUILD_TESTING)
       mir2_client_v1_login_to_world_flow_smoke
       mir2_client_v1_game_command_bridge_smoke
       mir2_client_v1_inventory_npc_smoke
+      mir2_client_v1_bag_projection_smoke
       mir2_client_v1_trade_group_guild_smoke
       mir2_client_v1_world_min_loop_smoke
       mir2_client_v1_magic_gateway_smoke
