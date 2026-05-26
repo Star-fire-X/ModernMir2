@@ -2724,7 +2724,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
       } else if (auto* monster_target = as_monster(target); monster_target != nullptr) {
         applied_damage = apply_legacy_monster_damage(
-            objects_, *monster_target, damage, attacker->id(), now_ms);
+            objects_, *monster_target, damage, attacker->id(), config_, current_tick, now_ms);
         if (applied_damage > 0) {
           monster_damaged = true;
           if (!direct_primary_hit) {
@@ -2849,7 +2849,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
           } else if (auto* monster_target = as_monster(extra_target); monster_target != nullptr) {
             extra_applied_damage = apply_legacy_monster_damage(
-                objects_, *monster_target, extra_damage, attacker->id(), now_ms);
+                objects_, *monster_target, extra_damage, attacker->id(),
+                config_, current_tick, now_ms);
             if (extra_applied_damage > 0) {
               monster_damaged = true;
               notify_owned_slaves_target(*attacker, monster_target->id(), now_ms);
@@ -2944,7 +2945,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
           } else if (auto* monster_target = as_monster(extra_target); monster_target != nullptr) {
             extra_applied_damage = apply_legacy_monster_damage(
-                objects_, *monster_target, extra_damage, attacker->id(), now_ms);
+                objects_, *monster_target, extra_damage, attacker->id(),
+                config_, current_tick, now_ms);
             if (extra_applied_damage > 0) {
               monster_damaged = true;
               notify_owned_slaves_target(*attacker, monster_target->id(), now_ms);
@@ -4549,7 +4551,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         } else if (auto* monster_target = as_monster(&resolved_target); monster_target != nullptr) {
           if (harmful_spell) {
             applied_damage = apply_legacy_monster_damage(
-                objects_, *monster_target, damage, attacker->id(), now_ms);
+                objects_, *monster_target, damage, attacker->id(), config_, current_tick, now_ms);
             if (applied_damage > 0) {
               notify_owned_slaves_target(*attacker, monster_target->id(), now_ms);
             }
@@ -5248,7 +5250,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
       } else if (auto* monster_target = as_monster(&target); monster_target != nullptr) {
         applied_damage = apply_legacy_monster_damage(
-            objects_, *monster_target, damage, caster->id(), now_ms);
+            objects_, *monster_target, damage, caster->id(), config_, current_tick, now_ms);
         if (applied_damage > 0) {
           notify_owned_slaves_target(*caster, monster_target->id(), now_ms);
         }

@@ -27,6 +27,8 @@ bool legacy_monster_has_pre_run_search(const Monster& monster) {
           monster.ai_profile() == MonsterAiProfile::stationary);
 }
 
+constexpr std::int32_t kLegacyOrdinaryMonsterViewRange = 5;
+
 std::pair<std::int32_t, std::int32_t> legacy_slave_back_position(const Player& master) {
   const auto back_dir =
       static_cast<std::uint8_t>((master.character().dir + 4) % 8);
@@ -858,16 +860,10 @@ bool MapActor::legacy_monster_think(Monster& monster, RuntimeDispatch& dispatch,
           target != nullptr &&
           (std::abs(target->x() - monster.x()) > 15 ||
            std::abs(target->y() - monster.y()) > 15);
-      const auto invalid_player =
-          player_target != nullptr &&
-          (player_target->is_dead() ||
-           is_safe_zone(config_, player_target->x(), player_target->y()) ||
-           player_target->legacy_transparent_active(current_tick));
-      const auto invalid_monster =
-          monster_target != nullptr &&
-          (monster_target->is_dead() || monster_target->legacy_ghosted());
+      static_cast<void>(player_target);
+      static_cast<void>(monster_target);
       if (target == nullptr || focus_expired || target_too_far ||
-          invalid_player || invalid_monster) {
+          !legacy_monster_valid_target(monster, *target, current_tick)) {
         monster.lose_target();
       }
     }
@@ -890,6 +886,91 @@ bool MapActor::legacy_monster_think(Monster& monster, RuntimeDispatch& dispatch,
   return true;
 }
 
+void MapActor::legacy_refresh_monster_visible_actors(Monster& monster) {
+  std::vector<std::uint64_t> scanned_actor_ids;
+  for (std::int32_t x = monster.x() - kLegacyOrdinaryMonsterViewRange;
+       x <= monster.x() + kLegacyOrdinaryMonsterViewRange; ++x) {
+    for (std::int32_t y = monster.y() - kLegacyOrdinaryMonsterViewRange;
+         y <= monster.y() + kLegacyOrdinaryMonsterViewRange; ++y) {
+      const auto* cell = environment_.cell(x, y);
+      if (cell == nullptr) {
+        continue;
+      }
+      for (const auto& object : cell->obj_list) {
+        if (object.shape != LegacyMapObjectShape::moving_object ||
+            object.object_id == monster.id() || object.moving.ghost ||
+            object.moving.death || object.moving.hide_mode ||
+            object.moving.supervisor_mode) {
+          continue;
+        }
+        if (std::find(scanned_actor_ids.begin(), scanned_actor_ids.end(),
+                      object.object_id) != scanned_actor_ids.end()) {
+          continue;
+        }
+        const auto object_it = objects_.find(object.object_id);
+        if (object_it == objects_.end()) {
+          continue;
+        }
+        if (const auto* player = as_player(object_it->second.get()); player != nullptr) {
+          if (player->is_dead() || player->legacy_ghost()) {
+            continue;
+          }
+        } else if (const auto* candidate_monster = as_monster(object_it->second.get());
+                   candidate_monster != nullptr) {
+          if (candidate_monster->is_dead() || candidate_monster->legacy_ghosted() ||
+              candidate_monster->hide_mode()) {
+            continue;
+          }
+        } else {
+          continue;
+        }
+        scanned_actor_ids.push_back(object.object_id);
+      }
+    }
+  }
+  monster.refresh_legacy_visible_actor_ids(scanned_actor_ids);
+}
+
+bool MapActor::legacy_monster_valid_target(const Monster& monster, const GameObject& target,
+                                           std::uint64_t current_tick) const {
+  if (target.id() == monster.id()) {
+    return false;
+  }
+  if (const auto* player = as_player(&target); player != nullptr) {
+    if (player->is_dead() || player->legacy_ghost() ||
+        is_safe_zone(config_, player->x(), player->y()) ||
+        player->legacy_transparent_active(current_tick)) {
+      return false;
+    }
+    return !monster.is_slave() || player->id() != monster.master_actor_id();
+  }
+  const auto* target_monster = as_monster(&target);
+  if (target_monster == nullptr || target_monster->is_dead() ||
+      target_monster->legacy_ghosted() || target_monster->hide_mode()) {
+    return false;
+  }
+  if (target_monster->id() == monster.master_actor_id()) {
+    return false;
+  }
+  if (target_monster->master_actor_id() == monster.master_actor_id()) {
+    return false;
+  }
+  return true;
+}
+
+bool MapActor::legacy_monster_search_candidate(const Monster& monster,
+                                               const GameObject& target,
+                                               std::uint64_t current_tick) const {
+  if (!legacy_monster_valid_target(monster, target, current_tick)) {
+    return false;
+  }
+  if (as_player(&target) != nullptr) {
+    return true;
+  }
+  const auto* target_monster = as_monster(&target);
+  return target_monster != nullptr && target_monster->master_actor_id() != 0;
+}
+
 void MapActor::legacy_active_search(Monster& monster, RuntimeDispatch& dispatch,
                                     std::uint64_t current_tick, std::uint64_t now_ms) {
   if (!legacy_monster_has_pre_run_search(monster)) {
@@ -910,26 +991,24 @@ void MapActor::legacy_active_search(Monster& monster, RuntimeDispatch& dispatch,
 bool MapActor::legacy_monster_normal_attack(Monster& monster, RuntimeDispatch& dispatch,
                                             std::uint64_t current_tick,
                                             std::uint64_t now_ms) {
-  Player* nearest = nullptr;
+  GameObject* nearest = nullptr;
   auto best_distance = std::numeric_limits<std::int32_t>::max();
-  for (auto& [actor_id, object] : objects_) {
-    static_cast<void>(actor_id);
-    auto* player = as_player(object.get());
-    if (player == nullptr || player->is_dead()) {
+  for (const auto actor_id : monster.legacy_visible_actor_ids()) {
+    const auto object_it = objects_.find(actor_id);
+    if (object_it == objects_.end()) {
       continue;
     }
-    if (!in_legacy_view_range(monster, *player) ||
-        is_safe_zone(config_, player->x(), player->y()) ||
-        player->legacy_transparent_active(current_tick)) {
+    auto* target = object_it->second.get();
+    if (!legacy_monster_search_candidate(monster, *target, current_tick)) {
       continue;
     }
 
-    const auto distance = std::abs(player->x() - monster.x()) +
-                          std::abs(player->y() - monster.y());
+    const auto distance = std::abs(target->x() - monster.x()) +
+                          std::abs(target->y() - monster.y());
     if (distance >= best_distance) {
       continue;
     }
-    nearest = player;
+    nearest = target;
     best_distance = distance;
   }
 
@@ -959,26 +1038,7 @@ bool MapActor::legacy_attack_target(Monster& monster, RuntimeDispatch& dispatch,
   auto* target = target_it != objects_.end() ? target_it->second.get() : nullptr;
   auto* player_target = as_player(target);
   auto* monster_target = as_monster(target);
-  if (target == nullptr || !is_attackable_target(*target)) {
-    monster.lose_target();
-    return false;
-  }
-  if (player_target != nullptr &&
-      (player_target->is_dead() || is_safe_zone(config_, player_target->x(), player_target->y()) ||
-       player_target->legacy_transparent_active(current_tick))) {
-    monster.lose_target();
-    return false;
-  }
-  if (monster_target != nullptr &&
-      (monster_target->is_dead() || monster_target->legacy_ghosted() ||
-       monster_target->id() == monster.id() ||
-       monster_target->master_actor_id() == monster.master_actor_id() ||
-       monster_target->id() == monster.master_actor_id())) {
-    monster.lose_target();
-    return false;
-  }
-  if (monster.is_slave() && player_target != nullptr &&
-      player_target->id() == monster.master_actor_id()) {
+  if (target == nullptr || !legacy_monster_valid_target(monster, *target, current_tick)) {
     monster.lose_target();
     return false;
   }
@@ -1215,7 +1275,8 @@ void MapActor::legacy_monster_attack_monster(Monster& monster, Monster& target,
                    "GetAttackPower/GetHitStruckDamage");
 
   const auto applied_damage =
-      apply_legacy_monster_damage(objects_, target, damage, monster.id(), now_ms);
+      apply_legacy_monster_damage(objects_, target, damage, monster.id(),
+                                  config_, current_tick, now_ms);
   if (applied_damage <= 0) {
     add_legacy_trace(dispatch, "MonsterCombat", "absorbed", trace_mail,
                      current_tick, now_ms, false, 0, 0, "StruckDamage");
