@@ -67,6 +67,7 @@ function Get-CiBuildTargets {
     "mir2_world_tick_cadence_smoke",
     "mir2_player_movement_smoke",
     "mir2_visibility_delta_smoke",
+    "mir2_monster_visibility_order_smoke",
     "mir2_monster_movement_legacy_smoke",
     "mir2_monster_target_selection_legacy_smoke",
     "mir2_monster_home_leash_smoke",
