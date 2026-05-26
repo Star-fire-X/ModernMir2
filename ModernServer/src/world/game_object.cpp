@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <utility>
 
 #include "util/string_utils.hpp"
 #include "world/legacy_item_rules.hpp"
@@ -2309,6 +2310,7 @@ MonsterSnapshot Monster::snapshot() const {
                          .legacy_run_next_tick_ms = run_next_tick_ms_,
                          .legacy_search_time_ms = search_time_ms_,
                          .legacy_search_rate_ms = search_rate_ms_,
+                         .legacy_visible_actor_ids = legacy_visible_actor_ids_,
                          .target_actor_id = aggro_target_id_,
                          .target_focus_time_ms = target_focus_time_ms_,
                          .target_x = target_x_,
@@ -2625,6 +2627,25 @@ void Monster::mark_legacy_run_time(std::uint64_t now_ms) {
 }
 
 void Monster::mark_legacy_search_time(std::uint64_t now_ms) { search_time_ms_ = now_ms; }
+
+void Monster::refresh_legacy_visible_actor_ids(
+    const std::vector<std::uint64_t>& scanned_actor_ids) {
+  std::vector<std::uint64_t> refreshed;
+  refreshed.reserve(scanned_actor_ids.size());
+  for (const auto actor_id : legacy_visible_actor_ids_) {
+    if (std::find(scanned_actor_ids.begin(), scanned_actor_ids.end(), actor_id) !=
+            scanned_actor_ids.end() &&
+        std::find(refreshed.begin(), refreshed.end(), actor_id) == refreshed.end()) {
+      refreshed.push_back(actor_id);
+    }
+  }
+  for (const auto actor_id : scanned_actor_ids) {
+    if (std::find(refreshed.begin(), refreshed.end(), actor_id) == refreshed.end()) {
+      refreshed.push_back(actor_id);
+    }
+  }
+  legacy_visible_actor_ids_ = std::move(refreshed);
+}
 
 void Monster::mark_legacy_attack_time(std::uint64_t now_ms) {
   attack_time_ms_ = now_ms;

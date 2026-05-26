@@ -677,6 +677,7 @@ struct MonsterSnapshot {
   std::uint64_t legacy_run_next_tick_ms{0};
   std::uint64_t legacy_search_time_ms{0};
   std::uint64_t legacy_search_rate_ms{0};
+  std::vector<std::uint64_t> legacy_visible_actor_ids{};
   std::uint64_t target_actor_id{0};
   std::uint64_t target_focus_time_ms{0};
   std::int32_t target_x{-1};
@@ -836,6 +837,9 @@ class Monster : public GameObject {
   [[nodiscard]] std::uint64_t legacy_run_next_tick_ms() const { return run_next_tick_ms_; }
   [[nodiscard]] std::uint64_t legacy_search_time_ms() const { return search_time_ms_; }
   [[nodiscard]] std::uint64_t legacy_search_rate_ms() const { return search_rate_ms_; }
+  [[nodiscard]] const std::vector<std::uint64_t>& legacy_visible_actor_ids() const {
+    return legacy_visible_actor_ids_;
+  }
   [[nodiscard]] std::uint64_t legacy_ghost_time_ms() const { return ghost_time_ms_; }
   [[nodiscard]] bool legacy_due(std::uint64_t now_ms) const;
   [[nodiscard]] bool legacy_search_due(std::uint64_t now_ms) const;
@@ -876,6 +880,7 @@ class Monster : public GameObject {
   [[nodiscard]] bool ai_due(std::uint64_t current_tick) const { return current_tick >= next_ai_tick_; }
   void mark_legacy_run_time(std::uint64_t now_ms);
   void mark_legacy_search_time(std::uint64_t now_ms);
+  void refresh_legacy_visible_actor_ids(const std::vector<std::uint64_t>& scanned_actor_ids);
   void mark_legacy_attack_time(std::uint64_t now_ms);
   void mark_legacy_walk_time(std::uint64_t now_ms);
   void mark_legacy_hit_time(std::uint64_t now_ms);
@@ -984,6 +989,7 @@ class Monster : public GameObject {
   std::uint64_t attack_time_ms_{0};
   std::uint64_t search_time_ms_{0};
   std::uint64_t search_rate_ms_{0};
+  std::vector<std::uint64_t> legacy_visible_actor_ids_{};
   std::uint64_t walk_time_ms_{0};
   std::uint64_t hit_time_ms_{0};
   std::uint64_t search_enemy_time_ms_{0};

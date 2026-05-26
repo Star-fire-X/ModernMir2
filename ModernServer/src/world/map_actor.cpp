@@ -1017,7 +1017,7 @@ LegacyMagicDamageResult apply_legacy_magic_damage(
     }
   } else if (auto* monster_target = as_monster(&target); monster_target != nullptr) {
     result.applied_damage = apply_legacy_monster_damage(
-        objects, *monster_target, damage, caster.id(), now_ms);
+        objects, *monster_target, damage, caster.id(), map_config, current_tick, now_ms);
     result.target_died = monster_target->is_dead();
     result.slain_monster_id = result.target_died ? monster_target->id() : 0;
   }
@@ -1778,6 +1778,7 @@ RuntimeDispatch MapActor::legacy_process_monster(std::uint64_t actor_id,
     monster->mark_legacy_run_time(now_ms);
     if (monster->legacy_search_due(now_ms)) {
       monster->mark_legacy_search_time(now_ms);
+      legacy_refresh_monster_visible_actors(*monster);
     }
     handle_monster_ai(*monster, dispatch, current_tick, now_ms);
   }
@@ -2828,7 +2829,7 @@ bool MapActor::handle_legacy_rush_rush(Player& attacker, LegacyUseMagicInfo& use
       }
     } else if (auto* monster_target = as_monster(&target); monster_target != nullptr) {
       applied_damage = apply_legacy_monster_damage(objects_, *monster_target, damage,
-                                                   hitter_id, now_ms);
+                                                   hitter_id, config_, current_tick, now_ms);
       if (applied_damage > 0 && hitter_id == attacker.id()) {
         notify_owned_slaves_target(attacker, monster_target->id(), now_ms);
       }
