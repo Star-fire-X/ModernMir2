@@ -268,6 +268,14 @@ enum class LegacyRepairMode {
   special
 };
 
+enum class LegacyNpcItemMode {
+  none,
+  buy,
+  sell,
+  repair,
+  storage
+};
+
 struct LegacyQueuedCommand {
   ActorMail mail{};
   std::uint64_t received_ms{0};
@@ -524,6 +532,17 @@ class Player : public GameObject {
   void set_legacy_slave_relax(bool value) { slave_relax_ = value; }
   [[nodiscard]] LegacyRepairMode legacy_repair_mode() const { return legacy_repair_mode_; }
   void set_legacy_repair_mode(LegacyRepairMode mode) { legacy_repair_mode_ = mode; }
+  [[nodiscard]] LegacyNpcItemMode legacy_npc_item_mode() const { return legacy_npc_item_mode_; }
+  [[nodiscard]] std::uint64_t legacy_npc_item_actor_id() const {
+    return legacy_npc_item_actor_id_;
+  }
+  void set_legacy_npc_item_mode(LegacyNpcItemMode mode, std::uint64_t actor_id) {
+    legacy_npc_item_mode_ = mode;
+    legacy_npc_item_actor_id_ = mode == LegacyNpcItemMode::none ? 0 : actor_id;
+  }
+  void clear_legacy_npc_item_mode() {
+    set_legacy_npc_item_mode(LegacyNpcItemMode::none, 0);
+  }
   [[nodiscard]] bool legacy_magic_bubble_active(std::uint64_t current_tick) const;
   [[nodiscard]] std::int32_t legacy_magic_bubble_level() const;
   [[nodiscard]] bool legacy_poison_stone_active(std::uint64_t current_tick) const;
@@ -614,6 +633,8 @@ class Player : public GameObject {
   bool legacy_see_health_gauge_{false};
   bool slave_relax_{false};
   LegacyRepairMode legacy_repair_mode_{LegacyRepairMode::normal};
+  LegacyNpcItemMode legacy_npc_item_mode_{LegacyNpcItemMode::none};
+  std::uint64_t legacy_npc_item_actor_id_{0};
   std::uint8_t legacy_name_color_{255};
   LegacyBuffContainer legacy_buffs_{};
   std::int32_t legacy_prepared_sword_magic_id_{0};

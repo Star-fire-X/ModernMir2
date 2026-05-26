@@ -108,6 +108,26 @@ mir2::LogicCommand trade_try(std::uint64_t session_id, std::string target_name) 
   return command;
 }
 
+mir2::LogicCommand walk_command(std::uint64_t session_id, std::int32_t x, std::int32_t y) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::walk;
+  command.session_id = session_id;
+  command.x = x;
+  command.y = y;
+  return command;
+}
+
+mir2::LogicCommand turn_command(std::uint64_t session_id, std::int32_t x, std::int32_t y,
+                                std::uint8_t dir) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::turn;
+  command.session_id = session_id;
+  command.x = x;
+  command.y = y;
+  command.dir = dir;
+  return command;
+}
+
 }  // namespace
 
 int main() {
@@ -142,6 +162,14 @@ int main() {
   if (!has_packet(near_click, 7, mir2::kSmSendGoodsList)) {
     return 3;
   }
+
+  static_cast<void>(tick_players(runtime, 30));
+  static_cast<void>(runtime.route_logic_command(walk_command(7, 10, 11)));
+  static_cast<void>(tick_players(runtime, 30));
+  static_cast<void>(runtime.route_logic_command(walk_command(7, 10, 10)));
+  static_cast<void>(tick_players(runtime, 30));
+  static_cast<void>(runtime.route_logic_command(turn_command(7, 10, 10, 2)));
+  static_cast<void>(tick_players(runtime));
 
   static_cast<void>(runtime.route_logic_command(trade_try(7, "HeroB")));
   const auto trade_open = tick_players(runtime);
