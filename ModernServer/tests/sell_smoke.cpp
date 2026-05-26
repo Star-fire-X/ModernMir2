@@ -103,6 +103,7 @@ int main() {
   mir2::HostConfig config;
   config.maps.push_back(mir2::MapConfig{"0", "SellMap", {}, 0, 0, 10, 10});
   config.items.push_back(mir2::ItemConfig{1, "Sell Sword", 3, 90, 5, 1, 1, 1000, 1, 0, 0});
+  config.items.push_back(mir2::ItemConfig{2, "Event Token", 1, 10, 51, 0, 1, 1000, -1, 0, 0});
   config.npcs.push_back(mir2::NpcConfig{"merchant_1",
                                          "0",
                                          "Trader",
@@ -113,7 +114,7 @@ int main() {
                                          {},
                                          {},
                                          100,
-                                         {5}});
+                                         {5, 51}});
 
   mir2::LogicRuntime runtime(config);
   runtime.initialize();
@@ -260,6 +261,38 @@ int main() {
   const auto capped_items = decode_bag_items(capped_bag_packet->body);
   if (capped_items.size() != 2 || capped_items[0].make_index != 2001 ||
       capped_items[1].make_index != 2002) {
+    return 1;
+  }
+
+  mir2::LogicRuntime event_runtime(config);
+  event_runtime.initialize();
+  mir2::CharacterRecord event_hero = hero;
+  event_hero.character_name = "EventHero";
+  event_hero.bag_items[0].index = 2;
+  event_hero.bag_items[0].make_index = 3001;
+  mir2::LogicCommand event_enter = enter;
+  event_enter.session_id = 9;
+  event_enter.character_name = "EventHero";
+  event_enter.character = event_hero;
+  static_cast<void>(event_runtime.route_logic_command(event_enter));
+  static_cast<void>(run_legacy_ticks(event_runtime));
+  static_cast<void>(event_runtime.route_logic_command(
+      make_sell_command(mir2::LogicCommandKind::sell_item, 9, 1, 3001, "Event Token")));
+  const auto event_sell_dispatch = run_legacy_ticks(event_runtime);
+  if (!find_packet(event_sell_dispatch, mir2::kSmUserSellItemFail).has_value() ||
+      find_packet(event_sell_dispatch, mir2::kSmWeightChanged).has_value() ||
+      has_save_character(event_sell_dispatch, "EventHero")) {
+    return 1;
+  }
+  mir2::LogicCommand event_bag_query;
+  event_bag_query.kind = mir2::LogicCommandKind::query_bag_items;
+  event_bag_query.session_id = 9;
+  static_cast<void>(event_runtime.route_logic_command(event_bag_query));
+  const auto event_bag_dispatch = run_legacy_ticks(event_runtime);
+  const auto event_bag_packet = find_packet(event_bag_dispatch, mir2::kSmBagItems);
+  const auto event_items = event_bag_packet.has_value() ? decode_bag_items(event_bag_packet->body)
+                                                        : std::vector<mir2::LegacyClientItem>{};
+  if (event_items.size() != 1 || event_items.front().make_index != 3001) {
     return 1;
   }
 
