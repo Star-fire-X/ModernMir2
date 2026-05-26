@@ -329,6 +329,12 @@ if(BUILD_TESTING)
   add_test(NAME mir2_client_v1_canonical_command_smoke
     COMMAND mir2_client_v1_canonical_command_smoke)
 
+  add_executable(mir2_client_v1_semantic_golden_smoke
+    tests/client_v1_semantic_golden_smoke.cpp)
+  target_link_libraries(mir2_client_v1_semantic_golden_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_client_v1_semantic_golden_smoke
+    COMMAND mir2_client_v1_semantic_golden_smoke)
+
   add_executable(mir2_legacy_environment_smoke tests/legacy_environment_smoke.cpp)
   target_link_libraries(mir2_legacy_environment_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_environment_smoke COMMAND mir2_legacy_environment_smoke)
@@ -1092,6 +1098,7 @@ if(BUILD_TESTING)
       mir2_canonical_login_state_smoke
       mir2_canonical_login_error_smoke
       mir2_client_v1_canonical_command_smoke
+      mir2_client_v1_semantic_golden_smoke
       mir2_client_v1_protocol_smoke
       mir2_movement_blocking_legacy_smoke
       mir2_combat_smoke
