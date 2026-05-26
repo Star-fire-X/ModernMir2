@@ -212,6 +212,7 @@ LegacyMapAddResult LegacyMapEnvironment::add_item_object(std::int32_t x, std::in
         result.ok = true;
         result.merged = true;
         result.object_id = object.object_id;
+        result.merged_gold_amount = merged_amount;
         return result;
       }
     }
@@ -410,7 +411,8 @@ std::optional<std::uint64_t> LegacyMapEnvironment::first_item_object_id(std::int
   if (target == nullptr) {
     return std::nullopt;
   }
-  for (const auto& object : target->obj_list) {
+  for (auto it = target->obj_list.rbegin(); it != target->obj_list.rend(); ++it) {
+    const auto& object = *it;
     if (object.shape == LegacyMapObjectShape::item_object) {
       return object.object_id;
     }

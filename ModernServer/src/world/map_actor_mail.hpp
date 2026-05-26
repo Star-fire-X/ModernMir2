@@ -1159,14 +1159,29 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (add_result.merged) {
         auto existing = ground_items_.find(add_result.object_id);
         if (existing == ground_items_.end()) {
-          add_legacy_trace(dispatch, "LegacyItem", "merge_state_reject", mail, current_tick,
-                           now_ms, false, mail.amount, 0, "drop_gold");
-          break;
+          GroundItem recovered_item = ground_item;
+          recovered_item.id = add_result.object_id;
+          recovered_item.gold_amount = add_result.merged_gold_amount;
+          recovered_item.count = recovered_item.gold_amount;
+          recovered_item.looks = gold_looks(recovered_item.gold_amount);
+          recovered_item.owner_actor_id = 0;
+          recovered_item.ownership_expire_ms = 0;
+          recovered_item.dropper_actor_id = 0;
+          recovered_item.dropper_name.clear();
+          auto [recovered_it, _] =
+              ground_items_.insert_or_assign(recovered_item.id, std::move(recovered_item));
+          existing = recovered_it;
+          add_legacy_trace(dispatch, "LegacyItem", "merge_state_repair", mail, current_tick,
+                           now_ms, true, existing->second.gold_amount, 0, "drop_gold");
         }
         player->spend_gold(mail.amount);
         refresh_ground_item_ownership(existing->second, now_ms);
         const auto same_owner = existing->second.owner_actor_id == ground_item.owner_actor_id;
-        existing->second.gold_amount += mail.amount;
+        const auto merged_total =
+            add_result.merged_gold_amount > 0
+                ? add_result.merged_gold_amount
+                : existing->second.gold_amount + mail.amount;
+        existing->second.gold_amount = merged_total;
         existing->second.count = existing->second.gold_amount;
         existing->second.looks = gold_looks(existing->second.gold_amount);
         existing->second.expire_time_ms = now_ms + kLegacyGroundItemExpireMs;
@@ -1804,9 +1819,21 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
 
       add_legacy_trace(dispatch, "LegacyItem", "validate", mail, current_tick, now_ms, true, 0, 0,
                        "pickup_item");
-      const auto first_item_id = environment_.first_item_object_id(player->x(), player->y());
-      auto ground_it = first_item_id.has_value() ? ground_items_.find(*first_item_id)
-                                                 : ground_items_.end();
+      auto ground_it = ground_items_.end();
+      while (true) {
+        const auto first_item_id = environment_.first_item_object_id(player->x(), player->y());
+        if (!first_item_id.has_value()) {
+          break;
+        }
+        ground_it = ground_items_.find(*first_item_id);
+        if (ground_it != ground_items_.end()) {
+          break;
+        }
+        static_cast<void>(environment_.delete_from_map(
+            player->x(), player->y(), LegacyMapObjectShape::item_object, *first_item_id));
+        add_legacy_trace(dispatch, "LegacyItem", "orphan_map_item_repair", mail, current_tick,
+                         now_ms, true, static_cast<std::int32_t>(*first_item_id), 0, "pickup_item");
+      }
       if (ground_it == ground_items_.end()) {
         add_legacy_trace(dispatch, "LegacyItem", "empty_cell", mail, current_tick, now_ms, false,
                          0, 0, "pickup_item");
@@ -1855,13 +1882,23 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (!environment_.delete_from_map(ground_item.x, ground_item.y,
                                         LegacyMapObjectShape::item_object,
                                         ground_item.id)) {
+        remove_item_from_visibility(ground_item.id, dispatch);
+        ground_items_.erase(ground_it);
+        add_legacy_trace(dispatch, "LegacyItem", "orphan_ground_item_repair", mail, current_tick,
+                         now_ms, true, static_cast<std::int32_t>(ground_item.id), 0, "pickup_item");
         add_legacy_trace(dispatch, "LegacyItem", "map_reject", mail, current_tick, now_ms,
                          false, static_cast<std::int32_t>(ground_item.id), 0, "pickup_item");
         break;
       }
       if (!player->add_bag_item(ground_item.item)) {
-        static_cast<void>(environment_.add_item_object(
-            ground_item.x, ground_item.y, ground_item.id, LegacyMapItemState{}, now_ms));
+        const auto rollback_result = environment_.add_item_object(
+            ground_item.x, ground_item.y, ground_item.id, LegacyMapItemState{}, now_ms);
+        if (!rollback_result.ok) {
+          remove_item_from_visibility(ground_item.id, dispatch);
+          ground_items_.erase(ground_it);
+          add_legacy_trace(dispatch, "LegacyItem", "rollback_repair", mail, current_tick, now_ms,
+                           false, static_cast<std::int32_t>(ground_item.id), 0, "pickup_item");
+        }
         add_legacy_trace(dispatch, "LegacyItem", "bag_reject", mail, current_tick, now_ms, false,
                          0, 0, "pickup_item");
         break;

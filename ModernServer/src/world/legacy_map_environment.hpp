@@ -61,6 +61,7 @@ struct LegacyMapAddResult {
   bool ok{false};
   bool merged{false};
   std::uint64_t object_id{0};
+  std::int32_t merged_gold_amount{0};
 };
 
 class LegacyMapEnvironment {
