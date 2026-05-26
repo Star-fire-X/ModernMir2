@@ -473,6 +473,12 @@ if(BUILD_TESTING)
   add_test(NAME mir2_monster_legacy_combat_damage_smoke
     COMMAND mir2_monster_legacy_combat_damage_smoke)
 
+  add_executable(mir2_monster_attack_legacy_smoke
+    tests/monster_attack_legacy_smoke.cpp)
+  target_link_libraries(mir2_monster_attack_legacy_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_monster_attack_legacy_smoke
+    COMMAND mir2_monster_attack_legacy_smoke)
+
   add_executable(mir2_monster_struck_retaliation_smoke
     tests/monster_struck_retaliation_smoke.cpp)
   target_link_libraries(mir2_monster_struck_retaliation_smoke PRIVATE mir2_hostlib)
@@ -1121,6 +1127,7 @@ if(BUILD_TESTING)
       mir2_monster_target_selection_legacy_smoke
       mir2_monster_home_leash_smoke
       mir2_monster_legacy_combat_damage_smoke
+      mir2_monster_attack_legacy_smoke
       mir2_skill_formula_golden_smoke
       mir2_skill_protocol_golden_smoke
       mir2_skill_status_poison_buff_hide_shield_smoke

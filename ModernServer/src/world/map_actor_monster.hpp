@@ -1059,6 +1059,7 @@ bool MapActor::legacy_attack_target(Monster& monster, RuntimeDispatch& dispatch,
       } else if (monster_target != nullptr) {
         legacy_monster_attack_monster(monster, *monster_target, dispatch, current_tick, now_ms);
       }
+      monster.break_legacy_holy_seize();
     }
     return true;
   }

@@ -71,6 +71,7 @@ function Get-CiBuildTargets {
     "mir2_monster_target_selection_legacy_smoke",
     "mir2_monster_home_leash_smoke",
     "mir2_monster_legacy_combat_damage_smoke",
+    "mir2_monster_attack_legacy_smoke",
     "mir2_attack_protocol_golden_smoke",
     "mir2_skill_formula_golden_smoke",
     "mir2_skill_protocol_golden_smoke",
