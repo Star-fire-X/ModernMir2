@@ -16,6 +16,7 @@
 
 #include "shared/legacy/map_document.hpp"
 #include "toml++/toml.hpp"
+#include "util/legacy_text.hpp"
 #include "util/string_utils.hpp"
 
 namespace mir2 {
@@ -104,16 +105,7 @@ bool looks_like_merchant_code(std::string_view text) {
 }
 
 std::vector<std::string> read_text_lines(const std::filesystem::path& path) {
-  std::ifstream file(path, std::ios::binary);
-  std::vector<std::string> lines;
-  std::string line;
-  while (std::getline(file, line)) {
-    if (!line.empty() && line.back() == '\r') {
-      line.pop_back();
-    }
-    lines.push_back(line);
-  }
-  return lines;
+  return util::read_legacy_text_lines(path);
 }
 
 std::string strip_utf8_bom(std::string line) {
@@ -262,7 +254,7 @@ std::filesystem::path resolve_legacy_include_path(const std::filesystem::path& c
   if (name.size() >= 2 && name.front() == '[' && name.back() == ']') {
     name = name.substr(1, name.size() - 2);
   }
-  const auto requested = std::filesystem::path(util::trim(std::move(name)));
+  const auto requested = util::path_from_utf8(util::trim(std::move(name)));
   if (requested.empty()) {
     return {};
   }
@@ -271,14 +263,19 @@ std::filesystem::path resolve_legacy_include_path(const std::filesystem::path& c
   }
   const auto base = current_path.parent_path();
   const auto root = base.parent_path();
-  const std::vector<std::filesystem::path> candidates{
-      base / requested,
-      root / requested,
-      root / "Defines" / requested,
-      root / "QuestDiary" / requested,
-      root / "Npc_def" / requested,
-      root / "market_def" / requested,
-  };
+  const auto encoded = util::ascii_path(requested);
+  std::vector<std::filesystem::path> candidates;
+  for (const auto& directory : {
+           base,
+           root,
+           root / "Defines",
+           root / "QuestDiary",
+           root / "Npc_def",
+           root / "market_def",
+       }) {
+    candidates.push_back(directory / requested);
+    candidates.push_back(directory / encoded);
+  }
   for (const auto& candidate : candidates) {
     if (std::filesystem::exists(candidate)) {
       return candidate;
@@ -554,7 +551,9 @@ std::filesystem::path with_map_suffix(const std::filesystem::path& path, const s
   if (path.empty()) {
     return {};
   }
-  return path.parent_path() / (path.stem().string() + "-" + map_id + path.extension().string());
+  return path.parent_path() / util::path_from_utf8(
+      util::path_to_utf8_string(path.stem()) + "-" + map_id +
+      util::path_to_utf8_string(path.extension()));
 }
 
 std::filesystem::path resolve_npc_script_path(const std::filesystem::path& root, const NpcConfig& npc) {
@@ -562,7 +561,7 @@ std::filesystem::path resolve_npc_script_path(const std::filesystem::path& root,
     return {};
   }
 
-  const auto script_path = std::filesystem::path(npc.script);
+  const auto script_path = util::path_from_utf8(npc.script);
   const auto map_specific = with_map_suffix(script_path, npc.map_id);
   const auto filename = script_path.filename();
   const auto map_specific_filename = map_specific.filename();
@@ -599,7 +598,7 @@ std::filesystem::path resolve_map_quest_script_path(const std::filesystem::path&
     return {};
   }
 
-  const auto script_path = std::filesystem::path(qfile);
+  const auto script_path = util::path_from_utf8(qfile);
   const auto map_specific = with_map_suffix(script_path, map_id);
   const auto filename = script_path.filename();
   const auto map_specific_filename = map_specific.filename();

@@ -216,7 +216,7 @@ int main() {
     auto map = make_map();
     constexpr std::uint64_t monster_id = 101;
     map.enqueue_mail(make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::basic,
-                                  1, 0, 81));
+                                  1, 0, 81, 200, 80));
     map.enqueue_mail(make_player(2, 20, "FarHero", 10, 11));
     map.enqueue_mail(make_player(3, 30, "NearHero", 8, 8));
     static_cast<void>(map.tick(1, 0));
@@ -240,7 +240,7 @@ int main() {
     auto map = make_map();
     constexpr std::uint64_t monster_id = 105;
     map.enqueue_mail(make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::basic,
-                                  1, 0, 81));
+                                  1, 0, 81, 200, 80));
     map.enqueue_mail(make_player(7, 70, "FirstHero", 10, 11));
     static_cast<void>(map.tick(1, 0));
 
@@ -273,7 +273,7 @@ int main() {
     auto map = make_map();
     constexpr std::uint64_t monster_id = 106;
     spawn(map, make_monster(monster_id, 10, 9, mir2::MonsterAiProfile::basic,
-                            1, 0, 81, 1000),
+                            1, 0, 81, 1000, 80),
           make_player(9, 90, "CooldownHero", 10, 10));
 
     const auto first = map.legacy_process_monster(monster_id, 2, 1001, 0, 0);
@@ -299,7 +299,7 @@ int main() {
     auto map = make_map();
     constexpr std::uint64_t monster_id = 107;
     spawn(map, make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::basic,
-                            1, 0, 81),
+                            1, 0, 81, 200, 80),
           make_player(10, 100, "GoneHero", 10, 11));
 
     static_cast<void>(map.legacy_process_monster(monster_id, 2, 1001, 0, 0));
@@ -338,7 +338,8 @@ int main() {
   {
     auto map = make_map();
     constexpr std::uint64_t monster_id = 102;
-    spawn(map, make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::aggressive),
+    spawn(map, make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::aggressive,
+                            1, 0, 0, 200, 80),
           make_player(4, 40, "DiagHero", 12, 10));
 
     const auto dispatch = map.legacy_process_monster(monster_id, 2, 1001, 0, 0);
@@ -354,7 +355,7 @@ int main() {
     auto map = make_map();
     constexpr std::uint64_t monster_id = 103;
     spawn(map, make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::aggressive,
-                            1, 500),
+                            1, 500, 0, 200, 80),
           make_player(5, 50, "WaitHero", 10, 12));
 
     const auto first = map.legacy_process_monster(monster_id, 2, 1001, 0, 0);

@@ -202,6 +202,7 @@ int main() {
     assert(has_packet_ident(dispatch, mir2::legacy::kSmFireHit));
     assert(has_trace(dispatch, "fire_hit_bonus"));
     assert(has_trace(dispatch, "train_skill"));
+    assert(has_trace(dispatch, "train_skill", 1));
 
     mir2::RuntimeDispatch cooldown;
     append(cooldown, runtime.route_logic_command(spell(1501, 26)));
@@ -228,6 +229,7 @@ int main() {
     assert(has_packet_ident(dispatch, mir2::legacy::kSmCrossHit));
     assert(count_trace(dispatch, "struck") >= 2);
     assert(has_trace(dispatch, "train_skill"));
+    assert(has_trace(dispatch, "train_skill", 1));
 
     mir2::RuntimeDispatch disabled;
     append(disabled, runtime.route_logic_command(spell(1511, 34)));
@@ -255,6 +257,24 @@ int main() {
     assert(count_trace(dispatch, "struck") == 1);
     assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 200) == 0);
     assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 500) == 1);
+  }
+
+  {
+    auto config = base_config();
+    config.maps[0].fight_zone = true;
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto attacker = character("SwordPvp", {3});
+    attacker.attack_mode = 0;
+    static_cast<void>(runtime.route_logic_command(enter(1513, attacker)));
+    auto target = character("SwordPvpTarget", {}, 10, 9);
+    target.ability.exp_count = 1;
+    static_cast<void>(runtime.route_logic_command(enter(1514, target)));
+    static_cast<void>(runtime.tick());
+    auto dispatch = runtime.route_logic_command(attack(1513, 10, 9));
+    append(dispatch, runtime.tick());
+    assert(has_packet_ident(dispatch, mir2::kSmStruck));
+    assert(!has_trace(dispatch, "train_skill"));
   }
 
   {
