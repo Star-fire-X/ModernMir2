@@ -200,6 +200,33 @@ bool check_map3_patch_points_in_doc(const std::filesystem::path& modern_server_r
   return true;
 }
 
+bool check_moveattr_overlay_deferred_guard(const std::filesystem::path& modern_server_root) {
+  const auto doc = read_text(modern_server_root / "docs" / "map_compat_phase1_findings.md");
+  const auto map_actor_hpp = read_text(modern_server_root / "src" / "world" / "map_actor.hpp");
+  const auto map_actor_cpp = read_text(modern_server_root / "src" / "world" / "map_actor.cpp");
+  const auto environment_hpp =
+      read_text(modern_server_root / "src" / "world" / "legacy_map_environment.hpp");
+  const auto environment_cpp =
+      read_text(modern_server_root / "src" / "world" / "legacy_map_environment.cpp");
+  if (doc.empty() || map_actor_hpp.empty() || map_actor_cpp.empty() || environment_hpp.empty() ||
+      environment_cpp.empty()) {
+    return false;
+  }
+
+  if (doc.find("MOVEATTR_OVERLAY_DEFERRED_PR7") == std::string::npos) {
+    return false;
+  }
+
+  return map_actor_hpp.find("moveattr_overlay") == std::string::npos &&
+         map_actor_hpp.find("set_move_attr_overlay") == std::string::npos &&
+         map_actor_cpp.find("moveattr_overlay") == std::string::npos &&
+         map_actor_cpp.find("set_move_attr_overlay") == std::string::npos &&
+         environment_hpp.find("moveattr_overlay") == std::string::npos &&
+         environment_hpp.find("set_move_attr_overlay") == std::string::npos &&
+         environment_cpp.find("moveattr_overlay") == std::string::npos &&
+         environment_cpp.find("set_move_attr_overlay") == std::string::npos;
+}
+
 }  // namespace
 
 int main() {
@@ -220,8 +247,11 @@ int main() {
   if (!check_canfly_canfirefly_split()) {
     return fail(5, "CanFly/CanFireFly baseline");
   }
+  if (!check_moveattr_overlay_deferred_guard(modern_server_root)) {
+    return fail(6, "MoveAttr overlay deferred guard");
+  }
   if (!check_map3_patch_points_in_doc(modern_server_root)) {
-    return fail(6, "Map3 patch-point baseline doc");
+    return fail(7, "Map3 patch-point baseline doc");
   }
   return 0;
 }

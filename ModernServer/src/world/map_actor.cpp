@@ -2220,7 +2220,7 @@ bool MapActor::legacy_player_tracks_event(std::uint64_t actor_id, std::uint64_t 
 }
 
 bool MapActor::legacy_can_spawn_monster(std::int32_t x, std::int32_t y) const {
-  return environment_.can_walk(x, y, false);
+  return environment_.can_walk(x, y, true);
 }
 
 #include "world/map_actor_visibility.hpp"
