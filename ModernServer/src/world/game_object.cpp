@@ -257,9 +257,10 @@ constexpr std::int32_t kRcBigKudeki = 90;
 constexpr std::int32_t kRcMagCowFaceMon = 91;
 constexpr std::int32_t kRcThornDark = 93;
 constexpr std::int32_t kRcDigOutZombi = 95;
-constexpr std::int32_t kRcToxicGhost = 127;
 constexpr std::int32_t kRcBeeQueen = 103;
 constexpr std::int32_t kRcArcherMon = 104;
+constexpr std::int32_t kRcGasMoth = 105;
+constexpr std::int32_t kRcGasDung = 106;
 constexpr std::int32_t kRcCentipedeKing = 107;
 constexpr std::int32_t kRcArcherGuard = 112;
 constexpr std::int32_t kRcSpiderHouse = 116;
@@ -267,6 +268,7 @@ constexpr std::int32_t kRcHighRiskSpider = 118;
 constexpr std::int32_t kRcBigPoisonSpider = 119;
 constexpr std::int32_t kRcScultureKing = 102;
 constexpr std::int32_t kRcScultureKingNoFollower = 122;
+constexpr std::int32_t kRcToxicGhost = 127;
 constexpr std::int32_t kRcDoorGuard = 11;
 constexpr std::int32_t kRcArcherPolice = 20;
 constexpr std::int32_t kRcCastleDoor = 110;
@@ -2271,6 +2273,8 @@ Monster::Monster(std::uint64_t id, std::string name, std::string map_id, std::in
     case kRcHighRiskSpider:
     case kRcBigPoisonSpider:
     case kRcBigKudeki:
+    case kRcGasMoth:
+    case kRcGasDung:
     case kRcToxicGhost:
     case kRcMagCowFaceMon:
       search_rate_ms_ = search_rate_ms != 0 ? search_rate_ms : 1500;

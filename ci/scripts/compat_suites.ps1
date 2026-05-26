@@ -72,6 +72,7 @@ function Get-CiBuildTargets {
     "mir2_monster_home_leash_smoke",
     "mir2_monster_legacy_combat_damage_smoke",
     "mir2_monster_attack_legacy_smoke",
+    "mir2_monster_special_race_smoke",
     "mir2_attack_protocol_golden_smoke",
     "mir2_skill_formula_golden_smoke",
     "mir2_skill_protocol_golden_smoke",
@@ -407,16 +408,6 @@ function Get-CiQuarantinedTests {
     [pscustomobject]@{
       Project = "ModernServer"
       Test = "mir2_equipment_derived_upgrade_stats_smoke"
-      Reason = "Local phase3 validation asserts in Debug/MSVC and then waits for the assertion path until timeout."
-    },
-    [pscustomobject]@{
-      Project = "ModernServer"
-      Test = "mir2_monster_race_ai_smoke"
-      Reason = "Local phase3 validation asserts in Debug/MSVC and then waits for the assertion path until timeout."
-    },
-    [pscustomobject]@{
-      Project = "ModernServer"
-      Test = "mir2_monster_special_race_smoke"
       Reason = "Local phase3 validation asserts in Debug/MSVC and then waits for the assertion path until timeout."
     },
     [pscustomobject]@{

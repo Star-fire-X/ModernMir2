@@ -1863,6 +1863,22 @@ bool MapActor::legacy_monster_special_run(Monster& monster, RuntimeDispatch& dis
     return true;
   }
 
+  if (monster.target_actor_id() == 0) {
+    const auto elapsed =
+        static_cast<std::int64_t>(now_ms) -
+        static_cast<std::int64_t>(monster.search_enemy_time_ms());
+    if (elapsed > 1000) {
+      monster.mark_search_enemy_time(now_ms);
+      const auto search_range = behavior == LegacyMonsterRaceBehavior::spit ? 5
+                                : behavior == LegacyMonsterRaceBehavior::fly_axe ? 11
+                                                                                  : 7;
+      if (auto* target = legacy_nearest_player_target(monster, current_tick, search_range, false);
+          target != nullptr) {
+        monster.select_target(target->id(), now_ms);
+      }
+    }
+  }
+
   if (legacy_monster_special_attack_target(monster, dispatch, current_tick, now_ms)) {
     return true;
   }
