@@ -571,11 +571,39 @@ bool is_attackable_target(const GameObject& object) {
   return (as_player(&object) != nullptr || as_monster(&object) != nullptr) && is_alive(object);
 }
 
+bool is_safe_zone(const MapConfig& map_config, std::int32_t x, std::int32_t y);
+
+bool is_legacy_monster_retaliation_source(const Monster& monster, const GameObject& source,
+                                          const MapConfig& map_config,
+                                          std::uint64_t current_tick) {
+  if (const auto* source_player = as_player(&source); source_player != nullptr) {
+    if (monster.is_slave() && source_player->id() == monster.master_actor_id()) {
+      return false;
+    }
+    return !source_player->is_dead() && !source_player->legacy_ghost() &&
+           !is_safe_zone(map_config, source_player->x(), source_player->y()) &&
+           !source_player->legacy_transparent_active(current_tick);
+  }
+  const auto* source_monster = as_monster(&source);
+  if (source_monster == nullptr || source_monster->id() == monster.id() ||
+      source_monster->master_actor_id() == 0 || source_monster->is_dead() ||
+      source_monster->legacy_ghosted() || source_monster->hide_mode()) {
+    return false;
+  }
+  if (source_monster->id() == monster.master_actor_id() ||
+      source_monster->master_actor_id() == monster.master_actor_id()) {
+    return false;
+  }
+  return true;
+}
+
 std::int32_t apply_legacy_monster_damage(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     Monster& monster,
     std::int32_t damage,
     std::uint64_t source_actor_id,
+    const MapConfig& map_config,
+    std::uint64_t current_tick,
     std::uint64_t now_ms) {
   const auto was_dead = monster.is_dead();
   const auto applied = monster.apply_damage(damage, source_actor_id, now_ms);
@@ -588,8 +616,8 @@ std::int32_t apply_legacy_monster_damage(
        monster.ai_profile() == MonsterAiProfile::aggressive)) {
     const auto source_it = objects.find(source_actor_id);
     if (source_it != objects.end()) {
-      const auto* source_player = as_player(source_it->second.get());
-      if (source_player != nullptr && !source_player->is_dead()) {
+      if (is_legacy_monster_retaliation_source(monster, *source_it->second,
+                                               map_config, current_tick)) {
         monster.select_target(source_actor_id, now_ms);
       }
     }

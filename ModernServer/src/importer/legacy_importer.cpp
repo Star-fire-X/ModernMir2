@@ -15,6 +15,7 @@
 #include <sqlext.h>
 #endif
 
+#include "util/legacy_text.hpp"
 #include "util/string_utils.hpp"
 
 namespace mir2 {
@@ -34,8 +35,18 @@ std::string ascii_safe(std::string value) {
   return value;
 }
 
+std::string control_safe(std::string value) {
+  for (char& ch : value) {
+    const auto byte = static_cast<unsigned char>(ch);
+    if (byte < 32 || byte == 127) {
+      ch = '_';
+    }
+  }
+  return value;
+}
+
 std::string quote(const std::string& value) {
-  const auto normalized = ascii_safe(value);
+  const auto normalized = control_safe(value);
   std::string escaped;
   escaped.reserve(normalized.size() + 8);
   for (const char ch : normalized) {
@@ -48,11 +59,9 @@ std::string quote(const std::string& value) {
 }
 
 std::vector<std::string> read_lines(const std::filesystem::path& path) {
-  std::ifstream file(path, std::ios::binary);
   std::vector<std::string> lines;
-  std::string line;
-  while (std::getline(file, line)) {
-    lines.push_back(util::trim(line));
+  for (auto line : util::read_legacy_text_lines(path)) {
+    lines.push_back(util::trim(std::move(line)));
   }
   return lines;
 }
@@ -521,6 +530,45 @@ void ensure_output_dirs(const std::filesystem::path& output_root) {
   std::filesystem::create_directories(output_root / "npc_scripts" / "market_def");
   std::filesystem::create_directories(output_root / "npc_scripts" / "Npc_def");
   std::filesystem::create_directories(output_root / "npc_scripts" / "MapQuest_def");
+  std::filesystem::create_directories(output_root / "npc_scripts" / "Defines");
+  std::filesystem::create_directories(output_root / "npc_scripts" / "QuestDiary");
+}
+
+void copy_legacy_script_tree(const std::filesystem::path& legacy_root,
+                             const std::filesystem::path& output_root,
+                             const std::filesystem::path& legacy_subdir,
+                             const std::filesystem::path& output_subdir) {
+  const auto source_root = legacy_root / "Envir" / legacy_subdir;
+  if (!std::filesystem::exists(source_root)) {
+    return;
+  }
+  const auto target_root = output_root / "npc_scripts" / output_subdir;
+  std::error_code ignored;
+  for (const auto& entry : std::filesystem::recursive_directory_iterator(source_root, ignored)) {
+    if (ignored) {
+      break;
+    }
+    const auto relative = std::filesystem::relative(entry.path(), source_root, ignored);
+    if (ignored || relative.empty()) {
+      ignored.clear();
+      continue;
+    }
+    const auto target = target_root / util::ascii_path(relative);
+    if (entry.is_directory(ignored)) {
+      std::filesystem::create_directories(target, ignored);
+      ignored.clear();
+      continue;
+    }
+    if (!entry.is_regular_file(ignored)) {
+      ignored.clear();
+      continue;
+    }
+    std::filesystem::create_directories(target.parent_path(), ignored);
+    ignored.clear();
+    std::filesystem::copy_file(entry.path(), target,
+                               std::filesystem::copy_options::overwrite_existing, ignored);
+    ignored.clear();
+  }
 }
 
 void write_server_files(const IniFile& setup, const std::filesystem::path& output_root) {
@@ -795,7 +843,7 @@ std::filesystem::path find_legacy_npc_script(const std::filesystem::path& legacy
 
   for (const auto& directory : directories) {
     for (const auto& candidate : candidates) {
-      const auto path = directory / candidate;
+      const auto path = directory / util::path_from_utf8(candidate);
       if (std::filesystem::exists(path)) {
         return path;
       }
@@ -804,33 +852,27 @@ std::filesystem::path find_legacy_npc_script(const std::filesystem::path& legacy
   return {};
 }
 
-bool is_ascii_text(std::string_view text) {
-  return std::all_of(text.begin(), text.end(), [](unsigned char ch) { return ch >= 32 && ch <= 126; });
-}
-
 std::string import_npc_script_asset(const std::filesystem::path& legacy_root,
                                     const std::filesystem::path& output_root, std::string_view npc_id,
                                     std::string_view map_id) {
-  if (!is_ascii_text(npc_id) || !is_ascii_text(map_id)) {
-    return ascii_safe(std::string(npc_id) + ".txt");
-  }
   try {
     const auto source = find_legacy_npc_script(legacy_root, npc_id, map_id);
     if (source.empty()) {
-      return ascii_safe(std::string(npc_id) + ".txt");
+      return util::ascii_path_component(std::string(npc_id) + ".txt");
     }
 
     const auto source_dir = util::lower_copy(source.parent_path().filename().string());
     const auto subdir = source_dir == "market_def" ? std::filesystem::path("market_def")
                                                    : std::filesystem::path("Npc_def");
-    const auto target_name = ascii_safe(std::string(npc_id) + "-" + std::string(map_id)) +
-                             source.extension().string();
+    const auto target_name = util::ascii_path_component(
+        std::string(npc_id) + "-" + std::string(map_id) +
+        util::path_to_utf8_string(source.extension()));
     const auto relative = std::filesystem::path("npc_scripts") / subdir / target_name;
     std::filesystem::copy_file(source, output_root / relative,
                                std::filesystem::copy_options::overwrite_existing);
     return relative.generic_string();
   } catch (const std::exception&) {
-    return ascii_safe(std::string(npc_id) + ".txt");
+    return util::ascii_path_component(std::string(npc_id) + ".txt");
   }
 }
 
@@ -897,30 +939,32 @@ std::size_t import_npcs(const std::filesystem::path& legacy_root, const std::fil
 std::string import_mapquest_script_asset(const std::filesystem::path& legacy_root,
                                          const std::filesystem::path& output_root,
                                          std::string_view qfile) {
-  const auto name = ascii_safe(std::filesystem::path(std::string(qfile)).filename().string());
+  const auto name = util::path_to_utf8_string(util::path_from_utf8(qfile).filename());
+  const auto safe_name = util::ascii_path_component(name);
   if (name.empty()) {
     return {};
   }
   const std::vector<std::filesystem::path> candidates = {
-      legacy_root / "Envir" / "MapQuest_def" / name,
-      legacy_root / "Envir" / "MapQuest_def" / (name + ".txt"),
-      legacy_root / "Envir" / "MapQuest_def" / (name + ".TXT"),
+      legacy_root / "Envir" / "MapQuest_def" / util::path_from_utf8(name),
+      legacy_root / "Envir" / "MapQuest_def" / util::path_from_utf8(name + ".txt"),
+      legacy_root / "Envir" / "MapQuest_def" / util::path_from_utf8(name + ".TXT"),
   };
   for (const auto& source : candidates) {
     if (!std::filesystem::exists(source)) {
       continue;
     }
+    const auto target_name = util::ascii_path_component(util::path_to_utf8_string(source.filename()));
     const auto target = std::filesystem::path("npc_scripts") / "MapQuest_def" /
-                        source.filename();
+                        target_name;
     try {
       std::filesystem::copy_file(source, output_root / target,
                                  std::filesystem::copy_options::overwrite_existing);
       return target.generic_string();
     } catch (const std::exception&) {
-      return name;
+      return safe_name;
     }
   }
-  return name;
+  return safe_name;
 }
 
 std::size_t import_map_quests(const std::filesystem::path& legacy_root,
@@ -1243,13 +1287,15 @@ LegacyImportReport LegacyImporter::import_tree(const std::filesystem::path& lega
   const auto setup = parse_ini(legacy_root / "!SetUp.txt");
 
   write_server_files(setup, output_root);
+  copy_legacy_script_tree(legacy_root, output_root, "Defines", "Defines");
+  copy_legacy_script_tree(legacy_root, output_root, "QuestDiary", "QuestDiary");
   LegacyImportReport report;
   report.npc_count = import_npcs(legacy_root, output_root);
   report.map_quest_count = import_map_quests(legacy_root, output_root);
   report.item_count = import_items_from_makeitem(legacy_root, output_root);
 
 #ifdef MIR2_ENABLE_ODBC
-  report.item_count = import_table_as_toml(
+  const auto odbc_item_count = import_table_as_toml(
       legacy_root / "Data.mdb", output_root / "items" / "imported_items.toml",
       "SELECT Idx, Name, StdMode, Shape, ImgIndex, DuraMax, Weight, Need, NeedLevel, "
       "Price, Stock, AtkSpd, Agility, Accurate, MgAvoid, Strong, Undead, HPADD, MPADD, "
@@ -1264,6 +1310,13 @@ LegacyImportReport LegacyImporter::import_tree(const std::filesystem::path& lega
        "strong", "undead", "hp_add", "mp_add", "exp_add", "eff_type1", "eff_rate1",
        "eff_value1", "eff_type2", "eff_rate2", "eff_value2"},
       report.warnings);
+  if (odbc_item_count > 0) {
+    report.item_count = odbc_item_count;
+  } else {
+    report.item_count = import_items_from_makeitem(legacy_root, output_root);
+    report.warnings.push_back(
+        "ODBC StdItems import returned no rows, MakeItem.txt fallback items were used.");
+  }
   report.magic_count = import_table_as_toml(legacy_root / "Data.mdb", output_root / "magic" / "imported_magic.toml",
                                             "SELECT ID, Name, DefSpell, DefPower FROM Magic", "magic",
                                             {"ID", "Name", "DefSpell", "DefPower"},

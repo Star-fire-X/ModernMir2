@@ -992,6 +992,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                              mail.payload));
         break;
       }
+      if (!player->legacy_item_change_ready(now_ms)) {
+        add_legacy_trace(dispatch, "LegacyItem", "item_change_throttle", mail, current_tick,
+                         now_ms, false, mail.item_make_index, 0, "drop_item");
+        queue_packet(dispatch, player->session_id(),
+                     make_drop_result_packet(player->session_id(), false, mail.item_make_index,
+                                             mail.payload));
+        break;
+      }
 
       const auto* bag_item =
           player->bag_item_mutable(mail.item_make_index, mail.payload, item_configs_);
@@ -1003,12 +1011,27 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                              mail.payload));
         break;
       }
+      auto dropped_item = *bag_item;
+      if (const auto* config = find_item_config(item_configs_, bag_item->index); config != nullptr) {
+        if (config->std_mode == 51) {
+          add_legacy_trace(dispatch, "LegacyItem", "stdmode51_reject", mail, current_tick,
+                           now_ms, false, mail.item_make_index, 0, "drop_item");
+          queue_packet(dispatch, player->session_id(),
+                       make_drop_result_packet(player->session_id(), false, mail.item_make_index,
+                                               mail.payload));
+          break;
+        }
+        if (config->std_mode == 40) {
+          dropped_item.dura =
+              clamp_dura_value(static_cast<std::int32_t>(dropped_item.dura) - 2000);
+        }
+      }
 
       GroundItem ground_item;
       add_legacy_trace(dispatch, "LegacyItem", "validate", mail, current_tick, now_ms, true, 0, 0,
                        "drop_item");
       ground_item.id = next_ground_item_id_;
-      ground_item.item = *bag_item;
+      ground_item.item = dropped_item;
       ground_item.name = item_name(*bag_item, item_configs_);
       ground_item.count = 1;
       ground_item.looks = item_looks(*bag_item, item_configs_);
@@ -1042,19 +1065,21 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             ground_item.x, ground_item.y, LegacyMapObjectShape::item_object, ground_item.id));
         break;
       }
-      ground_item.item = *removed;
+      ground_item.item = dropped_item;
       ground_items_[ground_item.id] = ground_item;
       player->refresh_derived_state(item_configs_);
 
       sync_visibility_after_item_change(ground_item.x, ground_item.y, dispatch, ground_item.id);
       queue_packet(dispatch, player->session_id(),
-                   make_del_item_packet(player->session_id(), player->id(), *removed, item_configs_));
+                   make_del_item_packet(player->session_id(), player->id(), ground_item.item,
+                                        item_configs_));
       queue_packet(dispatch, player->session_id(),
                    make_weight_changed_packet(player->session_id(), player->character()));
       queue_packet(dispatch, player->session_id(),
                    make_drop_result_packet(player->session_id(), true, removed->make_index,
                                            ground_item.name));
       queue_save_character(dispatch, *player);
+      player->mark_legacy_item_change(now_ms);
       add_legacy_trace(dispatch, "LegacyItem", "success", mail, current_tick, now_ms, true,
                        static_cast<std::int32_t>(ground_item.id), 0, "drop_item");
       break;
@@ -1382,6 +1407,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             return !is_empty(item) && item.make_index == mail.item_make_index;
           });
       if (already_offered) {
+        queue_packet(dispatch, player->session_id(),
+                     make_deal_simple_packet(player->session_id(), kSmDealAddItemFail));
+        break;
+      }
+      const auto* bag_item = player->bag_item(mail.item_make_index, mail.payload, item_configs_);
+      const auto* item_config =
+          bag_item != nullptr ? find_item_config(item_configs_, bag_item->index) : nullptr;
+      if (bag_item == nullptr || (item_config != nullptr && item_config->std_mode == 51)) {
         queue_packet(dispatch, player->session_id(),
                      make_deal_simple_packet(player->session_id(), kSmDealAddItemFail));
         break;
@@ -2060,6 +2093,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       const auto target_item = player->character().bag_items[*bag_slot];
 
       const auto* item_config = find_item_config(item_configs_, target_item.index);
+      if (item_config != nullptr && config_.no_drug && item_config->std_mode >= 0 &&
+          item_config->std_mode <= 3) {
+        add_legacy_trace(dispatch, "LegacyItem", "nodrug_reject", mail, current_tick, now_ms,
+                         false, target_item.index, 0, "eat_item");
+        queue_packet(dispatch, player->session_id(),
+                     make_eat_result_packet(player->session_id(), false));
+        break;
+      }
       if (item_config != nullptr && legacy_item_is_unbind_bundle(*item_config)) {
         const auto* target_config = find_item_config_by_name_or_id(item_configs_, item_config->unbind_item);
         if (target_config == nullptr || item_config->unbind_count <= 0) {
@@ -2305,24 +2346,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
-      if (config_.no_drug) {
-        add_legacy_trace(dispatch, "LegacyItem", "nodrug_reject", mail, current_tick, now_ms,
-                         false, target_item.index, 0, "eat_item");
-        queue_packet(dispatch, player->session_id(),
-                     make_eat_result_packet(player->session_id(), false));
-        break;
-      }
-
-      const auto old_hp = player->character().ability.hp;
-      const auto old_mp = player->character().ability.mp;
       player->apply_consumable(*item_config);
-      if (player->character().ability.hp == old_hp && player->character().ability.mp == old_mp) {
-        add_legacy_trace(dispatch, "LegacyItem", "consume_no_effect", mail, current_tick,
-                         now_ms, false, target_item.index, 0, "eat_item");
-        queue_packet(dispatch, player->session_id(),
-                     make_eat_result_packet(player->session_id(), false));
-        break;
-      }
       const auto removed = player->remove_bag_item_at(*bag_slot);
       if (!removed.has_value()) {
         queue_packet(dispatch, player->session_id(),
@@ -2687,6 +2711,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       bool target_died = false;
       Monster* slain_monster = nullptr;
       std::int32_t weapon_durability_loss = 0;
+      bool monster_damaged = false;
 
       if (auto* player_target = as_player(target); player_target != nullptr) {
         if (!config_.fight_zone && !config_.fight3_zone && player_target->pk_level() < 2) {
@@ -2723,8 +2748,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
       } else if (auto* monster_target = as_monster(target); monster_target != nullptr) {
         applied_damage = apply_legacy_monster_damage(
-            objects_, *monster_target, damage, attacker->id(), now_ms);
+            objects_, *monster_target, damage, attacker->id(), config_, current_tick, now_ms);
         if (applied_damage > 0) {
+          monster_damaged = true;
           if (!direct_primary_hit) {
             weapon_durability_loss = roll_legacy_weapon_durability_loss(
                 *attacker, *target, dispatch, current_tick, now_ms);
@@ -2847,8 +2873,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
           } else if (auto* monster_target = as_monster(extra_target); monster_target != nullptr) {
             extra_applied_damage = apply_legacy_monster_damage(
-                objects_, *monster_target, extra_damage, attacker->id(), now_ms);
+                objects_, *monster_target, extra_damage, attacker->id(),
+                config_, current_tick, now_ms);
             if (extra_applied_damage > 0) {
+              monster_damaged = true;
               notify_owned_slaves_target(*attacker, monster_target->id(), now_ms);
             }
             extra_target_died = monster_target->is_dead();
@@ -2941,8 +2969,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
           } else if (auto* monster_target = as_monster(extra_target); monster_target != nullptr) {
             extra_applied_damage = apply_legacy_monster_damage(
-                objects_, *monster_target, extra_damage, attacker->id(), now_ms);
+                objects_, *monster_target, extra_damage, attacker->id(),
+                config_, current_tick, now_ms);
             if (extra_applied_damage > 0) {
+              monster_damaged = true;
               notify_owned_slaves_target(*attacker, monster_target->id(), now_ms);
             }
             extra_target_died = monster_target->is_dead();
@@ -2983,15 +3013,21 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                            extra_target_died ? "SM_DEATH" : "SM_STRUCK");
         }
       }
-      if (sword_magic_id != 0) {
+      if (sword_magic_id != 0 && monster_damaged) {
         if (auto* user_magic = attacker->learned_magic_mutable(sword_magic_id);
             user_magic != nullptr) {
           const auto magic_it = magic_configs_.find(sword_magic_id);
           if (magic_it != magic_configs_.end()) {
             LegacyRandom fallback_random;
             auto& random = legacy_random_ != nullptr ? *legacy_random_ : fallback_random;
+            const auto fixed_train_amount =
+                (sword_magic_id == 12 || sword_magic_id == 25 || sword_magic_id == 26 ||
+                 sword_magic_id == 34)
+                    ? 1
+                    : 0;
             const auto training =
-                legacy_train_magic(*attacker, *user_magic, magic_it->second, random);
+                legacy_train_magic(*attacker, *user_magic, magic_it->second, random,
+                                   fixed_train_amount);
             if (training.trained) {
               add_legacy_trace(dispatch, "LegacySkill", "train_skill", effective_mail,
                                current_tick, now_ms, true, training.train_amount,
@@ -3012,6 +3048,13 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       auto* attacker = as_player(attacker_it->second.get());
       if (attacker == nullptr || attacker->is_dead()) {
+        break;
+      }
+      if (attacker->legacy_poison_stone_active(current_tick)) {
+        add_legacy_trace(dispatch, "LegacySpell", "poison_stone_reject", mail,
+                         current_tick, now_ms, false, 0, 0, "POISON_STONE");
+        queue_packet(dispatch, attacker->session_id(),
+                     make_ack_packet(attacker->session_id(), false));
         break;
       }
 
@@ -3224,17 +3267,6 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         LegacyRandom fallback_random;
         auto& random = legacy_random_ != nullptr ? *legacy_random_ : fallback_random;
 
-        auto fail_magic = [&](std::string label) {
-          add_legacy_trace(dispatch, "LegacySpell", "spell_fail", mail, current_tick, now_ms,
-                           false, magic_id, 0, std::move(label));
-          queue_packet(dispatch, attacker->session_id(),
-                       make_ack_packet(attacker->session_id(), false));
-          queue_actor_origin_packet(objects_, dispatch, *attacker, true, [&](const Player& watcher) {
-            queue_packet(dispatch, watcher.session_id(),
-                         make_magic_fire_fail_packet(watcher.session_id(), *attacker));
-          });
-        };
-
         auto fail_magic_after_spell = [&](std::string label) {
           add_legacy_trace(dispatch, "LegacySpell", "spell_fail", mail, current_tick, now_ms,
                            false, magic_id, 0, std::move(label));
@@ -3284,40 +3316,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           fire_y = mail.y;
         }
         if (fire_x == 0 && fire_y == 0 &&
-            (magic_id == 8 || magic_id == 14 || magic_id == 15 || magic_id == 18 ||
+            (magic_id == 8 || magic_id == 37 || magic_id == 14 || magic_id == 15 || magic_id == 18 ||
              magic_id == 19 || magic_id == 21 || magic_id == 22 || magic_id == 24 ||
              magic_id == 31 || magic_id == 36 || magic_id == 16 || magic_id == 17 ||
              magic_id == 30)) {
           fire_x = attacker->x();
           fire_y = attacker->y();
-        }
-
-        if (magic_id == 1 || magic_id == 5 || magic_id == 11 || magic_id == 32 ||
-            magic_id == 35) {
-          std::string reason;
-          if (!harmful_target_ok(target, reason)) {
-            fail_magic(reason);
-            break;
-          }
-        }
-        if (magic_id == 1 || magic_id == 5) {
-          if (!legacy_mag_can_hit_target(attacker->x(), attacker->y(), target)) {
-            fail_magic("MagCanHitTarget");
-            break;
-          }
-          if (std::abs(target->x() - fire_x) > 1 || std::abs(target->y() - fire_y) > 1) {
-            fail_magic("target_not_near_spell_xy");
-            break;
-          }
-        }
-        if (magic_id == 28 && target == nullptr) {
-          fail_magic("target_missing");
-          break;
-        }
-        if ((magic_id == 9 || magic_id == 10) &&
-            attacker->x() == fire_x && attacker->y() == fire_y) {
-          fail_magic("line_direction");
-          break;
         }
 
         const auto spell_point =
@@ -3478,17 +3482,34 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         switch (magic_id) {
           case 1:
           case 5: {
+            std::string reason;
+            if (!harmful_target_ok(target, reason)) {
+              fire_target_id = 0;
+              add_legacy_trace(dispatch, "LegacySpell", "target_reject", mail,
+                               current_tick, now_ms, false, magic_id, 0, reason);
+              break;
+            }
+            if (!legacy_mag_can_hit_target(attacker->x(), attacker->y(), target) ||
+                std::abs(target->x() - fire_x) > 1 || std::abs(target->y() - fire_y) > 1) {
+              fire_target_id = 0;
+              add_legacy_trace(dispatch, "LegacySpell", "target_reject", mail,
+                               current_tick, now_ms, false, magic_id, 0, "MagCanHitTarget");
+              break;
+            }
             const auto anti_roll = random.random(10);
-            const auto anti_magic = target != nullptr ? legacy_actor_anti_magic(*target) : 0;
+            const auto anti_magic = legacy_actor_anti_magic(*target);
+            const auto anti_pass = legacy_anti_magic_pass(anti_magic, anti_roll);
             add_legacy_trace(dispatch, "LegacySpell", "anti_magic", mail, current_tick,
-                             now_ms, legacy_anti_magic_pass(anti_magic, anti_roll), anti_roll,
+                             now_ms, anti_pass, anti_roll,
                              anti_magic,
                              "AntiMagic");
-            if (legacy_anti_magic_pass(anti_magic, anti_roll) && target != nullptr) {
+            if (anti_pass) {
               const auto power = legacy_fireball_power(*attacker, magic_it->second.legacy,
                                                        user_magic->level, random);
               queue_delayed_hit(*target, power, 600, 2, LegacyDelayedEffectKind::delay_magic);
               train = as_monster(target) != nullptr;
+            } else {
+              fire_target_id = 0;
             }
             break;
           }
@@ -3514,8 +3535,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             send_magic_fire = false;
             std::string reason;
             if (!harmful_target_ok(target, reason)) {
-              add_legacy_trace(dispatch, "LegacySpell", "poison_target_reject", mail,
-                               current_tick, now_ms, false, magic_id, 0, reason);
+              fail_magic_after_spell(reason.empty() ? "target_missing" : reason);
+              spell_branch_aborted = true;
               break;
             }
             auto poison_slot = find_legacy_poison_powder_slot(*attacker, item_configs_);
@@ -3563,7 +3584,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             send_magic_fire = true;
             break;
           }
-          case 8: {
+          case 8:
+          case 37: {
             auto pushed = 0;
             const auto push_level = static_cast<std::int32_t>(user_magic->level);
             auto targets = collect_legacy_area_targets(objects_, *attacker, config_,
@@ -3673,13 +3695,21 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           }
           case 11:
           case 35: {
+            std::string reason;
+            if (!harmful_target_ok(target, reason)) {
+              fire_target_id = 0;
+              add_legacy_trace(dispatch, "LegacySpell", "target_reject", mail,
+                               current_tick, now_ms, false, magic_id, 0, reason);
+              break;
+            }
             const auto anti_roll = random.random(10);
-            const auto anti_magic = target != nullptr ? legacy_actor_anti_magic(*target) : 0;
+            const auto anti_magic = legacy_actor_anti_magic(*target);
+            const auto anti_pass = legacy_anti_magic_pass(anti_magic, anti_roll);
             add_legacy_trace(dispatch, "LegacySpell", "anti_magic", mail, current_tick,
-                             now_ms, legacy_anti_magic_pass(anti_magic, anti_roll), anti_roll,
+                             now_ms, anti_pass, anti_roll,
                              anti_magic,
                              "AntiMagic");
-            if (legacy_anti_magic_pass(anti_magic, anti_roll) && target != nullptr) {
+            if (anti_pass) {
               auto power = legacy_fireball_power(*attacker, magic_it->second.legacy,
                                                  user_magic->level, random);
               if (magic_id == 11 && actor_undead(*target)) {
@@ -3690,6 +3720,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
               }
               queue_delayed_hit(*target, power, 600, 2, LegacyDelayedEffectKind::mag_struck);
               train = as_monster(target) != nullptr;
+            } else {
+              fire_target_id = 0;
             }
             break;
           }
@@ -4291,7 +4323,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             break;
           }
           case 32: {
-            auto* monster_target = as_monster(target);
+            std::string reason;
+            auto* monster_target =
+                harmful_target_ok(target, reason) ? as_monster(target) : nullptr;
             if (monster_target != nullptr && monster_target->legacy_undead()) {
               const auto level_roll = random.random(4);
               const auto level_gate =
@@ -4541,7 +4575,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         } else if (auto* monster_target = as_monster(&resolved_target); monster_target != nullptr) {
           if (harmful_spell) {
             applied_damage = apply_legacy_monster_damage(
-                objects_, *monster_target, damage, attacker->id(), now_ms);
+                objects_, *monster_target, damage, attacker->id(), config_, current_tick, now_ms);
             if (applied_damage > 0) {
               notify_owned_slaves_target(*attacker, monster_target->id(), now_ms);
             }
@@ -5240,7 +5274,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
       } else if (auto* monster_target = as_monster(&target); monster_target != nullptr) {
         applied_damage = apply_legacy_monster_damage(
-            objects_, *monster_target, damage, caster->id(), now_ms);
+            objects_, *monster_target, damage, caster->id(), config_, current_tick, now_ms);
         if (applied_damage > 0) {
           notify_owned_slaves_target(*caster, monster_target->id(), now_ms);
         }

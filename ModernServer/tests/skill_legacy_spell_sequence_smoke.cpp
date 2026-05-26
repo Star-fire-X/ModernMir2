@@ -173,6 +173,17 @@ std::optional<std::size_t> first_packet_index(const mir2::RuntimeDispatch& dispa
   return std::nullopt;
 }
 
+std::optional<mir2::DecodedLegacyGamePacket> first_packet(const mir2::RuntimeDispatch& dispatch,
+                                                         std::uint16_t ident) {
+  for (const auto& event : dispatch.session_events) {
+    const auto decoded = mir2::decode_legacy_game_packet(event.packet);
+    if (decoded.has_value() && decoded->message.ident == ident) {
+      return decoded;
+    }
+  }
+  return std::nullopt;
+}
+
 void append_dispatch(mir2::RuntimeDispatch& target, mir2::RuntimeDispatch source) {
   target.session_events.insert(target.session_events.end(),
                                std::make_move_iterator(source.session_events.begin()),
@@ -222,6 +233,63 @@ int main() {
     const auto snapshot = runtime.snapshot_character_actor("MpFail");
     assert(snapshot.has_value());
     assert(snapshot->ability.mp == 0);
+  }
+
+  {
+    auto config = base_config();
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(
+        make_enter(606, make_character("InvalidTarget", 10, 10, 15, 15, 30, 1))));
+    static_cast<void>(runtime.route_logic_command(
+        make_enter(608, make_character("InvalidWatcher", 12, 10, 15, 15, 20, 0))));
+    static_cast<void>(runtime.tick());
+    static_cast<void>(runtime.route_logic_command(make_spell(606, 1, 1, 1, 0)));
+    const auto dispatch = runtime.tick();
+
+    assert(has_trace(dispatch, "target_reject"));
+    assert(!has_trace(dispatch, "delay_magic_queued"));
+    assert(has_packet(dispatch, mir2::kSmSpell));
+    assert(has_packet(dispatch, mir2::kSmMagicFire));
+    assert(!has_packet(dispatch, mir2::kSmMagicFireFail));
+    assert(!has_packet(dispatch, mir2::kSmStruck));
+    const auto snapshot = runtime.snapshot_character_actor("InvalidTarget");
+    assert(snapshot.has_value());
+    assert(snapshot->ability.mp < 30);
+  }
+
+  {
+    auto config = base_config();
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto login = runtime.route_logic_command(
+        make_enter(607, make_character("StoneLocked", 10, 10, 15, 15, 30, 1)));
+    append_dispatch(login, runtime.tick());
+    const auto new_map = first_packet(login, mir2::kSmNewMap);
+    assert(new_map.has_value());
+    const auto actor_id =
+        static_cast<std::uint64_t>(static_cast<std::uint32_t>(new_map->message.recog));
+
+    mir2::ActorMail poison;
+    poison.kind = mir2::ActorMailKind::legacy_delayed_effect;
+    poison.map_id = "0";
+    poison.actor_id = actor_id;
+    poison.target_actor_id = actor_id;
+    poison.delayed_effect_kind = mir2::LegacyDelayedEffectKind::make_poison;
+    poison.poison_kind = 5;
+    poison.duration_ticks = 50;
+    static_cast<void>(runtime.route_actor_mail(poison));
+    static_cast<void>(runtime.tick());
+
+    static_cast<void>(runtime.route_logic_command(make_spell(607, 1, 10, 2, 0)));
+    const auto dispatch = runtime.tick();
+    assert(has_trace(dispatch, "poison_stone_reject"));
+    assert(!has_packet(dispatch, mir2::kSmSpell));
+    assert(!has_packet(dispatch, mir2::kSmMagicFire));
+    assert(!has_packet(dispatch, mir2::kSmMagicFireFail));
+    const auto snapshot = runtime.snapshot_character_actor("StoneLocked");
+    assert(snapshot.has_value());
+    assert(snapshot->ability.mp == 30);
   }
 
   {

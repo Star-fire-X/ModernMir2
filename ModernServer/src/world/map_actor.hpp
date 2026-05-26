@@ -209,6 +209,13 @@ class MapActor {
   [[nodiscard]] bool legacy_monster_think(Monster& monster, RuntimeDispatch& dispatch,
                                           std::uint64_t current_tick,
                                           std::uint64_t now_ms);
+  void legacy_refresh_monster_visible_actors(Monster& monster);
+  [[nodiscard]] bool legacy_monster_valid_target(const Monster& monster,
+                                                 const GameObject& target,
+                                                 std::uint64_t current_tick) const;
+  [[nodiscard]] bool legacy_monster_search_candidate(const Monster& monster,
+                                                     const GameObject& target,
+                                                     std::uint64_t current_tick) const;
   void legacy_active_search(Monster& monster, RuntimeDispatch& dispatch,
                             std::uint64_t current_tick, std::uint64_t now_ms);
   [[nodiscard]] bool legacy_monster_normal_attack(Monster& monster,

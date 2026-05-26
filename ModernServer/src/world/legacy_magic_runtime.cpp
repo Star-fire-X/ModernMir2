@@ -99,7 +99,8 @@ LegacyReadBookResult legacy_read_magic_book(
 }
 
 LegacyMagicTrainResult legacy_train_magic(Player& player, LegacyUseMagicInfo& user_magic,
-                                          const MagicConfig& magic, LegacyRandom& random) {
+                                          const MagicConfig& magic, LegacyRandom& random,
+                                          std::int32_t fixed_train_amount) {
   LegacyMagicTrainResult result;
   result.magic_id = user_magic.magic_id;
   result.level = user_magic.level;
@@ -114,7 +115,7 @@ LegacyMagicTrainResult legacy_train_magic(Player& player, LegacyUseMagicInfo& us
     return result;
   }
 
-  result.train_amount = 1 + random.random(3);
+  result.train_amount = fixed_train_amount > 0 ? fixed_train_amount : 1 + random.random(3);
   user_magic.cur_train += result.train_amount;
   result.trained = true;
 
