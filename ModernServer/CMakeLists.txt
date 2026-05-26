@@ -223,6 +223,10 @@ if(BUILD_TESTING)
   add_test(NAME mir2_npc_shop_interleaving_fuzz_smoke
     COMMAND mir2_npc_shop_interleaving_fuzz_smoke)
 
+  add_executable(mir2_npc_item_interlock_smoke tests/npc_item_interlock_smoke.cpp)
+  target_link_libraries(mir2_npc_item_interlock_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_npc_item_interlock_smoke COMMAND mir2_npc_item_interlock_smoke)
+
   add_executable(mir2_canonical_legacy_command_smoke
     tests/canonical_legacy_command_smoke.cpp)
   target_link_libraries(mir2_canonical_legacy_command_smoke PRIVATE mir2_hostlib)
@@ -1029,6 +1033,10 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_client_v1_magic_gateway_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_client_v1_magic_gateway_smoke COMMAND mir2_client_v1_magic_gateway_smoke)
 
+  add_executable(mir2_client_v1_downlink_order_smoke tests/client_v1_downlink_order_smoke.cpp)
+  target_link_libraries(mir2_client_v1_downlink_order_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_client_v1_downlink_order_smoke COMMAND mir2_client_v1_downlink_order_smoke)
+
   add_executable(mir2_client_v1_world_entry_smoke tests/client_v1_world_entry_smoke.cpp)
   target_link_libraries(mir2_client_v1_world_entry_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_client_v1_world_entry_smoke COMMAND mir2_client_v1_world_entry_smoke)
@@ -1056,6 +1064,10 @@ if(BUILD_TESTING)
   add_executable(mir2_client_v1_inventory_npc_smoke tests/client_v1_inventory_npc_smoke.cpp)
   target_link_libraries(mir2_client_v1_inventory_npc_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_client_v1_inventory_npc_smoke COMMAND mir2_client_v1_inventory_npc_smoke)
+
+  add_executable(mir2_client_v1_bag_projection_smoke tests/client_v1_bag_projection_smoke.cpp)
+  target_link_libraries(mir2_client_v1_bag_projection_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_client_v1_bag_projection_smoke COMMAND mir2_client_v1_bag_projection_smoke)
 
   add_executable(mir2_client_v1_trade_group_guild_smoke tests/client_v1_trade_group_guild_smoke.cpp)
   target_link_libraries(mir2_client_v1_trade_group_guild_smoke PRIVATE mir2_hostlib)
@@ -1149,8 +1161,10 @@ if(BUILD_TESTING)
       mir2_client_v1_login_to_world_flow_smoke
       mir2_client_v1_game_command_bridge_smoke
       mir2_client_v1_inventory_npc_smoke
+      mir2_client_v1_bag_projection_smoke
       mir2_client_v1_trade_group_guild_smoke
       mir2_client_v1_world_min_loop_smoke
       mir2_client_v1_magic_gateway_smoke
+      mir2_client_v1_downlink_order_smoke
   )
 endif()

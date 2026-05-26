@@ -109,6 +109,7 @@ function Get-CiBuildTargets {
     "mir2_client_v1_login_to_world_flow_smoke",
     "mir2_client_v1_game_command_bridge_smoke",
     "mir2_client_v1_inventory_npc_smoke",
+    "mir2_client_v1_bag_projection_smoke",
     "mir2_client_v1_world_min_loop_smoke",
     "mir2_client_v1_magic_gateway_smoke"
   ))

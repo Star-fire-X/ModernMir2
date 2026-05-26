@@ -54,6 +54,14 @@ mir2::LogicCommand make_pickup(std::uint64_t session_id, std::int32_t x = 10,
   return command;
 }
 
+mir2::LogicCommand make_drop_gold(std::uint64_t session_id, std::int32_t amount) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::drop_gold;
+  command.session_id = session_id;
+  command.amount = amount;
+  return command;
+}
+
 mir2::RuntimeDispatch tick_due(mir2::LogicRuntime& runtime, std::uint64_t& now_ms) {
   now_ms += 251;
   return runtime.tick(now_ms);
@@ -245,6 +253,40 @@ bool test_drop_and_pickup_order() {
   return snapshot.has_value() && bag_make_indices(*snapshot) == std::vector<std::int32_t>{4001};
 }
 
+bool test_drop_and_pickup_gold_order() {
+  mir2::LogicRuntime runtime(make_config());
+  runtime.initialize();
+  auto character = make_character("GoldUser");
+  character.gold = 1000;
+  static_cast<void>(runtime.route_logic_command(make_enter(451, character)));
+  std::uint64_t now_ms = 20;
+  static_cast<void>(runtime.tick(now_ms));
+
+  static_cast<void>(runtime.route_logic_command(make_drop_gold(451, 120)));
+  const auto drop = tick_due(runtime, now_ms);
+  if (!matches_packet_order(drop,
+                            {mir2::kSmItemShow, mir2::kSmGoldChanged},
+                            {mir2::kSmItemShow, mir2::kSmGoldChanged,
+                             mir2::kSmItemHide, mir2::kSmAddItem})) {
+    return false;
+  }
+  auto snapshot = runtime.snapshot_character_actor("GoldUser");
+  if (!snapshot.has_value() || snapshot->gold != 880) {
+    return false;
+  }
+
+  static_cast<void>(runtime.route_logic_command(make_pickup(451)));
+  const auto pickup = tick_due(runtime, now_ms);
+  if (!matches_packet_order(pickup,
+                            {mir2::kSmItemHide, mir2::kSmGoldChanged},
+                            {mir2::kSmItemShow, mir2::kSmGoldChanged,
+                             mir2::kSmItemHide, mir2::kSmAddItem})) {
+    return false;
+  }
+  snapshot = runtime.snapshot_character_actor("GoldUser");
+  return snapshot.has_value() && snapshot->gold == 1000;
+}
+
 bool test_pickup_weight_failure_keeps_ground_item() {
   mir2::LogicRuntime runtime(make_config());
   runtime.initialize();
@@ -329,6 +371,9 @@ int main() {
   }
   if (!test_drop_and_pickup_order()) {
     return fail("drop/pickup packet order");
+  }
+  if (!test_drop_and_pickup_gold_order()) {
+    return fail("drop/pickup gold packet order");
   }
   if (!test_pickup_weight_failure_keeps_ground_item()) {
     return fail("pickup weight failure keeps ground item");
