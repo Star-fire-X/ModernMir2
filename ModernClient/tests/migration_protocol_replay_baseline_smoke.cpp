@@ -305,19 +305,28 @@ void test_runtime_state_apply_keeps_drain_order() {
   app.push_protocol_message_for_test(InventoryUpdate{ItemSlotState{6, updated_potion}});
   app.push_protocol_message_for_test(SysMessage{"server notice", 1});
   app.push_protocol_message_for_test(ChatLine{"player line", 0xFFFFFFFFU, 0});
-  app.push_protocol_message_for_test(GroundItemRemove{9001, 331, 270});
-  app.push_protocol_message_for_test(InventoryRemove{6});
   app.pump_protocol_for_test();
 
   auto& state = app.state_for_test();
   assert(state.world.last_action_ack_ok);
-  assert(state.world.ground_items.find(9001) == state.world.ground_items.end());
-  assert(state.world.bag_items[6].empty());
+  const auto ground_item = state.world.ground_items.find(9001);
+  assert(ground_item != state.world.ground_items.end());
+  assert(ground_item->second.name == "Gold");
+  assert(!state.world.bag_items[6].empty());
+  assert(state.world.bag_items[6].name == "Potion");
+  assert(state.world.bag_items[6].dura == 0);
   assert(state.world.sys_messages.size() == 1);
   assert(state.world.sys_messages.front().text == "server notice");
   assert(state.world.chat_lines.size() == 2);
   assert(state.world.chat_lines[0].text == "server notice");
   assert(state.world.chat_lines[1].text == "player line");
+
+  app.push_protocol_message_for_test(GroundItemRemove{9001, 331, 270});
+  app.push_protocol_message_for_test(InventoryRemove{6});
+  app.pump_protocol_for_test();
+
+  assert(state.world.ground_items.find(9001) == state.world.ground_items.end());
+  assert(state.world.bag_items[6].empty());
 }
 
 void test_bad_runtime_frame_during_map_transition_disconnects_immediately() {
