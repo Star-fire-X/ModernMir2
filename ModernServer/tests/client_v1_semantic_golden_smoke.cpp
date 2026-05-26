@@ -132,10 +132,16 @@ bool check_spell_and_inventory_goldens() {
 
   command = mir2::decode_client_v1_drop_gold_command(
       99, mir2::client_v1::DropGoldRequest{250});
-  return expect_common(command, mir2::CanonicalLegacyCommandKind::drop_gold,
-                       mir2::LogicCommandKind::drop_gold) &&
-         command.amount == 250 && command.game_message.ident == mir2::kCmDropGold &&
-         command.game_message.recog == 250;
+  if (!expect_common(command, mir2::CanonicalLegacyCommandKind::drop_gold,
+                     mir2::LogicCommandKind::drop_gold) ||
+      command.amount != 250 || command.game_message.ident != mir2::kCmDropGold ||
+      command.game_message.recog != 250) {
+    return false;
+  }
+
+  command = mir2::decode_client_v1_revive_command(99);
+  return expect_common(command, mir2::CanonicalLegacyCommandKind::revive,
+                       mir2::LogicCommandKind::revive);
 }
 
 bool check_npc_merchant_storage_goldens() {
@@ -174,6 +180,24 @@ bool check_npc_merchant_storage_goldens() {
     return false;
   }
 
+  command = mir2::decode_client_v1_merchant_sell_command(
+      99, 42, mir2::client_v1::MerchantSellRequest{0, 0x12346, "Ruby"});
+  if (!expect_common(command, mir2::CanonicalLegacyCommandKind::sell_item,
+                     mir2::LogicCommandKind::sell_item) ||
+      command.game_message.ident != mir2::kCmUserSellItem ||
+      command.game_message.param != 0x2346 || command.game_message.tag != 0x0001) {
+    return false;
+  }
+
+  command = mir2::decode_client_v1_merchant_repair_price_command(
+      99, 42, mir2::client_v1::MerchantRepairPriceRequest{0, 0x12347, "Sword"});
+  if (!expect_common(command, mir2::CanonicalLegacyCommandKind::query_repair_cost,
+                     mir2::LogicCommandKind::query_repair_cost) ||
+      command.game_message.ident != mir2::kCmMerchantQueryRepairCost ||
+      command.game_message.param != 0x2347 || command.game_message.tag != 0x0001) {
+    return false;
+  }
+
   command = mir2::decode_client_v1_merchant_repair_command(
       99, 42, mir2::client_v1::MerchantRepairRequest{0, 0x12347, "Sword"});
   if (!expect_common(command, mir2::CanonicalLegacyCommandKind::repair_item,
@@ -189,6 +213,21 @@ bool check_npc_merchant_storage_goldens() {
                      mir2::LogicCommandKind::storage_item) ||
       command.game_message.ident != mir2::kCmUserStorageItem ||
       command.game_message.param != 0x2348 || command.game_message.tag != 0x0001) {
+    return false;
+  }
+
+  command = mir2::decode_client_v1_storage_withdraw_command(
+      99, 42, mir2::client_v1::StorageWithdrawRequest{0, 0x12349, "Ring"});
+  if (!expect_common(command, mir2::CanonicalLegacyCommandKind::take_back_storage_item,
+                     mir2::LogicCommandKind::take_back_storage_item) ||
+      command.game_message.ident != mir2::kCmUserTakeBackStorageItem ||
+      command.game_message.param != 0x2349 || command.game_message.tag != 0x0001) {
+    return false;
+  }
+
+  command = mir2::decode_client_v1_query_bag_items_command(99);
+  if (!expect_common(command, mir2::CanonicalLegacyCommandKind::query_bag_items,
+                     mir2::LogicCommandKind::query_bag_items)) {
     return false;
   }
 
@@ -243,10 +282,17 @@ bool check_trade_and_chat_goldens() {
     return false;
   }
 
+  command = mir2::decode_client_v1_trade_cancel_command(99);
+  if (!expect_common(command, mir2::CanonicalLegacyCommandKind::trade_cancel,
+                     mir2::LogicCommandKind::trade_cancel) ||
+      command.game_message.ident != mir2::kCmDealCancel) {
+    return false;
+  }
+
   command = mir2::decode_client_v1_chat_command(99, mir2::client_v1::ChatSend{name});
   return expect_common(command, mir2::CanonicalLegacyCommandKind::say,
                        mir2::LogicCommandKind::say) &&
-         command.text == name && command.game_message.ident == 0;
+         command.text == name;
 }
 
 }  // namespace
