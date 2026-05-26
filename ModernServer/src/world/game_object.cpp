@@ -9,6 +9,7 @@
 
 #include "util/string_utils.hpp"
 #include "world/legacy_item_rules.hpp"
+#include "world/legacy_map_environment.hpp"
 #include "world/legacy_skill_formula.hpp"
 
 namespace mir2 {
@@ -1521,7 +1522,9 @@ void Player::apply_consumable(const ItemConfig& item_config) {
 }
 
 void Player::add_gold(std::int32_t amount) {
-  character_.gold = std::max(0, character_.gold + amount);
+  const auto next = static_cast<std::int64_t>(character_.gold) + amount;
+  character_.gold =
+      static_cast<std::int32_t>(std::clamp<std::int64_t>(next, 0, kLegacyBagGold));
 }
 
 void Player::spend_gold(std::int32_t amount) {
@@ -2002,6 +2005,14 @@ bool Player::legacy_rush_ready(std::uint64_t now_ms) const {
 
 void Player::mark_legacy_rush(std::uint64_t now_ms) {
   legacy_latest_rush_time_ms_ = now_ms;
+}
+
+bool Player::legacy_item_change_ready(std::uint64_t now_ms) const {
+  return legacy_item_change_time_ms_ == 0 || now_ms > legacy_item_change_time_ms_ + 3000;
+}
+
+void Player::mark_legacy_item_change(std::uint64_t now_ms) {
+  legacy_item_change_time_ms_ = now_ms;
 }
 
 bool Player::legacy_open_health_active(std::uint64_t current_tick) const {
