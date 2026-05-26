@@ -149,6 +149,19 @@ std::optional<std::int32_t> parse_int32(std::string_view text) {
   return std::nullopt;
 }
 
+std::optional<std::pair<std::int32_t, std::int32_t>> parse_xy_token(std::string_view text) {
+  const auto comma = text.find(',');
+  if (comma == std::string_view::npos || comma == 0 || comma + 1 >= text.size()) {
+    return std::nullopt;
+  }
+  const auto x = parse_int32(text.substr(0, comma));
+  const auto y = parse_int32(text.substr(comma + 1));
+  if (!x.has_value() || !y.has_value()) {
+    return std::nullopt;
+  }
+  return std::pair<std::int32_t, std::int32_t>{*x, *y};
+}
+
 std::string legacy_name_key(std::string name) {
   return util::lower_copy(ascii_safe(std::move(name)));
 }
@@ -626,6 +639,8 @@ LegacyImportReport import_maps_and_spawns(const std::filesystem::path& legacy_ro
     if (section.contains("HomeX")) home_x = section.at("HomeX");
     if (section.contains("HomeY")) home_y = section.at("HomeY");
   }
+  const auto setup_home_x = parse_int32(home_x).value_or(0);
+  const auto setup_home_y = parse_int32(home_y).value_or(0);
   maps.insert(home_map);
 
   std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> start_points;
@@ -679,7 +694,26 @@ LegacyImportReport import_maps_and_spawns(const std::filesystem::path& legacy_ro
     }
 
     const auto tokens = split_ws(line);
-    if (tokens.size() >= 7 && tokens[3] == "->") {
+    bool gate_parsed = false;
+    if (tokens.size() >= 5 && tokens[2] == "->") {
+      const auto source = parse_xy_token(tokens[1]);
+      const auto target = parse_xy_token(tokens[4]);
+      if (source.has_value() && target.has_value()) {
+        const auto map_id = tokens[0];
+        auto& info = map_infos[map_id];
+        if (info.id.empty()) {
+          info.id = map_id;
+          info.title = map_id;
+          map_order.push_back(map_id);
+        }
+        info.gates.push_back(
+            ImportedGate{source->first, source->second, tokens[3], target->first, target->second});
+        maps.insert(map_id);
+        gate_parsed = true;
+      }
+    }
+
+    if (!gate_parsed && tokens.size() >= 7 && tokens[3] == "->") {
       const auto map_id = tokens[0];
       const auto x = parse_int32(tokens[1]);
       const auto y = parse_int32(tokens[2]);
@@ -697,6 +731,12 @@ LegacyImportReport import_maps_and_spawns(const std::filesystem::path& legacy_ro
       }
       info.gates.push_back(ImportedGate{*x, *y, tokens[4], *target_x, *target_y});
       maps.insert(map_id);
+      gate_parsed = true;
+    }
+
+    if (!gate_parsed &&
+        ((tokens.size() >= 5 && tokens[2] == "->") || (tokens.size() >= 7 && tokens[3] == "->"))) {
+      report.warnings.push_back("Skipped invalid gate line: " + line);
     }
   }
 
@@ -746,6 +786,12 @@ LegacyImportReport import_maps_and_spawns(const std::filesystem::path& legacy_ro
            << "\n";
     }
     file << "allow_pk = " << (info.law_full ? "false" : "true") << "\n";
+    if (map_id == home_map && setup_home_x > 0 && setup_home_y > 0) {
+      file << "badman_zones = [\n";
+      file << "  { x = " << (setup_home_x - 10) << ", y = " << (setup_home_y - 10)
+           << ", width = 21, height = 21 }\n";
+      file << "]\n";
+    }
     const auto point_it = start_points.find(map_id);
     if (point_it != start_points.end() && !point_it->second.empty()) {
       file << "safe_zones = [\n";
@@ -782,6 +828,12 @@ LegacyImportReport import_maps_and_spawns(const std::filesystem::path& legacy_ro
     file << "height = 0\n";
     file << "home_x = " << home_x << "\n";
     file << "home_y = " << home_y << "\n";
+    if (setup_home_x > 0 && setup_home_y > 0) {
+      file << "badman_zones = [\n";
+      file << "  { x = " << (setup_home_x - 10) << ", y = " << (setup_home_y - 10)
+           << ", width = 21, height = 21 }\n";
+      file << "]\n";
+    }
     report.map_count = 1;
   }
 
@@ -1003,9 +1055,10 @@ std::size_t import_map_quests(const std::filesystem::path& legacy_root,
     first = false;
     const auto qfile = import_mapquest_script_asset(legacy_root, output_root, tokens[5]);
     const auto group = tokens.size() > 6 && util::lower_copy(tokens[6]) == "group";
+    const auto clamped_value = std::clamp(*value, 0, 1);
     file << "  { map_id = " << quote(tokens[0])
          << ", set_number = " << *set_number
-         << ", value = " << *value
+         << ", value = " << clamped_value
          << ", monster_name = " << quote(tokens[3] == "*" ? std::string{} : tokens[3])
          << ", item_name = " << quote(tokens[4] == "*" ? std::string{} : tokens[4])
          << ", qfile = " << quote(qfile)

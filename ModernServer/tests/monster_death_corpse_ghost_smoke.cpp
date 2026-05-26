@@ -136,6 +136,7 @@ int main() {
   map.enqueue_mail(make_monster(monster_id));
   static_cast<void>(map.tick(1, 0));
   static_cast<void>(map.legacy_spawn_player(make_player(player_id, session_id), 1, 0, true));
+  assert(map.legacy_can_spawn_monster(10, 10));
 
   const auto attack = make_attack(player_id, session_id, monster_id);
   assert(map.enqueue_legacy_player_command(attack, 20));

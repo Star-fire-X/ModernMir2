@@ -41,10 +41,10 @@ int main() {
              "1 50 60\n");
   write_text(legacy / "Envir" / "MapInfo.txt",
              "[0 Bichon Province 0] SAFE DAY NORECALL NEEDSET_OFF(9) L7\n"
-             "0 331 270 -> 1 50 60\n"
+             "0 331,270 -> 1 50,60\n"
              "[1 Cave Path 0] FIGHT3 DARK QUIZ NODRUG NORECONNECT(0) "
              "CHECKQUEST(entry.txt) NEEDSET_ON(12)\n"
-             "1 49 60 -> 0 330 270\n");
+             "1 49,60 -> 0 330,270\n");
   write_text(legacy / "Envir" / "MapQuest_def" / "entry.txt",
              "[@main]\n"
              "#ACT\n"
@@ -54,6 +54,7 @@ int main() {
   mir2::LegacyImporter importer;
   const auto report = importer.import_tree(legacy, output);
   assert(report.map_count == 2);
+  assert(report.warnings.empty());
 
   mir2::ConfigLoader loader;
   const auto config = loader.load(output);
@@ -67,6 +68,9 @@ int main() {
   assert(home->need_set_number == 9);
   assert(home->need_set_value == 0);
   assert(!home->allow_pk);
+  assert(home->badman_zones.size() == 1);
+  assert(home->badman_zones.front().x == 320 && home->badman_zones.front().y == 260);
+  assert(home->badman_zones.front().width == 21 && home->badman_zones.front().height == 21);
   assert(home->safe_zones.size() == 1);
   assert(home->safe_zones.front().x == 320 && home->safe_zones.front().y == 260);
   assert(home->safe_zones.front().width == 21 && home->safe_zones.front().height == 21);

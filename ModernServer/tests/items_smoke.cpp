@@ -399,9 +399,21 @@ int main() {
           make_item_command(mir2::LogicCommandKind::drop_item, 17, make_index, "Token")));
       return tick_player_due(env_runtime, env_now_ms);
     };
+    auto wait_item_change_ready = [&] {
+      env_now_ms += 3001;
+      static_cast<void>(env_runtime.tick(env_now_ms));
+    };
 
-    static_cast<void>(drop_token(3001));
-    static_cast<void>(drop_token(3002));
+    wait_item_change_ready();
+    const auto first_drop = drop_token(3001);
+    if (!has_packet(first_drop, mir2::kSmDropItemSuccess)) {
+      return 1;
+    }
+    wait_item_change_ready();
+    const auto second_drop = drop_token(3002);
+    if (!has_packet(second_drop, mir2::kSmDropItemSuccess)) {
+      return 1;
+    }
 
     mir2::LogicCommand pickup_first;
     pickup_first.kind = mir2::LogicCommandKind::pickup_item;
@@ -409,19 +421,32 @@ int main() {
     pickup_first.x = 10;
     pickup_first.y = 10;
     static_cast<void>(env_runtime.route_logic_command(pickup_first));
-    const auto fifo_pickup = tick_player_due(env_runtime, env_now_ms);
-    const auto fifo_add = find_packet(fifo_pickup, mir2::kSmAddItem);
-    if (!fifo_add.has_value()) {
+    const auto newest_pickup = tick_player_due(env_runtime, env_now_ms);
+    const auto newest_add = find_packet(newest_pickup, mir2::kSmAddItem);
+    if (!newest_add.has_value()) {
       return 1;
     }
-    const auto fifo_item = decode_client_item(fifo_add->body);
-    if (!fifo_item.has_value() || fifo_item->make_index != 3001) {
+    const auto newest_item = decode_client_item(newest_add->body);
+    if (!newest_item.has_value() || newest_item->make_index != 3002) {
       return 1;
     }
 
-    static_cast<void>(drop_token(3001));
-    static_cast<void>(drop_token(3003));
-    static_cast<void>(drop_token(3004));
+    wait_item_change_ready();
+    const auto third_drop = drop_token(3002);
+    if (!has_packet(third_drop, mir2::kSmDropItemSuccess)) {
+      return 1;
+    }
+    wait_item_change_ready();
+    const auto fourth_drop = drop_token(3003);
+    if (!has_packet(fourth_drop, mir2::kSmDropItemSuccess)) {
+      return 1;
+    }
+    wait_item_change_ready();
+    const auto fifth_drop = drop_token(3004);
+    if (!has_packet(fifth_drop, mir2::kSmDropItemSuccess)) {
+      return 1;
+    }
+    wait_item_change_ready();
     const auto capped_drop = drop_token(3005);
     if (!has_packet(capped_drop, mir2::kSmDropItemFail) ||
         has_packet(capped_drop, mir2::kSmDropItemSuccess)) {

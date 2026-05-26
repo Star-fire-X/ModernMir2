@@ -109,7 +109,7 @@ std::optional<std::int32_t> parse_i32(std::string_view text) {
 }
 
 std::optional<RunLoginPayload> decode_run_login(const LegacyPacket& packet) {
-  const auto decoded = legacy_decode_string(body_to_string(packet));
+  const auto decoded = legacy_decode_text(body_to_string(packet));
   if (!util::starts_with(decoded, "**")) {
     return std::nullopt;
   }

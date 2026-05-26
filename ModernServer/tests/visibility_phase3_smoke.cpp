@@ -142,8 +142,8 @@ int main() {
     const auto dispatch = walk(runtime, 91, 10, 10);
     assert(find_packet(dispatch, 91, mir2::kSmClearObjects).has_value());
     assert(find_packet(dispatch, 91, mir2::kSmChangeMap).has_value());
-    assert(find_packet(dispatch, 92, mir2::kSmDisappear).has_value());
-    assert(find_packet(dispatch, 93, mir2::kSmTurn).has_value());
+    assert(find_packet(dispatch, 92, mir2::kSmSpaceMoveHide).has_value());
+    assert(find_packet(dispatch, 93, mir2::kSmSpaceMoveShow).has_value());
   }
 
   {
@@ -161,12 +161,14 @@ int main() {
 
     mir2::RuntimeDispatch dispatch;
     assert(map.legacy_add_event_object(9001, 11, 10, 0, &dispatch));
+    assert(!map.legacy_add_event_object(9002, 12, 10, 0, false, &dispatch,
+                                        mir2::LegacyEventType::stone_mine));
     assert(map.legacy_player_tracks_event(1, 9001));
-    assert(dispatch.session_events.empty());
+    assert(find_packet(dispatch, 1, mir2::kSmShowEvent).has_value());
 
     map.legacy_remove_event_object(9001, 11, 10, &dispatch);
     assert(!map.legacy_player_tracks_event(1, 9001));
-    assert(dispatch.session_events.empty());
+    assert(find_packet(dispatch, 1, mir2::kSmHideEvent).has_value());
   }
 
   return 0;

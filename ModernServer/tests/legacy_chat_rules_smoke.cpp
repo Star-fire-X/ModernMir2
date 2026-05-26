@@ -95,7 +95,7 @@ std::vector<DecodedPacket> packets(const mir2::RuntimeDispatch& dispatch,
       continue;
     }
     result.push_back(DecodedPacket{decoded->message,
-                                   mir2::legacy_decode_string(decoded->body)});
+                                   mir2::legacy_decode_text(decoded->body)});
   }
   return result;
 }
@@ -129,7 +129,7 @@ bool has_text(const mir2::RuntimeDispatch& dispatch, std::uint64_t session_id,
       continue;
     }
     const auto decoded = mir2::decode_legacy_game_packet(event.packet);
-    if (decoded.has_value() && mir2::legacy_decode_string(decoded->body) == text) {
+    if (decoded.has_value() && mir2::legacy_decode_text(decoded->body) == text) {
       return true;
     }
   }

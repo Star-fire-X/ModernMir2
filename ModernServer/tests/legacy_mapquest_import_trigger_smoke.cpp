@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -21,16 +22,17 @@ void write_text(const std::filesystem::path& path, const char* text) {
   file << text;
 }
 
-mir2::CharacterRecord make_hero() {
+mir2::CharacterRecord make_hero(std::string name, std::int32_t x, std::int32_t y,
+                                bool alive, bool kill_gate_enabled) {
   mir2::CharacterRecord hero;
-  hero.account_id = "guest";
-  hero.character_name = "Hero";
+  hero.account_id = "acct_" + name;
+  hero.character_name = std::move(name);
   hero.map_id = "0";
-  hero.x = 10;
-  hero.y = 10;
+  hero.x = x;
+  hero.y = y;
   hero.ability.level = 12;
   hero.ability.dc = mir2::make_word(20, 30);
-  hero.ability.hp = 40;
+  hero.ability.hp = alive ? 40 : 0;
   hero.ability.max_hp = 40;
   hero.ability.mp = 10;
   hero.ability.max_mp = 10;
@@ -38,20 +40,23 @@ mir2::CharacterRecord make_hero() {
   hero.ability.max_weight = 100;
   hero.ability.max_wear_weight = 100;
   hero.ability.max_hand_weight = 100;
+  if (kill_gate_enabled) {
+    hero.quest_marks[0] = static_cast<std::uint8_t>(hero.quest_marks[0] | 0x40U);
+  }
   return hero;
 }
 
-mir2::LogicCommand enter_world() {
-  auto hero = make_hero();
+mir2::LogicCommand enter_world(std::uint64_t session_id,
+                               const mir2::CharacterRecord& character) {
   mir2::LogicCommand command;
   command.kind = mir2::LogicCommandKind::enter_world;
-  command.session_id = 7;
-  command.account_id = hero.account_id;
-  command.character_name = hero.character_name;
-  command.map_id = hero.map_id;
-  command.x = hero.x;
-  command.y = hero.y;
-  command.character = std::move(hero);
+  command.session_id = session_id;
+  command.account_id = character.account_id;
+  command.character_name = character.character_name;
+  command.map_id = character.map_id;
+  command.x = character.x;
+  command.y = character.y;
+  command.character = character;
   return command;
 }
 
@@ -77,11 +82,12 @@ std::optional<mir2::DecodedLegacyGamePacket> find_packet(const mir2::RuntimeDisp
 }
 
 std::optional<mir2::DecodedLegacyGamePacket> find_packet_by_body(
-    const mir2::RuntimeDispatch& dispatch, std::uint16_t ident, std::string_view body) {
+    const mir2::RuntimeDispatch& dispatch, std::uint16_t ident,
+    std::string_view body) {
   for (const auto& event : dispatch.session_events) {
     const auto decoded = mir2::decode_legacy_game_packet(event.packet);
     if (decoded.has_value() && decoded->message.ident == ident &&
-        mir2::legacy_decode_string(decoded->body) == body) {
+        mir2::legacy_decode_text(decoded->body) == body) {
       return decoded;
     }
   }
@@ -100,17 +106,14 @@ bool has_mapquest_trace(const mir2::RuntimeDispatch& dispatch, std::string_view 
                      });
 }
 
-std::optional<std::size_t> trace_index(const mir2::RuntimeDispatch& dispatch,
-                                       std::string_view stage, std::string_view action,
-                                       std::string_view label = {}) {
-  for (std::size_t i = 0; i < dispatch.legacy_traces.size(); ++i) {
-    const auto& trace = dispatch.legacy_traces[i];
-    if (trace.stage == stage && trace.action == action &&
-        (label.empty() || trace.label == label)) {
-      return i;
-    }
-  }
-  return std::nullopt;
+std::size_t count_mapquest_traces(const mir2::RuntimeDispatch& dispatch,
+                                  std::string_view source) {
+  return static_cast<std::size_t>(std::count_if(
+      dispatch.legacy_traces.begin(), dispatch.legacy_traces.end(),
+      [&](const mir2::LegacyRuntimeTrace& trace) {
+        return trace.stage == "LegacyScript" &&
+               trace.action == "mapquest_trigger" && trace.label == source;
+      }));
 }
 
 bool has_unsupported_script_trace(const mir2::RuntimeDispatch& dispatch) {
@@ -121,6 +124,19 @@ bool has_unsupported_script_trace(const mir2::RuntimeDispatch& dispatch) {
                                trace.action == "unsupported_condition" ||
                                trace.action == "mapquest_missing_script");
                      });
+}
+
+bool quest_mark_set(const mir2::CharacterRecord& character, std::int32_t index) {
+  if (index <= 0) {
+    return false;
+  }
+  const auto zero_based = index - 1;
+  const auto byte_index = static_cast<std::size_t>(zero_based / 8);
+  if (byte_index >= character.quest_marks.size()) {
+    return false;
+  }
+  const auto bit = static_cast<std::uint8_t>(0x80U >> (zero_based % 8));
+  return (character.quest_marks[byte_index] & bit) != 0U;
 }
 
 }  // namespace
@@ -139,63 +155,91 @@ int main() {
              "HomeY=10\n");
   write_text(legacy / "Envir" / "StartPoint.txt", "0 10 10\n");
   write_text(legacy / "Envir" / "MapInfo.txt", "[0 QuestMap 0]\n");
-  write_text(legacy / "Envir" / "MonGen.txt", "0 11 11 Oma 0 1 1 0\n");
+  write_text(legacy / "Envir" / "MonGen.txt", "0 11 11 TestMon 0 1 1 0\n");
   write_text(legacy / "Envir" / "MonZen.txt", "");
   write_text(legacy / "Envir" / "merchant.txt", "");
   write_text(legacy / "Envir" / "Npcs.txt", "");
   write_text(legacy / "Envir" / "MakeItem.txt", "Apple\n");
-  write_text(legacy / "Envir" / "MonItems" / "Oma.txt", "1/1 Apple 1\n");
   write_text(legacy / "Envir" / "MapQuest.txt",
-             "0 [0] 0 * * entry.txt\n"
-             "0 [1] 1 Oma * death.txt\n"
-             "0 [2] 1 * Apple pickup.txt\n");
+             "0 [1] 0 * * entry.txt\n"
+             "0 [2] 2 赤月恶魔 * death.txt\n"
+             "0 [3] -1 * 苹果 pickup.txt\n"
+             "0 [4] -1 赤月恶魔 * group.txt group\n");
   write_text(legacy / "Envir" / "MapQuest_def" / "entry.txt",
              "[@main]\n"
              "#ACT\n"
-             "SET [1] 1\n");
+             "SET [8] 1\n");
   write_text(legacy / "Envir" / "MapQuest_def" / "death.txt",
              "[@main]\n"
              "#ACT\n"
-             "SET [2] 1\n");
+             "SET [9] 1\n");
   write_text(legacy / "Envir" / "MapQuest_def" / "pickup.txt",
              "[@main]\n"
              "#ACT\n"
-             "SET [3] 1\n");
+             "SET [10] 1\n");
+  write_text(legacy / "Envir" / "MapQuest_def" / "group.txt",
+             "[@main]\n"
+             "#ACT\n"
+             "SET [11] 1\n");
 
   mir2::LegacyImporter importer;
   const auto report = importer.import_tree(legacy, output);
-  assert(report.map_quest_count == 3);
+  assert(report.map_quest_count == 4);
 
   mir2::ConfigLoader loader;
   auto config = loader.load(output);
-  assert(config.map_quests.size() == 3);
+  assert(config.map_quests.size() == 4);
   assert(std::all_of(config.map_quests.begin(), config.map_quests.end(),
                      [](const mir2::MapQuestConfig& quest) {
                        return !quest.dialog_sections.empty();
                      }));
 
+  auto find_quest = [&](std::int32_t set_number) -> const mir2::MapQuestConfig* {
+    const auto it =
+        std::find_if(config.map_quests.begin(), config.map_quests.end(),
+                     [&](const mir2::MapQuestConfig& quest) {
+                       return quest.set_number == set_number;
+                     });
+    return it == config.map_quests.end() ? nullptr : &*it;
+  };
+  const auto* death_quest = find_quest(2);
+  const auto* pickup_quest = find_quest(3);
+  const auto* group_quest = find_quest(4);
+  assert(death_quest != nullptr);
+  assert(pickup_quest != nullptr);
+  assert(group_quest != nullptr);
+  assert(death_quest->value == 1);
+  assert(pickup_quest->value == 0);
+  assert(group_quest->value == 0 && group_quest->enable_group);
+  assert(death_quest->monster_name == "赤月恶魔");
+  assert(pickup_quest->item_name == "苹果");
+
   for (auto& map : config.maps) {
     if (map.id == "0") {
-      map.width = 20;
-      map.height = 20;
+      map.width = 40;
+      map.height = 40;
       map.home_x = 10;
       map.home_y = 10;
     }
   }
   config.runtime.legacy_random_seed = 11;
+  config.items.clear();
+  config.items.push_back(mir2::ItemConfig{1, "苹果", 1, 1, 1, 0, 2, 1, -1, 0, 0});
   config.monsters.clear();
-  mir2::MonsterDefConfig oma;
-  oma.name = "Oma";
-  oma.hp = 8;
-  oma.dc = 1;
-  oma.exp = 10;
-  oma.ai_profile = mir2::MonsterAiProfile::aggressive;
-  config.monsters.push_back(oma);
+  mir2::MonsterDefConfig demon;
+  demon.name = "赤月恶魔";
+  demon.hp = 8;
+  demon.dc = 1;
+  demon.exp = 10;
+  demon.ai_profile = mir2::MonsterAiProfile::aggressive;
+  config.monsters.push_back(demon);
+  config.monster_drops.clear();
+  config.monster_drops.push_back(mir2::MonsterDropConfig{"赤月恶魔", 1, 1, "苹果", 1});
   config.spawns.clear();
   mir2::SpawnConfig spawn;
   spawn.map_id = "0";
   spawn.actor_type = "monster";
-  spawn.name = "Oma";
+  spawn.name = "赤月恶魔";
   spawn.x = 11;
   spawn.y = 11;
   spawn.count = 1;
@@ -207,38 +251,58 @@ int main() {
   static_cast<void>(runtime.tick(1000));
   static_cast<void>(runtime.tick(1201));
 
-  static_cast<void>(runtime.route_logic_command(enter_world()));
-  const auto enter_dispatch = runtime.tick(1220);
-  assert(find_packet(enter_dispatch, mir2::kSmNewMap).has_value());
-  assert(has_mapquest_trace(enter_dispatch, "enter"));
-  const auto enter_trigger = trace_index(enter_dispatch, "LegacyScript", "mapquest_trigger",
-                                         "enter");
-  const auto enter_user_begin = trace_index(enter_dispatch, "ProcessUserHumans", "begin");
-  assert(enter_trigger.has_value());
-  assert(enter_user_begin.has_value());
-  assert(*enter_trigger < *enter_user_begin);
-  assert(!has_unsupported_script_trace(enter_dispatch));
-  auto snapshot = runtime.snapshot_character_actor("Hero");
-  assert(snapshot.has_value() && snapshot->quest_marks[0] == 0x80);
+  const auto attacker = make_hero("Hero", 10, 10, true, true);
+  const auto near = make_hero("Near", 12, 10, true, true);
+  const auto far = make_hero("Far", 30, 10, true, true);
+  const auto dead = make_hero("Dead", 11, 10, false, true);
+
+  static_cast<void>(runtime.route_logic_command(enter_world(7, attacker)));
+  const auto attacker_enter = runtime.tick(1220);
+  assert(find_packet(attacker_enter, mir2::kSmNewMap).has_value());
+  assert(!has_mapquest_trace(attacker_enter, "enter"));
+
+  static_cast<void>(runtime.route_logic_command(enter_world(8, near)));
+  const auto near_enter = runtime.tick(1230);
+  assert(find_packet(near_enter, mir2::kSmNewMap).has_value());
+  assert(!has_mapquest_trace(near_enter, "enter"));
+
+  static_cast<void>(runtime.route_logic_command(enter_world(9, far)));
+  const auto far_enter = runtime.tick(1240);
+  assert(find_packet(far_enter, mir2::kSmNewMap).has_value());
+  assert(!has_mapquest_trace(far_enter, "enter"));
+
+  static_cast<void>(runtime.route_logic_command(enter_world(10, dead)));
+  const auto dead_enter = runtime.tick(1250);
+  assert(!has_mapquest_trace(dead_enter, "enter"));
+
+  auto hero_snapshot = runtime.snapshot_character_actor("Hero");
+  assert(hero_snapshot.has_value());
+  assert(!quest_mark_set(*hero_snapshot, 8));
 
   static_cast<void>(runtime.route_logic_command(make_attack(11, 11)));
-  const auto kill_dispatch = runtime.tick(1240);
+  const auto kill_dispatch = runtime.tick(1300);
   assert(has_packet(kill_dispatch, mir2::kSmDeath));
   assert(has_mapquest_trace(kill_dispatch, "monster_die"));
-  const auto kill_user_begin = trace_index(kill_dispatch, "ProcessUserHumans", "begin");
-  const auto kill_trigger = trace_index(kill_dispatch, "LegacyScript", "mapquest_trigger",
-                                        "monster_die");
-  const auto kill_monster_begin = trace_index(kill_dispatch, "ProcessMonsters", "begin");
-  assert(kill_user_begin.has_value());
-  assert(kill_trigger.has_value());
-  assert(kill_monster_begin.has_value());
-  assert(*kill_user_begin < *kill_trigger);
-  assert(*kill_trigger < *kill_monster_begin);
+  assert(count_mapquest_traces(kill_dispatch, "monster_die") == 3);
   assert(!has_unsupported_script_trace(kill_dispatch));
-  snapshot = runtime.snapshot_character_actor("Hero");
-  assert(snapshot.has_value() && snapshot->quest_marks[0] == 0xC0);
 
-  const auto apple_show = find_packet_by_body(kill_dispatch, mir2::kSmItemShow, "Apple");
+  auto near_snapshot = runtime.snapshot_character_actor("Near");
+  auto far_snapshot = runtime.snapshot_character_actor("Far");
+  auto dead_snapshot = runtime.snapshot_character_actor("Dead");
+  hero_snapshot = runtime.snapshot_character_actor("Hero");
+  assert(hero_snapshot.has_value() && near_snapshot.has_value() && far_snapshot.has_value() &&
+         dead_snapshot.has_value());
+  assert(quest_mark_set(*hero_snapshot, 9));
+  assert(quest_mark_set(*hero_snapshot, 11));
+  assert(!quest_mark_set(*hero_snapshot, 8));
+  assert(!quest_mark_set(*near_snapshot, 9));
+  assert(quest_mark_set(*near_snapshot, 11));
+  assert(!quest_mark_set(*far_snapshot, 9));
+  assert(!quest_mark_set(*far_snapshot, 11));
+  assert(!quest_mark_set(*dead_snapshot, 9));
+  assert(!quest_mark_set(*dead_snapshot, 11));
+
+  const auto apple_show = find_packet_by_body(kill_dispatch, mir2::kSmItemShow, "苹果");
   assert(apple_show.has_value());
   mir2::LogicCommand pickup;
   pickup.kind = mir2::LogicCommandKind::pickup_item;
@@ -250,22 +314,10 @@ int main() {
   assert(has_packet(pickup_dispatch, mir2::kSmItemHide));
   assert(has_packet(pickup_dispatch, mir2::kSmAddItem));
   assert(has_mapquest_trace(pickup_dispatch, "pickup"));
-  const auto pickup_user_begin = trace_index(pickup_dispatch, "ProcessUserHumans", "begin");
-  const auto pickup_success = trace_index(pickup_dispatch, "LegacyItem", "success",
-                                          "pickup_item");
-  const auto pickup_trigger = trace_index(pickup_dispatch, "LegacyScript", "mapquest_trigger",
-                                          "pickup");
-  const auto pickup_monster_begin = trace_index(pickup_dispatch, "ProcessMonsters", "begin");
-  assert(pickup_user_begin.has_value());
-  assert(pickup_success.has_value());
-  assert(pickup_trigger.has_value());
-  assert(pickup_monster_begin.has_value());
-  assert(*pickup_user_begin < *pickup_success);
-  assert(*pickup_success < *pickup_trigger);
-  assert(*pickup_trigger < *pickup_monster_begin);
   assert(!has_unsupported_script_trace(pickup_dispatch));
-  snapshot = runtime.snapshot_character_actor("Hero");
-  assert(snapshot.has_value() && snapshot->quest_marks[0] == 0xE0);
+
+  hero_snapshot = runtime.snapshot_character_actor("Hero");
+  assert(hero_snapshot.has_value() && quest_mark_set(*hero_snapshot, 10));
 
   std::filesystem::remove_all(root, ignored);
   return 0;

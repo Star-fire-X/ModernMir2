@@ -65,14 +65,26 @@ int main() {
   assert(moved_object != nullptr && moved_object->a_time_ms == 777);
 
   assert(!env.add_item_object(1, 1, 100, {}, 200).ok);
+  assert(!env.add_placeholder_object(
+      1, 1, mir2::LegacyMapObjectShape::event_object, 900, 200,
+      mir2::LegacyMapPlacementPolicy::passable_only));
+  assert(!env.add_placeholder_object(
+      0, 1, mir2::LegacyMapObjectShape::event_object, 901, 200,
+      mir2::LegacyMapPlacementPolicy::blocked_only));
+  assert(env.add_placeholder_object(
+      1, 1, mir2::LegacyMapObjectShape::event_object, 902, 200,
+      mir2::LegacyMapPlacementPolicy::blocked_only));
+  assert(env.add_placeholder_object(
+      0, 1, mir2::LegacyMapObjectShape::event_object, 903, 200,
+      mir2::LegacyMapPlacementPolicy::passable_only));
   assert(env.add_item_object(0, 1, 100, {}, 201).ok);
   assert(env.add_item_object(0, 1, 101, {}, 202).ok);
   assert(env.add_item_object(0, 1, 102, {}, 203).ok);
   assert(env.add_item_object(0, 1, 103, {}, 204).ok);
   assert(!env.add_item_object(0, 1, 104, {}, 205).ok);
-  assert(env.first_item_object_id(0, 1) == 100);
-  assert(env.delete_from_map(0, 1, mir2::LegacyMapObjectShape::item_object, 100) == 1);
-  assert(env.first_item_object_id(0, 1) == 101);
+  assert(env.first_item_object_id(0, 1) == 103);
+  assert(env.delete_from_map(0, 1, mir2::LegacyMapObjectShape::item_object, 103) == 1);
+  assert(env.first_item_object_id(0, 1) == 102);
   assert(env.delete_from_map(9, 9, mir2::LegacyMapObjectShape::item_object, 101) == 0);
   assert(env.delete_from_map(2, 2, mir2::LegacyMapObjectShape::item_object, 101) == -2);
 
@@ -82,7 +94,8 @@ int main() {
   assert(first_gold.ok && !first_gold.merged && first_gold.object_id == 1);
   auto merged_gold =
       gold_env.add_item_object(2, 2, 2, mir2::LegacyMapItemState{true, 300}, 301);
-  assert(merged_gold.ok && merged_gold.merged && merged_gold.object_id == 1);
+  assert(merged_gold.ok && merged_gold.merged && merged_gold.object_id == 1 &&
+         merged_gold.merged_gold_amount == 500);
   const auto* gold_cell = gold_env.cell(2, 2);
   assert(gold_cell != nullptr && gold_cell->obj_list.size() == 1);
   assert(gold_cell->obj_list.front().item.gold_amount == 500);

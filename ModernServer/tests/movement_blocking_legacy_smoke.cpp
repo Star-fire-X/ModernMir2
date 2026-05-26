@@ -168,5 +168,43 @@ int main() {
   move(runtime, 12, mir2::LogicCommandKind::run, 3, 8);
   const auto low_hp = snapshot(runtime, "LowHp");
   assert(low_hp.x == 1 && low_hp.y == 8);
+
+  mir2::HostConfig npc_blocking_config;
+  npc_blocking_config.budgets.tick_ms = 20;
+  npc_blocking_config.maps.push_back(
+      mir2::MapConfig{"0", "NpcBlocking", {}, 0, 0, 12, 12});
+  {
+    mir2::NpcConfig npc;
+    npc.id = "guide";
+    npc.map_id = "0";
+    npc.name = "Guide";
+    npc.x = 6;
+    npc.y = 5;
+    npc.service = "none";
+    npc_blocking_config.npcs.push_back(std::move(npc));
+  }
+  {
+    mir2::NpcConfig merchant;
+    merchant.id = "trader";
+    merchant.map_id = "0";
+    merchant.name = "Trader";
+    merchant.x = 5;
+    merchant.y = 4;
+    merchant.service = "merchant";
+    npc_blocking_config.npcs.push_back(std::move(merchant));
+  }
+
+  mir2::LogicRuntime npc_runtime(npc_blocking_config);
+  npc_runtime.initialize();
+  enter(npc_runtime, 20, make_character("Walker", 5, 5));
+  advance(npc_runtime);
+
+  move(npc_runtime, 20, mir2::LogicCommandKind::walk, 6, 5);
+  auto walker = snapshot(npc_runtime, "Walker");
+  assert(walker.x == 5 && walker.y == 5);
+
+  move(npc_runtime, 20, mir2::LogicCommandKind::walk, 5, 4);
+  walker = snapshot(npc_runtime, "Walker");
+  assert(walker.x == 5 && walker.y == 5);
   return 0;
 }

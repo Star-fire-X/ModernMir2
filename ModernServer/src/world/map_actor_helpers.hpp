@@ -4928,19 +4928,23 @@ bool is_safe_zone(const MapConfig& map_config, std::int32_t x, std::int32_t y) {
   if (map_config.law_full) {
     return true;
   }
+  if (std::any_of(map_config.badman_zones.begin(), map_config.badman_zones.end(),
+                  [&](const MapZoneConfig& zone) { return point_in_zone(zone, x, y); })) {
+    return true;
+  }
   return std::any_of(map_config.safe_zones.begin(), map_config.safe_zones.end(),
                      [&](const MapZoneConfig& zone) { return point_in_zone(zone, x, y); });
 }
 
 std::int32_t area_state_mask(const MapConfig& map_config, std::int32_t x, std::int32_t y) {
   std::int32_t mask = 0;
-  if (is_safe_zone(map_config, x, y)) {
+  if (map_config.law_full) {
     mask |= kAreaSafe;
   }
   if (map_config.fight_zone || map_config.fight3_zone) {
     mask |= kAreaFight;
   }
-  if (map_config.allow_pk && !map_config.fight_zone && !map_config.fight3_zone) {
+  if (map_config.fight3_zone) {
     mask |= kAreaFreePk;
   }
   return mask;

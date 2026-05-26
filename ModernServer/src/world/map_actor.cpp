@@ -1375,8 +1375,12 @@ bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, s
                                        std::uint64_t now_ms, bool blocks_walk,
                                        RuntimeDispatch* dispatch,
                                        LegacyEventType type) {
+  const auto placement_policy = type == LegacyEventType::stone_mine
+                                    ? LegacyMapPlacementPolicy::blocked_only
+                                    : LegacyMapPlacementPolicy::passable_only;
   const auto added = environment_.add_placeholder_object(x, y, LegacyMapObjectShape::event_object,
-                                                        event_id, now_ms, blocks_walk);
+                                                        event_id, now_ms, placement_policy,
+                                                        blocks_walk);
   if (added) {
     event_objects_[event_id] = {x, y};
     event_object_types_[event_id] = type;
@@ -1389,7 +1393,8 @@ bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, s
 
 bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, std::int32_t y,
                                        std::uint64_t now_ms, RuntimeDispatch* dispatch) {
-  return legacy_add_event_object(event_id, x, y, now_ms, false, dispatch);
+  return legacy_add_event_object(event_id, x, y, now_ms, false, dispatch,
+                                 LegacyEventType::pile_stones);
 }
 
 void MapActor::legacy_remove_event_object(std::uint64_t event_id, std::int32_t x,
@@ -1564,24 +1569,10 @@ RuntimeDispatch MapActor::legacy_space_move_player(
     context.items = &item_configs_;
     context.magics = &magic_configs_;
     player->on_mail(move_mail, context);
-    force_refresh_after_same_map_transfer(*player, old_x, old_y, dispatch, now_ms);
-    if (show2) {
-      bool sent_self = false;
-      for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
-        if (!is_legacy_visible_to(watcher, *player)) {
-          return;
-        }
-        if (watcher.session_id() == player->session_id()) {
-          sent_self = true;
-        }
-        queue_packet(dispatch, watcher.session_id(),
-                     make_space_move_show2_packet(watcher.session_id(), *player));
-      });
-      if (!sent_self) {
-        queue_packet(dispatch, player->session_id(),
-                     make_space_move_show2_packet(player->session_id(), *player));
-      }
-    }
+    force_refresh_after_same_map_transfer(
+        *player, old_x, old_y, dispatch, now_ms,
+        show2 ? kSmSpaceMoveHide2 : kSmSpaceMoveHide,
+        show2 ? kSmSpaceMoveShow2 : kSmSpaceMoveShow);
     recall_owned_slaves_to_master(*player, dispatch, current_tick, now_ms);
     dispatch.audit_events.push_back(AuditEvent{
         "world.space_move", snapshot.account_id + ":" + snapshot.character_name, config_.id});
@@ -1604,6 +1595,20 @@ RuntimeDispatch MapActor::legacy_space_move_player(
   transfer.legacy_buffs = player->legacy_buffs_for_transfer(current_tick);
   transfer.legacy_name_color = player->legacy_name_color();
   transfer.legacy_space_move_show2 = show2;
+
+  if (show2) {
+    queue_actor_origin_packet(objects_, dispatch, *player, true,
+                              [&](const Player& watcher) {
+      queue_packet(dispatch, watcher.session_id(),
+                   make_space_move_hide2_packet(watcher.session_id(), *player));
+    });
+  } else {
+    queue_actor_origin_packet(objects_, dispatch, *player, true,
+                              [&](const Player& watcher) {
+      queue_packet(dispatch, watcher.session_id(),
+                   make_space_move_hide_packet(watcher.session_id(), *player));
+    });
+  }
 
   queue_packet(dispatch, player->session_id(), make_clear_objects_packet(player->session_id()));
   queue_packet(dispatch, player->session_id(),
@@ -2215,7 +2220,7 @@ bool MapActor::legacy_player_tracks_event(std::uint64_t actor_id, std::uint64_t 
 }
 
 bool MapActor::legacy_can_spawn_monster(std::int32_t x, std::int32_t y) const {
-  return environment_.can_walk(x, y, false);
+  return environment_.can_walk(x, y, true);
 }
 
 #include "world/map_actor_visibility.hpp"

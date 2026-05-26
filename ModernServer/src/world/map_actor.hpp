@@ -107,7 +107,7 @@ class MapActor {
                                              std::int32_t y, std::uint64_t now_ms,
                                              bool blocks_walk = false,
                                              RuntimeDispatch* dispatch = nullptr,
-                                             LegacyEventType type = LegacyEventType::stone_mine);
+                                             LegacyEventType type = LegacyEventType::pile_stones);
   [[nodiscard]] bool legacy_add_event_object(std::uint64_t event_id, std::int32_t x,
                                              std::int32_t y, std::uint64_t now_ms,
                                              RuntimeDispatch* dispatch);
@@ -332,7 +332,9 @@ class MapActor {
                                           RuntimeDispatch& dispatch);
   void force_refresh_after_same_map_transfer(Player& player, std::int32_t old_x,
                                              std::int32_t old_y, RuntimeDispatch& dispatch,
-                                             std::uint64_t now_ms);
+                                             std::uint64_t now_ms,
+                                             std::uint16_t space_move_hide_ident = kSmSpaceMoveHide,
+                                             std::uint16_t space_move_show_ident = kSmSpaceMoveShow);
   void remove_actor_from_visibility(std::uint64_t actor_id, RuntimeDispatch& dispatch);
   void remove_item_from_visibility(std::uint64_t item_id, RuntimeDispatch& dispatch);
   [[nodiscard]] std::vector<std::uint64_t> ordered_player_ids() const;

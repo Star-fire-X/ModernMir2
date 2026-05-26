@@ -22,6 +22,11 @@ enum class LegacyMapObjectShape : std::uint8_t {
   event_object
 };
 
+enum class LegacyMapPlacementPolicy : std::uint8_t {
+  passable_only,
+  blocked_only
+};
+
 struct LegacyMovingObjectState {
   bool ghost{false};
   bool hold_place{true};
@@ -56,6 +61,7 @@ struct LegacyMapAddResult {
   bool ok{false};
   bool merged{false};
   std::uint64_t object_id{0};
+  std::int32_t merged_gold_amount{0};
 };
 
 class LegacyMapEnvironment {
@@ -96,6 +102,8 @@ class LegacyMapEnvironment {
                                             LegacyMapObjectShape shape,
                                             std::uint64_t object_id,
                                             std::uint64_t now_ms,
+                                            LegacyMapPlacementPolicy placement_policy =
+                                                LegacyMapPlacementPolicy::passable_only,
                                             bool blocks_walk = false);
   [[nodiscard]] bool add_gate_object(std::int32_t x, std::int32_t y,
                                      std::uint64_t object_id,
