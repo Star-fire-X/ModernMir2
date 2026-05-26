@@ -118,6 +118,26 @@ void check_runtime_sequence(const std::filesystem::path& temp_root,
 void check_default_module_registration(const std::filesystem::path& temp_root,
                                        const std::shared_ptr<spdlog::logger>& logger) {
   {
+    mir2::HostConfig config;
+    config.runtime.data_dir = temp_root / "default_gateways" / "data";
+    config.runtime.log_dir = temp_root / "default_gateways" / "logs";
+    config.runtime.status_file = temp_root / "default_gateways" / "status.json";
+    config.ports.client_v1_login_gateway.address = "127.0.0.1";
+    config.ports.client_v1_login_gateway.port = 5626;
+    config.ports.client_v1_game_gateway.address = "127.0.0.1";
+    config.ports.client_v1_game_gateway.port = 7126;
+    mir2::HostRuntime runtime(temp_root, std::move(config), logger);
+    mir2::register_default_modules(runtime);
+    runtime.write_status_snapshot();
+
+    const auto status = read_text(temp_root / "default_gateways" / "status.json");
+    assert(status.find("\"login_gateway\":") == std::string::npos);
+    assert(status.find("\"game_gateway\":") == std::string::npos);
+    assert(status.find("\"client_v1_login_gateway\":") != std::string::npos);
+    assert(status.find("\"client_v1_game_gateway\":") != std::string::npos);
+  }
+
+  {
     auto config = make_config(temp_root / "all_gateways");
     config.runtime.enable_legacy_gateways = true;
     config.runtime.enable_client_v1_gateways = true;
