@@ -97,7 +97,8 @@ mir2::LogicCommand make_item_command(mir2::LogicCommandKind kind, std::uint64_t 
 
 bool check_item_packet(const mir2::DecodedLegacyGamePacket& packet, std::uint16_t ident,
                        std::uint64_t actor_id, std::int32_t make_index,
-                       std::size_t expected_encoded_size) {
+                       std::string_view name, std::uint8_t std_mode, std::uint16_t dura,
+                       std::uint16_t dura_max, std::size_t expected_encoded_size) {
   if (packet.message.ident != ident ||
       packet.message.recog != static_cast<std::int32_t>(actor_id) ||
       packet.message.param != 0 || packet.message.tag != 0 || packet.message.series != 1 ||
@@ -105,7 +106,9 @@ bool check_item_packet(const mir2::DecodedLegacyGamePacket& packet, std::uint16_
     return false;
   }
   const auto item = decode_client_item(packet.body);
-  return item.has_value() && item->make_index == make_index && sizeof(*item) == 84;
+  return item.has_value() && item->make_index == make_index &&
+         mir2::to_string(item->item.name) == name && item->item.std_mode == std_mode &&
+         item->dura == dura && item->dura_max == dura_max && sizeof(*item) == 84;
 }
 
 bool check_abi() {
@@ -181,7 +184,9 @@ int main() {
   const auto bag_items = decode_bag_items(bag_packet->body, expected_encoded_size);
   if (bag_items.size() != 2 || bag_items[0].make_index != 1001 ||
       bag_items[1].make_index != 1002 || mir2::to_string(bag_items[0].item.name) != "Wooden Sword" ||
-      bag_items[0].item.std_mode != 5 || bag_items[0].item.price != 100) {
+      bag_items[0].item.std_mode != 5 || bag_items[0].item.price != 100 ||
+      bag_packet->body.size() != bag_packet->message.series * (expected_encoded_size + 1) ||
+      bag_packet->body.back() != '/') {
     return fail("bag packet body");
   }
 
@@ -190,7 +195,8 @@ int main() {
   const auto drop_dispatch = tick_player_due(runtime, now_ms);
   const auto del_packet = find_packet(drop_dispatch, mir2::kSmDelItem);
   if (!del_packet.has_value() ||
-      !check_item_packet(*del_packet, mir2::kSmDelItem, actor_id, 1001, expected_encoded_size)) {
+      !check_item_packet(*del_packet, mir2::kSmDelItem, actor_id, 1001, "Wooden Sword", 5, 600,
+                         1000, expected_encoded_size)) {
     return fail("del item packet");
   }
 
@@ -203,7 +209,8 @@ int main() {
   const auto pickup_dispatch = tick_player_due(runtime, now_ms);
   const auto add_packet = find_packet(pickup_dispatch, mir2::kSmAddItem);
   if (!add_packet.has_value() ||
-      !check_item_packet(*add_packet, mir2::kSmAddItem, actor_id, 1001, expected_encoded_size)) {
+      !check_item_packet(*add_packet, mir2::kSmAddItem, actor_id, 1001, "Wooden Sword", 5, 600,
+                         1000, expected_encoded_size)) {
     return fail("add item packet");
   }
 
@@ -212,7 +219,8 @@ int main() {
   const auto take_on_dispatch = tick_player_due(runtime, now_ms);
   const auto update_packet = find_packet(take_on_dispatch, mir2::kSmUpdateItem);
   if (!update_packet.has_value() || !check_item_packet(*update_packet, mir2::kSmUpdateItem,
-                                                       actor_id, 1001, expected_encoded_size)) {
+                                                       actor_id, 1001, "Wooden Sword", 5, 600,
+                                                       1000, expected_encoded_size)) {
     return fail("update item packet");
   }
 
