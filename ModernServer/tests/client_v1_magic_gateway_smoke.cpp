@@ -293,7 +293,7 @@ int main() {
   const auto* show_upsert =
       std::get_if<mir2::client_v1::ActorUpsert>(&messages.front());
   assert(show_upsert != nullptr);
-  assert(show_upsert->actor.id == 77);
+  assert(show_upsert->actor.actor_id == 77);
   assert(show_upsert->actor.x == 12 && show_upsert->actor.y == 13);
   assert(show_upsert->actor.dir == 2);
   assert(show_upsert->actor.feature == 0x1234);
@@ -309,7 +309,7 @@ int main() {
   assert(messages.size() == 1);
   show_upsert = std::get_if<mir2::client_v1::ActorUpsert>(&messages.front());
   assert(show_upsert != nullptr);
-  assert(show_upsert->actor.id == 88);
+  assert(show_upsert->actor.actor_id == 88);
   assert(show_upsert->actor.x == 14 && show_upsert->actor.y == 15);
   assert(show_upsert->actor.feature == 3);
 
