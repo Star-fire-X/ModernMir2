@@ -17,7 +17,7 @@ struct RuntimeConfig {
   std::filesystem::path status_file{"runtime/status.json"};
   std::size_t default_queue_capacity{4096};
   std::size_t io_threads{2};
-  bool enable_legacy_gateways{true};
+  bool enable_legacy_gateways{false};
   bool enable_client_v1_gateways{true};
   bool legacy_approval_mode{false};
   std::size_t backpressure_threshold{3072};
