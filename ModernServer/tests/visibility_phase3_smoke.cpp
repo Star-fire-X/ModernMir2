@@ -161,6 +161,8 @@ int main() {
 
     mir2::RuntimeDispatch dispatch;
     assert(map.legacy_add_event_object(9001, 11, 10, 0, &dispatch));
+    assert(!map.legacy_add_event_object(9002, 12, 10, 0, false, &dispatch,
+                                        mir2::LegacyEventType::stone_mine));
     assert(map.legacy_player_tracks_event(1, 9001));
     assert(dispatch.session_events.empty());
 

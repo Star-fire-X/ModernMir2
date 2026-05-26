@@ -4,6 +4,8 @@
 #include <cstring>
 #include <vector>
 
+#include "util/legacy_text.hpp"
+
 namespace mir2 {
 
 namespace {
@@ -104,6 +106,14 @@ std::string legacy_decode_string(std::string_view encoded) {
     return {};
   }
   return std::string(reinterpret_cast<const char*>(decoded.data()));
+}
+
+std::string legacy_encode_text(std::string_view utf8_text) {
+  return legacy_encode_string(util::utf8_text_to_legacy(utf8_text));
+}
+
+std::string legacy_decode_text(std::string_view encoded_text) {
+  return util::legacy_text_to_utf8(legacy_decode_string(encoded_text));
 }
 
 std::string legacy_encode_buffer(const void* data, std::size_t size) {

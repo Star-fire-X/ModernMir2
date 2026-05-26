@@ -322,10 +322,12 @@ int main() {
   gbk_like.push_back(static_cast<char>(0xB0));
   gbk_like.push_back(static_cast<char>(0xA1));
   gbk_like += " hi";
+  const auto normalized_gbk_like =
+      mir2::legacy_decode_text(mir2::legacy_encode_string(gbk_like));
   post_legacy_packet(bus, alice_session_id,
                      make_text_packet(alice_session_id, mir2::kSmWhisper, 1234,
                                       mir2::make_word(252, 255), gbk_like));
-  if (!expect_chat_line(alice_reader, gbk_like, 252, 255)) {
+  if (!expect_chat_line(alice_reader, normalized_gbk_like, 252, 255)) {
     stop_services();
     return fail("gbk-like bytes");
   }

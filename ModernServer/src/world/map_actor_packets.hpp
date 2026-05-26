@@ -13,7 +13,7 @@ LegacyPacket make_turn_like_packet(std::uint64_t session_id, std::uint16_t ident
   const auto desc = make_char_desc(object);
   auto body = legacy_encode_buffer(&desc, sizeof(desc));
   if (include_name) {
-    body += legacy_encode_string(actor_name(object) + "/" + std::to_string(actor_name_color(object)));
+    body += legacy_encode_text(actor_name(object) + "/" + std::to_string(actor_name_color(object)));
   }
 
   return make_legacy_game_packet(
@@ -191,7 +191,7 @@ LegacyPacket make_new_map_packet(std::uint64_t session_id, const Player& player,
       make_default_message(kSmNewMap, static_cast<std::int32_t>(player.id()),
                            static_cast<std::uint16_t>(player.x()),
                            static_cast<std::uint16_t>(player.y()), 0),
-      legacy_encode_string(map_config.id));
+      legacy_encode_text(map_config.id));
 }
 
 LegacyPacket make_logon_packet(std::uint64_t session_id, const Player& player) {
@@ -216,7 +216,7 @@ LegacyPacket make_map_description_packet(std::uint64_t session_id, const MapConf
   const auto title = map_config.title.empty() ? map_config.id : map_config.title;
   return make_legacy_game_packet(session_id, 0, 0,
                                  make_default_message(kSmMapDescription, 0, 0, 0, 0),
-                                 legacy_encode_string(title));
+                                 legacy_encode_text(title));
 }
 
 LegacyPacket make_username_packet(std::uint64_t session_id, std::uint64_t actor_id,
@@ -224,7 +224,7 @@ LegacyPacket make_username_packet(std::uint64_t session_id, std::uint64_t actor_
   return make_legacy_game_packet(
       session_id, 0, 0,
       make_default_message(kSmUsername, static_cast<std::int32_t>(actor_id), color, 0, 0),
-      legacy_encode_string(std::move(user_name)));
+      legacy_encode_text(std::move(user_name)));
 }
 
 LegacyPacket make_ability_packet(std::uint64_t session_id, const CharacterRecord& character) {
@@ -323,7 +323,7 @@ LegacyPacket make_hear_packet(std::uint64_t session_id, std::uint64_t actor_id,
       session_id, 0, 0,
       make_default_message(kSmHear, static_cast<std::int32_t>(actor_id),
                            make_word(kDefaultChatColor, kDefaultChatShadow), 0, 0),
-      legacy_encode_string(message));
+      legacy_encode_text(message));
 }
 
 LegacyPacket make_legacy_chat_packet(std::uint64_t session_id,
@@ -362,7 +362,7 @@ LegacyPacket make_legacy_chat_packet(std::uint64_t session_id,
   return make_legacy_game_packet(
       session_id, 0, 0,
       make_default_message(ident, recog, color, 0, 1),
-      legacy_encode_string(message));
+      legacy_encode_text(message));
 }
 
 LegacyPacket make_system_notice_packet(std::uint64_t session_id, const std::string& message) {
@@ -437,7 +437,7 @@ LegacyPacket make_clear_objects_packet(std::uint64_t session_id) {
 LegacyPacket make_change_map_packet(std::uint64_t session_id, const std::string& map_id) {
   return make_legacy_game_packet(session_id, 0, 0,
                                  make_default_message(kSmChangeMap, 0, 0, 0, 0),
-                                 legacy_encode_string(map_id));
+                                 legacy_encode_text(map_id));
 }
 
 LegacyPacket make_spell_packet(
@@ -516,7 +516,7 @@ LegacyPacket make_item_show_packet(std::uint64_t session_id, const MapActor::Gro
       make_default_message(kSmItemShow, static_cast<std::int32_t>(item.id),
                            static_cast<std::uint16_t>(item.x), static_cast<std::uint16_t>(item.y),
                            static_cast<std::uint16_t>(std::clamp(item.looks, 0, 65535))),
-      legacy_encode_string(item.name));
+      legacy_encode_text(item.name));
 }
 
 LegacyPacket make_item_hide_packet(std::uint64_t session_id, const MapActor::GroundItem& item) {
@@ -531,7 +531,7 @@ LegacyPacket make_drop_result_packet(std::uint64_t session_id, bool ok, std::int
   return make_legacy_game_packet(
       session_id, 0, 0,
       make_default_message(ok ? kSmDropItemSuccess : kSmDropItemFail, make_index, 0, 0, 0),
-      legacy_encode_string(item_name));
+      legacy_encode_text(item_name));
 }
 
 LegacyPacket make_take_on_result_packet(std::uint64_t session_id, bool ok, std::int32_t feature) {
@@ -589,7 +589,7 @@ LegacyPacket make_gold_changed_packet(std::uint64_t session_id, std::int32_t gol
 LegacyPacket make_deal_menu_packet(std::uint64_t session_id, std::string_view peer_name) {
   return make_legacy_game_packet(session_id, 0, 0,
                                  make_default_message(kSmDealMenu, 0, 0, 0, 0),
-                                 legacy_encode_string(std::string(peer_name)));
+                                 legacy_encode_text(std::string(peer_name)));
 }
 
 LegacyPacket make_deal_simple_packet(std::uint64_t session_id, std::uint16_t ident) {
@@ -688,7 +688,7 @@ LegacyPacket make_send_goods_list_packet(
       session_id, 0, 0,
       make_default_message(kSmSendGoodsList, static_cast<std::int32_t>(merchant_actor_id),
                            static_cast<std::uint16_t>(entries.size()), 0, 0),
-      legacy_encode_string(body));
+      legacy_encode_text(body));
 }
 
 LegacyPacket make_merchant_say_packet(std::uint64_t session_id, std::uint64_t merchant_actor_id,
@@ -698,7 +698,7 @@ LegacyPacket make_merchant_say_packet(std::uint64_t session_id, std::uint64_t me
       session_id, 0, 0,
       make_default_message(kSmMerchantSay, static_cast<std::int32_t>(merchant_actor_id),
                            kDefaultMerchantFace, 0, 0),
-      legacy_encode_string(body));
+      legacy_encode_text(body));
 }
 
 LegacyPacket make_play_dice_packet(std::uint64_t session_id, std::uint64_t merchant_actor_id,
@@ -719,7 +719,7 @@ LegacyPacket make_play_dice_packet(std::uint64_t session_id, std::uint64_t merch
       make_default_message(kSmPlayDice, static_cast<std::int32_t>(merchant_actor_id),
                            static_cast<std::uint16_t>(std::clamp(dice_count, 0, 65535)),
                            0, 0),
-      legacy_encode_buffer(&body, sizeof(body)) + legacy_encode_string(target_label));
+      legacy_encode_buffer(&body, sizeof(body)) + legacy_encode_text(target_label));
 }
 
 LegacyPacket make_merchant_dlg_close_packet(std::uint64_t session_id) {
@@ -754,7 +754,7 @@ LegacyPacket make_send_detail_goods_list_packet(
       session_id, 0, 0,
       make_default_message(kSmSendDetailGoodsList, static_cast<std::int32_t>(merchant_actor_id),
                            count, static_cast<std::uint16_t>(std::clamp(top_line, 0, 65535)), 0),
-      legacy_encode_string(body));
+      legacy_encode_text(body));
 }
 
 LegacyPacket make_user_sell_result_packet(std::uint64_t session_id, bool ok, std::int32_t gold) {

@@ -1375,8 +1375,12 @@ bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, s
                                        std::uint64_t now_ms, bool blocks_walk,
                                        RuntimeDispatch* dispatch,
                                        LegacyEventType type) {
+  const auto placement_policy = type == LegacyEventType::stone_mine
+                                    ? LegacyMapPlacementPolicy::blocked_only
+                                    : LegacyMapPlacementPolicy::passable_only;
   const auto added = environment_.add_placeholder_object(x, y, LegacyMapObjectShape::event_object,
-                                                        event_id, now_ms, blocks_walk);
+                                                        event_id, now_ms, placement_policy,
+                                                        blocks_walk);
   if (added) {
     event_objects_[event_id] = {x, y};
     event_object_types_[event_id] = type;
@@ -1389,7 +1393,8 @@ bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, s
 
 bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, std::int32_t y,
                                        std::uint64_t now_ms, RuntimeDispatch* dispatch) {
-  return legacy_add_event_object(event_id, x, y, now_ms, false, dispatch);
+  return legacy_add_event_object(event_id, x, y, now_ms, false, dispatch,
+                                 LegacyEventType::pile_stones);
 }
 
 void MapActor::legacy_remove_event_object(std::uint64_t event_id, std::int32_t x,

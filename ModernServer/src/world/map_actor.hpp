@@ -107,7 +107,7 @@ class MapActor {
                                              std::int32_t y, std::uint64_t now_ms,
                                              bool blocks_walk = false,
                                              RuntimeDispatch* dispatch = nullptr,
-                                             LegacyEventType type = LegacyEventType::stone_mine);
+                                             LegacyEventType type = LegacyEventType::pile_stones);
   [[nodiscard]] bool legacy_add_event_object(std::uint64_t event_id, std::int32_t x,
                                              std::int32_t y, std::uint64_t now_ms,
                                              RuntimeDispatch* dispatch);

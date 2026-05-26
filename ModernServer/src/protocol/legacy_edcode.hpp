@@ -13,6 +13,8 @@ namespace mir2 {
 
 std::string legacy_encode_string(std::string_view text);
 std::string legacy_decode_string(std::string_view encoded);
+std::string legacy_encode_text(std::string_view utf8_text);
+std::string legacy_decode_text(std::string_view encoded_text);
 std::string legacy_encode_buffer(const void* data, std::size_t size);
 bool legacy_decode_buffer(std::string_view encoded, void* data, std::size_t size);
 std::string legacy_encode_message(const LegacyDefaultMessage& message);

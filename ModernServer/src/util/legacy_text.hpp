@@ -103,6 +103,41 @@ inline std::string legacy_text_to_utf8(std::string_view bytes) {
   return std::string(bytes);
 }
 
+inline std::string utf8_text_to_legacy(std::string_view utf8_text) {
+  const auto without_bom = strip_utf8_bom_view(utf8_text);
+  if (without_bom.empty()) {
+    return {};
+  }
+
+#ifdef _WIN32
+  if (is_valid_utf8(without_bom)) {
+    const auto wide_size =
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, without_bom.data(),
+                            static_cast<int>(without_bom.size()), nullptr, 0);
+    if (wide_size > 0) {
+      std::wstring wide(static_cast<std::size_t>(wide_size), L'\0');
+      if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, without_bom.data(),
+                              static_cast<int>(without_bom.size()), wide.data(),
+                              wide_size) == wide_size) {
+        const auto legacy_size =
+            WideCharToMultiByte(936, WC_NO_BEST_FIT_CHARS, wide.data(), wide_size,
+                                nullptr, 0, nullptr, nullptr);
+        if (legacy_size > 0) {
+          std::string legacy(static_cast<std::size_t>(legacy_size), '\0');
+          if (WideCharToMultiByte(936, WC_NO_BEST_FIT_CHARS, wide.data(), wide_size,
+                                  legacy.data(), legacy_size, nullptr, nullptr) ==
+              legacy_size) {
+            return legacy;
+          }
+        }
+      }
+    }
+  }
+#endif
+
+  return std::string(without_bom);
+}
+
 inline std::filesystem::path path_from_utf8(std::string_view text) {
   std::u8string value;
   value.reserve(text.size());

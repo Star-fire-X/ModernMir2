@@ -237,9 +237,16 @@ bool LegacyMapEnvironment::add_placeholder_object(std::int32_t x, std::int32_t y
                                                   LegacyMapObjectShape shape,
                                                   std::uint64_t object_id,
                                                   std::uint64_t now_ms,
+                                                  LegacyMapPlacementPolicy placement_policy,
                                                   bool blocks_walk) {
-  if (!static_can_move(x, y)) {
-    return false;
+  if (placement_policy == LegacyMapPlacementPolicy::passable_only) {
+    if (!static_can_move(x, y)) {
+      return false;
+    }
+  } else {
+    if (!in_bounds(x, y) || static_can_move(x, y)) {
+      return false;
+    }
   }
   auto* target = mutable_cell(x, y);
   if (target == nullptr) {

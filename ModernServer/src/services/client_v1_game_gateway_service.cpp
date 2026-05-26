@@ -334,7 +334,7 @@ std::string name_from_turn_body(std::string_view encoded) {
   if (encoded.size() <= desc_size) {
     return {};
   }
-  auto decoded = legacy_decode_string(encoded.substr(desc_size));
+  auto decoded = legacy_decode_text(encoded.substr(desc_size));
   const auto slash = decoded.find('/');
   if (slash != std::string::npos) {
     decoded.resize(slash);
@@ -470,12 +470,12 @@ std::vector<std::pair<std::int32_t, LegacyClientItem>> decode_equipment_item_lis
 }
 
 std::string merchant_dialog_text(std::string_view body) {
-  return legacy_decode_string(body);
+  return legacy_decode_text(body);
 }
 
 std::vector<client_v1::MerchantGoodsItem> merchant_goods_from_legacy_body(
     std::string_view body) {
-  const auto decoded = legacy_decode_string(body);
+  const auto decoded = legacy_decode_text(body);
   const auto tokens = util::split(decoded, '/');
   std::vector<client_v1::MerchantGoodsItem> goods;
   for (std::size_t index = 0; index + 3U < tokens.size(); index += 4U) {
@@ -2202,7 +2202,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       messages.push_back(client_v1::WorldClearObjects{});
       break;
     case kSmChangeMap: {
-      const auto map_id = legacy_decode_string(decoded->body);
+      const auto map_id = legacy_decode_text(decoded->body);
       {
         std::scoped_lock lock(mutex_);
         sessions_[session_id].map_change_pending = true;
@@ -2219,7 +2219,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
                                                  decoded->message.tag, false});
       break;
     case kSmNewMap: {
-      const auto map_id = legacy_decode_string(decoded->body);
+      const auto map_id = legacy_decode_text(decoded->body);
       auto emit_map_entered = false;
       {
         std::scoped_lock lock(mutex_);
@@ -2244,7 +2244,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       break;
     }
     case kSmMapDescription:
-      messages.push_back(client_v1::MapDescription{legacy_decode_string(decoded->body)});
+      messages.push_back(client_v1::MapDescription{legacy_decode_text(decoded->body)});
       break;
     case kSmLogon: {
       auto desc = decode_body_wl_prefix(decoded->body);
@@ -2457,7 +2457,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       messages.push_back(client_v1::GroundItemAdd{client_v1::GroundItemState{
           static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog)),
           decoded->message.param, decoded->message.tag, decoded->message.series,
-          legacy_decode_string(decoded->body)}});
+          legacy_decode_text(decoded->body)}});
       break;
     case kSmItemHide:
       messages.push_back(client_v1::GroundItemRemove{
@@ -2621,7 +2621,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       break;
     case kSmDropItemFail:
       messages.push_back(client_v1::SysMessage{
-          "Drop failed: " + legacy_decode_string(decoded->body), 1});
+          "Drop failed: " + legacy_decode_text(decoded->body), 1});
       break;
     case kSmTakeOnOk:
       messages.push_back(client_v1::SysMessage{"Equipped item.", 0});
@@ -2744,7 +2744,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       break;
     }
     case kSmDealMenu: {
-      const auto peer_name = legacy_decode_string(decoded->body);
+      const auto peer_name = legacy_decode_text(decoded->body);
       bool wrong_target = false;
       {
         std::scoped_lock lock(mutex_);
@@ -2781,7 +2781,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       break;
     }
     case kSmHear: {
-      const auto text = legacy_decode_string(decoded->body);
+      const auto text = legacy_decode_text(decoded->body);
       const auto color = decoded->message.param;
       if (color == make_word(0, 255) && actor_id != 0) {
         messages.push_back(legacy_actor_say(actor_id, text, color));
@@ -2823,7 +2823,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
     case kSmCry:
     case kSmWhisper:
     case kSmGuildMessage:
-      messages.push_back(legacy_chat_line(legacy_decode_string(decoded->body),
+      messages.push_back(legacy_chat_line(legacy_decode_text(decoded->body),
                                           decoded->message.param));
       break;
     case kSmMerchantSay: {
@@ -3067,7 +3067,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
           actor_id,
           static_cast<std::uint8_t>(client_v1::kActorIdentityName |
                                     client_v1::kActorIdentityNameColor),
-          legacy_decode_string(decoded->body),
+          legacy_decode_text(decoded->body),
           static_cast<std::uint32_t>(decoded->message.param),
           0,
           0});

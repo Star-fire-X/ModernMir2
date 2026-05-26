@@ -65,6 +65,18 @@ int main() {
   assert(moved_object != nullptr && moved_object->a_time_ms == 777);
 
   assert(!env.add_item_object(1, 1, 100, {}, 200).ok);
+  assert(!env.add_placeholder_object(
+      1, 1, mir2::LegacyMapObjectShape::event_object, 900, 200,
+      mir2::LegacyMapPlacementPolicy::passable_only));
+  assert(!env.add_placeholder_object(
+      0, 1, mir2::LegacyMapObjectShape::event_object, 901, 200,
+      mir2::LegacyMapPlacementPolicy::blocked_only));
+  assert(env.add_placeholder_object(
+      1, 1, mir2::LegacyMapObjectShape::event_object, 902, 200,
+      mir2::LegacyMapPlacementPolicy::blocked_only));
+  assert(env.add_placeholder_object(
+      0, 1, mir2::LegacyMapObjectShape::event_object, 903, 200,
+      mir2::LegacyMapPlacementPolicy::passable_only));
   assert(env.add_item_object(0, 1, 100, {}, 201).ok);
   assert(env.add_item_object(0, 1, 101, {}, 202).ok);
   assert(env.add_item_object(0, 1, 102, {}, 203).ok);

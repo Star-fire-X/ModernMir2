@@ -166,7 +166,7 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
     case kCmSay: {
       auto command = make_command(session_id, packet, decoded->message,
                                   CanonicalLegacyCommandKind::say);
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmClickNpc: {
@@ -181,7 +181,7 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
                                   CanonicalLegacyCommandKind::merchant_select);
       command.target_actor_id =
           static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmQueryUsername: {
@@ -202,7 +202,7 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
       command.target_actor_id =
           static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
       command.item_make_index = make_long(decoded->message.param, decoded->message.tag);
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmUserTakeBackStorageItem: {
@@ -211,7 +211,7 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
       command.target_actor_id =
           static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
       command.item_make_index = make_long(decoded->message.param, decoded->message.tag);
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmUserGetDetailItem: {
@@ -220,7 +220,7 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
       command.target_actor_id =
           static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
       command.item_make_index = decoded->message.param;
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmMerchantQuerySellPrice: {
@@ -229,7 +229,7 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
       command.target_actor_id =
           static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
       command.item_make_index = make_long(decoded->message.param, decoded->message.tag);
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmMerchantQueryRepairCost: {
@@ -238,14 +238,14 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
       command.target_actor_id =
           static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
       command.item_make_index = make_long(decoded->message.param, decoded->message.tag);
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmDropItem: {
       auto command = make_command(session_id, packet, decoded->message,
                                   CanonicalLegacyCommandKind::drop_item);
       command.item_make_index = decoded->message.recog;
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmPickup: {
@@ -260,7 +260,7 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
                                   CanonicalLegacyCommandKind::take_on_item);
       command.item_make_index = decoded->message.recog;
       command.item_slot = decoded->message.param;
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmTakeOffItem: {
@@ -268,14 +268,14 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
                                   CanonicalLegacyCommandKind::take_off_item);
       command.item_make_index = decoded->message.recog;
       command.item_slot = decoded->message.param;
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmEat: {
       auto command = make_command(session_id, packet, decoded->message,
                                   CanonicalLegacyCommandKind::eat_item);
       command.item_make_index = decoded->message.recog;
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmDropGold: {
@@ -287,21 +287,21 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
     case kCmDealTry: {
       auto command = make_command(session_id, packet, decoded->message,
                                   CanonicalLegacyCommandKind::trade_try);
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmDealAddItem: {
       auto command = make_command(session_id, packet, decoded->message,
                                   CanonicalLegacyCommandKind::trade_add_item);
       command.item_make_index = decoded->message.recog;
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmDealDelItem: {
       auto command = make_command(session_id, packet, decoded->message,
                                   CanonicalLegacyCommandKind::trade_remove_item);
       command.item_make_index = decoded->message.recog;
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmDealCancel:
@@ -322,7 +322,7 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
       command.target_actor_id =
           static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
       command.item_make_index = make_long(decoded->message.param, decoded->message.tag);
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmUserBuyItem: {
@@ -331,7 +331,7 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
       command.target_actor_id =
           static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
       command.item_make_index = make_long(decoded->message.param, decoded->message.tag);
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     case kCmUserRepairItem: {
@@ -340,7 +340,7 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
       command.target_actor_id =
           static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
       command.item_make_index = make_long(decoded->message.param, decoded->message.tag);
-      command.text = copy_legacy_bytes(legacy_decode_string(decoded->body));
+      command.text = copy_legacy_bytes(legacy_decode_text(decoded->body));
       return ok(std::move(command));
     }
     default:

@@ -285,7 +285,7 @@ int main() {
   const auto dialog_dispatch = runtime.tick(1500);
   const auto say_packet = find_packet(dialog_dispatch, mir2::kSmMerchantSay);
   assert(say_packet.has_value());
-  const auto say_text = mir2::legacy_decode_string(say_packet->body);
+  const auto say_text = mir2::legacy_decode_text(say_packet->body);
   assert(contains_text(say_text, utf8(u8"中文商人")));
   assert(contains_text(say_text, utf8(u8"欢迎勇士")));
 

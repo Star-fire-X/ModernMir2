@@ -262,6 +262,8 @@ std::optional<ExpectedKinds> expected_kinds(std::uint16_t ident) {
 }
 
 std::string expected_text(std::uint16_t ident, const std::string& decoded_bytes) {
+  const auto normalized_text =
+      mir2::legacy_decode_text(mir2::legacy_encode_string(decoded_bytes));
   switch (ident) {
     case mir2::kCmSpell:
       return decoded_bytes;
@@ -282,7 +284,7 @@ std::string expected_text(std::uint16_t ident, const std::string& decoded_bytes)
     case mir2::kCmUserSellItem:
     case mir2::kCmUserBuyItem:
     case mir2::kCmUserRepairItem:
-      return decoded_bytes;
+      return normalized_text;
     default:
       return {};
   }

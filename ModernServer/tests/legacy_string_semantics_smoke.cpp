@@ -77,6 +77,7 @@ bool check_validation() {
 
 bool check_codec_and_canonical_text() {
   const auto gbk_chat = bytes({0xB0, 0xA1}) + std::string{" chat"};
+  const auto normalized_chat = mir2::legacy_decode_text(mir2::legacy_encode_string(gbk_chat));
   if (mir2::legacy_decode_string(mir2::legacy_encode_string(gbk_chat)) != gbk_chat) {
     return false;
   }
@@ -86,7 +87,7 @@ bool check_codec_and_canonical_text() {
       mir2::legacy_encode_string(gbk_chat));
   const auto legacy = mir2::decode_legacy_game_command(55, legacy_packet);
   if (legacy.status != mir2::CanonicalParseStatus::ok || !legacy.command.has_value() ||
-      legacy.command->text != gbk_chat ||
+      legacy.command->text != normalized_chat ||
       legacy.command->source_protocol != mir2::CanonicalSourceProtocol::legacy_framed) {
     return false;
   }
@@ -103,6 +104,21 @@ bool check_codec_and_canonical_text() {
   return npc.text == selection;
 }
 
+bool check_text_boundary_codec() {
+  const auto utf8_text = bytes({0xE4, 0xB8, 0xAD});
+  if (mir2::legacy_decode_text(mir2::legacy_encode_text(utf8_text)) != utf8_text) {
+    return false;
+  }
+
+  const auto gbk_text = bytes({0xB0, 0xA1});
+  const auto decoded = mir2::legacy_decode_text(mir2::legacy_encode_string(gbk_text));
+#ifdef _WIN32
+  return decoded == bytes({0xE5, 0x95, 0x8A});
+#else
+  return decoded == gbk_text;
+#endif
+}
+
 }  // namespace
 
 int main() {
@@ -114,6 +130,9 @@ int main() {
   }
   if (!check_codec_and_canonical_text()) {
     return fail("codec canonical text");
+  }
+  if (!check_text_boundary_codec()) {
+    return fail("text boundary codec");
   }
   return 0;
 }
