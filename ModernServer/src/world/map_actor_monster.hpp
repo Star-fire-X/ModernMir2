@@ -671,6 +671,18 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
       if (auto* attacker = as_player(attacker_it->second.get()); attacker != nullptr) {
         static_cast<void>(trigger_map_quest(*attacker, death_dropper_name, {}, false,
                                             "monster_die", dispatch, current_tick, now_ms));
+        for (auto& [_, member_object] : objects_) {
+          auto* member = as_player(member_object.get());
+          if (member == nullptr || member->is_dead()) {
+            continue;
+          }
+          if (std::abs(member->x() - attacker->x()) > 12 ||
+              std::abs(member->y() - attacker->y()) > 12) {
+            continue;
+          }
+          static_cast<void>(trigger_map_quest(*member, death_dropper_name, {}, true,
+                                              "monster_die", dispatch, current_tick, now_ms));
+        }
       }
     }
   }

@@ -131,7 +131,7 @@ bool check_mapquest_empty_trigger_baseline() {
                                       has_trace(dispatch, "LegacyScript", "mapquest_trigger",
                                                 "enter");
   constexpr bool kDelphiExpectedEnterTriggerForEmptyMonItem = false;
-  return current_triggers_enter && current_triggers_enter != kDelphiExpectedEnterTriggerForEmptyMonItem;
+  return current_triggers_enter == kDelphiExpectedEnterTriggerForEmptyMonItem;
 }
 
 bool check_itemshow_body_baseline() {

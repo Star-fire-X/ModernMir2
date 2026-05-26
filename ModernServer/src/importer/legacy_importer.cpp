@@ -1055,9 +1055,10 @@ std::size_t import_map_quests(const std::filesystem::path& legacy_root,
     first = false;
     const auto qfile = import_mapquest_script_asset(legacy_root, output_root, tokens[5]);
     const auto group = tokens.size() > 6 && util::lower_copy(tokens[6]) == "group";
+    const auto clamped_value = std::clamp(*value, 0, 1);
     file << "  { map_id = " << quote(tokens[0])
          << ", set_number = " << *set_number
-         << ", value = " << *value
+         << ", value = " << clamped_value
          << ", monster_name = " << quote(tokens[3] == "*" ? std::string{} : tokens[3])
          << ", item_name = " << quote(tokens[4] == "*" ? std::string{} : tokens[4])
          << ", qfile = " << quote(qfile)

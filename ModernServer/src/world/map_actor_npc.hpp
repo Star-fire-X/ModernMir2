@@ -1064,10 +1064,11 @@ bool MapActor::trigger_map_quest(Player& player, std::string monster_name, std::
     if (quest.map_id != config_.id) {
       continue;
     }
-    if (player.quest_mark(quest.set_number) != quest.value) {
+    if (player.quest_mark(quest.set_number) !=
+        static_cast<std::uint8_t>(std::clamp(quest.value, 0, 1))) {
       continue;
     }
-    if (group_call != quest.enable_group && group_call) {
+    if (quest.enable_group != group_call) {
       continue;
     }
 
@@ -1075,11 +1076,11 @@ bool MapActor::trigger_map_quest(Player& player, std::string monster_name, std::
     const auto quest_item = util::lower_copy(util::trim(quest.item_name));
     bool matches = false;
     if (quest_monster.empty() && quest_item.empty()) {
-      matches = wanted_monster.empty() && wanted_item.empty();
+      matches = false;
     } else if (!quest_monster.empty() && !quest_item.empty()) {
       matches = quest_monster == wanted_monster && quest_item == wanted_item;
     } else if (!quest_monster.empty()) {
-      matches = quest_monster == wanted_monster && wanted_item.empty();
+      matches = quest_monster == wanted_monster;
     } else if (!quest_item.empty()) {
       matches = quest_item == wanted_item;
     }

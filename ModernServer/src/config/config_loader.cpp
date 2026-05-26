@@ -1176,7 +1176,7 @@ void load_map_quests(const std::filesystem::path& directory, HostConfig& config)
         MapQuestConfig quest;
         quest.map_id = value_or<std::string>(quest_table, "map_id", {});
         quest.set_number = value_or<int>(quest_table, "set_number", 0);
-        quest.value = value_or<int>(quest_table, "value", 0);
+        quest.value = std::clamp(value_or<int>(quest_table, "value", 0), 0, 1);
         quest.monster_name = value_or<std::string>(quest_table, "monster_name", {});
         if (quest.monster_name.empty()) {
           quest.monster_name = value_or<std::string>(quest_table, "mon_name", {});
