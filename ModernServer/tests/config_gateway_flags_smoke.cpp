@@ -17,6 +17,8 @@ void write_text(const std::filesystem::path& path, const char* text) {
 int main() {
   assert(mir2::LogicBudgetConfig{}.tick_ms == 10);
   assert(mir2::LogicBudgetConfig{}.player_input_budget_per_tick == 0);
+  assert(!mir2::RuntimeConfig{}.enable_legacy_gateways);
+  assert(mir2::RuntimeConfig{}.enable_client_v1_gateways);
 
   const auto root = std::filesystem::temp_directory_path() / "mir2_config_gateway_flags_smoke";
   std::error_code ignored;
@@ -26,9 +28,7 @@ int main() {
              "log_dir = \"logs\"\n"
              "data_dir = \"data\"\n"
              "status_file = \"runtime/status.json\"\n"
-             "io_threads = 2\n"
-             "enable_legacy_gateways = false\n"
-             "enable_client_v1_gateways = true\n");
+             "io_threads = 2\n");
   write_text(root / "ports.toml",
              "[login_gateway]\n"
              "address = \"127.0.0.1\"\n"
@@ -70,6 +70,17 @@ int main() {
   assert(config.runtime.io_threads == 2);
   assert(config.budgets.tick_ms == 20);
   assert(config.budgets.player_input_budget_per_tick == 2);
+
+  write_text(root / "server.toml",
+             "log_dir = \"logs\"\n"
+             "data_dir = \"data\"\n"
+             "status_file = \"runtime/status.json\"\n"
+             "io_threads = 2\n"
+             "enable_legacy_gateways = true\n"
+             "enable_client_v1_gateways = false\n");
+  const auto explicit_gateway_config = loader.load(root);
+  assert(explicit_gateway_config.runtime.enable_legacy_gateways);
+  assert(!explicit_gateway_config.runtime.enable_client_v1_gateways);
 
   write_text(root / "server.toml",
              "log_dir = \"logs\"\n"
