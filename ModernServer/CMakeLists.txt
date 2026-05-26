@@ -349,6 +349,12 @@ if(BUILD_TESTING)
   add_test(NAME mir2_legacy_mapinfo_import_routes_smoke
     COMMAND mir2_legacy_mapinfo_import_routes_smoke)
 
+  add_executable(mir2_map_compat_phase1_baseline_smoke
+    tests/map_compat_phase1_baseline_smoke.cpp)
+  target_link_libraries(mir2_map_compat_phase1_baseline_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_map_compat_phase1_baseline_smoke
+    COMMAND mir2_map_compat_phase1_baseline_smoke)
+
   add_executable(mir2_movement_blocking_legacy_smoke
     tests/movement_blocking_legacy_smoke.cpp)
   target_link_libraries(mir2_movement_blocking_legacy_smoke PRIVATE mir2_hostlib)
