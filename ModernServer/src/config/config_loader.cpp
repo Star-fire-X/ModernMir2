@@ -1192,7 +1192,7 @@ HostConfig ConfigLoader::load(const std::filesystem::path& root) const {
   config.runtime.default_queue_capacity =
       value_or<std::size_t>(server, "default_queue_capacity", 4096);
   config.runtime.io_threads = value_or<std::size_t>(server, "io_threads", 2);
-  config.runtime.enable_legacy_gateways = value_or<bool>(server, "enable_legacy_gateways", true);
+  config.runtime.enable_legacy_gateways = value_or<bool>(server, "enable_legacy_gateways", false);
   config.runtime.enable_client_v1_gateways =
       value_or<bool>(server, "enable_client_v1_gateways", true);
   config.runtime.legacy_approval_mode =
