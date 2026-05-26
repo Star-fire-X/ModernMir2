@@ -526,6 +526,7 @@ class Player : public GameObject {
   void set_legacy_repair_mode(LegacyRepairMode mode) { legacy_repair_mode_ = mode; }
   [[nodiscard]] bool legacy_magic_bubble_active(std::uint64_t current_tick) const;
   [[nodiscard]] std::int32_t legacy_magic_bubble_level() const;
+  [[nodiscard]] bool legacy_poison_stone_active(std::uint64_t current_tick) const;
   [[nodiscard]] bool activate_legacy_magic_bubble(std::int32_t level,
                                                   std::uint64_t current_tick,
                                                   std::uint64_t expire_tick);
@@ -544,6 +545,8 @@ class Player : public GameObject {
   void mark_legacy_fire_hit(std::uint64_t now_ms);
   [[nodiscard]] bool legacy_rush_ready(std::uint64_t now_ms) const;
   void mark_legacy_rush(std::uint64_t now_ms);
+  [[nodiscard]] bool legacy_item_change_ready(std::uint64_t now_ms) const;
+  void mark_legacy_item_change(std::uint64_t now_ms);
   [[nodiscard]] bool legacy_long_hit_enabled() const { return legacy_long_hit_enabled_; }
   void set_legacy_long_hit_enabled(bool value) { legacy_long_hit_enabled_ = value; }
   [[nodiscard]] bool legacy_wide_hit_enabled() const { return legacy_wide_hit_enabled_; }
@@ -621,6 +624,7 @@ class Player : public GameObject {
   std::int32_t legacy_power_hit_level_{-1};
   std::uint64_t legacy_latest_fire_hit_time_ms_{0};
   std::uint64_t legacy_latest_rush_time_ms_{0};
+  std::uint64_t legacy_item_change_time_ms_{0};
   bool legacy_long_hit_enabled_{false};
   bool legacy_wide_hit_enabled_{false};
   bool legacy_cross_hit_enabled_{false};
@@ -647,6 +651,7 @@ struct MonsterSnapshot {
   std::string map_id{};
   std::int32_t x{0};
   std::int32_t y{0};
+  std::uint8_t dir{0};
   std::int32_t level{1};
   std::int32_t hp{0};
   std::int32_t max_hp{0};
@@ -675,6 +680,7 @@ struct MonsterSnapshot {
   std::uint64_t legacy_run_next_tick_ms{0};
   std::uint64_t legacy_search_time_ms{0};
   std::uint64_t legacy_search_rate_ms{0};
+  std::vector<std::uint64_t> legacy_visible_actor_ids{};
   std::uint64_t target_actor_id{0};
   std::uint64_t target_focus_time_ms{0};
   std::int32_t target_x{-1};
@@ -834,6 +840,9 @@ class Monster : public GameObject {
   [[nodiscard]] std::uint64_t legacy_run_next_tick_ms() const { return run_next_tick_ms_; }
   [[nodiscard]] std::uint64_t legacy_search_time_ms() const { return search_time_ms_; }
   [[nodiscard]] std::uint64_t legacy_search_rate_ms() const { return search_rate_ms_; }
+  [[nodiscard]] const std::vector<std::uint64_t>& legacy_visible_actor_ids() const {
+    return legacy_visible_actor_ids_;
+  }
   [[nodiscard]] std::uint64_t legacy_ghost_time_ms() const { return ghost_time_ms_; }
   [[nodiscard]] bool legacy_due(std::uint64_t now_ms) const;
   [[nodiscard]] bool legacy_search_due(std::uint64_t now_ms) const;
@@ -874,6 +883,7 @@ class Monster : public GameObject {
   [[nodiscard]] bool ai_due(std::uint64_t current_tick) const { return current_tick >= next_ai_tick_; }
   void mark_legacy_run_time(std::uint64_t now_ms);
   void mark_legacy_search_time(std::uint64_t now_ms);
+  void refresh_legacy_visible_actor_ids(const std::vector<std::uint64_t>& scanned_actor_ids);
   void mark_legacy_attack_time(std::uint64_t now_ms);
   void mark_legacy_walk_time(std::uint64_t now_ms);
   void mark_legacy_hit_time(std::uint64_t now_ms);
@@ -982,6 +992,7 @@ class Monster : public GameObject {
   std::uint64_t attack_time_ms_{0};
   std::uint64_t search_time_ms_{0};
   std::uint64_t search_rate_ms_{0};
+  std::vector<std::uint64_t> legacy_visible_actor_ids_{};
   std::uint64_t walk_time_ms_{0};
   std::uint64_t hit_time_ms_{0};
   std::uint64_t search_enemy_time_ms_{0};
