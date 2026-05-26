@@ -1,38 +1,71 @@
-#include <cassert>
+#include <cstdlib>
 #include <cstdint>
+#include <iostream>
 #include <optional>
 #include <string>
 
 #include "protocol/legacy_game_codec.hpp"
 #include "protocol/legacy_types.hpp"
-#include "world/logic_runtime.hpp"
+#include "world/map_actor.hpp"
 
 namespace {
 
-std::optional<mir2::DecodedLegacyGamePacket> find_packet(const mir2::RuntimeDispatch& dispatch,
-                                                         std::uint16_t ident) {
+void check(bool condition, const char* expression, const char* file, int line) {
+  if (condition) {
+    return;
+  }
+  std::cerr << "check failed: " << expression << " at " << file << ":" << line << "\n";
+  std::exit(1);
+}
+
+#define CHECK(expr) check((expr), #expr, __FILE__, __LINE__)
+
+std::optional<mir2::DecodedLegacyGamePacket> find_packet_by_recog(
+    const mir2::RuntimeDispatch& dispatch, std::uint16_t ident, std::int32_t recog) {
   for (const auto& event : dispatch.session_events) {
     const auto decoded = mir2::decode_legacy_game_packet(event.packet);
-    if (decoded.has_value() && decoded->message.ident == ident) {
+    if (decoded.has_value() && decoded->message.ident == ident &&
+        decoded->message.recog == recog) {
       return decoded;
     }
   }
   return std::nullopt;
 }
 
-bool has_packet(const mir2::RuntimeDispatch& dispatch, std::uint16_t ident) {
-  return find_packet(dispatch, ident).has_value();
+mir2::ActorMail make_monster(std::uint64_t actor_id, std::int32_t x, std::int32_t y,
+                             mir2::MonsterAiProfile profile,
+                             std::int32_t race_server = 0) {
+  mir2::ActorMail mail;
+  mail.kind = mir2::ActorMailKind::spawn_monster;
+  mail.map_id = "0";
+  mail.actor_id = actor_id;
+  mail.name = "Monster";
+  mail.x = x;
+  mail.y = y;
+  mail.max_hp = 20;
+  mail.attack_power = 3;
+  mail.dc_min = 3;
+  mail.dc_max = 3;
+  mail.exp_reward = 1;
+  mail.walk_speed_ms = 200;
+  mail.walk_step = 1;
+  mail.attack_speed_ms = 40;
+  mail.monster_ai_profile = profile;
+  mail.race_server = race_server;
+  mail.monster_search_rate_ms = 80;
+  mail.legacy_spawn_group = true;
+  return mail;
 }
 
-mir2::CharacterRecord make_hero(std::int32_t x, std::int32_t y) {
+mir2::ActorMail make_player(std::uint64_t actor_id, std::uint64_t session_id,
+                            std::string name, std::int32_t x, std::int32_t y) {
   mir2::CharacterRecord hero;
-  hero.account_id = "guest";
-  hero.character_name = "Hero";
+  hero.account_id = name;
+  hero.character_name = std::move(name);
   hero.map_id = "0";
   hero.x = x;
   hero.y = y;
   hero.ability.level = 1;
-  hero.ability.dc = mir2::make_word(0, 8);
   hero.ability.hp = 40;
   hero.ability.max_hp = 40;
   hero.ability.mp = 10;
@@ -41,141 +74,89 @@ mir2::CharacterRecord make_hero(std::int32_t x, std::int32_t y) {
   hero.ability.max_weight = 100;
   hero.ability.max_wear_weight = 100;
   hero.ability.max_hand_weight = 100;
-  return hero;
+
+  mir2::ActorMail mail;
+  mail.kind = mir2::ActorMailKind::spawn_player;
+  mail.map_id = "0";
+  mail.actor_id = actor_id;
+  mail.session_id = session_id;
+  mail.character = hero;
+  mail.x = x;
+  mail.y = y;
+  return mail;
 }
 
-mir2::SpawnConfig make_spawn(std::string name, std::int32_t x, std::int32_t y) {
-  mir2::SpawnConfig spawn;
-  spawn.map_id = "0";
-  spawn.actor_type = "monster";
-  spawn.name = std::move(name);
-  spawn.x = x;
-  spawn.y = y;
-  spawn.respawn_ms = 30000;
-  return spawn;
+mir2::MapActor make_map() {
+  mir2::LogicBudgetConfig budgets;
+  budgets.tick_ms = 20;
+  return mir2::MapActor(mir2::MapConfig{"0", "RaceAI", {}, 0, 0, 30, 30},
+                        budgets, {}, {});
 }
 
-mir2::RuntimeDispatch enter_and_tick(mir2::LogicRuntime& runtime,
-                                     std::int32_t x = 10,
-                                     std::int32_t y = 10) {
-  mir2::LogicCommand enter;
-  enter.kind = mir2::LogicCommandKind::enter_world;
-  enter.session_id = 7;
-  enter.account_id = "guest";
-  enter.character_name = "Hero";
-  enter.map_id = "0";
-  enter.x = x;
-  enter.y = y;
-  enter.character = make_hero(x, y);
-  static_cast<void>(runtime.route_logic_command(enter));
-  return runtime.tick();
-}
-
-mir2::RuntimeDispatch run_ticks(mir2::LogicRuntime& runtime, int count) {
-  mir2::RuntimeDispatch last;
-  for (int index = 0; index < count; ++index) {
-    last = runtime.tick();
-  }
-  return last;
+void spawn(mir2::MapActor& map, const mir2::ActorMail& monster,
+           const mir2::ActorMail& player) {
+  map.enqueue_mail(monster);
+  map.enqueue_mail(player);
+  static_cast<void>(map.tick(1, 0));
 }
 
 }  // namespace
 
 int main() {
   {
-    mir2::HostConfig config;
-    config.maps.push_back(mir2::MapConfig{"0", "Passive", {}, 0, 0, 20, 20});
-    mir2::MonsterDefConfig deer;
-    deer.name = "Deer";
-    deer.hp = 12;
-    deer.dc = 3;
-    deer.ai_profile = mir2::MonsterAiProfile::passive_animal;
-    config.monsters.push_back(deer);
-    config.spawns.push_back(make_spawn("Deer", 10, 8));
+    auto map = make_map();
+    constexpr std::uint64_t monster_id = 100;
+    spawn(map, make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::passive_animal),
+          make_player(1, 10, "Hero", 10, 10));
 
-    mir2::LogicRuntime runtime(config);
-    runtime.initialize();
-    static_cast<void>(enter_and_tick(runtime));
-    for (int index = 0; index < 8; ++index) {
-      const auto dispatch = runtime.tick();
-      assert(!has_packet(dispatch, mir2::kSmWalk));
-      assert(!has_packet(dispatch, mir2::kSmHit));
-      assert(!has_packet(dispatch, mir2::kSmStruck));
-    }
+    const auto dispatch = map.legacy_process_monster(monster_id, 2, 1001, 0, 0);
+    CHECK(!find_packet_by_recog(dispatch, mir2::kSmHit,
+                                static_cast<std::int32_t>(monster_id)).has_value());
+    CHECK(!find_packet_by_recog(dispatch, mir2::kSmStruck,
+                                static_cast<std::int32_t>(monster_id)).has_value());
   }
 
   {
-    mir2::HostConfig config;
-    config.maps.push_back(mir2::MapConfig{"0", "Aggressive", {}, 0, 0, 20, 20});
-    mir2::MonsterDefConfig oma;
-    oma.name = "Oma";
-    oma.race_server = 81;
-    oma.hp = 12;
-    oma.dc = 3;
-    oma.walk_speed_ms = 20;
-    config.monsters.push_back(oma);
-    config.spawns.push_back(make_spawn("Oma", 10, 8));
+    auto map = make_map();
+    constexpr std::uint64_t monster_id = 101;
+    map.enqueue_mail(make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::basic, 81));
+    map.enqueue_mail(make_player(2, 20, "FarHero", 10, 11));
+    map.enqueue_mail(make_player(3, 30, "NearHero", 8, 8));
+    static_cast<void>(map.tick(1, 0));
 
-    mir2::LogicRuntime runtime(config);
-    runtime.initialize();
-    static_cast<void>(enter_and_tick(runtime));
-    const auto chase = runtime.tick();
-    const auto walk = find_packet(chase, mir2::kSmWalk);
-    assert(walk.has_value());
-    assert(walk->message.param == 10);
-    assert(walk->message.tag == 9);
+    const auto dispatch = map.legacy_process_monster(monster_id, 2, 1001, 0, 0);
+    const auto walk = find_packet_by_recog(dispatch, mir2::kSmWalk,
+                                           static_cast<std::int32_t>(monster_id));
+    CHECK(walk.has_value());
+    const auto snapshot = map.legacy_monster_snapshot(monster_id);
+    CHECK(snapshot.has_value());
+    CHECK(snapshot->target_actor_id == 3);
   }
 
   {
-    mir2::HostConfig config;
-    config.maps.push_back(mir2::MapConfig{"0", "Stationary", {}, 0, 0, 20, 20});
-    mir2::MonsterDefConfig plant;
-    plant.name = "Plant";
-    plant.hp = 12;
-    plant.dc = 3;
-    plant.attack_speed_ms = 40;
-    plant.ai_profile = mir2::MonsterAiProfile::stationary;
-    config.monsters.push_back(plant);
-    config.spawns.push_back(make_spawn("Plant", 10, 8));
+    auto map = make_map();
+    constexpr std::uint64_t monster_id = 102;
+    spawn(map, make_monster(monster_id, 10, 8, mir2::MonsterAiProfile::stationary),
+          make_player(4, 40, "Hero", 10, 10));
 
-    mir2::LogicRuntime runtime(config);
-    runtime.initialize();
-    static_cast<void>(enter_and_tick(runtime));
-    bool struck = false;
-    bool walked = false;
-    for (int index = 0; index < 8; ++index) {
-      const auto dispatch = runtime.tick();
-      struck = struck || has_packet(dispatch, mir2::kSmStruck);
-      walked = walked || has_packet(dispatch, mir2::kSmWalk);
-    }
-    assert(struck);
-    assert(!walked);
+    const auto dispatch = map.legacy_process_monster(monster_id, 2, 1001, 0, 0);
+    CHECK(find_packet_by_recog(dispatch, mir2::kSmHit,
+                               static_cast<std::int32_t>(monster_id)).has_value());
+    CHECK(!find_packet_by_recog(dispatch, mir2::kSmWalk,
+                                static_cast<std::int32_t>(monster_id)).has_value());
   }
 
   {
-    mir2::HostConfig config;
-    config.maps.push_back(mir2::MapConfig{"0", "Ranged", {}, 0, 0, 20, 20});
-    mir2::MonsterDefConfig archer;
-    archer.name = "Archer";
-    archer.hp = 12;
-    archer.dc = 3;
-    archer.attack_speed_ms = 40;
-    archer.ai_profile = mir2::MonsterAiProfile::ranged;
-    config.monsters.push_back(archer);
-    config.spawns.push_back(make_spawn("Archer", 10, 6));
+    auto map = make_map();
+    constexpr std::uint64_t monster_id = 103;
+    spawn(map, make_monster(monster_id, 10, 6, mir2::MonsterAiProfile::ranged),
+          make_player(5, 50, "Hero", 10, 10));
 
-    mir2::LogicRuntime runtime(config);
-    runtime.initialize();
-    static_cast<void>(enter_and_tick(runtime));
-    bool struck = false;
-    bool walked = false;
-    for (int index = 0; index < 8; ++index) {
-      const auto dispatch = runtime.tick();
-      struck = struck || has_packet(dispatch, mir2::kSmStruck);
-      walked = walked || has_packet(dispatch, mir2::kSmWalk);
-    }
-    assert(struck);
-    assert(!walked);
+    const auto dispatch = map.legacy_process_monster(monster_id, 2, 1001, 0, 0);
+    CHECK(find_packet_by_recog(dispatch, mir2::kSmHit,
+                               static_cast<std::int32_t>(monster_id)).has_value());
+    CHECK(!find_packet_by_recog(dispatch, mir2::kSmWalk,
+                                static_cast<std::int32_t>(monster_id)).has_value());
   }
 
   return 0;

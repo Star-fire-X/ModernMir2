@@ -48,6 +48,8 @@ constexpr std::int32_t kRcDigOutZombi = 95;
 constexpr std::int32_t kRcScultureKing = 102;
 constexpr std::int32_t kRcBeeQueen = 103;
 constexpr std::int32_t kRcArcherMon = 104;
+constexpr std::int32_t kRcGasMoth = 105;
+constexpr std::int32_t kRcGasDung = 106;
 constexpr std::int32_t kRcCentipedeKing = 107;
 constexpr std::int32_t kRcCastleDoor = 110;
 constexpr std::int32_t kRcWall = 111;
@@ -81,6 +83,8 @@ LegacyMonsterRaceBehavior legacy_monster_race_behavior(std::int32_t race_server)
     case kRcBigPoisonSpider:
       return LegacyMonsterRaceBehavior::spit;
     case kRcBigKudeki:
+    case kRcGasMoth:
+    case kRcGasDung:
     case kRcToxicGhost:
       return LegacyMonsterRaceBehavior::front_gas;
     case kRcMagCowFaceMon:
