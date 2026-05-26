@@ -363,6 +363,12 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_visibility_phase3_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_visibility_phase3_smoke COMMAND mir2_visibility_phase3_smoke)
 
+  add_executable(mir2_monster_visibility_order_smoke
+    tests/monster_visibility_order_smoke.cpp)
+  target_link_libraries(mir2_monster_visibility_order_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_monster_visibility_order_smoke
+    COMMAND mir2_monster_visibility_order_smoke)
+
   add_executable(mir2_safe_zone_legacy_smoke tests/safe_zone_legacy_smoke.cpp)
   target_link_libraries(mir2_safe_zone_legacy_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_safe_zone_legacy_smoke COMMAND mir2_safe_zone_legacy_smoke)
@@ -1123,6 +1129,7 @@ if(BUILD_TESTING)
       mir2_legacy_action_cadence_smoke
       mir2_player_movement_smoke
       mir2_visibility_delta_smoke
+      mir2_monster_visibility_order_smoke
       mir2_monster_movement_legacy_smoke
       mir2_monster_target_selection_legacy_smoke
       mir2_monster_home_leash_smoke

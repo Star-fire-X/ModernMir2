@@ -335,6 +335,11 @@ class MapActor {
                                              std::uint64_t now_ms);
   void remove_actor_from_visibility(std::uint64_t actor_id, RuntimeDispatch& dispatch);
   void remove_item_from_visibility(std::uint64_t item_id, RuntimeDispatch& dispatch);
+  [[nodiscard]] std::vector<std::uint64_t> ordered_player_ids() const;
+  [[nodiscard]] std::vector<std::uint64_t> ordered_visible_actor_ids(
+      const Player& player) const;
+  [[nodiscard]] std::vector<std::uint64_t> ordered_visible_item_ids(
+      const Player& player) const;
   void refresh_ground_item_ownership(GroundItem& item, std::uint64_t now_ms);
   void remove_expired_ground_items(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   bool try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
