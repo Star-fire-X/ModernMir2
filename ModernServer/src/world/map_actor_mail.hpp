@@ -992,6 +992,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                              mail.payload));
         break;
       }
+      if (!player->legacy_item_change_ready(now_ms)) {
+        add_legacy_trace(dispatch, "LegacyItem", "item_change_throttle", mail, current_tick,
+                         now_ms, false, mail.item_make_index, 0, "drop_item");
+        queue_packet(dispatch, player->session_id(),
+                     make_drop_result_packet(player->session_id(), false, mail.item_make_index,
+                                             mail.payload));
+        break;
+      }
 
       const auto* bag_item =
           player->bag_item_mutable(mail.item_make_index, mail.payload, item_configs_);
@@ -1003,12 +1011,27 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                              mail.payload));
         break;
       }
+      auto dropped_item = *bag_item;
+      if (const auto* config = find_item_config(item_configs_, bag_item->index); config != nullptr) {
+        if (config->std_mode == 51) {
+          add_legacy_trace(dispatch, "LegacyItem", "stdmode51_reject", mail, current_tick,
+                           now_ms, false, mail.item_make_index, 0, "drop_item");
+          queue_packet(dispatch, player->session_id(),
+                       make_drop_result_packet(player->session_id(), false, mail.item_make_index,
+                                               mail.payload));
+          break;
+        }
+        if (config->std_mode == 40) {
+          dropped_item.dura =
+              clamp_dura_value(static_cast<std::int32_t>(dropped_item.dura) - 2000);
+        }
+      }
 
       GroundItem ground_item;
       add_legacy_trace(dispatch, "LegacyItem", "validate", mail, current_tick, now_ms, true, 0, 0,
                        "drop_item");
       ground_item.id = next_ground_item_id_;
-      ground_item.item = *bag_item;
+      ground_item.item = dropped_item;
       ground_item.name = item_name(*bag_item, item_configs_);
       ground_item.count = 1;
       ground_item.looks = item_looks(*bag_item, item_configs_);
@@ -1042,19 +1065,21 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             ground_item.x, ground_item.y, LegacyMapObjectShape::item_object, ground_item.id));
         break;
       }
-      ground_item.item = *removed;
+      ground_item.item = dropped_item;
       ground_items_[ground_item.id] = ground_item;
       player->refresh_derived_state(item_configs_);
 
       sync_visibility_after_item_change(ground_item.x, ground_item.y, dispatch, ground_item.id);
       queue_packet(dispatch, player->session_id(),
-                   make_del_item_packet(player->session_id(), player->id(), *removed, item_configs_));
+                   make_del_item_packet(player->session_id(), player->id(), ground_item.item,
+                                        item_configs_));
       queue_packet(dispatch, player->session_id(),
                    make_weight_changed_packet(player->session_id(), player->character()));
       queue_packet(dispatch, player->session_id(),
                    make_drop_result_packet(player->session_id(), true, removed->make_index,
                                            ground_item.name));
       queue_save_character(dispatch, *player);
+      player->mark_legacy_item_change(now_ms);
       add_legacy_trace(dispatch, "LegacyItem", "success", mail, current_tick, now_ms, true,
                        static_cast<std::int32_t>(ground_item.id), 0, "drop_item");
       break;
@@ -1382,6 +1407,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             return !is_empty(item) && item.make_index == mail.item_make_index;
           });
       if (already_offered) {
+        queue_packet(dispatch, player->session_id(),
+                     make_deal_simple_packet(player->session_id(), kSmDealAddItemFail));
+        break;
+      }
+      const auto* bag_item = player->bag_item(mail.item_make_index, mail.payload, item_configs_);
+      const auto* item_config =
+          bag_item != nullptr ? find_item_config(item_configs_, bag_item->index) : nullptr;
+      if (bag_item == nullptr || (item_config != nullptr && item_config->std_mode == 51)) {
         queue_packet(dispatch, player->session_id(),
                      make_deal_simple_packet(player->session_id(), kSmDealAddItemFail));
         break;
@@ -2060,6 +2093,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       const auto target_item = player->character().bag_items[*bag_slot];
 
       const auto* item_config = find_item_config(item_configs_, target_item.index);
+      if (item_config != nullptr && config_.no_drug && item_config->std_mode >= 0 &&
+          item_config->std_mode <= 3) {
+        add_legacy_trace(dispatch, "LegacyItem", "nodrug_reject", mail, current_tick, now_ms,
+                         false, target_item.index, 0, "eat_item");
+        queue_packet(dispatch, player->session_id(),
+                     make_eat_result_packet(player->session_id(), false));
+        break;
+      }
       if (item_config != nullptr && legacy_item_is_unbind_bundle(*item_config)) {
         const auto* target_config = find_item_config_by_name_or_id(item_configs_, item_config->unbind_item);
         if (target_config == nullptr || item_config->unbind_count <= 0) {
@@ -2305,24 +2346,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
-      if (config_.no_drug) {
-        add_legacy_trace(dispatch, "LegacyItem", "nodrug_reject", mail, current_tick, now_ms,
-                         false, target_item.index, 0, "eat_item");
-        queue_packet(dispatch, player->session_id(),
-                     make_eat_result_packet(player->session_id(), false));
-        break;
-      }
-
-      const auto old_hp = player->character().ability.hp;
-      const auto old_mp = player->character().ability.mp;
       player->apply_consumable(*item_config);
-      if (player->character().ability.hp == old_hp && player->character().ability.mp == old_mp) {
-        add_legacy_trace(dispatch, "LegacyItem", "consume_no_effect", mail, current_tick,
-                         now_ms, false, target_item.index, 0, "eat_item");
-        queue_packet(dispatch, player->session_id(),
-                     make_eat_result_packet(player->session_id(), false));
-        break;
-      }
       const auto removed = player->remove_bag_item_at(*bag_slot);
       if (!removed.has_value()) {
         queue_packet(dispatch, player->session_id(),

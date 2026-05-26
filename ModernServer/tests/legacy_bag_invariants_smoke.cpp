@@ -14,6 +14,7 @@
 #include "protocol/legacy_types.hpp"
 #include "storage/repository.hpp"
 #include "world/game_object.hpp"
+#include "world/legacy_map_environment.hpp"
 
 namespace {
 
@@ -204,6 +205,18 @@ bool make_index_uniqueness_scan_covers_all_item_containers() {
   return !unique_make_indices(record);
 }
 
+bool add_gold_clamps_to_legacy_bag_gold() {
+  auto record = character("GoldCap");
+  record.gold = mir2::kLegacyBagGold - 1;
+  mir2::Player player(4, 10, record);
+  player.add_gold(100);
+  if (player.character().gold != mir2::kLegacyBagGold) {
+    return false;
+  }
+  player.add_gold(-mir2::kLegacyBagGold - 100);
+  return player.character().gold == 0;
+}
+
 }  // namespace
 
 int main() {
@@ -221,6 +234,9 @@ int main() {
   }
   if (!make_index_uniqueness_scan_covers_all_item_containers()) {
     return fail("make index uniqueness scan");
+  }
+  if (!add_gold_clamps_to_legacy_bag_gold()) {
+    return fail("add gold clamps");
   }
   return 0;
 }
