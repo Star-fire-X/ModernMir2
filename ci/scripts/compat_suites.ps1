@@ -67,6 +67,9 @@ function Get-CiBuildTargets {
     "mir2_world_tick_cadence_smoke",
     "mir2_player_movement_smoke",
     "mir2_visibility_delta_smoke",
+    "mir2_monster_movement_legacy_smoke",
+    "mir2_monster_target_selection_legacy_smoke",
+    "mir2_monster_home_leash_smoke",
     "mir2_monster_legacy_combat_damage_smoke",
     "mir2_attack_protocol_golden_smoke",
     "mir2_skill_formula_golden_smoke",
@@ -88,6 +91,7 @@ function Get-CiBuildTargets {
     "mir2_scripted_merchant_smoke",
     "mir2_scripted_npc_dialog_smoke",
     "mir2_legacy_mapquest_import_trigger_smoke",
+    "mir2_legacy_gbk_import_smoke",
     "mir2_npc_shop_protocol_golden_smoke",
     "mir2_npc_shop_interleaving_fuzz_smoke",
     "mir2_special_consumables_legacy_smoke",
@@ -412,11 +416,6 @@ function Get-CiQuarantinedTests {
       Project = "ModernServer"
       Test = "mir2_monster_special_race_smoke"
       Reason = "Local phase3 validation asserts in Debug/MSVC and then waits for the assertion path until timeout."
-    },
-    [pscustomobject]@{
-      Project = "ModernServer"
-      Test = "mir2_monster_home_leash_smoke"
-      Reason = "Local phase3 validation times out and asserts on the monster walk expectation; keep outside nightly until fixed separately."
     },
     [pscustomobject]@{
       Project = "ModernClient"

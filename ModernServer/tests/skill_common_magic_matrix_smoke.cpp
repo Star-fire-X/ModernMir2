@@ -54,7 +54,7 @@ mir2::HostConfig base_config() {
   map.allow_pk = true;
   map.fight_zone = true;
   config.maps.push_back(map);
-  for (const auto id : {1, 2, 5, 8, 9, 10, 11, 23, 24, 29, 31, 33, 35, 36}) {
+  for (const auto id : {1, 2, 5, 8, 9, 10, 11, 23, 24, 29, 31, 33, 35, 36, 37}) {
     config.magics.push_back(legacy_magic(id));
   }
   config.items.push_back(mir2::ItemConfig{501, "Bujuk", 1, 10, 25, 5, 1, 1000, 9});
@@ -228,6 +228,19 @@ int main() {
     append(dispatch, runtime.route_logic_command(spell(1321, 23, 10, 8)));
     append(dispatch, runtime.tick());
     assert(count_trace(dispatch, "mag_struck", 23) >= 1);
+  }
+
+  {
+    auto config = base_config();
+    config.spawns.push_back(spawn("Push37Target", 10, 9));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(enter(1331, character("Push37", {37}))));
+    static_cast<void>(runtime.tick());
+    auto dispatch = runtime.route_logic_command(spell(1331, 37));
+    append(dispatch, runtime.tick());
+    assert(has_trace(dispatch, "push"));
+    assert(has_trace(dispatch, "train_skill"));
   }
 
   return 0;

@@ -82,7 +82,7 @@ mir2::ActorMail make_monster(std::uint64_t actor_id, std::int32_t accuracy) {
   mail.walk_speed_ms = 200;
   mail.attack_speed_ms = 200;
   mail.monster_ai_profile = mir2::MonsterAiProfile::aggressive;
-  mail.monster_search_rate_ms = 1500;
+  mail.monster_search_rate_ms = 80;
   mail.dir = 4;
   mail.legacy_spawn_group = true;
   return mail;

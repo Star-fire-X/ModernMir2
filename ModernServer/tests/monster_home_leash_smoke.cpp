@@ -71,7 +71,7 @@ int main() {
   player.character = make_hero();
   static_cast<void>(actor.legacy_spawn_player(player, 2, 40, true));
 
-  const auto dispatch = actor.legacy_process_monster(1, 3, 60, 0, 0);
+  const auto dispatch = actor.legacy_process_monster(1, 3, 251, 0, 0);
   const auto walk = find_packet(dispatch, mir2::kSmWalk);
   assert(walk.has_value());
   assert(walk->message.recog == 1);
@@ -79,6 +79,12 @@ int main() {
   assert(walk->message.tag == 24);
   assert(!find_packet(dispatch, mir2::kSmHit).has_value());
   assert(!find_packet(dispatch, mir2::kSmStruck).has_value());
+  const auto snapshot = actor.legacy_monster_snapshot(1);
+  assert(snapshot.has_value());
+  assert(snapshot->target_actor_id == 0);
+  assert(snapshot->target_x == 10);
+  assert(snapshot->target_y == 10);
+  assert(snapshot->walk_time_ms == 251);
 
   return 0;
 }
