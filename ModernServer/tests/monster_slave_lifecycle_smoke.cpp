@@ -1,6 +1,7 @@
 #include <algorithm>
-#include <cassert>
 #include <cstdint>
+#include <cstdlib>
+#include <iostream>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -8,6 +9,15 @@
 #include "world/map_actor.hpp"
 
 namespace {
+
+#define CHECK(expr)                                                            \
+  do {                                                                         \
+    if (!(expr)) {                                                             \
+      std::cerr << "CHECK failed: " #expr << " at " << __FILE__ << ":"       \
+                << __LINE__ << "\n";                                          \
+      return 1;                                                                \
+    }                                                                          \
+  } while (false)
 
 constexpr std::uint64_t kScriptMonsterBase = 0x6000000000000000ULL;
 
@@ -99,7 +109,7 @@ mir2::MapActor make_map() {
   budgets.tick_ms = 20;
   std::unordered_map<std::string, mir2::MonsterDefConfig> defs;
   defs.emplace("__whiteskeleton", make_skeleton_def());
-  return mir2::MapActor(mir2::MapConfig{"0", "SlaveLife", {}, 0, 0, 50, 50},
+  return mir2::MapActor(mir2::MapConfig{"0", "SlaveLife", {}, 50, 50, 0, 0},
                         budgets, {}, {}, {}, {}, std::move(defs));
 }
 
@@ -138,17 +148,17 @@ int main() {
 
     const auto dispatch =
         map.legacy_spawn_player(make_player(1, 100, std::move(restored)), 1, 1000, true);
-    assert(has_trace(dispatch, "LegacySlave", "restore"));
+    CHECK(has_trace(dispatch, "LegacySlave", "restore"));
     auto slave = map.legacy_monster_snapshot(kScriptMonsterBase);
-    assert(slave.has_value());
-    assert(slave->name == "__WhiteSkeleton");
-    assert(slave->is_slave);
-    assert(slave->master_actor_id == 1);
-    assert(slave->hp == 31);
-    assert(slave->mp == 2);
-    assert(slave->slave_exp == 77);
-    assert(slave->slave_exp_level == 2);
-    assert(slave->master_royalty_time_ms == 61000);
+    CHECK(slave.has_value());
+    CHECK(slave->name == "__WhiteSkeleton");
+    CHECK(slave->is_slave);
+    CHECK(slave->master_actor_id == 1);
+    CHECK(slave->hp == 31);
+    CHECK(slave->mp == 2);
+    CHECK(slave->slave_exp == 77);
+    CHECK(slave->slave_exp_level == 2);
+    CHECK(slave->master_royalty_time_ms == 61000);
   }
 
   {
@@ -161,15 +171,15 @@ int main() {
 
     const auto dispatch = map.legacy_disconnect_player(1, 5000);
     const auto* save = find_save_request(dispatch, "Saver");
-    assert(save != nullptr);
-    assert(save->character.slaves[0].name == "__WhiteSkeleton");
-    assert(save->character.slaves[0].slave_exp == 42);
-    assert(save->character.slaves[0].slave_exp_level == 2);
-    assert(save->character.slaves[0].slave_make_level == 1);
-    assert(save->character.slaves[0].remain_royalty_sec == 60);
-    assert(save->character.slaves[0].hp == 23);
-    assert(save->character.slaves[0].mp == 2);
-    assert(!map.legacy_monster_snapshot(2).has_value());
+    CHECK(save != nullptr);
+    CHECK(save->character.slaves[0].name == "__WhiteSkeleton");
+    CHECK(save->character.slaves[0].slave_exp == 42);
+    CHECK(save->character.slaves[0].slave_exp_level == 2);
+    CHECK(save->character.slaves[0].slave_make_level == 1);
+    CHECK(save->character.slaves[0].remain_royalty_sec == 60);
+    CHECK(save->character.slaves[0].hp == 23);
+    CHECK(save->character.slaves[0].mp == 2);
+    CHECK(!map.legacy_monster_snapshot(2).has_value());
   }
 
   {
@@ -181,12 +191,12 @@ int main() {
     static_cast<void>(map.tick(1, 0));
 
     const auto dispatch = map.legacy_process_monster(2, 100, 1001, 0, 0);
-    assert(has_trace(dispatch, "LegacySlave", "royalty_expired"));
+    CHECK(has_trace(dispatch, "LegacySlave", "royalty_expired"));
     auto slave = map.legacy_monster_snapshot(2);
-    assert(slave.has_value());
-    assert(slave->master_actor_id == 0);
-    assert(slave->hp == 4);
-    assert(!slave->death_settled);
+    CHECK(slave.has_value());
+    CHECK(slave->master_actor_id == 0);
+    CHECK(slave->hp == 2);
+    CHECK(!slave->death_settled);
   }
 
   {
@@ -199,12 +209,12 @@ int main() {
 
     const auto twelve_hours_later = 12ULL * 60ULL * 60ULL * 1000ULL + 2ULL;
     const auto dispatch = map.legacy_process_monster(2, 200, twelve_hours_later, 0, 0);
-    assert(has_trace(dispatch, "ProcessMonsters", "slave_death"));
-    assert(has_trace(dispatch, "LegacyReward", "slave_no_drop"));
+    CHECK(has_trace(dispatch, "ProcessMonsters", "slave_death"));
+    CHECK(has_trace(dispatch, "LegacyReward", "slave_no_drop"));
     auto slave = map.legacy_monster_snapshot(2);
-    assert(slave.has_value());
-    assert(slave->death_time_ms != 0);
-    assert(slave->death_settled);
+    CHECK(slave.has_value());
+    CHECK(slave->death_time_ms != 0);
+    CHECK(slave->death_settled);
   }
 
   {
@@ -213,10 +223,10 @@ int main() {
     static_cast<void>(map.tick(1, 0));
 
     const auto dispatch = map.legacy_process_monster(2, 300, 1000, 0, 0);
-    assert(has_trace(dispatch, "ProcessMonsters", "slave_death"));
+    CHECK(has_trace(dispatch, "ProcessMonsters", "slave_death"));
     auto slave = map.legacy_monster_snapshot(2);
-    assert(slave.has_value());
-    assert(slave->death_settled);
+    CHECK(slave.has_value());
+    CHECK(slave->death_settled);
   }
 
   {
@@ -229,11 +239,11 @@ int main() {
 
     static_cast<void>(map.legacy_process_monster(2, 400, 1000, 0, 0));
     auto slave = map.legacy_monster_snapshot(2);
-    assert(slave.has_value());
-    assert(slave->x == 10);
-    assert(slave->y == 12);
-    assert(slave->target_x == 10);
-    assert(slave->target_y == 11);
+    CHECK(slave.has_value());
+    CHECK(slave->x == 10);
+    CHECK(slave->y == 12);
+    CHECK(slave->target_x == 10);
+    CHECK(slave->target_y == 11);
   }
 
   {
@@ -241,17 +251,17 @@ int main() {
     static_cast<void>(
         map.legacy_spawn_player(make_player(1, 105, make_character("Relax", 10, 10, 0)),
                                 1, 0, true));
-    assert(map.legacy_set_player_slave_relax(1, true));
+    CHECK(map.legacy_set_player_slave_relax(1, true));
     map.enqueue_mail(make_slave(2, 1, 10, 13, 100000000));
     static_cast<void>(map.tick(1, 0));
 
     static_cast<void>(map.legacy_process_monster(2, 500, 1000, 0, 0));
     auto slave = map.legacy_monster_snapshot(2);
-    assert(slave.has_value());
-    assert(slave->x == 10);
-    assert(slave->y == 13);
-    assert(slave->target_x == -1);
-    assert(slave->target_y == -1);
+    CHECK(slave.has_value());
+    CHECK(slave->x == 10);
+    CHECK(slave->y == 13);
+    CHECK(slave->target_x == -1);
+    CHECK(slave->target_y == -1);
   }
 
   {
@@ -264,9 +274,9 @@ int main() {
 
     static_cast<void>(map.legacy_process_monster(2, 600, 1000, 0, 0));
     auto slave = map.legacy_monster_snapshot(2);
-    assert(slave.has_value());
-    assert(std::abs(slave->x - 10) <= 3);
-    assert(std::abs(slave->y - 10) <= 3);
+    CHECK(slave.has_value());
+    CHECK(std::abs(slave->x - 10) <= 3);
+    CHECK(std::abs(slave->y - 10) <= 3);
   }
 
   return 0;

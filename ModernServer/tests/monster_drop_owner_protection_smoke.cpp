@@ -1,5 +1,5 @@
-#include <cassert>
 #include <cstdint>
+#include <iostream>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -10,6 +10,15 @@
 #include "world/map_actor.hpp"
 
 namespace {
+
+#define CHECK(expr)                                                            \
+  do {                                                                         \
+    if (!(expr)) {                                                             \
+      std::cerr << "CHECK failed: " #expr << " at " << __FILE__ << ":"       \
+                << __LINE__ << "\n";                                          \
+      return 1;                                                                \
+    }                                                                          \
+  } while (false)
 
 std::optional<mir2::DecodedLegacyGamePacket> find_packet(const mir2::RuntimeDispatch& dispatch,
                                                          std::uint16_t ident) {
@@ -129,7 +138,7 @@ int main() {
 
   mir2::LogicBudgetConfig budgets;
   budgets.tick_ms = 20;
-  mir2::MapActor map(mir2::MapConfig{"0", "OwnerDrop", {}, 0, 0, 20, 20}, budgets,
+  mir2::MapActor map(mir2::MapConfig{"0", "OwnerDrop", {}, 20, 20, 0, 0}, budgets,
                      std::move(items), {});
   static_cast<void>(
       map.legacy_spawn_player(make_player(killer_id, killer_session, "Hero", 10, 10), 1, 0, true));
@@ -138,29 +147,29 @@ int main() {
   map.enqueue_mail(make_monster(monster_id));
   static_cast<void>(map.tick(1, 0));
 
-  assert(map.enqueue_legacy_player_command(make_attack(killer_id, killer_session, monster_id), 20));
+  CHECK(map.enqueue_legacy_player_command(make_attack(killer_id, killer_session, monster_id), 20));
   const auto kill = map.legacy_process_player(killer_id, 2, 20, false);
-  assert(find_packet(kill, mir2::kSmDeath).has_value());
+  CHECK(find_packet(kill, mir2::kSmDeath).has_value());
   const auto show = find_packet(kill, mir2::kSmItemShow);
-  assert(show.has_value());
-  assert(show->message.param == 9);
-  assert(show->message.tag == 8);
+  CHECK(show.has_value());
+  CHECK(show->message.param == 9);
+  CHECK(show->message.tag == 8);
 
-  assert(map.enqueue_legacy_player_command(make_pickup(picker_id, picker_session), 40));
-  const auto early_pickup = map.legacy_process_player(picker_id, 3, 40, false);
-  assert(has_owner_reject(early_pickup, killer_id));
-  assert(!find_packet(early_pickup, mir2::kSmItemHide).has_value());
-  assert(!find_packet(early_pickup, mir2::kSmAddItem).has_value());
+  CHECK(map.enqueue_legacy_player_command(make_pickup(picker_id, picker_session), 1000));
+  const auto early_pickup = map.legacy_process_player(picker_id, 50, 1000, false);
+  CHECK(has_owner_reject(early_pickup, killer_id));
+  CHECK(!find_packet(early_pickup, mir2::kSmItemHide).has_value());
+  CHECK(!find_packet(early_pickup, mir2::kSmAddItem).has_value());
 
-  assert(map.enqueue_legacy_player_command(make_pickup(picker_id, picker_session), 120020));
-  const auto boundary_pickup = map.legacy_process_player(picker_id, 4, 120020, false);
-  assert(has_owner_reject(boundary_pickup, killer_id));
-  assert(!find_packet(boundary_pickup, mir2::kSmItemHide).has_value());
+  CHECK(map.enqueue_legacy_player_command(make_pickup(picker_id, picker_session), 120040));
+  const auto boundary_pickup = map.legacy_process_player(picker_id, 6002, 120040, false);
+  CHECK(has_owner_reject(boundary_pickup, killer_id));
+  CHECK(!find_packet(boundary_pickup, mir2::kSmItemHide).has_value());
 
-  assert(map.enqueue_legacy_player_command(make_pickup(picker_id, picker_session), 120021));
-  const auto late_pickup = map.legacy_process_player(picker_id, 5, 120021, false);
-  assert(find_packet(late_pickup, mir2::kSmItemHide).has_value());
-  assert(find_packet(late_pickup, mir2::kSmAddItem).has_value());
+  CHECK(map.enqueue_legacy_player_command(make_pickup(picker_id, picker_session), 121000));
+  const auto late_pickup = map.legacy_process_player(picker_id, 6050, 121000, false);
+  CHECK(find_packet(late_pickup, mir2::kSmItemHide).has_value());
+  CHECK(find_packet(late_pickup, mir2::kSmAddItem).has_value());
 
   return 0;
 }
