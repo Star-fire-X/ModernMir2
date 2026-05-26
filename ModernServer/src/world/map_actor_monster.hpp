@@ -340,13 +340,19 @@ bool MapActor::tame_player_slave(Player& master, Monster& target,
 
 void MapActor::restore_saved_slaves(Player& player, RuntimeDispatch& dispatch,
                                     std::uint64_t current_tick, std::uint64_t now_ms) {
-  for (const auto& record : player.character().slaves) {
+  const auto master_id = player.id();
+  const auto records = player.character().slaves;
+  for (const auto& record : records) {
     if (record.name.empty() || record.remain_royalty_sec <= 0 || record.hp <= 0) {
       continue;
     }
+    auto* master = find_player(master_id);
+    if (master == nullptr) {
+      return;
+    }
     const auto royalty_time_ms =
         now_ms + static_cast<std::uint64_t>(record.remain_royalty_sec) * 1000ULL;
-    auto spawn = build_slave_spawn_mail(record.name, player, player.x(), player.y(),
+    auto spawn = build_slave_spawn_mail(record.name, *master, master->x(), master->y(),
                                         record.slave_make_level, record.slave_exp_level,
                                         record.slave_exp, royalty_time_ms, 0, now_ms,
                                         record);
@@ -360,9 +366,30 @@ void MapActor::restore_saved_slaves(Player& player, RuntimeDispatch& dispatch,
                        current_tick, now_ms, false, 0, 0, "template_missing");
       continue;
     }
-    handle_mail(*spawn, dispatch, current_tick, now_ms);
-    if (objects_.contains(spawn->actor_id)) {
-      player.add_slave_actor_id(spawn->actor_id);
+    auto object = make_object(*spawn);
+    if (auto* slave = as_monster(object.get()); slave != nullptr) {
+      slave->set_dir(spawn->dir);
+      if (spawn->current_hp > 0 || spawn->current_mp > 0) {
+        slave->set_hp_mp(spawn->current_hp > 0 ? spawn->current_hp : slave->hp(),
+                         spawn->current_mp >= 0 ? spawn->current_mp : slave->mp());
+      }
+      const auto walk_offset =
+          legacy_random_ != nullptr ? static_cast<std::uint64_t>(legacy_random_->random(3000))
+                                    : 0ULL;
+      const auto hit_offset =
+          legacy_random_ != nullptr ? static_cast<std::uint64_t>(legacy_random_->random(3000))
+                                    : 0ULL;
+      slave->initialize_legacy_ai_timers(now_ms, walk_offset, hit_offset);
+    }
+    if (environment_.add_moving_object(object->x(), object->y(), object->id(), now_ms,
+                                       moving_state_for(*object))) {
+      schedule_actor(current_tick, *object);
+      const auto slave_id = spawn->actor_id;
+      objects_[slave_id] = std::move(object);
+      if (auto* refreshed_master = find_player(master_id); refreshed_master != nullptr) {
+        refreshed_master->add_slave_actor_id(slave_id);
+      }
+      sync_all_player_visibility(dispatch);
       add_legacy_trace(dispatch, "LegacySlave", "restore", *spawn, current_tick,
                        now_ms, true, static_cast<std::int32_t>(spawn->actor_id & 0x7fffffff),
                        record.slave_exp_level, record.name);
@@ -608,10 +635,19 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
     if (last_it != objects_.end()) {
       if (auto* player_hitter = as_player(last_it->second.get()); player_hitter != nullptr) {
         reward_actor_id = player_hitter->id();
+        drop_owner_actor_id = player_hitter->id();
       }
     }
   }
-  static_cast<void>(killer_actor_id);
+  if (reward_actor_id == 0 && killer_actor_id != 0) {
+    const auto killer_it = objects_.find(killer_actor_id);
+    if (killer_it != objects_.end()) {
+      if (auto* player_killer = as_player(killer_it->second.get()); player_killer != nullptr) {
+        reward_actor_id = player_killer->id();
+        drop_owner_actor_id = player_killer->id();
+      }
+    }
+  }
 
   if (reward_actor_id != 0) {
     const auto attacker_it = objects_.find(reward_actor_id);

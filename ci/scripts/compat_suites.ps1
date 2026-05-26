@@ -133,6 +133,9 @@ function Get-CiBuildTargets {
     "mir2_monster_death_corpse_ghost_smoke",
     "mir2_monster_spawn_alive_count_smoke",
     "mir2_monster_drop_gold_split_smoke",
+    "mir2_monster_drop_owner_protection_smoke",
+    "mir2_monster_slave_exp_smoke",
+    "mir2_monster_slave_lifecycle_smoke",
     "mir2_monster_slave_ownership_smoke",
     "mir2_monster_drop_random_upgrade_smoke",
     "mir2_legacy_npc_merchant_cursor_smoke",
@@ -383,21 +386,6 @@ function Get-CiQuarantinedTests {
     [pscustomobject]@{
       Project = "ModernServer"
       Test = "mir2_monster_spawn_zentime_smoke"
-      Reason = "Local phase3 validation asserts in Debug/MSVC and then waits for the assertion path until timeout."
-    },
-    [pscustomobject]@{
-      Project = "ModernServer"
-      Test = "mir2_monster_drop_owner_protection_smoke"
-      Reason = "Local phase3 validation asserts in Debug/MSVC and then waits for the assertion path until timeout."
-    },
-    [pscustomobject]@{
-      Project = "ModernServer"
-      Test = "mir2_monster_slave_exp_smoke"
-      Reason = "Local phase3 validation asserts in Debug/MSVC and then waits for the assertion path until timeout."
-    },
-    [pscustomobject]@{
-      Project = "ModernServer"
-      Test = "mir2_monster_slave_lifecycle_smoke"
       Reason = "Local phase3 validation asserts in Debug/MSVC and then waits for the assertion path until timeout."
     },
     [pscustomobject]@{
