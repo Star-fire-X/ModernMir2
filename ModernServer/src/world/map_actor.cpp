@@ -1862,6 +1862,19 @@ RuntimeDispatch MapActor::legacy_process_merchant(std::uint64_t actor_id,
   if (merchant->legacy_search_due(now_ms)) {
     merchant->mark_legacy_search_time(now_ms);
   }
+  auto& weapon_upgrades = merchant->weapon_upgrades_mutable();
+  const auto upgrade_count_before = weapon_upgrades.size();
+  weapon_upgrades.erase(
+      std::remove_if(weapon_upgrades.begin(), weapon_upgrades.end(),
+                     [&](const LegacyWeaponUpgradeRecord& record) {
+                       return record.ready_time_ms != 0 &&
+                              now_ms > record.ready_time_ms + kLegacyWeaponUpgradeExpireMs;
+                     }),
+      weapon_upgrades.end());
+  if (weapon_upgrades.size() != upgrade_count_before) {
+    dispatch.persist_requests.push_back(make_save_merchant_state_request(*merchant));
+  }
+
   constexpr std::uint64_t kMerchantRefillMs = 5ULL * 60ULL * 1000ULL;
   constexpr std::uint64_t kMerchantVerifyMs = 10ULL * 60ULL * 1000ULL;
   if (merchant->legacy_refill_time_ms() == 0 ||

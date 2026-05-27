@@ -244,9 +244,8 @@ std::vector<LegacyWeaponUpgradeRecord> decode_weapon_upgrade_blob(sqlite3_stmt* 
     record.upsc = raw[offset++];
     record.upmc = raw[offset++];
     record.durapoint = raw[offset++];
-    static_cast<void>(read_u64_le(raw + offset));
+    record.ready_time_ms = read_u64_le(raw + offset);
     offset += 8;
-    record.ready_time_ms = 0;
     records.push_back(record);
   }
   return records;

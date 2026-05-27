@@ -218,6 +218,12 @@ if(BUILD_TESTING)
   add_test(NAME mir2_npc_shop_protocol_golden_smoke
     COMMAND mir2_npc_shop_protocol_golden_smoke)
 
+  add_executable(mir2_legacy_business_golden_smoke
+    tests/legacy_business_golden_smoke.cpp)
+  target_link_libraries(mir2_legacy_business_golden_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_business_golden_smoke
+    COMMAND mir2_legacy_business_golden_smoke)
+
   add_executable(mir2_npc_shop_interleaving_fuzz_smoke
     tests/npc_shop_interleaving_fuzz_smoke.cpp)
   target_link_libraries(mir2_npc_shop_interleaving_fuzz_smoke PRIVATE mir2_hostlib)
@@ -1139,6 +1145,7 @@ if(BUILD_TESTING)
       mir2_persistence_version_smoke
       mir2_world_shutdown_persistence_smoke
       mir2_npc_shop_protocol_golden_smoke
+      mir2_legacy_business_golden_smoke
       mir2_npc_shop_interleaving_fuzz_smoke
       mir2_canonical_legacy_command_smoke
       mir2_legacy_string_semantics_smoke

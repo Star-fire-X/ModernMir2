@@ -135,7 +135,7 @@ int main() {
       merchant_it->weapon_upgrades.front().upsc != 3 ||
       merchant_it->weapon_upgrades.front().upmc != 4 ||
       merchant_it->weapon_upgrades.front().durapoint != 15 ||
-      merchant_it->weapon_upgrades.front().ready_time_ms != 0) {
+      merchant_it->weapon_upgrades.front().ready_time_ms != 123456) {
     return 1;
   }
 
