@@ -373,7 +373,27 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, lucky, condition_line);
       return success;
     }
-    if (command_name == "CHECKMONMAP" || command_name == "CHECKMONAREA") {
+    if (command_name == "CHECKMONMAP") {
+      std::string map_id = config_.id;
+      std::int32_t needed = 1;
+      if (tokens.size() == 1) {
+        if (const auto maybe_needed = parse_int32(tokens[0]); maybe_needed.has_value()) {
+          needed = *maybe_needed;
+        } else {
+          map_id = util::trim(tokens[0]);
+        }
+      } else if (tokens.size() >= 2) {
+        map_id = util::trim(tokens[0]);
+        needed = int_token(1, 1);
+      }
+      const auto count = legacy_script_map_hooks_.monster_count
+                             ? legacy_script_map_hooks_.monster_count(map_id)
+                             : (map_id == config_.id ? legacy_live_monster_count() : 0);
+      const auto success = count >= needed;
+      trace("condition", success, count, condition_line);
+      return success;
+    }
+    if (command_name == "CHECKMONAREA") {
       std::string name;
       std::int32_t needed = 1;
       std::int32_t range = kLegacyViewRange;
@@ -408,14 +428,21 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       return success;
     }
     if (command_name == "CHECKHUM") {
-      const auto needed = int_token(0, 1);
-      std::int32_t count = 0;
-      for (const auto& [_, object] : objects_) {
-        const auto* other = as_player(object.get());
-        if (other != nullptr && !other->is_dead()) {
-          ++count;
+      std::string map_id = config_.id;
+      std::int32_t needed = 1;
+      if (tokens.size() == 1) {
+        if (const auto maybe_needed = parse_int32(tokens[0]); maybe_needed.has_value()) {
+          needed = *maybe_needed;
+        } else {
+          map_id = util::trim(tokens[0]);
         }
+      } else if (tokens.size() >= 2) {
+        map_id = util::trim(tokens[0]);
+        needed = int_token(1, 1);
       }
+      const auto count = legacy_script_map_hooks_.player_count
+                             ? legacy_script_map_hooks_.player_count(map_id)
+                             : (map_id == config_.id ? legacy_live_player_count() : 0);
       const auto success = count >= needed;
       trace("condition", success, count, condition_line);
       return success;
@@ -713,7 +740,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     }
     if (command_name == "GIVE") {
       const auto target = parse_script_amount_target(payload);
-      if (util::lower_copy(target.target) == "gold") {
+      if (is_legacy_script_gold_token(target.target)) {
         const auto new_gold =
             static_cast<std::int64_t>(player.character().gold) + target.amount;
         if (target.amount < 0 || new_gold > kLegacyBagGold) {
@@ -753,7 +780,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     }
     if (command_name == "TAKE") {
       const auto target = parse_script_amount_target(payload);
-      if (util::lower_copy(target.target) == "gold") {
+      if (is_legacy_script_gold_token(target.target)) {
         if (!player.can_spend_gold(target.amount)) {
           trace("take_gold_reject", false, target.amount, action_line);
           return std::nullopt;
@@ -956,28 +983,14 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       return std::nullopt;
     }
     if (command_name == "MONCLEAR") {
-      const auto wanted = tokens.empty() ? std::string{} : util::lower_copy(tokens[0]);
-      std::vector<std::uint64_t> remove_ids;
-      for (const auto& [actor_id, object] : objects_) {
-        const auto* monster = as_monster(object.get());
-        if (monster == nullptr) {
-          continue;
-        }
-        if (!wanted.empty() && util::lower_copy(monster->name()) != wanted) {
-          continue;
-        }
-        remove_ids.push_back(actor_id);
-      }
-      for (const auto actor_id : remove_ids) {
-        if (const auto it = objects_.find(actor_id); it != objects_.end()) {
-          static_cast<void>(environment_.delete_from_map(
-              it->second->x(), it->second->y(), LegacyMapObjectShape::moving_object,
-              it->second->id()));
-          remove_actor_from_visibility(actor_id, dispatch);
-          objects_.erase(it);
-        }
-      }
-      trace("monclear", true, static_cast<std::int32_t>(remove_ids.size()), action_line);
+      const auto map_id = tokens.empty() ? config_.id : util::trim(tokens[0]);
+      const auto removed = legacy_script_map_hooks_.clear_monsters
+                               ? legacy_script_map_hooks_.clear_monsters(map_id, dispatch,
+                                                                         current_tick, now_ms)
+                               : (map_id == config_.id
+                                      ? legacy_clear_monsters(dispatch, current_tick, now_ms)
+                                      : 0);
+      trace("monclear", true, removed, action_line);
       return std::nullopt;
     }
     if (command_name == "TIMERECALL") {

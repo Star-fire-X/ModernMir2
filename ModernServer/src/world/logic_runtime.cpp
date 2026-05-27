@@ -579,6 +579,27 @@ void LogicRuntime::initialize() {
     map_it->second->set_guild_castle_snapshot(guild_castle_snapshot_);
   }
 
+  for (auto& [_, map_actor] : maps_) {
+    MapActor::LegacyScriptMapHooks hooks;
+    hooks.monster_count = [this](std::string_view map_id) {
+      const auto map_it = maps_.find(std::string(map_id));
+      return map_it != maps_.end() ? map_it->second->legacy_live_monster_count() : 0;
+    };
+    hooks.player_count = [this](std::string_view map_id) {
+      const auto map_it = maps_.find(std::string(map_id));
+      return map_it != maps_.end() ? map_it->second->legacy_live_player_count() : 0;
+    };
+    hooks.clear_monsters = [this](std::string_view map_id, RuntimeDispatch& dispatch,
+                                  std::uint64_t current_tick, std::uint64_t now_ms) {
+      const auto map_it = maps_.find(std::string(map_id));
+      if (map_it == maps_.end()) {
+        return 0;
+      }
+      return map_it->second->legacy_clear_monsters(dispatch, current_tick, now_ms);
+    };
+    map_actor->set_legacy_script_map_hooks(std::move(hooks));
+  }
+
   for (const auto& spawn : config_.spawns) {
     MonsterGroup group;
     group.name = spawn.name;

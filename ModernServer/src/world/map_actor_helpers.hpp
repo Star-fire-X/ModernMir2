@@ -1449,6 +1449,10 @@ struct LegacyScriptAmountTarget {
   std::int32_t amount{1};
 };
 
+constexpr std::string_view kLegacyGoldTokenUtf8 = "\xE9\x87\x91\xE5\xB8\x81";
+constexpr std::string_view kLegacyGoldTokenUtf8Traditional = "\xE9\x87\x91\xE5\xB9\xA3";
+constexpr std::string_view kLegacyGoldTokenGbk = "\xBD\xF0\xB1\xD2";
+
 std::vector<std::string> split_script_tokens(std::string_view payload) {
   std::vector<std::string> tokens;
   std::string current;
@@ -1471,6 +1475,32 @@ std::vector<std::string> split_script_tokens(std::string_view payload) {
     tokens.push_back(std::move(current));
   }
   return tokens;
+}
+
+bool is_legacy_script_gold_token(std::string_view token) {
+  const auto normalized = util::lower_copy(util::trim(std::string(token)));
+  return normalized == "gold" || normalized == kLegacyGoldTokenUtf8 ||
+         normalized == kLegacyGoldTokenUtf8Traditional || normalized == kLegacyGoldTokenGbk;
+}
+
+std::optional<LegacyScriptAmountTarget> parse_attached_gold_amount(std::string_view payload) {
+  const auto normalized = util::lower_copy(util::trim(std::string(payload)));
+  for (const auto coin : {std::string_view{"gold"}, kLegacyGoldTokenUtf8,
+                          kLegacyGoldTokenUtf8Traditional, kLegacyGoldTokenGbk}) {
+    if (normalized.size() <= coin.size() || !util::starts_with(normalized, coin)) {
+      continue;
+    }
+    const auto suffix = util::trim(std::string(normalized.substr(coin.size())));
+    const auto amount = parse_int32(suffix);
+    if (!amount.has_value()) {
+      continue;
+    }
+    LegacyScriptAmountTarget target;
+    target.target = std::string(coin);
+    target.amount = std::max(*amount, 0);
+    return target;
+  }
+  return std::nullopt;
 }
 
 std::string strip_legacy_mark_token(std::string token) {
@@ -1503,6 +1533,11 @@ LegacyScriptAmountTarget parse_script_amount_target(std::string_view payload) {
         target.target = util::trim(std::move(target.target));
       }
       return target;
+    }
+  }
+  if (tokens.size() == 1) {
+    if (auto attached = parse_attached_gold_amount(tokens.front()); attached.has_value()) {
+      return *attached;
     }
   }
   target.target = util::trim(std::string(payload));

@@ -3,10 +3,12 @@
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <utility>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -54,6 +56,14 @@ class MapActor {
     std::vector<std::string> messages{};
   };
 
+  struct LegacyScriptMapHooks {
+    std::function<std::int32_t(std::string_view map_id)> monster_count{};
+    std::function<std::int32_t(std::string_view map_id)> player_count{};
+    std::function<std::int32_t(std::string_view map_id, RuntimeDispatch& dispatch,
+                               std::uint64_t current_tick, std::uint64_t now_ms)>
+        clear_monsters{};
+  };
+
   MapActor(MapConfig config, LogicBudgetConfig budgets,
            std::unordered_map<std::int32_t, ItemConfig> item_configs,
            std::unordered_map<std::int32_t, MagicConfig> magic_configs,
@@ -68,6 +78,7 @@ class MapActor {
 
   void enqueue_mail(ActorMail mail);
   void set_legacy_random(LegacyRandom* legacy_random);
+  void set_legacy_script_map_hooks(LegacyScriptMapHooks hooks);
   bool apply_merchant_state(const MerchantStateRecord& state);
   void set_castle_dialog_context(CastleDialogContext castle_dialog_context);
   void set_guild_castle_snapshot(GuildCastleSnapshot guild_castle_snapshot);
@@ -94,6 +105,11 @@ class MapActor {
                                                        std::size_t sub_cursor);
   [[nodiscard]] bool legacy_monster_alive(std::uint64_t actor_id) const;
   [[nodiscard]] bool legacy_monster_counts_for_spawn(std::uint64_t actor_id) const;
+  [[nodiscard]] std::int32_t legacy_live_monster_count() const;
+  [[nodiscard]] std::int32_t legacy_live_player_count() const;
+  [[nodiscard]] std::int32_t legacy_clear_monsters(RuntimeDispatch& dispatch,
+                                                   std::uint64_t current_tick,
+                                                   std::uint64_t now_ms);
   [[nodiscard]] bool legacy_can_spawn_monster(std::int32_t x, std::int32_t y) const;
   [[nodiscard]] RuntimeDispatch legacy_process_merchant(std::uint64_t actor_id,
                                                         std::uint64_t current_tick,
@@ -465,6 +481,7 @@ class MapActor {
   WheelTimer<std::uint64_t> object_wheel_{1024};
   WheelTimer<ActorMail> delayed_mail_wheel_{1024};
   LegacyRandom* legacy_random_{nullptr};
+  LegacyScriptMapHooks legacy_script_map_hooks_{};
   MakeIndexAllocator fallback_make_index_allocator_{};
   MakeIndexAllocator* make_index_allocator_{nullptr};
   std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>> objects_{};
