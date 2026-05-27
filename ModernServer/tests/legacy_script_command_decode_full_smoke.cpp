@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -116,7 +117,13 @@ bool has_unsupported_script_trace(const mir2::RuntimeDispatch& dispatch) {
 }  // namespace
 
 int main() {
+  const auto temp_root =
+      std::filesystem::temp_directory_path() / "mir2_legacy_script_command_decode_full_smoke";
+  std::error_code ignored;
+  std::filesystem::remove_all(temp_root, ignored);
+
   mir2::HostConfig config;
+  config.runtime.data_dir = temp_root / "data";
   config.runtime.legacy_random_seed = 1;
   config.maps.push_back(mir2::MapConfig{
       .id = "0",
@@ -345,5 +352,6 @@ BREAK)"});
   assert(!has_unsupported_script_trace(break_dispatch));
   assert(has_trace(break_dispatch, "break"));
 
+  std::filesystem::remove_all(temp_root, ignored);
   return 0;
 }

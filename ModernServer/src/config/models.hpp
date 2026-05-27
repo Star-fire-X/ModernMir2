@@ -458,6 +458,7 @@ struct HostConfig {
   std::vector<MagicConfig> magics{};
   std::vector<NpcConfig> npcs{};
   std::vector<MapQuestConfig> map_quests{};
+  std::vector<NpcDialogSectionConfig> startup_quest_dialog_sections{};
 };
 
 }  // namespace mir2

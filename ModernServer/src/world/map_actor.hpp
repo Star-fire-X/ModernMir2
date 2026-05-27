@@ -19,6 +19,7 @@
 #include "core/wheel_timer.hpp"
 #include "world/game_object.hpp"
 #include "world/legacy_map_environment.hpp"
+#include "world/legacy_name_list_repository.hpp"
 #include "world/legacy_random.hpp"
 #include "world/make_index_allocator.hpp"
 
@@ -74,7 +75,9 @@ class MapActor {
            MakeIndexAllocator* make_index_allocator = nullptr,
            std::string black_stone_name = "BlackStone",
            bool legacy_approval_mode = false,
-           std::shared_ptr<std::array<std::int32_t, 10>> script_global_params = nullptr);
+           std::shared_ptr<std::array<std::int32_t, 10>> script_global_params = nullptr,
+           std::shared_ptr<LegacyNameListRepository> script_name_lists = nullptr,
+           std::vector<NpcDialogSectionConfig> startup_quest_dialog_sections = {});
 
   void enqueue_mail(ActorMail mail);
   void set_legacy_random(LegacyRandom* legacy_random);
@@ -471,6 +474,8 @@ class MapActor {
   bool trigger_map_quest(Player& player, std::string monster_name, std::string item_name,
                          bool group_call, std::string source, RuntimeDispatch& dispatch,
                          std::uint64_t current_tick, std::uint64_t now_ms);
+  bool trigger_startup_quest(Player& player, RuntimeDispatch& dispatch,
+                             std::uint64_t current_tick, std::uint64_t now_ms);
 
   MapConfig config_{};
   LogicBudgetConfig budgets_{};
@@ -485,6 +490,7 @@ class MapActor {
   LegacyMapEnvironment environment_{};
   CastleDialogContext castle_dialog_context_{};
   GuildCastleSnapshot guild_castle_snapshot_{};
+  std::vector<NpcDialogSectionConfig> startup_quest_dialog_sections_{};
   std::deque<ActorMail> mailbox_{};
   WheelTimer<std::uint64_t> object_wheel_{1024};
   WheelTimer<ActorMail> delayed_mail_wheel_{1024};
@@ -500,8 +506,8 @@ class MapActor {
   std::unordered_map<std::uint64_t, std::pair<std::int32_t, std::int32_t>> event_objects_{};
   std::unordered_map<std::uint64_t, LegacyEventType> event_object_types_{};
   std::unordered_map<std::uint64_t, PlayerVisibility> visibility_{};
-  std::unordered_map<std::string, std::unordered_set<std::string>> script_name_lists_{};
   std::shared_ptr<std::array<std::int32_t, 10>> script_global_params_{};
+  std::shared_ptr<LegacyNameListRepository> script_name_lists_{};
   std::uint64_t next_ground_item_id_{1};
   std::uint64_t next_trade_session_id_{1};
   std::uint64_t next_script_monster_id_{0x6000000000000000ULL};

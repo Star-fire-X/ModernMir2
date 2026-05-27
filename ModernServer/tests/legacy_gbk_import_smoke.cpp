@@ -199,8 +199,8 @@ int main() {
                   item + "\\\n");
   const auto merchant_script = std::string{"#INCLUDE "} + define_file + "\n" +
                                "[@main]\n"
-                               "#SAY\n"
-                               "@WELCOME\\\n"
+                               "#SAY\n" +
+                               welcome + "\\\n"
                                "#CALL [" +
                                call_file + "] @called\n";
   write_bytes(legacy / "Envir" / "market_def" / "9gbk-0.txt", merchant_script);

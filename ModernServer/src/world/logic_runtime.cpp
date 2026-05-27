@@ -520,6 +520,8 @@ void LogicRuntime::initialize() {
   one_zen_time_ms_ = 0;
   one_zen_time_initialized_ = false;
   default_map_id_.clear();
+  script_name_lists_ =
+      std::make_shared<LegacyNameListRepository>(config_.runtime.data_dir / "legacy_name_lists");
   apply_runtime_castle_defaults(config_.runtime, castle_dialog_context_);
   apply_runtime_castle_defaults(config_.runtime, guild_castle_snapshot_);
   castle_dialog_context_ = guild_castle_snapshot_.castle_dialog;
@@ -571,7 +573,8 @@ void LogicRuntime::initialize() {
                                            &make_index_allocator_,
                                            config_.runtime.black_stone_name,
                                            config_.runtime.legacy_approval_mode,
-                                           script_global_params_));
+                                           script_global_params_, script_name_lists_,
+                                           config_.startup_quest_dialog_sections));
     map_it->second->set_legacy_random(&legacy_random_);
     if (inserted) {
       map_order_.push_back(map.id);

@@ -525,13 +525,13 @@ mir2::HostConfig make_script_config() {
   npc.y = 10;
   npc.service = "none";
   npc.dialog_sections.push_back(
-      {"@takefail", "#IF\\CHECKLEVEL 1\\#ACT\\#TAKE Apple 2\\#SAY Done"});
+      {"@takefail", "#IF\nCHECKLEVEL 1\n#ACT\n#TAKE Apple 2\n#SAY Done"});
   npc.dialog_sections.push_back(
-      {"@takecheckfail", "#IF\\CHECKLEVEL 1\\#ACT\\#TAKECHECKITEM Apple 2\\#SAY Done"});
+      {"@takecheckfail", "#IF\nCHECKLEVEL 1\n#ACT\n#TAKECHECKITEM Apple 2\n#SAY Done"});
   npc.dialog_sections.push_back(
-      {"@givepartial", "#IF\\CHECKLEVEL 1\\#ACT\\#GIVE Apple 2\\#SAY Done"});
+      {"@givepartial", "#IF\nCHECKLEVEL 1\n#ACT\n#GIVE Apple 2\n#SAY Done"});
   npc.dialog_sections.push_back(
-      {"@goldcap", "#IF\\CHECKLEVEL 1\\#ACT\\#GIVE Gold 2\\#SAY Done"});
+      {"@goldcap", "#IF\nCHECKLEVEL 1\n#ACT\n#GIVE Gold 2\n#SAY Done"});
   config.npcs.push_back(npc);
   return config;
 }

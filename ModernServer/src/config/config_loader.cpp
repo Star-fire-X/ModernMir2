@@ -23,6 +23,8 @@ namespace mir2 {
 
 namespace {
 
+constexpr std::int32_t kLegacyScriptIncludeDepthLimit = 64;
+
 toml::table parse_file_checked(const std::filesystem::path& path) {
   try {
     return toml::parse_file(path.string());
@@ -117,6 +119,10 @@ std::string strip_utf8_bom(std::string line) {
   return line;
 }
 
+bool is_legacy_script_comment_line(std::string_view trimmed) {
+  return util::starts_with(trimmed, ";") || util::starts_with(trimmed, "/");
+}
+
 std::string upper_copy(std::string_view text) {
   std::string upper{text};
   std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char ch) {
@@ -163,11 +169,11 @@ std::string normalize_dialog_text(const std::vector<std::string>& lines) {
   for (auto line : lines) {
     line = strip_utf8_bom(std::move(line));
     line = util::trim(std::move(line));
-    if (line.empty() || util::starts_with(line, ";")) {
+    if (line.empty() || is_legacy_script_comment_line(line)) {
       continue;
     }
-    if (!text.empty() && text.back() != '\\') {
-      text.push_back('\\');
+    if (!text.empty()) {
+      text.push_back('\n');
     }
     text += line;
   }
@@ -178,8 +184,8 @@ void append_dialog_section_text(std::string& target, std::string text) {
   if (text.empty()) {
     return;
   }
-  if (!target.empty() && target.back() != '\\') {
-    target.push_back('\\');
+  if (!target.empty()) {
+    target.push_back('\n');
   }
   target += std::move(text);
 }
@@ -295,6 +301,9 @@ std::vector<std::string> extract_legacy_section(const std::filesystem::path& pat
   for (auto line : read_text_lines(path)) {
     line = strip_utf8_bom(std::move(line));
     const auto trimmed = util::trim(line);
+    if (is_legacy_script_comment_line(trimmed)) {
+      continue;
+    }
     if (trimmed.size() >= 3 && trimmed.front() == '[' && trimmed.back() == ']') {
       const auto action = util::lower_copy(util::trim(trimmed.substr(1, trimmed.size() - 2)));
       if (capturing && action != wanted) {
@@ -309,14 +318,59 @@ std::vector<std::string> extract_legacy_section(const std::filesystem::path& pat
   return extracted;
 }
 
+enum class LegacyPreprocessBlock {
+  say,
+  condition,
+  act,
+  else_say,
+  else_act
+};
+
+bool should_replace_define_in_block(LegacyPreprocessBlock block) {
+  return block == LegacyPreprocessBlock::condition || block == LegacyPreprocessBlock::act ||
+         block == LegacyPreprocessBlock::else_act;
+}
+
+LegacyPreprocessBlock next_preprocess_block(LegacyPreprocessBlock current,
+                                            std::string_view trimmed_upper) {
+  if (!trimmed_upper.empty() && trimmed_upper.front() == '[') {
+    return LegacyPreprocessBlock::say;
+  }
+  if (util::starts_with(trimmed_upper, "#IF")) {
+    return LegacyPreprocessBlock::condition;
+  }
+  if (util::starts_with(trimmed_upper, "#ACT")) {
+    return LegacyPreprocessBlock::act;
+  }
+  if (util::starts_with(trimmed_upper, "#ELSEACT") ||
+      util::starts_with(trimmed_upper, "#ELESACT")) {
+    return LegacyPreprocessBlock::else_act;
+  }
+  if (util::starts_with(trimmed_upper, "#SAY")) {
+    return LegacyPreprocessBlock::say;
+  }
+  if (util::starts_with(trimmed_upper, "#ELSESAY")) {
+    return LegacyPreprocessBlock::else_say;
+  }
+  return current;
+}
+
+using LegacyDefines = std::unordered_map<std::string, std::string>;
+
 std::vector<std::string> preprocess_legacy_script_lines(const std::filesystem::path& path,
-                                                        std::int32_t depth = 0) {
-  if (depth > 8 || !std::filesystem::exists(path)) {
+                                                        std::int32_t depth,
+                                                        LegacyDefines defines,
+                                                        std::optional<std::string_view> section);
+
+std::vector<std::string> preprocess_legacy_script_lines(const std::filesystem::path& path,
+                                                        std::int32_t depth,
+                                                        LegacyDefines defines,
+                                                        std::optional<std::string_view> section) {
+  if (depth > kLegacyScriptIncludeDepthLimit || !std::filesystem::exists(path)) {
     return {};
   }
 
   std::vector<std::string> output;
-  std::unordered_map<std::string, std::string> defines;
   auto set_define = [&](std::string name, std::string value) {
     name = upper_copy(util::trim(std::move(name)));
     if (!name.empty()) {
@@ -326,12 +380,15 @@ std::vector<std::string> preprocess_legacy_script_lines(const std::filesystem::p
 
   auto collect_defines = [&](auto&& self, const std::filesystem::path& define_path,
                              std::int32_t define_depth) -> void {
-    if (define_depth > 8 || !std::filesystem::exists(define_path)) {
+    if (define_depth > kLegacyScriptIncludeDepthLimit || !std::filesystem::exists(define_path)) {
       return;
     }
     for (auto line : read_text_lines(define_path)) {
       line = strip_utf8_bom(std::move(line));
       const auto trimmed = util::trim(line);
+      if (is_legacy_script_comment_line(trimmed)) {
+        continue;
+      }
       const auto upper = upper_copy(trimmed);
       if (util::starts_with(upper, "#DEFINE")) {
         auto tokens = split_tokens(trimmed);
@@ -349,9 +406,15 @@ std::vector<std::string> preprocess_legacy_script_lines(const std::filesystem::p
     }
   };
 
-  for (auto line : read_text_lines(path)) {
+  auto source_lines = section.has_value() ? extract_legacy_section(path, *section)
+                                          : read_text_lines(path);
+  auto block = LegacyPreprocessBlock::say;
+  for (auto line : source_lines) {
     line = strip_utf8_bom(std::move(line));
     const auto trimmed = util::trim(line);
+    if (trimmed.empty() || is_legacy_script_comment_line(trimmed)) {
+      continue;
+    }
     const auto upper = upper_copy(trimmed);
     if (util::starts_with(upper, "#SETHOME")) {
       const auto marker = first_token(trimmed);
@@ -382,25 +445,32 @@ std::vector<std::string> preprocess_legacy_script_lines(const std::filesystem::p
       const auto close = trimmed.find(']', open == std::string::npos ? 0 : open + 1);
       if (open != std::string::npos && close != std::string::npos) {
         const auto file_name = trimmed.substr(open + 1, close - open - 1);
-        const auto section = util::trim(trimmed.substr(close + 1));
+        const auto call_section = util::trim(trimmed.substr(close + 1));
         const auto call_path = resolve_legacy_include_path(path, file_name);
-        auto called_lines = extract_legacy_section(call_path, section);
         output.push_back("#ACT");
-        output.push_back("GOTO " + section);
-        output.insert(output.end(), std::make_move_iterator(called_lines.begin()),
-                      std::make_move_iterator(called_lines.end()));
+        output.push_back("GOTO " + call_section);
+        auto preprocessed_called =
+            preprocess_legacy_script_lines(call_path, depth + 1, defines, call_section);
+        output.insert(output.end(), std::make_move_iterator(preprocessed_called.begin()),
+                      std::make_move_iterator(preprocessed_called.end()));
         continue;
+      }
+    }
+
+    block = next_preprocess_block(block, upper);
+    if (should_replace_define_in_block(block)) {
+      for (const auto& [name, value] : defines) {
+        line = replace_case_insensitive(std::move(line), name, value);
       }
     }
     output.push_back(std::move(line));
   }
-
-  for (auto& line : output) {
-    for (const auto& [name, value] : defines) {
-      line = replace_case_insensitive(std::move(line), name, value);
-    }
-  }
   return output;
+}
+
+std::vector<std::string> preprocess_legacy_script_lines(const std::filesystem::path& path,
+                                                        std::int32_t depth = 0) {
+  return preprocess_legacy_script_lines(path, depth, {}, std::nullopt);
 }
 
 void merge_dialog_sections(NpcConfig& npc, std::vector<NpcDialogSectionConfig> sections) {
@@ -627,6 +697,22 @@ std::filesystem::path resolve_map_quest_script_path(const std::filesystem::path&
 std::filesystem::path resolve_map_quest_script_path(const std::filesystem::path& root,
                                                     const MapQuestConfig& quest) {
   return resolve_map_quest_script_path(root, quest.map_id, quest.qfile);
+}
+
+std::filesystem::path resolve_startup_quest_script_path(const std::filesystem::path& root) {
+  const std::vector<std::filesystem::path> candidates = {
+      root / "npc_scripts" / "Startup" / "StartupQuest.txt",
+      root / "npc_scripts" / "QuestDiary" / "Startup" / "StartupQuest.txt",
+      root / "Startup" / "StartupQuest.txt",
+      root / "QuestDiary" / "Startup" / "StartupQuest.txt",
+      root / "StartupQuest.txt",
+  };
+  for (const auto& candidate : candidates) {
+    if (std::filesystem::exists(candidate)) {
+      return candidate;
+    }
+  }
+  return {};
 }
 
 std::string infer_npc_service(const NpcConfig& npc) {
@@ -1198,6 +1284,14 @@ void load_map_quests(const std::filesystem::path& directory, HostConfig& config)
   }
 }
 
+void load_startup_quest(const std::filesystem::path& root, HostConfig& config) {
+  const auto script_path = resolve_startup_quest_script_path(root);
+  if (script_path.empty()) {
+    return;
+  }
+  config.startup_quest_dialog_sections = parse_npc_dialog_script(script_path);
+}
+
 }  // namespace
 
 HostConfig ConfigLoader::load(const std::filesystem::path& root) const {
@@ -1410,6 +1504,7 @@ HostConfig ConfigLoader::load(const std::filesystem::path& root) const {
   load_magics(root / "magic", config);
   load_npcs(root / "npcs", config);
   load_map_quests(root / "map_quests", config);
+  load_startup_quest(root, config);
 
   if (config.maps.empty()) {
     throw std::runtime_error("No map configuration files were found.");
