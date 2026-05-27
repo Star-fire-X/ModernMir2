@@ -433,15 +433,19 @@ void WorldService::seed_session_sequence_for_test(std::uint64_t session_id,
   session_sequence_watermarks_[session_id] = session_seq;
 }
 
-void WorldService::clear_session_actions_for_test() {
+std::size_t WorldService::legacy_session_inbox_size_for_test(
+    std::uint64_t session_id) const {
+  return runtime_ != nullptr ? runtime_->legacy_session_inbox_size(session_id) : 0;
 }
 
-std::size_t WorldService::session_action_count_for_test() const {
-  return 0;
+std::vector<std::uint64_t> WorldService::legacy_session_inbox_sequences_for_test(
+    std::uint64_t session_id) const {
+  return runtime_ != nullptr ? runtime_->legacy_session_inbox_sequences(session_id)
+                             : std::vector<std::uint64_t>{};
 }
 
-std::size_t WorldService::session_action_reject_count_for_test() const {
-  return 0;
+RuntimeDispatch WorldService::tick_runtime_for_test(std::uint64_t now_ms) {
+  return runtime_ != nullptr ? runtime_->tick(now_ms) : RuntimeDispatch{};
 }
 
 RuntimeDispatch WorldService::run_legacy_socket_stage_for_test(std::uint64_t now_ms) {

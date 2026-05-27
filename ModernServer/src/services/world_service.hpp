@@ -9,6 +9,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "core/module.hpp"
 #include "protocol/canonical_login_state.hpp"
@@ -36,9 +37,11 @@ class WorldService : public Module {
   void initialize_runtime_for_test(const HostConfig& config);
   void enqueue_gate_event_for_test(SessionEvent event);
   void seed_session_sequence_for_test(std::uint64_t session_id, std::uint64_t session_seq);
-  void clear_session_actions_for_test();
-  [[nodiscard]] std::size_t session_action_count_for_test() const;
-  [[nodiscard]] std::size_t session_action_reject_count_for_test() const;
+  [[nodiscard]] std::size_t legacy_session_inbox_size_for_test(
+      std::uint64_t session_id) const;
+  [[nodiscard]] std::vector<std::uint64_t> legacy_session_inbox_sequences_for_test(
+      std::uint64_t session_id) const;
+  [[nodiscard]] RuntimeDispatch tick_runtime_for_test(std::uint64_t now_ms);
   [[nodiscard]] RuntimeDispatch run_legacy_socket_stage_for_test(std::uint64_t now_ms);
   [[nodiscard]] RuntimeDispatch process_ingress_batch_for_test(WorldIngressBatch& batch);
 #endif

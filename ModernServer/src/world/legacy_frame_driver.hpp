@@ -85,7 +85,7 @@ struct LegacyFrameCallbacks {
 // - legacy_protocol_command_golden_smoke: encode/decode golden vectors
 // - core_smoke: codec unit tests, check-code strip, body round-trip
 // - world_invalid_command_smoke: stale sequence rejection
-// - legacy_frame_smoke check_session_fifo_ordering: per-frame action gate
+// - legacy_frame_smoke check_session_fifo_ordering: per-session FIFO admission
 class LegacyFrameDriver {
  public:
   [[nodiscard]] RuntimeDispatch run_frame(std::uint64_t now_ms, WorldIngressBatch ingress_batch,
