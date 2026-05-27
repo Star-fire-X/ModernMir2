@@ -27,6 +27,7 @@
 #include <deque>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -128,6 +129,11 @@ struct LegacyActorMessage {
   int magic_effect_type{-1};
 };
 
+struct LegacyActorBundleMessage {
+  std::vector<client_v1::Message> staged_state{};
+  std::vector<LegacyActorMessage> actor_messages{};
+};
+
 struct ActorState {
   std::uint64_t actor_id{0};
   std::string name{};
@@ -162,6 +168,7 @@ struct ActorState {
   LegacyEventPriority legacy_event_priority{LegacyEventPriority::normal};
   std::uint64_t legacy_event_sequence{0};
   std::deque<LegacyActorMessage> legacy_action_queue{};
+  std::deque<LegacyActorBundleMessage> legacy_actor_bundle_queue{};
   std::vector<ActorState> legacy_pending_actions{};
   bool dead{false};
   bool skeleton{false};                ///< 死亡后是否已变为骨架
@@ -842,6 +849,14 @@ struct GameStateStore {
     return message.kind == LegacyActorMessage::Kind::death;
   }
 
+  static bool legacy_actor_bundle_is_hurry(const LegacyActorBundleMessage& bundle) {
+    return !bundle.actor_messages.empty() &&
+           std::all_of(bundle.actor_messages.begin(), bundle.actor_messages.end(),
+                       [](const LegacyActorMessage& message) {
+                         return legacy_actor_message_is_hurry(message);
+                       });
+  }
+
   static bool legacy_actor_accepts_hurry_magic(const ActorState& actor) {
     return actor.current_action == client_v1::ActorActionKind::spell &&
            actor.action_magic &&
@@ -858,6 +873,17 @@ struct GameStateStore {
                          return legacy_actor_message_is_death(message);
                        }),
         actor.legacy_action_queue.end());
+    actor.legacy_actor_bundle_queue.erase(
+        std::remove_if(actor.legacy_actor_bundle_queue.begin(),
+                       actor.legacy_actor_bundle_queue.end(),
+                       [](const LegacyActorBundleMessage& bundle) {
+                         return std::any_of(bundle.actor_messages.begin(),
+                                            bundle.actor_messages.end(),
+                                            [](const LegacyActorMessage& message) {
+                                              return legacy_actor_message_is_death(message);
+                                            });
+                       }),
+        actor.legacy_actor_bundle_queue.end());
   }
 
   static void revive_actor(ActorState& actor) {
@@ -884,6 +910,7 @@ struct GameStateStore {
       ActorState& actor, const LegacyEventPriority priority = LegacyEventPriority::normal) {
     auto event = actor;
     event.legacy_action_queue.clear();
+    event.legacy_actor_bundle_queue.clear();
     event.legacy_pending_actions.clear();
     event.pending_remove = false;
     event.legacy_event_priority = priority;
@@ -899,6 +926,123 @@ struct GameStateStore {
   void enqueue_legacy_actor_message(ActorState& actor, LegacyActorMessage message) {
     actor.actor_id = message.actor_id;
     actor.legacy_action_queue.push_back(std::move(message));
+  }
+
+  [[nodiscard]] bool actor_in_draw_order(const std::uint64_t actor_id) const {
+    return std::find(world.actor_draw_order.begin(), world.actor_draw_order.end(),
+                     actor_id) != world.actor_draw_order.end();
+  }
+
+  static std::uint64_t actor_id_from_legacy_bundle_message(
+      const client_v1::Message& message) {
+    return std::visit(
+        [](const auto& value) -> std::uint64_t {
+          using T = std::decay_t<decltype(value)>;
+          if constexpr (std::is_same_v<T, client_v1::ActorUpsert>) {
+            return value.actor.actor_id;
+          } else if constexpr (std::is_same_v<T, client_v1::ActorStateDelta> ||
+                               std::is_same_v<T, client_v1::ActorAction> ||
+                               std::is_same_v<T, client_v1::ActorIdentityUpdate> ||
+                               std::is_same_v<T, client_v1::ActorMagicFire> ||
+                               std::is_same_v<T, client_v1::ActorMagicFireFail> ||
+                               std::is_same_v<T, client_v1::ActorVitals> ||
+                               std::is_same_v<T, client_v1::ActorDeath>) {
+            return value.actor_id;
+          } else {
+            return 0;
+          }
+        },
+        message);
+  }
+
+  static bool append_legacy_actor_bundle_message(LegacyActorBundleMessage& bundle,
+                                                 client_v1::Message message) {
+    return std::visit(
+        [&](const auto& value) {
+          using T = std::decay_t<decltype(value)>;
+          if constexpr (std::is_same_v<T, client_v1::ActorAction>) {
+            const auto legacy_ident =
+                value.kind == client_v1::ActorActionKind::hit
+                    ? legacy::normalize_attack_ident_to_sm(value.legacy_ident)
+                    : value.legacy_ident;
+            bundle.actor_messages.push_back(
+                LegacyActorMessage{LegacyActorMessage::Kind::action,
+                                   value.actor_id,
+                                   value.kind,
+                                   legacy_ident,
+                                   value.x,
+                                   value.y,
+                                   value.dir,
+                                   value.target_actor_id,
+                                   value.value,
+                                   value.magic_id,
+                                   value.magic,
+                                   value.magic_effect,
+                                   -1});
+            return true;
+          } else if constexpr (std::is_same_v<T, client_v1::ActorMagicFire>) {
+            bundle.actor_messages.push_back(
+                LegacyActorMessage{LegacyActorMessage::Kind::magic_fire,
+                                   value.actor_id,
+                                   client_v1::ActorActionKind::turn,
+                                   value.legacy_ident,
+                                   value.x,
+                                   value.y,
+                                   0,
+                                   value.target_actor_id,
+                                   0,
+                                   0,
+                                   true,
+                                   value.effect,
+                                   value.effect_type});
+            return true;
+          } else if constexpr (std::is_same_v<T, client_v1::ActorMagicFireFail>) {
+            bundle.actor_messages.push_back(
+                LegacyActorMessage{LegacyActorMessage::Kind::magic_fire_fail,
+                                   value.actor_id,
+                                   client_v1::ActorActionKind::turn,
+                                   value.legacy_ident});
+            return true;
+          } else if constexpr (std::is_same_v<T, client_v1::ActorDeath>) {
+            bundle.actor_messages.push_back(
+                LegacyActorMessage{LegacyActorMessage::Kind::death,
+                                   value.actor_id,
+                                   client_v1::ActorActionKind::turn,
+                                   value.legacy_ident != 0 ? value.legacy_ident
+                                                           : legacy_sm::kDeath,
+                                   value.x,
+                                   value.y,
+                                   value.dir});
+            return true;
+          } else if constexpr (std::is_same_v<T, client_v1::ActorUpsert> ||
+                               std::is_same_v<T, client_v1::ActorStateDelta> ||
+                               std::is_same_v<T, client_v1::ActorIdentityUpdate> ||
+                               std::is_same_v<T, client_v1::ActorVitals>) {
+            bundle.staged_state.push_back(std::move(message));
+            return true;
+          } else {
+            return false;
+          }
+        },
+        message);
+  }
+
+  void enqueue_legacy_actor_bundle(std::vector<client_v1::Message> messages) {
+    LegacyActorBundleMessage bundle;
+    std::uint64_t actor_id = 0;
+    for (auto& message : messages) {
+      if (actor_id == 0) {
+        actor_id = actor_id_from_legacy_bundle_message(message);
+      }
+      append_legacy_actor_bundle_message(bundle, std::move(message));
+    }
+    if (actor_id == 0 ||
+        (bundle.staged_state.empty() && bundle.actor_messages.empty())) {
+      return;
+    }
+    auto& actor = world.actors[actor_id];
+    actor.actor_id = actor_id;
+    actor.legacy_actor_bundle_queue.push_back(std::move(bundle));
   }
 
   /// 根据动作类型返回动画持续时间（毫秒）
@@ -1060,8 +1204,71 @@ struct GameStateStore {
     }
   }
 
+  void apply_legacy_actor_upsert_staged(const client_v1::ActorUpsert& message) {
+    const auto actor_id = message.actor.actor_id;
+    const auto needs_draw_order = !actor_in_draw_order(actor_id);
+    auto& actor = world.actors[actor_id];
+    actor.actor_id = actor_id;
+    if (!message.actor.name.empty()) {
+      actor.name = message.actor.name;
+    }
+    if (needs_draw_order) {
+      actor.x = message.actor.x;
+      actor.y = message.actor.y;
+      actor.from_x = message.actor.x;
+      actor.from_y = message.actor.y;
+      actor.dir = message.actor.dir;
+      world.actor_draw_order.push_back(actor_id);
+    }
+    actor.feature = message.actor.feature;
+    actor.status = message.actor.status;
+    actor.actor_type = message.actor.actor_type;
+    if (actor.dead && actor.hp > 0) {
+      revive_actor(actor);
+      record_legacy_actor_event(actor);
+    }
+  }
+
+  void apply_legacy_actor_staged_message(const client_v1::Message& message) {
+    std::visit(
+        [&](const auto& value) {
+          using T = std::decay_t<decltype(value)>;
+          if constexpr (std::is_same_v<T, client_v1::ActorUpsert>) {
+            apply_legacy_actor_upsert_staged(value);
+          } else if constexpr (std::is_same_v<T, client_v1::ActorStateDelta> ||
+                               std::is_same_v<T, client_v1::ActorIdentityUpdate> ||
+                               std::is_same_v<T, client_v1::ActorVitals>) {
+            apply(value);
+          }
+        },
+        message);
+  }
+
+  void apply_legacy_actor_bundle(ActorState& actor,
+                                 const LegacyActorBundleMessage& bundle,
+                                 const std::uint64_t now_ms) {
+    for (const auto& message : bundle.staged_state) {
+      apply_legacy_actor_staged_message(message);
+    }
+    for (const auto& message : bundle.actor_messages) {
+      apply_legacy_actor_message(actor, message, now_ms);
+    }
+  }
+
   void process_legacy_hurry_messages_for_active_spell(ActorState& actor,
                                                       const std::uint64_t now_ms) {
+    auto bundle_it = actor.legacy_actor_bundle_queue.begin();
+    while (bundle_it != actor.legacy_actor_bundle_queue.end() &&
+           legacy_actor_accepts_hurry_magic(actor)) {
+      if (!legacy_actor_bundle_is_hurry(*bundle_it)) {
+        ++bundle_it;
+        continue;
+      }
+      const auto bundle = *bundle_it;
+      bundle_it = actor.legacy_actor_bundle_queue.erase(bundle_it);
+      apply_legacy_actor_bundle(actor, bundle, now_ms);
+    }
+
     auto it = actor.legacy_action_queue.begin();
     while (it != actor.legacy_action_queue.end() && legacy_actor_accepts_hurry_magic(actor)) {
       if (!legacy_actor_message_is_hurry(*it)) {
@@ -1173,6 +1380,22 @@ struct GameStateStore {
   void process_legacy_actor_queues(const std::uint64_t now_ms) {
     for (auto& [actor_id, actor] : world.actors) {
       (void)actor_id;
+      if (!actor.legacy_actor_bundle_queue.empty()) {
+        const auto hurry = legacy_actor_bundle_is_hurry(actor.legacy_actor_bundle_queue.front());
+        if (hurry) {
+          if (!actor_action_animating(actor, now_ms)) {
+            actor.legacy_actor_bundle_queue.pop_front();
+          }
+          continue;
+        }
+        if (actor_action_animating(actor, now_ms)) {
+          continue;
+        }
+        auto bundle = actor.legacy_actor_bundle_queue.front();
+        actor.legacy_actor_bundle_queue.pop_front();
+        apply_legacy_actor_bundle(actor, bundle, now_ms);
+        continue;
+      }
       if (actor.legacy_action_queue.empty()) {
         continue;
       }
@@ -1197,7 +1420,9 @@ struct GameStateStore {
     if (it == world.actors.end()) {
       return true;
     }
-    return it->second.legacy_action_queue.empty() && !actor_action_animating(it->second, now_ms);
+    return it->second.legacy_actor_bundle_queue.empty() &&
+           it->second.legacy_action_queue.empty() &&
+           !actor_action_animating(it->second, now_ms);
   }
 
   [[nodiscard]] bool should_defer_runtime_for_map_transition(
@@ -1536,6 +1761,7 @@ struct GameStateStore {
       self.legacy_has_old_position = false;
       self.legacy_event_priority = LegacyEventPriority::normal;
       self.legacy_action_queue.clear();
+      self.legacy_actor_bundle_queue.clear();
       self.legacy_pending_actions.clear();
       self.pending_remove = false;
       world.self_actor_id = world.pending_self_actor_id;

@@ -141,6 +141,24 @@ int main() {
     auto socket = connect_login(io_context);
     if (!socket.has_value()) {
       stop_services();
+      return fail("connect old version");
+    }
+    mir2::tests::ClientV1SocketReader reader(*socket);
+    std::uint32_t sequence = 1;
+    send_hello(*socket, sequence, mir2::client_v1::kProtocolVersion - 1);
+    const auto disconnect =
+        reader.wait_for_message<mir2::client_v1::DisconnectReason>();
+    if (!disconnect.has_value() || disconnect->code != 426 ||
+        disconnect->text != "protocol_version_mismatch") {
+      stop_services();
+      return fail("old version disconnect");
+    }
+  }
+
+  {
+    auto socket = connect_login(io_context);
+    if (!socket.has_value()) {
+      stop_services();
       return fail("connect unauth select");
     }
     mir2::tests::ClientV1SocketReader reader(*socket);

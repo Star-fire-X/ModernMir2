@@ -210,6 +210,11 @@ class ClientApp {
   SoftwareRenderer renderer_{};     ///< 软件渲染器（软件表面 + D3D11 纹理上传）
   ProtocolClient protocol_{};       ///< 网络协议客户端（非阻塞 TCP）
   std::vector<ProtocolEvent> deferred_protocol_events_{};
+  struct PendingLegacyBundle {
+    client_v1::LegacyBundleMeta meta{};
+    std::vector<client_v1::Frame> frames{};
+  };
+  std::optional<PendingLegacyBundle> pending_legacy_bundle_{};
   AssetManager assets_{};           ///< 资源管理器（WIL/WIX 精灵 + 地图文件）
   AudioService audio_{};            ///< 音频服务（目前为空桩）
   SceneManager scenes_{};           ///< 场景管理器（驱动场景切换）

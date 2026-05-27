@@ -3,7 +3,7 @@
 // 职责：定义客户端与服务端之间的二进制协议，包括消息枚举、
 //       所有消息结构的序列化/反序列化、帧封装和 TCP 流解析。
 // 协议格式：小端编码的二进制流，4 字节长度前缀 + 2 字节消息 ID
-//           + 2 字节标志 + 4 字节序号 + 可变长度载荷
+//           + 2 字节标志 + 4 字节序号 + 可选帧元数据 + 可变长度载荷
 // ============================================================
 #pragma once
 
@@ -23,7 +23,22 @@
 
 namespace mir2::client_v1 {
 
-constexpr std::uint32_t kProtocolVersion = 2;
+constexpr std::uint32_t kProtocolVersion = 3;
+
+constexpr std::uint16_t kFrameFlagLegacyBundle = 0x0001U;
+
+enum class LegacyBundleMode : std::uint8_t {
+  immediate = 0,
+  actor_queue = 1
+};
+
+struct LegacyBundleMeta {
+  std::uint64_t bundle_id{0};
+  std::uint16_t bundle_index{0};
+  std::uint16_t bundle_count{0};
+  std::uint16_t legacy_ident{0};
+  LegacyBundleMode bundle_mode{LegacyBundleMode::immediate};
+};
 
 /// 消息 ID 枚举：每个消息类型对应唯一的 16 位 ID
 /// 分组规则：1-99 会话，100-199 登录/账号，200-299 角色选择，
@@ -1157,6 +1172,7 @@ struct Frame {
   std::uint16_t flags{0};
   std::uint32_t sequence{0};
   std::vector<std::uint8_t> payload{};
+  std::optional<LegacyBundleMeta> legacy_bundle{};
 };
 
 // ====================================================================
@@ -2920,16 +2936,22 @@ std::optional<T> decode_payload(std::span<const std::uint8_t> bytes) {
 // ====================================================================
 // 帧编码/解码
 // 帧格式：[4 字节长度][2 字节 MessageId][2 字节 flags]
-//          [4 字节 sequence][可变长度 payload]
-// 长度字段 = sizeof(u16) + sizeof(u16) + sizeof(u32) + payload_size
+//          [4 字节 sequence][可选 legacy bundle header][可变长度 payload]
+// 长度字段 = sizeof(u16) + sizeof(u16) + sizeof(u32) + optional_header + payload_size
 // ====================================================================
 
 /// 将 Frame 结构编码为线缆字节流（小端序）
 inline std::vector<std::uint8_t> encode_frame(const Frame& frame) {
   std::vector<std::uint8_t> bytes;
   const auto payload_size = static_cast<std::uint32_t>(frame.payload.size());
+  constexpr auto legacy_bundle_header_size =
+      sizeof(std::uint64_t) + sizeof(std::uint16_t) + sizeof(std::uint16_t) +
+      sizeof(std::uint16_t) + sizeof(std::uint8_t);
+  const auto bundle_header_size =
+      frame.legacy_bundle.has_value() ? legacy_bundle_header_size : 0U;
   const auto length = static_cast<std::uint32_t>(sizeof(std::uint16_t) + sizeof(std::uint16_t) +
-                                                 sizeof(std::uint32_t) + payload_size);
+                                                 sizeof(std::uint32_t) + bundle_header_size +
+                                                 payload_size);
   bytes.reserve(sizeof(std::uint32_t) + length);
   auto append_u16 = [&](std::uint16_t value) {
     bytes.push_back(static_cast<std::uint8_t>(value & 0xFFU));
@@ -2941,10 +2963,26 @@ inline std::vector<std::uint8_t> encode_frame(const Frame& frame) {
     bytes.push_back(static_cast<std::uint8_t>((value >> 16U) & 0xFFU));
     bytes.push_back(static_cast<std::uint8_t>((value >> 24U) & 0xFFU));
   };
+  auto append_u64 = [&](std::uint64_t value) {
+    for (std::size_t index = 0; index < sizeof(std::uint64_t); ++index) {
+      bytes.push_back(static_cast<std::uint8_t>((value >> (index * 8U)) & 0xFFU));
+    }
+  };
   append_u32(length);
   append_u16(static_cast<std::uint16_t>(frame.message_id));
-  append_u16(frame.flags);
+  const auto wire_flags =
+      frame.legacy_bundle.has_value()
+          ? static_cast<std::uint16_t>(frame.flags | kFrameFlagLegacyBundle)
+          : static_cast<std::uint16_t>(frame.flags & ~kFrameFlagLegacyBundle);
+  append_u16(wire_flags);
   append_u32(frame.sequence);
+  if (frame.legacy_bundle.has_value()) {
+    append_u64(frame.legacy_bundle->bundle_id);
+    append_u16(frame.legacy_bundle->bundle_index);
+    append_u16(frame.legacy_bundle->bundle_count);
+    append_u16(frame.legacy_bundle->legacy_ident);
+    bytes.push_back(static_cast<std::uint8_t>(frame.legacy_bundle->bundle_mode));
+  }
   bytes.insert(bytes.end(), frame.payload.begin(), frame.payload.end());
   return bytes;
 }
@@ -2965,11 +3003,23 @@ inline std::vector<Frame> drain_frames(std::vector<std::uint8_t>& buffer) {
            (static_cast<std::uint32_t>(bytes[2]) << 16U) |
            (static_cast<std::uint32_t>(bytes[3]) << 24U);
   };
+  auto read_u64 = [](const std::uint8_t* bytes) -> std::uint64_t {
+    std::uint64_t value = 0;
+    for (std::size_t index = 0; index < sizeof(std::uint64_t); ++index) {
+      value |= static_cast<std::uint64_t>(bytes[index]) << (index * 8U);
+    }
+    return value;
+  };
 
   while (buffer.size() - offset >= sizeof(std::uint32_t)) {
     const auto* base = buffer.data() + offset;
     const auto length = read_u32(base);
-    if (length < sizeof(std::uint16_t) + sizeof(std::uint16_t) + sizeof(std::uint32_t)) {
+    constexpr auto fixed_header_size =
+        sizeof(std::uint16_t) + sizeof(std::uint16_t) + sizeof(std::uint32_t);
+    constexpr auto legacy_bundle_header_size =
+        sizeof(std::uint64_t) + sizeof(std::uint16_t) + sizeof(std::uint16_t) +
+        sizeof(std::uint16_t) + sizeof(std::uint8_t);
+    if (length < fixed_header_size) {
       buffer.clear();
       return {};
     }
@@ -2981,11 +3031,24 @@ inline std::vector<Frame> drain_frames(std::vector<std::uint8_t>& buffer) {
     frame.message_id = static_cast<MessageId>(read_u16(base + 4));
     frame.flags = read_u16(base + 6);
     frame.sequence = read_u32(base + 8);
-    const auto payload_offset = offset + sizeof(std::uint32_t) + sizeof(std::uint16_t) +
-                                sizeof(std::uint16_t) + sizeof(std::uint32_t);
+    auto payload_offset =
+        offset + sizeof(std::uint32_t) + fixed_header_size;
+    if ((frame.flags & kFrameFlagLegacyBundle) != 0U) {
+      if (length < fixed_header_size + legacy_bundle_header_size) {
+        buffer.clear();
+        return {};
+      }
+      const auto* bundle = buffer.data() + payload_offset;
+      frame.legacy_bundle = LegacyBundleMeta{
+          read_u64(bundle),
+          read_u16(bundle + 8),
+          read_u16(bundle + 10),
+          read_u16(bundle + 12),
+          static_cast<LegacyBundleMode>(bundle[14])};
+      payload_offset += legacy_bundle_header_size;
+    }
     const auto payload_size =
-        static_cast<std::size_t>(length) - sizeof(std::uint16_t) - sizeof(std::uint16_t) -
-        sizeof(std::uint32_t);
+        static_cast<std::size_t>(length) - (payload_offset - offset - sizeof(std::uint32_t));
     frame.payload.assign(buffer.begin() + static_cast<std::ptrdiff_t>(payload_offset),
                          buffer.begin() +
                              static_cast<std::ptrdiff_t>(payload_offset + payload_size));
@@ -3001,8 +3064,10 @@ inline std::vector<Frame> drain_frames(std::vector<std::uint8_t>& buffer) {
 
 /// 将消息类型编码为 Frame（编译期类型安全）
 template <typename T>
-Frame make_frame(const T& message, std::uint32_t sequence, std::uint16_t flags = 0) {
-  return Frame{MessageTraits<T>::kMessageId, flags, sequence, encode_payload(message)};
+Frame make_frame(const T& message, std::uint32_t sequence, std::uint16_t flags = 0,
+                 std::optional<LegacyBundleMeta> legacy_bundle = std::nullopt) {
+  return Frame{MessageTraits<T>::kMessageId, flags, sequence, encode_payload(message),
+               std::move(legacy_bundle)};
 }
 
 /// 从 Frame 解码为指定消息类型（编译期类型安全）
@@ -3357,9 +3422,10 @@ inline std::optional<Message> decode_any(const Frame& frame) {
 
 /// 将 Message 变体编码为 Frame（运行期多态分发）
 /// 使用 std::visit 自动匹配实际类型
-inline Frame encode_any(const Message& message, std::uint32_t sequence, std::uint16_t flags = 0) {
+inline Frame encode_any(const Message& message, std::uint32_t sequence, std::uint16_t flags = 0,
+                        std::optional<LegacyBundleMeta> legacy_bundle = std::nullopt) {
   return std::visit(
-      [&](const auto& value) { return make_frame(value, sequence, flags); }, message);
+      [&](const auto& value) { return make_frame(value, sequence, flags, legacy_bundle); }, message);
 }
 
 }  // namespace mir2::client_v1

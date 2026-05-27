@@ -35,7 +35,7 @@ int main() {
   const ClientHello hello{kProtocolVersion, 0x01020304U, 0xA0B0C0D0U, 0x0F0E0D0CU};
   const auto hello_bytes = encode_frame(make_frame(hello, 0x11223344U, 0x5566U));
   assert_bytes(hello_bytes, {0x18, 0x00, 0x00, 0x00, 0x01, 0x00, 0x66, 0x55,
-                             0x44, 0x33, 0x22, 0x11, 0x02, 0x00, 0x00, 0x00,
+                             0x44, 0x33, 0x22, 0x11, 0x03, 0x00, 0x00, 0x00,
                              0x04, 0x03, 0x02, 0x01, 0xD0, 0xC0, 0xB0, 0xA0,
                              0x0C, 0x0D, 0x0E, 0x0F});
 
@@ -78,6 +78,37 @@ int main() {
   frames = drain_frames(unknown_buffer);
   assert(frames.size() == 1);
   assert(!decode_any(frames.front()).has_value());
+
+  const LegacyBundleMeta bundle_meta{0x0102030405060708ULL,
+                                     1,
+                                     3,
+                                     mir2::legacy::kSmWalk,
+                                     LegacyBundleMode::actor_queue};
+  const ActorAction bundled_action{42,
+                                   ActorActionKind::walk,
+                                   12,
+                                   13,
+                                   2,
+                                   0,
+                                   0,
+                                   mir2::legacy::kSmWalk,
+                                   0,
+                                   false,
+                                   0};
+  const auto bundled_bytes = encode_frame(make_frame(bundled_action, 0x0A0B0C0DU,
+                                                     0x0020U, bundle_meta));
+  std::vector<std::uint8_t> bundle_buffer = bundled_bytes;
+  frames = drain_frames(bundle_buffer);
+  assert(bundle_buffer.empty());
+  assert(frames.size() == 1);
+  assert((frames.front().flags & kFrameFlagLegacyBundle) != 0U);
+  assert(frames.front().legacy_bundle.has_value());
+  assert(frames.front().legacy_bundle->bundle_id == bundle_meta.bundle_id);
+  assert(frames.front().legacy_bundle->bundle_index == 1);
+  assert(frames.front().legacy_bundle->bundle_count == 3);
+  assert(frames.front().legacy_bundle->legacy_ident == mir2::legacy::kSmWalk);
+  assert(frames.front().legacy_bundle->bundle_mode == LegacyBundleMode::actor_queue);
+  assert(decode_message<ActorAction>(frames.front())->kind == ActorActionKind::walk);
 
   const auto decoded_hello = round_trip(hello, 1);
   assert(decoded_hello.protocol_version == kProtocolVersion);

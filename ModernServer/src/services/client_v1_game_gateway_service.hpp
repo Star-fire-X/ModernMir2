@@ -36,6 +36,9 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
   void seed_session_for_test(std::uint64_t session_id);
   void translate_legacy_packet_for_test(std::uint64_t session_id, const LegacyPacket& packet,
                                         std::vector<client_v1::Message>& messages);
+  void translate_legacy_packet_frames_for_test(std::uint64_t session_id,
+                                               const LegacyPacket& packet,
+                                               std::vector<client_v1::Frame>& frames);
   [[nodiscard]] std::optional<CharacterRecord> session_character_for_test(
       std::uint64_t session_id) const;
 #endif
@@ -82,6 +85,7 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
     bool trade_local_accept{false};
     bool guild_visible{false};
     std::uint64_t next_session_seq{0};
+    std::uint64_t next_legacy_bundle_id{1};
     CanonicalLoginStage stage{CanonicalLoginStage::connected};
 
     [[nodiscard]] bool in_game() const {
@@ -172,7 +176,9 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
   void bus_loop();
   void handle_session_event(const SessionEvent& event);
   void translate_legacy_packet(std::uint64_t session_id, const LegacyPacket& packet,
-                               std::vector<client_v1::Message>& messages);
+                               std::vector<client_v1::Frame>& frames);
+  void translate_legacy_packet_messages(std::uint64_t session_id, const LegacyPacket& packet,
+                                        std::vector<client_v1::Message>& messages);
 
   struct GroupRuntimeState {
     std::vector<std::uint64_t> members{};
