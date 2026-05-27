@@ -12,6 +12,7 @@ std::int32_t delphi_round(double value) {
 bool legacy_is_sword_skill(std::int32_t magic_id) {
   switch (magic_id) {
     case 3:
+    case 4:
     case 7:
     case 12:
     case 25:

@@ -73,8 +73,8 @@
       "name": "hit_rng_sword4_heavy_big",
       "owner_pr": "PR-3",
       "source_trace": "attack_basic.json",
-      "delphi_rule": "Hit check is Random(SpeedPoint) < AccuracyPoint; skill 4 participates in sword-skill chains only if Delphi evidence does; HeavyHit/BigHit multipliers require direct evidence.",
-      "current_cpp_status": "parity_gap",
+      "delphi_rule": "Hit check is Random(SpeedPoint) < AccuracyPoint; skill 4 participates in sword-skill chains; HeavyHit/BigHit do not carry unproven modern damage multipliers.",
+      "current_cpp_status": "implemented_pr3",
       "required_coverage": ["AccuracyPoint 0", "SpeedPoint 0", "off-by-one hit roll", "skill 4", "HeavyHit", "BigHit", "Luck random order"]
     }
   ]

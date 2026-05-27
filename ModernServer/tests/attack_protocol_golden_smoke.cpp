@@ -70,7 +70,18 @@ bool has_trace(const mir2::RuntimeDispatch& dispatch, std::string_view stage,
                      });
 }
 
-mir2::ActorMail make_monster(std::uint64_t actor_id, std::int32_t hp = 20) {
+const mir2::LegacyRuntimeTrace* find_trace(const mir2::RuntimeDispatch& dispatch,
+                                           std::string_view stage,
+                                           std::string_view action) {
+  const auto it = std::find_if(dispatch.legacy_traces.begin(), dispatch.legacy_traces.end(),
+                               [&](const mir2::LegacyRuntimeTrace& trace) {
+                                 return trace.stage == stage && trace.action == action;
+                               });
+  return it == dispatch.legacy_traces.end() ? nullptr : &*it;
+}
+
+mir2::ActorMail make_monster(std::uint64_t actor_id, std::int32_t hp = 20,
+                             std::int32_t speed = 10) {
   mir2::ActorMail mail;
   mail.kind = mir2::ActorMailKind::spawn_monster;
   mail.map_id = "0";
@@ -84,6 +95,7 @@ mir2::ActorMail make_monster(std::uint64_t actor_id, std::int32_t hp = 20) {
   mail.dc_min = 1;
   mail.dc_max = 1;
   mail.accuracy = 20;
+  mail.speed = speed;
   mail.exp_reward = 1;
   mail.walk_speed_ms = 200;
   mail.attack_speed_ms = 200;
@@ -269,6 +281,56 @@ int main() {
     assert(struck_body.has_value());
     assert(struck_body->ltag1 == static_cast<std::int32_t>(attacker_id));
     assert(struck_body->ltag2 == 0);
+  }
+
+  {
+    constexpr std::uint64_t monster_id = 400;
+    constexpr std::uint64_t player_id = 5;
+    constexpr std::uint64_t session_id = 50;
+
+    auto map = make_map();
+    map.enqueue_mail(make_monster(monster_id));
+    static_cast<void>(map.tick(1, 0));
+    static_cast<void>(map.legacy_spawn_player(
+        make_player(player_id, session_id, "NoAccuracy", 10, 10, 8, 40, 0), 1, 0,
+        true));
+
+    mir2::LegacyRandom random(1);
+    map.set_legacy_random(&random);
+    assert(map.enqueue_legacy_player_command(make_attack(player_id, session_id, monster_id), 20));
+    const auto dispatch = map.legacy_process_player(player_id, 2, 20, false);
+
+    assert(packet_for_recog(dispatch, session_id, mir2::kSmHit,
+                            static_cast<std::int32_t>(player_id)).has_value());
+    assert(!packet_for_recog(dispatch, session_id, mir2::kSmStruck,
+                             static_cast<std::int32_t>(monster_id)).has_value());
+    assert(has_trace(dispatch, "LegacyCombat", "miss"));
+  }
+
+  {
+    constexpr std::uint64_t monster_id = 500;
+    constexpr std::uint64_t player_id = 6;
+    constexpr std::uint64_t session_id = 60;
+
+    auto map = make_map();
+    map.enqueue_mail(make_monster(monster_id, 20, 0));
+    static_cast<void>(map.tick(1, 0));
+    static_cast<void>(map.legacy_spawn_player(
+        make_player(player_id, session_id, "ZeroSpeedTarget", 10, 10, 8, 40, 1), 1,
+        0, true));
+
+    mir2::LegacyRandom random(1);
+    map.set_legacy_random(&random);
+    assert(map.enqueue_legacy_player_command(make_attack(player_id, session_id, monster_id), 20));
+    const auto dispatch = map.legacy_process_player(player_id, 2, 20, false);
+
+    assert_hit_before_struck(dispatch, session_id, static_cast<std::int32_t>(player_id),
+                             static_cast<std::int32_t>(monster_id));
+    const auto* hit_check = find_trace(dispatch, "LegacyCombat", "hit_check");
+    assert(hit_check != nullptr);
+    assert(hit_check->label == "range=0");
+    assert(hit_check->value == 0);
+    assert(hit_check->rng_before == hit_check->rng_after);
   }
 
   return 0;

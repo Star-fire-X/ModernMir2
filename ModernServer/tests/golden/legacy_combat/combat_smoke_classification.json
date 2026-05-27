@@ -40,14 +40,14 @@
       "role": "delphi_parity_smoke",
       "owner_pr": "PR-3/PR-4/PR-6",
       "contains_known_parity_gap": true,
-      "known_gap": "Current trace order covers stable behavior but does not yet prove Hit RNG boundaries, dual-target long-hit, or death/revival packet timing."
+      "known_gap": "Current trace order covers stable behavior but does not yet prove dual-target long-hit or death/revival packet timing."
     },
     {
       "test": "legacy_combat_formula_smoke.cpp",
       "role": "delphi_parity_smoke",
       "owner_pr": "PR-3",
-      "contains_known_parity_gap": true,
-      "known_gap": "PR-3 owns Random(SpeedPoint) < AccuracyPoint, skill 4 inclusion, HeavyHit/BigHit cleanup, and random-call order."
+      "contains_known_parity_gap": false,
+      "status": "PR-3 covers Random(SpeedPoint) < AccuracyPoint boundaries, raw AccuracyPoint/SpeedPoint zero cases, skill 4 inclusion, and HeavyHit/BigHit multiplier cleanup."
     },
     {
       "test": "attack_protocol_golden_smoke.cpp",
