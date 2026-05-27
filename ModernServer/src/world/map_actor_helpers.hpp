@@ -533,6 +533,7 @@ std::int32_t resolve_attack_range(std::uint16_t ident) {
 bool legacy_p14_sword_skill(std::int32_t magic_id) {
   switch (magic_id) {
     case 3:
+    case 4:
     case 7:
     case 12:
     case 25:
@@ -547,6 +548,8 @@ bool legacy_p14_sword_skill(std::int32_t magic_id) {
 
 std::uint16_t legacy_attack_ident_for_sword_skill(std::int32_t magic_id) {
   switch (magic_id) {
+    case 4:
+      return kCmHeavyHit;
     case 12:
       return kCmLongHit;
     case 25:
@@ -563,6 +566,8 @@ std::uint16_t legacy_attack_ident_for_sword_skill(std::int32_t magic_id) {
 
 std::int32_t legacy_sword_skill_for_attack_ident(std::uint16_t ident) {
   switch (ident) {
+    case kCmHeavyHit:
+      return 4;
     case kCmPowerHit:
       return 7;
     case kCmLongHit:
@@ -578,15 +583,8 @@ std::int32_t legacy_sword_skill_for_attack_ident(std::uint16_t ident) {
   }
 }
 
-double resolve_attack_multiplier(std::uint16_t ident) {
-  switch (ident) {
-    case kCmHeavyHit:
-      return 1.15;
-    case kCmBigHit:
-      return 1.25;
-    default:
-      return 1.0;
-  }
+bool legacy_hit_roll_succeeds(std::int32_t accuracy_point, std::int32_t hit_roll) {
+  return hit_roll < accuracy_point;
 }
 
 bool is_alive(const GameObject& object) {

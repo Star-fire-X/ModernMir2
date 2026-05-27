@@ -1199,9 +1199,9 @@ void MapActor::legacy_monster_temp_attack(Monster& monster, Player& target,
 
   const auto hit_roll =
       legacy_random_value(dispatch, "MonsterCombat", "hit_check",
-                          std::max(legacy_speed_point(target), 1), monster.id(),
+                          legacy_speed_point(target), monster.id(),
                           target.id(), "Attack", now_ms, current_tick);
-  if (monster.accuracy_point() <= hit_roll) {
+  if (!legacy_hit_roll_succeeds(monster.accuracy_point(), hit_roll)) {
     add_legacy_trace(dispatch, "MonsterCombat", "miss", trace_mail, current_tick,
                      now_ms, false, hit_roll, 0,
                      "AccuracyPoint<=Random(SpeedPoint)");
@@ -1300,9 +1300,9 @@ void MapActor::legacy_monster_attack_monster(Monster& monster, Monster& target,
 
   const auto hit_roll =
       legacy_random_value(dispatch, "MonsterCombat", "hit_check",
-                          std::max(legacy_speed_point(target), 1), monster.id(),
+                          legacy_speed_point(target), monster.id(),
                           target.id(), "Attack", now_ms, current_tick);
-  if (monster.accuracy_point() <= hit_roll) {
+  if (!legacy_hit_roll_succeeds(monster.accuracy_point(), hit_roll)) {
     add_legacy_trace(dispatch, "MonsterCombat", "miss", trace_mail, current_tick,
                      now_ms, false, hit_roll, 0,
                      "AccuracyPoint<=Random(SpeedPoint)");
@@ -1615,10 +1615,10 @@ bool MapActor::legacy_monster_special_attack_target(Monster& monster,
         continue;
       }
       const auto hit_roll = legacy_random_value(dispatch, "MonsterSpecial", "spit_hit",
-                                                std::max(legacy_speed_point(*player), 1),
+                                                legacy_speed_point(*player),
                                                 monster.id(), player->id(), {}, now_ms,
                                                 current_tick);
-      if (monster.accuracy_point() <= hit_roll) {
+      if (!legacy_hit_roll_succeeds(monster.accuracy_point(), hit_roll)) {
         continue;
       }
       LegacyRandom fallback_random;
@@ -1654,10 +1654,10 @@ bool MapActor::legacy_monster_special_attack_target(Monster& monster,
       }
     } else {
       const auto hit_roll = legacy_random_value(dispatch, "MonsterSpecial", "gas_hit",
-                                                std::max(legacy_speed_point(*target), 1),
+                                                legacy_speed_point(*target),
                                                 monster.id(), target->id(), {}, now_ms,
                                                 current_tick);
-      if (monster.accuracy_point() <= hit_roll) {
+      if (!legacy_hit_roll_succeeds(monster.accuracy_point(), hit_roll)) {
         return true;
       }
     }

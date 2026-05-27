@@ -1283,14 +1283,17 @@ std::int32_t calc_get_exp(std::int32_t attacker_level, std::int32_t target_level
 }
 
 std::int32_t legacy_accuracy_point(const Player& attacker) {
-  return std::max(attacker.accuracy_point(), 1);
+  return attacker.accuracy_point();
 }
 
 std::int32_t legacy_speed_point(const GameObject& object) {
   if (const auto* player = as_player(&object); player != nullptr) {
-    return std::max(player->speed_point(), 1);
+    return player->speed_point();
   }
-  return 10;
+  if (const auto* monster = as_monster(&object); monster != nullptr) {
+    return monster->speed_point();
+  }
+  return 0;
 }
 
 std::uint64_t ms_to_logic_ticks(std::uint32_t value_ms, std::uint32_t tick_ms) {
@@ -2795,7 +2798,7 @@ bool MapActor::apply_legacy_struck_equipment_durability(Player& target,
 }
 
 std::int32_t MapActor::roll_legacy_player_attack_power(
-    const Player& attacker, const GameObject& target, std::uint16_t ident,
+    const Player& attacker, const GameObject& target, std::uint16_t,
     RuntimeDispatch& dispatch, std::string stage, std::string command,
     std::uint64_t current_tick, std::uint64_t now_ms) {
   const auto dc_min = packed_min(attacker.character().ability.dc);
@@ -2835,9 +2838,7 @@ std::int32_t MapActor::roll_legacy_player_attack_power(
       }
     }
   }
-  return std::max(0, static_cast<std::int32_t>(
-                         std::lround(static_cast<double>(raw) *
-                                     resolve_attack_multiplier(ident))));
+  return std::max(0, raw);
 }
 
 bool MapActor::handle_legacy_rush_rush(Player& attacker, LegacyUseMagicInfo& user_magic,

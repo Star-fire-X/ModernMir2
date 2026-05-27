@@ -42,7 +42,7 @@ mir2::HostConfig base_config() {
   config.runtime.legacy_random_seed = 1;
   config.budgets.tick_ms = 20;
   config.maps.push_back(mir2::MapConfig{"0", "SwordMap", {}, 24, 24, 10, 10});
-  for (const auto id : {3, 7, 12, 25, 26}) {
+  for (const auto id : {3, 4, 7, 12, 25, 26}) {
     config.magics.push_back(make_sword_magic(id));
   }
   return config;
@@ -163,6 +163,15 @@ bool has_trace(const mir2::RuntimeDispatch& dispatch, const std::string& action,
                      });
 }
 
+const mir2::LegacyRuntimeTrace* find_trace(const mir2::RuntimeDispatch& dispatch,
+                                           const std::string& action) {
+  const auto it = std::find_if(dispatch.legacy_traces.begin(), dispatch.legacy_traces.end(),
+                               [&](const mir2::LegacyRuntimeTrace& trace) {
+                                 return trace.action == action;
+                               });
+  return it == dispatch.legacy_traces.end() ? nullptr : &*it;
+}
+
 bool has_packet_ident(const mir2::RuntimeDispatch& dispatch, std::uint16_t ident) {
   return std::any_of(dispatch.session_events.begin(), dispatch.session_events.end(),
                      [&](const mir2::SessionEvent& event) {
@@ -255,6 +264,22 @@ int main() {
     const auto snapshot = runtime.snapshot_character_actor("Power");
     assert(snapshot.has_value() &&
            (snapshot->magics[0].cur_train > 0 || snapshot->magics[0].level > 0));
+  }
+
+  {
+    auto config = base_config();
+    config.spawns.push_back(spawn("HeavyTarget", 10, 9, 10000));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(enter(1204, character("Heavy", {4}))));
+    static_cast<void>(runtime.tick(1000));
+    auto dispatch = runtime.route_logic_command(attack(1204, 10, 9, mir2::kCmHeavyHit));
+    append(dispatch, runtime.tick(2000));
+    assert(has_packet_ident(dispatch, mir2::legacy::kSmHeavyHit));
+    assert(has_trace(dispatch, "struck"));
+    assert(has_trace(dispatch, "train_skill"));
+    const auto* damage = find_trace(dispatch, "damage");
+    assert(damage != nullptr && damage->value == 18 && damage->damage == 18);
   }
 
   {
