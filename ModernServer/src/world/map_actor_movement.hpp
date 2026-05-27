@@ -206,10 +206,12 @@ bool MapActor::try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
   transfer.character = snapshot;
   transfer.legacy_buffs = player.legacy_buffs_for_transfer(current_tick);
   transfer.legacy_name_color = player.legacy_name_color();
+  transfer.legacy_spawn_reason = LegacySpawnReason::map_transfer;
 
   queue_packet(dispatch, player.session_id(), make_clear_objects_packet(player.session_id()));
   queue_packet(dispatch, player.session_id(),
-               make_change_map_packet(player.session_id(), snapshot.map_id));
+               make_change_map_packet(player.session_id(), snapshot.map_id, snapshot.x,
+                                      snapshot.y, 0));
   queue_save_character(dispatch, snapshot);
   detach_owned_slaves(player, dispatch, now_ms, true);
   remove_actor_from_visibility(player.id(), dispatch);
@@ -319,10 +321,12 @@ bool MapActor::try_item_map_move(Player& player, std::string target_map_id,
   transfer.character = snapshot;
   transfer.legacy_buffs = player.legacy_buffs_for_transfer(current_tick);
   transfer.legacy_name_color = player.legacy_name_color();
+  transfer.legacy_spawn_reason = LegacySpawnReason::map_transfer;
 
   queue_packet(dispatch, player.session_id(), make_clear_objects_packet(player.session_id()));
   queue_packet(dispatch, player.session_id(),
-               make_change_map_packet(player.session_id(), snapshot.map_id));
+               make_change_map_packet(player.session_id(), snapshot.map_id, snapshot.x,
+                                      snapshot.y, 0));
   queue_save_character(dispatch, snapshot);
   detach_owned_slaves(player, dispatch, now_ms, true);
   remove_actor_from_visibility(player.id(), dispatch);

@@ -90,7 +90,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             master->add_slave_actor_id(mail.actor_id);
           }
         }
-        sync_all_player_visibility(dispatch);
+        sync_all_player_visibility(dispatch, now_ms);
       }
       break;
     }
@@ -1096,7 +1096,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       ground_items_[ground_item.id] = ground_item;
       player->refresh_derived_state(item_configs_);
 
-      sync_visibility_after_item_change(ground_item.x, ground_item.y, dispatch, ground_item.id);
+      sync_visibility_after_item_change(ground_item.x, ground_item.y, dispatch, now_ms,
+                                        ground_item.id);
       queue_packet(dispatch, player->session_id(),
                    make_del_item_packet(player->session_id(), player->id(), ground_item.item,
                                         item_configs_));
@@ -1196,7 +1197,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         ground_items_[ground_item.id] = ground_item;
       }
 
-      sync_visibility_after_item_change(ground_item.x, ground_item.y, dispatch, ground_item.id);
+      sync_visibility_after_item_change(ground_item.x, ground_item.y, dispatch, now_ms,
+                                        ground_item.id);
       queue_packet(dispatch, player->session_id(),
                    make_gold_changed_packet(player->session_id(), player->character().gold));
       queue_save_character(dispatch, *player);
@@ -1861,7 +1863,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         const auto ground_item = ground_it->second;
         static_cast<void>(environment_.delete_from_map(
             ground_item.x, ground_item.y, LegacyMapObjectShape::item_object, ground_item.id));
-        remove_item_from_visibility(ground_item.id, dispatch);
+        remove_item_from_visibility(ground_item.id, dispatch, now_ms,
+                                    ItemVisibilityRemovalMode::immediate_all);
         ground_items_.erase(ground_it);
 
         queue_packet(dispatch, player->session_id(),
@@ -1882,7 +1885,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (!environment_.delete_from_map(ground_item.x, ground_item.y,
                                         LegacyMapObjectShape::item_object,
                                         ground_item.id)) {
-        remove_item_from_visibility(ground_item.id, dispatch);
+        remove_item_from_visibility(ground_item.id, dispatch, now_ms,
+                                    ItemVisibilityRemovalMode::delayed_all);
         ground_items_.erase(ground_it);
         add_legacy_trace(dispatch, "LegacyItem", "orphan_ground_item_repair", mail, current_tick,
                          now_ms, true, static_cast<std::int32_t>(ground_item.id), 0, "pickup_item");
@@ -1894,7 +1898,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         const auto rollback_result = environment_.add_item_object(
             ground_item.x, ground_item.y, ground_item.id, LegacyMapItemState{}, now_ms);
         if (!rollback_result.ok) {
-          remove_item_from_visibility(ground_item.id, dispatch);
+          remove_item_from_visibility(ground_item.id, dispatch, now_ms,
+                                      ItemVisibilityRemovalMode::delayed_all);
           ground_items_.erase(ground_it);
           add_legacy_trace(dispatch, "LegacyItem", "rollback_repair", mail, current_tick, now_ms,
                            false, static_cast<std::int32_t>(ground_item.id), 0, "pickup_item");
@@ -1904,7 +1909,9 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       player->refresh_derived_state(item_configs_);
-      remove_item_from_visibility(ground_item.id, dispatch);
+      remove_item_from_visibility(ground_item.id, dispatch, now_ms,
+                                  ItemVisibilityRemovalMode::immediate_single_session,
+                                  player->session_id());
       ground_items_.erase(ground_it);
 
       queue_packet(dispatch, player->session_id(),
@@ -4837,8 +4844,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       queue_packet(dispatch, player->session_id(),
                    make_sub_ability_packet(player->session_id(), *player));
       queue_save_character(dispatch, *player);
-      sync_player_visibility(*player, dispatch, true);
-      sync_all_player_visibility(dispatch);
+      sync_player_visibility(*player, dispatch, true, now_ms);
+      sync_all_player_visibility(dispatch, now_ms);
       add_legacy_trace(dispatch, "LegacyCombat", "revive", mail, current_tick, now_ms,
                        true, target_x, target_y, "SM_ALIVE");
       break;
@@ -5530,33 +5537,34 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
           }
 
-          for_each_player(objects_, [&](std::uint64_t actor_id, const Player& watcher) {
-            if (actor_id == player->id()) {
-              return;
+          for (const auto watcher_id : legacy_ref_target_player_ids(*player, now_ms)) {
+            if (watcher_id == player->id()) {
+              continue;
             }
-            if (!in_legacy_view_range(watcher, *player)) {
-              return;
+            const auto* watcher = find_player(watcher_id);
+            if (watcher == nullptr) {
+              continue;
             }
             switch (effective_mail.kind) {
               case ActorMailKind::turn:
-                queue_packet(dispatch, watcher.session_id(),
-                             make_turn_like_packet(watcher.session_id(), kSmTurn, *player, false));
+                queue_packet(dispatch, watcher->session_id(),
+                             make_turn_like_packet(watcher->session_id(), kSmTurn, *player, false));
                 break;
               case ActorMailKind::move:
-                queue_packet(dispatch, watcher.session_id(),
-                             make_turn_like_packet(watcher.session_id(), kSmWalk, *player, false));
+                queue_packet(dispatch, watcher->session_id(),
+                             make_turn_like_packet(watcher->session_id(), kSmWalk, *player, false));
                 break;
               case ActorMailKind::run:
-                queue_packet(dispatch, watcher.session_id(),
-                             make_turn_like_packet(watcher.session_id(), kSmRun, *player, false));
+                queue_packet(dispatch, watcher->session_id(),
+                             make_turn_like_packet(watcher->session_id(), kSmRun, *player, false));
                 break;
               default:
                 break;
             }
-          });
+          }
           if (moved_player) {
             sync_visibility_after_actor_move(*player, old_x, old_y, player->x(), player->y(),
-                                             dispatch);
+                                             dispatch, now_ms);
           }
         } else {
           it->second->on_mail(mail, context);

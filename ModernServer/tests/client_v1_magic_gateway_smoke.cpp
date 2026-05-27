@@ -104,9 +104,15 @@ mir2::LegacyPacket make_clear_objects_packet(std::uint64_t session_id) {
       session_id, 0, 0, mir2::make_default_message(mir2::kSmClearObjects, 0, 0, 0, 0));
 }
 
-mir2::LegacyPacket make_change_map_packet(std::uint64_t session_id) {
+mir2::LegacyPacket make_change_map_packet(std::uint64_t session_id,
+                                          std::int32_t x = 0,
+                                          std::int32_t y = 0,
+                                          std::uint16_t series = 0) {
   return mir2::make_legacy_game_packet(
-      session_id, 0, 0, mir2::make_default_message(mir2::kSmChangeMap, 0, 0, 0, 0),
+      session_id, 0, 0,
+      mir2::make_default_message(mir2::kSmChangeMap, 0,
+                                 static_cast<std::uint16_t>(x),
+                                 static_cast<std::uint16_t>(y), series),
       mir2::legacy_encode_string("1"));
 }
 
@@ -345,6 +351,20 @@ int main() {
   assert(map_entered->map_id == "1");
   assert(map_entered->self_actor_id == 42);
   assert(map_entered->x == 14 && map_entered->y == 15);
+  assert(map_entered->dir == 3);
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(
+      kSessionId, make_change_map_packet(kSessionId, 17, 18, 2), messages);
+  assert(messages.size() == 2);
+  map_change = std::get_if<mir2::client_v1::MapChange>(&messages[0]);
+  assert(map_change != nullptr);
+  assert(map_change->map_id == "1");
+  map_entered = std::get_if<mir2::client_v1::MapEntered>(&messages[1]);
+  assert(map_entered != nullptr);
+  assert(map_entered->map_id == "1");
+  assert(map_entered->self_actor_id == 42);
+  assert(map_entered->x == 17 && map_entered->y == 18);
   assert(map_entered->dir == 3);
 
   service.seed_session_for_test(kSessionId);

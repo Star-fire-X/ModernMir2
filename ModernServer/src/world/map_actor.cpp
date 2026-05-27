@@ -1400,7 +1400,7 @@ bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, s
     event_objects_[event_id] = {x, y};
     event_object_types_[event_id] = type;
     if (dispatch != nullptr) {
-      sync_visibility_after_event_change(x, y, *dispatch);
+      sync_visibility_after_event_change(x, y, *dispatch, now_ms);
     }
   }
   return added;
@@ -1416,14 +1416,14 @@ void MapActor::legacy_remove_event_object(std::uint64_t event_id, std::int32_t x
                                           std::int32_t y, RuntimeDispatch* dispatch) {
   static_cast<void>(
       environment_.delete_from_map(x, y, LegacyMapObjectShape::event_object, event_id));
-  event_objects_.erase(event_id);
-  event_object_types_.erase(event_id);
   if (dispatch != nullptr) {
     for (auto& [_, visibility] : visibility_) {
       visibility.events.erase(event_id);
     }
-    sync_visibility_after_event_change(x, y, *dispatch);
+    sync_visibility_after_event_change(x, y, *dispatch, tick_count_ms());
   }
+  event_objects_.erase(event_id);
+  event_object_types_.erase(event_id);
 }
 
 RuntimeDispatch MapActor::legacy_apply_fire_burn_event(const LegacyEventRecord& event,
@@ -1609,7 +1609,8 @@ RuntimeDispatch MapActor::legacy_space_move_player(
   transfer.character = snapshot;
   transfer.legacy_buffs = player->legacy_buffs_for_transfer(current_tick);
   transfer.legacy_name_color = player->legacy_name_color();
-  transfer.legacy_space_move_show2 = show2;
+  transfer.legacy_spawn_reason =
+      show2 ? LegacySpawnReason::space_move_show2 : LegacySpawnReason::space_move;
 
   if (show2) {
     queue_actor_origin_packet(objects_, dispatch, *player, true,
@@ -1627,7 +1628,8 @@ RuntimeDispatch MapActor::legacy_space_move_player(
 
   queue_packet(dispatch, player->session_id(), make_clear_objects_packet(player->session_id()));
   queue_packet(dispatch, player->session_id(),
-               make_change_map_packet(player->session_id(), snapshot.map_id));
+               make_change_map_packet(player->session_id(), snapshot.map_id, snapshot.x,
+                                      snapshot.y, 0));
   queue_save_character(dispatch, snapshot);
   detach_owned_slaves(*player, dispatch, now_ms, true);
   remove_actor_from_visibility(player->id(), dispatch);
@@ -1683,26 +1685,30 @@ RuntimeDispatch MapActor::legacy_spawn_player(const ActorMail& mail,
   if (player == nullptr) {
     return dispatch;
   }
-  if (fast_initialize) {
+  if (mail.legacy_spawn_reason != LegacySpawnReason::login) {
+    player->mark_legacy_initialize_done(now_ms);
+    if (mail.legacy_spawn_reason == LegacySpawnReason::space_move_show2) {
+      for_each_player(objects_, [&](std::uint64_t watcher_id, const Player& watcher) {
+        if (watcher.id() != player->id() && !is_legacy_visible_to(watcher, *player)) {
+          return;
+        }
+        queue_packet(dispatch, watcher.session_id(),
+                     make_space_move_show2_packet(watcher.session_id(), *player));
+        if (watcher_id != player->id()) {
+          auto& visibility = visibility_[watcher_id];
+          visibility.actors.insert(player->id());
+          if (std::find(visibility.actor_order.begin(), visibility.actor_order.end(),
+                        player->id()) == visibility.actor_order.end()) {
+            visibility.actor_order.push_back(player->id());
+          }
+        }
+      });
+    }
+    sync_player_visibility(*player, dispatch, true, now_ms);
+    sync_all_player_visibility(dispatch, now_ms);
+  } else if (fast_initialize) {
     dispatch_legacy_run_notice(*player, dispatch, now_ms);
     dispatch_legacy_initialize(*player, dispatch, now_ms);
-  }
-  if (mail.legacy_space_move_show2) {
-    bool sent_self = false;
-    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
-      if (!is_legacy_visible_to(watcher, *player)) {
-        return;
-      }
-      if (watcher.session_id() == player->session_id()) {
-        sent_self = true;
-      }
-      queue_packet(dispatch, watcher.session_id(),
-                   make_space_move_show2_packet(watcher.session_id(), *player));
-    });
-    if (!sent_self) {
-      queue_packet(dispatch, player->session_id(),
-                   make_space_move_show2_packet(player->session_id(), *player));
-    }
   }
   if (run_startup_quest) {
     static_cast<void>(trigger_startup_quest(*player, dispatch, current_tick, now_ms));
@@ -2045,7 +2051,7 @@ RuntimeDispatch MapActor::legacy_disconnect_player(std::uint64_t actor_id, std::
   remove_actor_from_visibility(player->id(), dispatch);
   visibility_.erase(player->id());
   objects_.erase(actor_id);
-  sync_all_player_visibility(dispatch);
+  sync_all_player_visibility(dispatch, now_ms);
   return dispatch;
 }
 
@@ -2189,7 +2195,8 @@ void MapActor::remove_expired_ground_items(RuntimeDispatch& dispatch, std::uint6
     const auto item = item_it->second;
     static_cast<void>(environment_.delete_from_map(
         item.x, item.y, LegacyMapObjectShape::item_object, item.id));
-    remove_item_from_visibility(item.id, dispatch);
+    remove_item_from_visibility(item.id, dispatch, now_ms,
+                                ItemVisibilityRemovalMode::immediate_all);
     ground_items_.erase(item_it);
   }
 }
@@ -2871,7 +2878,7 @@ bool MapActor::handle_legacy_rush_rush(Player& attacker, LegacyUseMagicInfo& use
     context.items = &item_configs_;
     context.magics = &magic_configs_;
     object.on_mail(move_mail, context);
-    sync_visibility_after_actor_move(object, old_x, old_y, x, y, dispatch);
+    sync_visibility_after_actor_move(object, old_x, old_y, x, y, dispatch, now_ms);
     for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
       if (watcher.id() != object.id() && !is_legacy_visible_to(watcher, object)) {
         return;
@@ -3569,7 +3576,7 @@ bool MapActor::settle_player_death(Player& player, RuntimeDispatch& dispatch,
     const auto item_y = ground_item.y;
     ++next_ground_item_id_;
     ground_items_[item_id] = std::move(ground_item);
-    sync_visibility_after_item_change(item_x, item_y, dispatch, item_id);
+    sync_visibility_after_item_change(item_x, item_y, dispatch, now_ms, item_id);
     return true;
   };
 

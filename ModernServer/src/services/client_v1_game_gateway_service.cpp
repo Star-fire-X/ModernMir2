@@ -2203,11 +2203,28 @@ void ClientV1GameGatewayService::translate_legacy_packet(
       break;
     case kSmChangeMap: {
       const auto map_id = legacy_decode_text(decoded->body);
+      std::optional<client_v1::MapEntered> inline_map_entered;
       {
         std::scoped_lock lock(mutex_);
-        sessions_[session_id].map_change_pending = true;
+        auto& current = sessions_[session_id];
+        const auto has_inline_entry =
+            current.actor_id != 0 &&
+            (decoded->message.param != 0 || decoded->message.tag != 0);
+        current.map_change_pending = !has_inline_entry;
+        if (has_inline_entry) {
+          current.character.map_id = map_id;
+          current.character.x = decoded->message.param;
+          current.character.y = decoded->message.tag;
+          inline_map_entered = client_v1::MapEntered{
+              map_id, current.actor_id, decoded->message.param, decoded->message.tag,
+              current.character.dir};
+          state = current;
+        }
       }
       messages.push_back(client_v1::MapChange{map_id});
+      if (inline_map_entered.has_value()) {
+        messages.push_back(*inline_map_entered);
+      }
       break;
     }
     case kSmOpenDoorOk:

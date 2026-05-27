@@ -376,6 +376,12 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_visibility_phase3_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_visibility_phase3_smoke COMMAND mir2_visibility_phase3_smoke)
 
+  add_executable(mir2_legacy_visibility_compat_smoke
+    tests/legacy_visibility_compat_smoke.cpp)
+  target_link_libraries(mir2_legacy_visibility_compat_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_visibility_compat_smoke
+    COMMAND mir2_legacy_visibility_compat_smoke)
+
   add_executable(mir2_monster_visibility_order_smoke
     tests/monster_visibility_order_smoke.cpp)
   target_link_libraries(mir2_monster_visibility_order_smoke PRIVATE mir2_hostlib)

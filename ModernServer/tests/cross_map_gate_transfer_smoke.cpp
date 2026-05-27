@@ -121,15 +121,17 @@ int main() {
   const auto transfer_dispatch = runtime.tick();
   assert(find_packet(transfer_dispatch, 1, mir2::kSmClearObjects).has_value());
   assert(find_packet(transfer_dispatch, 1, mir2::kSmChangeMap).has_value());
-  const auto new_map = find_packet(transfer_dispatch, 1, mir2::kSmNewMap);
-  assert(new_map.has_value());
-  assert(mir2::legacy_decode_string(new_map->body) == "1");
+  assert(!find_packet(transfer_dispatch, 1, mir2::kSmNewMap).has_value());
+  assert(!find_packet(transfer_dispatch, 1, mir2::kSmLogon).has_value());
+  const auto change_map = find_packet(transfer_dispatch, 1, mir2::kSmChangeMap);
+  assert(change_map.has_value());
+  assert(mir2::legacy_decode_string(change_map->body) == "1");
+  assert(change_map->message.param == 5);
+  assert(change_map->message.tag == 5);
   const auto hero_idents = packet_idents_for_session(transfer_dispatch, 1);
   const auto clear_index = first_ident_index(hero_idents, mir2::kSmClearObjects);
   const auto change_index = first_ident_index(hero_idents, mir2::kSmChangeMap);
-  const auto new_map_index = first_ident_index(hero_idents, mir2::kSmNewMap);
   assert(clear_index < change_index);
-  assert(change_index < new_map_index);
   assert(find_packet(transfer_dispatch, 2, mir2::kSmDisappear).has_value());
   assert(!find_packet(transfer_dispatch, 2, mir2::kSmNewMap).has_value());
 

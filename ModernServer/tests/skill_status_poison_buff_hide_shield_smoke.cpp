@@ -65,6 +65,18 @@ mir2::HostConfig base_config() {
   }
   config.items.push_back(mir2::ItemConfig{501, "Bujuk", 1, 10, 25, 5, 1, 1000, 9});
   config.items.push_back(mir2::ItemConfig{502, "Green Poison", 1, 10, 25, 1, 1, 1000, 9});
+  mir2::ItemConfig hit_speed_weapon;
+  hit_speed_weapon.id = 503;
+  hit_speed_weapon.name = "HitSpeed Weapon";
+  hit_speed_weapon.weight = 1;
+  hit_speed_weapon.price = 10;
+  hit_speed_weapon.std_mode = 5;
+  hit_speed_weapon.shape = 6;
+  hit_speed_weapon.looks = 1;
+  hit_speed_weapon.dura_max = 1000;
+  hit_speed_weapon.equip_slot = mir2::kEquipWeapon;
+  hit_speed_weapon.mac = mir2::make_word(0, 12);
+  config.items.push_back(hit_speed_weapon);
   return config;
 }
 
@@ -205,6 +217,17 @@ bool has_packet(const mir2::RuntimeDispatch& dispatch, std::uint16_t ident) {
                      });
 }
 
+std::optional<mir2::DecodedLegacyGamePacket> find_packet(const mir2::RuntimeDispatch& dispatch,
+                                                         std::uint16_t ident) {
+  for (const auto& event : dispatch.session_events) {
+    const auto decoded = mir2::decode_legacy_game_packet(event.packet);
+    if (decoded.has_value() && decoded->message.ident == ident) {
+      return decoded;
+    }
+  }
+  return std::nullopt;
+}
+
 std::optional<mir2::CharacterRecord> saved_character(
     const mir2::RuntimeDispatch& dispatch,
     const std::string& name) {
@@ -241,13 +264,21 @@ int main() {
     auto config = base_config();
     mir2::LogicRuntime runtime(config);
     runtime.initialize();
-    static_cast<void>(runtime.route_logic_command(enter(1411, character("Hidden", {18, 31}))));
+    auto hidden = character("Hidden", {18, 31});
+    hidden.equipped_items[mir2::kEquipWeapon].index = 503;
+    hidden.equipped_items[mir2::kEquipWeapon].make_index = 9503;
+    hidden.equipped_items[mir2::kEquipWeapon].dura = 1000;
+    hidden.equipped_items[mir2::kEquipWeapon].dura_max = 1000;
+    static_cast<void>(runtime.route_logic_command(enter(1411, std::move(hidden))));
     static_cast<void>(runtime.tick());
     auto dispatch = runtime.route_logic_command(spell(1411, 18));
     append(dispatch, runtime.tick());
     auto snapshot = runtime.snapshot_character_actor("Hidden");
     assert(snapshot.has_value() && (snapshot->status & kTransparentStatusBit) != 0);
     assert(has_packet(dispatch, mir2::kSmCharStatusChanged));
+    auto status_packet = find_packet(dispatch, mir2::kSmCharStatusChanged);
+    assert(status_packet.has_value());
+    assert(status_packet->message.series == 2);
     append(dispatch, runtime.route_logic_command(attack(1411, 10, 9)));
     append(dispatch, runtime.tick());
     snapshot = runtime.snapshot_character_actor("Hidden");

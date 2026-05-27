@@ -121,8 +121,16 @@ int main() {
 
     dispatch = pickup_item(runtime, 81, 20, 20);
     assert(find_packet(dispatch, 81, mir2::kSmItemHide).has_value());
-    assert(find_packet(dispatch, 82, mir2::kSmItemHide).has_value());
+    assert(!find_packet(dispatch, 82, mir2::kSmItemHide).has_value());
     assert(!find_packet(dispatch, 83, mir2::kSmItemHide).has_value());
+
+    dispatch = runtime.tick(runtime.current_tick() *
+                            static_cast<std::uint64_t>(config.budgets.tick_ms));
+    assert(!find_packet(dispatch, 82, mir2::kSmItemHide).has_value());
+
+    dispatch = runtime.tick();
+    assert(find_packet(dispatch, 82, mir2::kSmItemHide).has_value());
+    assert(!find_packet(dispatch, 81, mir2::kSmItemHide).has_value());
   }
 
   {
@@ -142,8 +150,16 @@ int main() {
     const auto dispatch = walk(runtime, 91, 10, 10);
     assert(find_packet(dispatch, 91, mir2::kSmClearObjects).has_value());
     assert(find_packet(dispatch, 91, mir2::kSmChangeMap).has_value());
+    assert(!find_packet(dispatch, 91, mir2::kSmNewMap).has_value());
+    assert(!find_packet(dispatch, 91, mir2::kSmLogon).has_value());
     assert(find_packet(dispatch, 92, mir2::kSmSpaceMoveHide).has_value());
     assert(find_packet(dispatch, 93, mir2::kSmSpaceMoveShow).has_value());
+    const auto change_map = find_packet(dispatch, 91, mir2::kSmChangeMap);
+    assert(change_map.has_value());
+    assert(mir2::legacy_decode_string(change_map->body) == "0");
+    assert(change_map->message.param == 30);
+    assert(change_map->message.tag == 30);
+    assert(change_map->message.series == 2);
   }
 
   {
@@ -168,7 +184,10 @@ int main() {
 
     map.legacy_remove_event_object(9001, 11, 10, &dispatch);
     assert(!map.legacy_player_tracks_event(1, 9001));
-    assert(find_packet(dispatch, 1, mir2::kSmHideEvent).has_value());
+    const auto hide_event = find_packet(dispatch, 1, mir2::kSmHideEvent);
+    assert(hide_event.has_value());
+    assert(hide_event->message.param == 11);
+    assert(hide_event->message.tag == 10);
   }
 
   return 0;

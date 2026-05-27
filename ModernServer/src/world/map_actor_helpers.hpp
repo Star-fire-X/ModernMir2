@@ -8,8 +8,8 @@ constexpr std::uint8_t kDefaultChatShadow = 0;
 constexpr std::int32_t kDefaultMerchantFace = 0;
 constexpr std::uint8_t kCrossMapSyncRetryLimit = 100;
 constexpr std::int32_t kLegacyViewRange = 12;
-constexpr std::int32_t kAreaSafe = 1;
-constexpr std::int32_t kAreaFight = 2;
+constexpr std::int32_t kAreaFight = 1;
+constexpr std::int32_t kAreaSafe = 2;
 constexpr std::int32_t kAreaFreePk = 4;
 constexpr std::uint8_t kHamAll = 0;
 constexpr std::uint8_t kHamPeace = 1;
@@ -425,6 +425,13 @@ std::int32_t actor_status(const GameObject& object) {
   return 0;
 }
 
+std::int32_t actor_hit_speed(const GameObject& object) {
+  if (const auto* player = as_player(&object); player != nullptr) {
+    return player->legacy_hit_speed();
+  }
+  return 0;
+}
+
 std::int32_t legacy_actor_anti_magic(const GameObject& object) {
   if (const auto* monster = as_monster(&object); monster != nullptr) {
     return std::max(monster->magical_defense(), 0);
@@ -460,11 +467,30 @@ std::string actor_name(const GameObject& object) {
   return object.name();
 }
 
+bool actor_uses_skeleton_packet(const GameObject& object) {
+  const auto* monster = as_monster(&object);
+  if (monster == nullptr) {
+    return false;
+  }
+  const auto lowered = util::lower_copy(monster->name());
+  return lowered == "__whiteskeleton" || lowered == "__elf" || lowered == "__elfwarrior";
+}
+
 LegacyCharDesc make_char_desc(const GameObject& object) {
   LegacyCharDesc desc;
   desc.feature = actor_feature(object);
   desc.status = actor_status(object);
   return desc;
+}
+
+std::uint16_t legacy_map_darkness(const MapConfig& map_config) {
+  if (map_config.daylight) {
+    return 0;
+  }
+  if (map_config.darkness) {
+    return 1;
+  }
+  return 2;
 }
 
 std::int32_t packed_min(std::uint16_t value) { return static_cast<std::int32_t>(value & 0xffu); }
