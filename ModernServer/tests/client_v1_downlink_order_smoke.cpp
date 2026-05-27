@@ -237,6 +237,25 @@ int main() {
   service.translate_legacy_packet_for_test(kSessionId, make_actor_walk_packet(), messages);
   assert(messages.size() == 2);
 
+  std::vector<mir2::client_v1::Frame> frames;
+  service.translate_legacy_packet_frames_for_test(kSessionId, make_actor_walk_packet(), frames);
+  assert(frames.size() == 2);
+  assert(frames[0].legacy_bundle.has_value());
+  assert(frames[1].legacy_bundle.has_value());
+  const auto bundle_id = frames[0].legacy_bundle->bundle_id;
+  assert(bundle_id != 0);
+  assert(frames[1].legacy_bundle->bundle_id == bundle_id);
+  assert(frames[0].legacy_bundle->bundle_index == 0);
+  assert(frames[1].legacy_bundle->bundle_index == 1);
+  assert(frames[0].legacy_bundle->bundle_count == 2);
+  assert(frames[1].legacy_bundle->bundle_count == 2);
+  assert(frames[0].legacy_bundle->legacy_ident == mir2::kSmWalk);
+  assert(frames[1].legacy_bundle->legacy_ident == mir2::kSmWalk);
+  assert(frames[0].legacy_bundle->bundle_mode ==
+         mir2::client_v1::LegacyBundleMode::actor_queue);
+  assert(frames[1].legacy_bundle->bundle_mode ==
+         mir2::client_v1::LegacyBundleMode::actor_queue);
+
   const auto& upsert = require_message<mir2::client_v1::ActorUpsert>(messages, 0);
   assert(upsert.actor.actor_id == 42);
   assert(upsert.actor.x == 12);

@@ -151,6 +151,52 @@ void ClientV1GatewayServiceBase::send_message(std::uint64_t session_id,
   }
 }
 
+void ClientV1GatewayServiceBase::send_frame(std::uint64_t session_id,
+                                            const client_v1::Frame& frame) {
+  std::shared_ptr<ClientV1Session> session;
+  {
+    std::scoped_lock lock(mutex_);
+    const auto it = sessions_.find(session_id);
+    if (it != sessions_.end()) {
+      session = it->second;
+    }
+  }
+  if (session != nullptr) {
+    session->send_frame(frame);
+  }
+}
+
+void ClientV1GatewayServiceBase::send_frames(
+    std::uint64_t session_id, const std::vector<client_v1::Frame>& frames) {
+  std::shared_ptr<ClientV1Session> session;
+  {
+    std::scoped_lock lock(mutex_);
+    const auto it = sessions_.find(session_id);
+    if (it != sessions_.end()) {
+      session = it->second;
+    }
+  }
+  if (session != nullptr) {
+    session->send_frames(frames);
+  }
+}
+
+void ClientV1GatewayServiceBase::send_frames(
+    std::uint64_t session_id, const std::vector<client_v1::Frame>& frames,
+    std::chrono::milliseconds delay) {
+  std::shared_ptr<ClientV1Session> session;
+  {
+    std::scoped_lock lock(mutex_);
+    const auto it = sessions_.find(session_id);
+    if (it != sessions_.end()) {
+      session = it->second;
+    }
+  }
+  if (session != nullptr) {
+    session->send_frames(frames, delay);
+  }
+}
+
 void ClientV1GatewayServiceBase::disconnect(std::uint64_t session_id, std::uint16_t code,
                                             const std::string& reason) {
   std::shared_ptr<ClientV1Session> session;

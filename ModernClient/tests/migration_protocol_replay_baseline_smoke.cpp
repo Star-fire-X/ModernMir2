@@ -48,6 +48,43 @@ bool has_actor(const mir2::client::GameStateStore& state, const std::uint64_t ac
   return state.world.actors.find(actor_id) != state.world.actors.end();
 }
 
+template <typename T>
+mir2::client_v1::Frame make_legacy_bundle_frame(
+    const T& message, const std::uint64_t bundle_id, const std::uint16_t index,
+    const std::uint16_t count, const std::uint16_t legacy_ident,
+    const mir2::client_v1::LegacyBundleMode mode) {
+  return mir2::client_v1::make_frame(
+      message, 0, 0,
+      mir2::client_v1::LegacyBundleMeta{bundle_id, index, count, legacy_ident, mode});
+}
+
+void bootstrap_world(mir2::client::ClientApp& app) {
+  using namespace mir2::client;
+  using namespace mir2::client_v1;
+
+  EnterWorldResult enter;
+  enter.success = true;
+  enter.self_actor_id = 1000;
+  enter.character_name = "Hero";
+  enter.map_id = "0";
+  enter.x = 330;
+  enter.y = 270;
+
+  WorldSnapshot snapshot;
+  snapshot.map_id = "0";
+  snapshot.width = 700;
+  snapshot.height = 700;
+  snapshot.self_actor_id = 1000;
+  snapshot.actors.push_back(
+      WorldActor{1000, "Hero", 330, 270, 0, 0, 0, ActorType::player});
+
+  app.push_protocol_message_for_test(enter);
+  app.push_protocol_message_for_test(snapshot);
+  app.pump_protocol_for_test();
+  assert(app.state_for_test().auth_phase == AuthFlowPhase::InGame);
+  assert(app.current_scene_for_test() == SceneId::world);
+}
+
 std::vector<std::string> run_protocol_trace() {
   using namespace mir2::client;
   using namespace mir2::client_v1;
@@ -434,6 +471,100 @@ void test_typed_disconnect_reason_clears_deferred_map_runtime() {
   assert(state.world.chat_lines.empty());
 }
 
+void test_immediate_legacy_bundle_waits_for_all_frames() {
+  using namespace mir2::client_v1;
+
+  mir2::client::ClientApp app;
+  app.set_config_for_test(test_config());
+  app.enable_protocol_test_mode_for_test();
+  bootstrap_world(app);
+
+  auto& state = app.state_for_test();
+  state.world.last_action_ack_ms = 0;
+  state.world.actors[1000].x = 330;
+  state.world.actors[1000].y = 270;
+
+  constexpr std::uint16_t kSmMoveFail = 28;
+  app.push_protocol_frame_for_test(make_legacy_bundle_frame(
+      ActionAck{false, 0}, 9001, 0, 2, kSmMoveFail, LegacyBundleMode::immediate));
+  app.pump_protocol_for_test();
+  assert(state.world.last_action_ack_ms == 0);
+  assert(state.world.actors[1000].x == 330);
+
+  app.push_protocol_frame_for_test(make_legacy_bundle_frame(
+      ActorStateDelta{1000, 329, 270, 2}, 9001, 1, 2, kSmMoveFail,
+      LegacyBundleMode::immediate));
+  app.pump_protocol_for_test();
+  assert(state.world.last_action_ack_ms != 0);
+  assert(state.world.actors[1000].x == 329);
+  assert(state.world.actors[1000].dir == 2);
+}
+
+void test_actor_queue_legacy_bundle_stages_state_until_queue_consume() {
+  using namespace mir2::client;
+  using namespace mir2::client_v1;
+
+  ClientApp app;
+  app.set_config_for_test(test_config());
+  app.enable_protocol_test_mode_for_test();
+  bootstrap_world(app);
+
+  auto& state = app.state_for_test();
+  state.apply(ActorUpsert{WorldActor{2000, "Guard", 331, 270, 0, 0, 0,
+                                     ActorType::monster}});
+  state.world.actors[2000].hp = 20;
+  state.world.actors[2000].current_action = ActorActionKind::turn;
+
+  constexpr std::uint16_t kSmStruck = 31;
+  app.push_protocol_frame_for_test(make_legacy_bundle_frame(
+      ActorVitals{2000, 10, 20, -1, -1, 7, 1000, false, kSmStruck}, 9002, 0, 2,
+      kSmStruck, LegacyBundleMode::actor_queue));
+  app.pump_protocol_for_test();
+  assert(state.world.actors[2000].hp == 20);
+  assert(state.world.actors[2000].current_action == ActorActionKind::turn);
+  assert(state.world.actors[2000].legacy_actor_bundle_queue.empty());
+
+  app.push_protocol_frame_for_test(make_legacy_bundle_frame(
+      ActorAction{2000, ActorActionKind::struck, 0, 0, 0, 1000, 7, kSmStruck, 0,
+                  false, 0},
+      9002, 1, 2, kSmStruck, LegacyBundleMode::actor_queue));
+  app.pump_protocol_for_test();
+  assert(state.world.actors[2000].hp == 20);
+  assert(state.world.actors[2000].current_action == ActorActionKind::turn);
+  assert(state.world.actors[2000].legacy_actor_bundle_queue.size() == 1);
+
+  state.process_legacy_actor_queues(12345);
+  assert(state.world.actors[2000].hp == 10);
+  assert(state.world.actors[2000].last_damage == 7);
+  assert(state.world.actors[2000].current_action == ActorActionKind::struck);
+}
+
+void test_map_transition_defers_whole_legacy_bundle() {
+  using namespace mir2::client;
+  using namespace mir2::client_v1;
+
+  ClientApp app;
+  app.set_config_for_test(test_config());
+  app.enable_protocol_test_mode_for_test();
+  bootstrap_world(app);
+
+  auto& state = app.state_for_test();
+  state.apply(WorldClearObjects{});
+  assert(state.world.map_transition_pending);
+
+  constexpr std::uint16_t kSmItemShow = 610;
+  app.push_protocol_frame_for_test(make_legacy_bundle_frame(
+      GroundItemAdd{GroundItemState{3000, 331, 270, 1, "Gold"}}, 9003, 0, 2,
+      kSmItemShow, LegacyBundleMode::immediate));
+  app.push_protocol_frame_for_test(make_legacy_bundle_frame(
+      ChatLine{"bundle chat", 0xFFFFFFFFU, 0}, 9003, 1, 2, kSmItemShow,
+      LegacyBundleMode::immediate));
+  app.pump_protocol_for_test();
+
+  assert(state.world.ground_items.empty());
+  assert(state.world.chat_lines.empty());
+}
+
 }  // namespace
 
 int main() {
@@ -446,5 +577,8 @@ int main() {
   test_bad_runtime_frame_during_map_transition_disconnects_immediately();
   test_disconnect_during_map_transition_is_not_deferred();
   test_typed_disconnect_reason_clears_deferred_map_runtime();
+  test_immediate_legacy_bundle_waits_for_all_frames();
+  test_actor_queue_legacy_bundle_stages_state_until_queue_consume();
+  test_map_transition_defers_whole_legacy_bundle();
   return 0;
 }

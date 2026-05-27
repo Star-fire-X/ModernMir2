@@ -47,6 +47,10 @@ class ClientV1GatewayServiceBase : public Module, public ClientV1SessionOwner {
   void send_message(std::uint64_t session_id, const client_v1::Message& message);
   void send_message(std::uint64_t session_id, const client_v1::Message& message,
                     std::chrono::milliseconds delay);
+  void send_frame(std::uint64_t session_id, const client_v1::Frame& frame);
+  void send_frames(std::uint64_t session_id, const std::vector<client_v1::Frame>& frames);
+  void send_frames(std::uint64_t session_id, const std::vector<client_v1::Frame>& frames,
+                   std::chrono::milliseconds delay);
   void disconnect(std::uint64_t session_id, std::uint16_t code, const std::string& reason);
   [[nodiscard]] HostContext& context() const { return *context_; }
 

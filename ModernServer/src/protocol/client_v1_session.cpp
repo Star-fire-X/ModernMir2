@@ -38,6 +38,56 @@ void ClientV1Session::send(const client_v1::Message& message) {
   });
 }
 
+void ClientV1Session::send_frame(const client_v1::Frame& frame) {
+  send_frames(std::vector<client_v1::Frame>{frame});
+}
+
+void ClientV1Session::send_frames(const std::vector<client_v1::Frame>& frames) {
+  auto self = shared_from_this();
+  asio::dispatch(strand_, [this, self, frames] {
+    if (closed_) {
+      return;
+    }
+    for (auto frame : frames) {
+      frame.sequence = next_sequence_++;
+      outbound_frames_.push_back(client_v1::encode_frame(frame));
+    }
+    if (!writing_) {
+      do_write();
+    }
+  });
+}
+
+void ClientV1Session::send_frames(const std::vector<client_v1::Frame>& frames,
+                                  std::chrono::milliseconds delay) {
+  if (delay.count() <= 0) {
+    send_frames(frames);
+    return;
+  }
+
+  auto self = shared_from_this();
+  asio::dispatch(strand_, [this, self, frames, delay] {
+    if (closed_) {
+      return;
+    }
+    auto timer = std::make_shared<asio::steady_timer>(strand_);
+    timer->expires_after(delay);
+    timer->async_wait(asio::bind_executor(
+        strand_, [this, self, frames, timer](const std::error_code& error) {
+          if (error || closed_) {
+            return;
+          }
+          for (auto frame : frames) {
+            frame.sequence = next_sequence_++;
+            outbound_frames_.push_back(client_v1::encode_frame(frame));
+          }
+          if (!writing_) {
+            do_write();
+          }
+        }));
+  });
+}
+
 void ClientV1Session::send(const client_v1::Message& message, std::chrono::milliseconds delay) {
   if (delay.count() <= 0) {
     send(message);

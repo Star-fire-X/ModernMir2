@@ -149,6 +149,33 @@ client_v1::ActorActionKind actor_action_kind_for_sm(std::uint16_t ident) {
   }
 }
 
+client_v1::LegacyBundleMode legacy_bundle_mode_for_sm(std::uint16_t ident) {
+  switch (ident) {
+    case kSmTurn:
+    case kSmWalk:
+    case kSmRun:
+    case kSmRush:
+    case kSmRushKung:
+    case kSmBackStep:
+    case kSmSpell:
+    case kSmStruck:
+    case kSmAlive:
+    case kSmMagicFire:
+    case kSmMagicFireFail:
+    case legacy::kSmFireHit:
+    case kSmHit:
+    case legacy::kSmHeavyHit:
+    case legacy::kSmBigHit:
+    case legacy::kSmPowerHit:
+    case legacy::kSmLongHit:
+    case legacy::kSmWideHit:
+    case legacy::kSmCrossHit:
+      return client_v1::LegacyBundleMode::actor_queue;
+    default:
+      return client_v1::LegacyBundleMode::immediate;
+  }
+}
+
 std::uint32_t legacy_chat_fore_color(std::uint16_t color) {
   return static_cast<std::uint32_t>(color & 0xFFU);
 }
@@ -539,7 +566,20 @@ void ClientV1GameGatewayService::seed_session_for_test(std::uint64_t session_id)
 void ClientV1GameGatewayService::translate_legacy_packet_for_test(
     std::uint64_t session_id, const LegacyPacket& packet,
     std::vector<client_v1::Message>& messages) {
-  translate_legacy_packet(session_id, packet, messages);
+  std::vector<client_v1::Frame> frames;
+  translate_legacy_packet(session_id, packet, frames);
+  for (const auto& frame : frames) {
+    const auto decoded = client_v1::decode_any(frame);
+    if (decoded.has_value()) {
+      messages.push_back(*decoded);
+    }
+  }
+}
+
+void ClientV1GameGatewayService::translate_legacy_packet_frames_for_test(
+    std::uint64_t session_id, const LegacyPacket& packet,
+    std::vector<client_v1::Frame>& frames) {
+  translate_legacy_packet(session_id, packet, frames);
 }
 
 std::optional<CharacterRecord> ClientV1GameGatewayService::session_character_for_test(
@@ -2137,15 +2177,13 @@ void ClientV1GameGatewayService::handle_session_event(const SessionEvent& event)
 
   if (event.kind == SessionEventKind::send_packet ||
       event.kind == SessionEventKind::send_packet_and_close) {
-    std::vector<client_v1::Message> messages;
-    translate_legacy_packet(event.session_id, event.packet, messages);
+    std::vector<client_v1::Frame> frames;
+    translate_legacy_packet(event.session_id, event.packet, frames);
     const auto delay =
         event.kind == SessionEventKind::send_packet
             ? std::chrono::milliseconds(event.delay_ms >= 0 ? event.delay_ms : 0)
             : std::chrono::milliseconds(0);
-    for (const auto& message : messages) {
-      send_message(event.session_id, message, delay);
-    }
+    send_frames(event.session_id, frames, delay);
     if (event.kind == SessionEventKind::send_packet_and_close) {
       disconnect(event.session_id, 409, event.reason.empty() ? "server_closed" : event.reason);
     }
@@ -2158,6 +2196,45 @@ void ClientV1GameGatewayService::handle_session_event(const SessionEvent& event)
 }
 
 void ClientV1GameGatewayService::translate_legacy_packet(
+    std::uint64_t session_id, const LegacyPacket& packet,
+    std::vector<client_v1::Frame>& frames) {
+  std::vector<client_v1::Message> messages;
+  translate_legacy_packet_messages(session_id, packet, messages);
+  if (messages.empty()) {
+    return;
+  }
+
+  std::optional<DecodedLegacyGamePacket> decoded;
+  if (packet.header.length >= 0) {
+    decoded = decode_legacy_game_packet(packet);
+  }
+  if (!decoded.has_value()) {
+    for (const auto& message : messages) {
+      frames.push_back(client_v1::encode_any(message, 0));
+    }
+    return;
+  }
+
+  std::uint64_t bundle_id = 0;
+  {
+    std::scoped_lock lock(mutex_);
+    bundle_id = sessions_[session_id].next_legacy_bundle_id++;
+  }
+  const auto bundle_count = static_cast<std::uint16_t>(
+      std::min<std::size_t>(messages.size(), 0xFFFFU));
+  const auto bundle_mode = legacy_bundle_mode_for_sm(decoded->message.ident);
+  for (std::uint16_t index = 0; index < bundle_count; ++index) {
+    auto meta = client_v1::LegacyBundleMeta{
+        bundle_id,
+        index,
+        bundle_count,
+        decoded->message.ident,
+        bundle_mode};
+    frames.push_back(client_v1::encode_any(messages[index], 0, 0, meta));
+  }
+}
+
+void ClientV1GameGatewayService::translate_legacy_packet_messages(
     std::uint64_t session_id, const LegacyPacket& packet,
     std::vector<client_v1::Message>& messages) {
   if (packet.header.length < 0) {

@@ -1660,15 +1660,121 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
         return false;
     }
   };
+  const auto valid_legacy_bundle_mode = [](const client_v1::LegacyBundleMode mode) {
+    return mode == client_v1::LegacyBundleMode::immediate ||
+           mode == client_v1::LegacyBundleMode::actor_queue;
+  };
+  enum class LegacyBundleCollectStatus {
+    single_frame,
+    pending,
+    complete,
+    protocol_error
+  };
+  struct LegacyBundleCollectResult {
+    LegacyBundleCollectStatus status{LegacyBundleCollectStatus::single_frame};
+    std::vector<client_v1::Frame> frames{};
+    std::optional<client_v1::LegacyBundleMeta> meta{};
+  };
+  auto collect_legacy_bundle_frame = [&](client_v1::Frame frame) {
+    LegacyBundleCollectResult result;
+    if (!frame.legacy_bundle.has_value()) {
+      if (pending_legacy_bundle_.has_value()) {
+        result.status = LegacyBundleCollectStatus::protocol_error;
+        return result;
+      }
+      result.frames.push_back(std::move(frame));
+      return result;
+    }
+
+    const auto meta = *frame.legacy_bundle;
+    if (meta.bundle_count == 0 || meta.bundle_index >= meta.bundle_count ||
+        !valid_legacy_bundle_mode(meta.bundle_mode)) {
+      result.status = LegacyBundleCollectStatus::protocol_error;
+      return result;
+    }
+
+    if (!pending_legacy_bundle_.has_value()) {
+      if (meta.bundle_index != 0) {
+        result.status = LegacyBundleCollectStatus::protocol_error;
+        return result;
+      }
+      PendingLegacyBundle pending;
+      pending.meta = meta;
+      pending.frames.reserve(meta.bundle_count);
+      pending_legacy_bundle_ = std::move(pending);
+    } else {
+      const auto& pending = *pending_legacy_bundle_;
+      if (pending.meta.bundle_id != meta.bundle_id ||
+          pending.meta.bundle_count != meta.bundle_count ||
+          pending.meta.legacy_ident != meta.legacy_ident ||
+          pending.meta.bundle_mode != meta.bundle_mode ||
+          meta.bundle_index != pending.frames.size()) {
+        result.status = LegacyBundleCollectStatus::protocol_error;
+        return result;
+      }
+    }
+
+    pending_legacy_bundle_->frames.push_back(std::move(frame));
+    if (pending_legacy_bundle_->frames.size() < pending_legacy_bundle_->meta.bundle_count) {
+      result.status = LegacyBundleCollectStatus::pending;
+      return result;
+    }
+
+    result.status = LegacyBundleCollectStatus::complete;
+    result.meta = pending_legacy_bundle_->meta;
+    result.frames = std::move(pending_legacy_bundle_->frames);
+    pending_legacy_bundle_.reset();
+    return result;
+  };
+  const auto validate_frames = [&](const std::vector<client_v1::Frame>& frames) {
+    return std::all_of(frames.begin(), frames.end(), validate_server_frame);
+  };
+  auto defer_frames = [&](std::vector<client_v1::Frame> frames) {
+    for (auto& frame : frames) {
+      deferred_protocol_events_.push_back(ProtocolFrameEvent{std::move(frame)});
+    }
+  };
+  const auto frames_have_non_control = [&](const std::vector<client_v1::Frame>& frames) {
+    return std::any_of(frames.begin(), frames.end(), [&](const client_v1::Frame& frame) {
+      return !is_map_transition_control(frame.message_id);
+    });
+  };
+  const auto decode_actor_queue_bundle_frame =
+      [](const client_v1::Frame& frame,
+         std::vector<client_v1::Message>& messages) {
+        auto decode = [&]<typename T>() {
+          const auto value = client_v1::decode_message<T>(frame);
+          if (!value.has_value()) {
+            return false;
+          }
+          messages.push_back(client_v1::Message{*value});
+          return true;
+        };
+        switch (frame.message_id) {
+          case client_v1::MessageId::actor_state_delta:
+            return decode.operator()<client_v1::ActorStateDelta>();
+          case client_v1::MessageId::actor_upsert:
+            return decode.operator()<client_v1::ActorUpsert>();
+          case client_v1::MessageId::actor_action:
+            return decode.operator()<client_v1::ActorAction>();
+          case client_v1::MessageId::actor_identity_update:
+            return decode.operator()<client_v1::ActorIdentityUpdate>();
+          case client_v1::MessageId::actor_magic_fire:
+            return decode.operator()<client_v1::ActorMagicFire>();
+          case client_v1::MessageId::actor_magic_fire_fail:
+            return decode.operator()<client_v1::ActorMagicFireFail>();
+          case client_v1::MessageId::actor_vitals:
+            return decode.operator()<client_v1::ActorVitals>();
+          case client_v1::MessageId::actor_death:
+            return decode.operator()<client_v1::ActorDeath>();
+          default:
+            return false;
+        }
+      };
   auto protocol_fifo_barrier = false;
   auto stop_protocol_drain = false;
   for (std::size_t event_index = 0; event_index < events.size(); ++event_index) {
     auto& event = events[event_index];
-    auto defer_current_frame = [&] {
-      if (std::holds_alternative<ProtocolFrameEvent>(events[event_index])) {
-        deferred_protocol_events_.push_back(std::move(events[event_index]));
-      }
-    };
     // ---- 连接建立事件 ----
     if (std::holds_alternative<ConnectedEvent>(event)) {
       // 发送客户端握手包（协议版本、构建号、资源修订号）
@@ -1726,6 +1832,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
         }
       }
       flush_scene_change_if_pending(context);
+      pending_legacy_bundle_.reset();
       deferred_protocol_events_.clear();
       break;
     }
@@ -1738,26 +1845,38 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
     // 收到有效消息就取消网络等待定时器
     cancel_network_wait_timers();
 
+    auto bundle_result = collect_legacy_bundle_frame(std::move(frame_event->frame));
+    if (bundle_result.status == LegacyBundleCollectStatus::protocol_error) {
+      pending_legacy_bundle_.reset();
+      protocol_.disconnect("protocol_decode_error");
+      deferred_protocol_events_.clear();
+      break;
+    }
+    if (bundle_result.status == LegacyBundleCollectStatus::pending) {
+      continue;
+    }
+
+    auto frames_to_dispatch = std::move(bundle_result.frames);
     bool deferred_for_map_transition = false;
-    const auto is_control_frame = is_map_transition_control(frame_event->frame.message_id);
+    const auto has_runtime_frame = frames_have_non_control(frames_to_dispatch);
     if (state_.connection_phase == GameStateStore::ConnectionPhase::play &&
-        scenes_.current_id() == SceneId::world && !is_control_frame &&
+        scenes_.current_id() == SceneId::world && has_runtime_frame &&
         (state_.world.map_transition_pending || protocol_fifo_barrier)) {
-      if (!validate_server_frame(frame_event->frame)) {
+      if (!validate_frames(frames_to_dispatch)) {
         protocol_.disconnect("protocol_decode_error");
+        pending_legacy_bundle_.reset();
         deferred_protocol_events_.clear();
         break;
       }
       if (legacy_trace_enabled()) {
         std::ostringstream out;
-        out << "defer_world_runtime message_id="
-            << static_cast<int>(frame_event->frame.message_id)
+        out << "defer_world_runtime frames=" << frames_to_dispatch.size()
             << " map_transition=" << state_.world.map_transition_pending
             << " fifo_barrier=" << protocol_fifo_barrier;
         legacy_trace(out.str());
       }
       protocol_fifo_barrier = true;
-      defer_current_frame();
+      defer_frames(std::move(frames_to_dispatch));
       continue;
     }
 
@@ -2390,6 +2509,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             state_.lobby.delete_character_pending = false;
             state_.lobby.enter_character_pending = false;
             state_.clear_play_scene_state();
+            pending_legacy_bundle_.reset();
             deferred_protocol_events_.clear();
             legacy_ui_lifecycle_trace(
                 legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::disconnect_clears_play_ui);
@@ -2493,8 +2613,9 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
           }
         };
 
+    auto dispatch_frame = [&](const client_v1::Frame& frame) -> bool {
     auto decode_and_dispatch = [&]<typename T>() -> bool {
-      auto value = client_v1::decode_message<T>(frame_event->frame);
+      auto value = client_v1::decode_message<T>(frame);
       if (!value.has_value()) {
         return false;
       }
@@ -2503,7 +2624,7 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
     };
 
     auto decoded = false;
-    switch (frame_event->frame.message_id) {
+    switch (frame.message_id) {
       case client_v1::MessageId::login_result:
         decoded = decode_and_dispatch.operator()<client_v1::LoginResult>();
         break;
@@ -2681,19 +2802,59 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
       default:
         break;
     }
+    return decoded;
+    };
+
+    auto decoded = true;
+    if (bundle_result.meta.has_value() &&
+        bundle_result.meta->bundle_mode == client_v1::LegacyBundleMode::actor_queue) {
+      std::vector<client_v1::Message> bundle_messages;
+      bundle_messages.reserve(frames_to_dispatch.size());
+      for (const auto& frame : frames_to_dispatch) {
+        if (!decode_actor_queue_bundle_frame(frame, bundle_messages)) {
+          decoded = false;
+          break;
+        }
+      }
+      if (decoded) {
+        if (state_.connection_phase == GameStateStore::ConnectionPhase::play &&
+            scenes_.current_id() == SceneId::world) {
+          state_.enqueue_legacy_actor_bundle(std::move(bundle_messages));
+        } else {
+          legacy_ui_lifecycle_trace(
+              legacy_ui_lifecycle::LegacyUiLifecycleTraceLabel::drop_unreachable_world_message);
+        }
+      }
+    } else {
+      if (!validate_frames(frames_to_dispatch)) {
+        decoded = false;
+      } else {
+        for (const auto& frame : frames_to_dispatch) {
+          if (!dispatch_frame(frame)) {
+            decoded = false;
+            break;
+          }
+          if (stop_protocol_drain || deferred_for_map_transition) {
+            break;
+          }
+        }
+      }
+    }
     if (!decoded) {
       protocol_.disconnect("protocol_decode_error");
+      pending_legacy_bundle_.reset();
       deferred_protocol_events_.clear();
       break;
     }
     if (stop_protocol_drain) {
       deferred_protocol_events_.clear();
+      pending_legacy_bundle_.reset();
       flush_scene_change_if_pending(context);
       break;
     }
     if (deferred_for_map_transition) {
       protocol_fifo_barrier = true;
-      defer_current_frame();
+      defer_frames(std::move(frames_to_dispatch));
       continue;
     }
     flush_scene_change_if_pending(context);
