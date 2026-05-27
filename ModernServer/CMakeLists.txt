@@ -736,6 +736,12 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_legacy_script_condition_action_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_script_condition_action_smoke COMMAND mir2_legacy_script_condition_action_smoke)
 
+  add_executable(mir2_legacy_script_golden_baseline_smoke
+    tests/legacy_script_golden_baseline_smoke.cpp)
+  target_link_libraries(mir2_legacy_script_golden_baseline_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_script_golden_baseline_smoke
+    COMMAND mir2_legacy_script_golden_baseline_smoke)
+
   add_executable(mir2_legacy_script_command_decode_full_smoke
     tests/legacy_script_command_decode_full_smoke.cpp)
   target_link_libraries(mir2_legacy_script_command_decode_full_smoke PRIVATE mir2_hostlib)
@@ -1161,6 +1167,7 @@ if(BUILD_TESTING)
       mir2_npc_instance_click_guard_smoke
       mir2_scripted_merchant_smoke
       mir2_scripted_npc_dialog_smoke
+      mir2_legacy_script_golden_baseline_smoke
       mir2_legacy_mapquest_import_trigger_smoke
       mir2_legacy_gbk_import_smoke
       mir2_special_consumables_legacy_smoke
