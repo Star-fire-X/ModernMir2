@@ -36,6 +36,13 @@
       "status": "Player HitXY cadence now uses Delphi window semantics, including HitSpeed >= 15 and the HitTimeOverCount/HitTimeOverSum allowance window."
     },
     {
+      "test": "spellxy_cooldown_fixture",
+      "role": "known_delphi_parity_gap",
+      "owner_pr": "post-stack",
+      "contains_known_parity_gap": true,
+      "status": "Frozen SpellXY failure-flow evidence is present, but LatestSpellTime/LatestSpellDelay and SM_SPELL-before-failure parity are not fully covered by this combat stack."
+    },
+    {
       "test": "legacy_combat_resolution_smoke.cpp",
       "role": "delphi_parity_smoke",
       "owner_pr": "PR-3/PR-4/PR-6",

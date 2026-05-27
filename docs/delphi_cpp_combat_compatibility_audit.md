@@ -37,6 +37,10 @@ The CTest-facing fixture entry point is
 canonical end-state list in
 `ModernServer/tests/golden/legacy_combat/canonical_combat_snapshots.json`.
 
+`SpellXY` cooldown and failure flow remains a known post-stack gap: the Delphi
+trace is frozen, but the stack does not yet fully assert `LatestSpellTime`,
+`LatestSpellDelay`, or `SM_SPELL` before branch failure.
+
 ## Smoke Classification
 
 Existing combat tests now have explicit roles in
@@ -59,6 +63,9 @@ PRs must update those tests when the runtime behavior changes.
 | PR-4 | Warrior sword target chains and 200ms/500ms struck delay timing. |
 | PR-5 | PK target rules and per-command action throttling instead of a global gameplay-action frame gate. |
 | PR-6 | Death/revival/downlink order, poison/firewall/magic-shield timing, and remaining monster combat timing. |
+
+`spellxy_cooldown` is deliberately not marked implemented by PR-6; it remains
+tracked as a post-stack parity item.
 
 ## Non-Goals For PR-1
 

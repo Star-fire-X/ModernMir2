@@ -15,10 +15,10 @@
     },
     {
       "name": "spellxy_cooldown",
-      "owner_pr": "PR-6",
+      "owner_pr": "post-stack",
       "source_trace": "spell_failure.json",
       "delphi_rule": "DoSpell deducts MP and broadcasts SM_SPELL before SpellNow branch failures decide effect/fire packets.",
-      "current_cpp_status": "partly_covered_by_skill_phase_smoke",
+      "current_cpp_status": "known_gap_partly_covered_by_skill_phase_smoke",
       "required_coverage": ["LatestSpellTime", "LatestSpellDelay", "SM_SPELL before branch failure", "SM_MAGICFIRE_FAIL nofire path"]
     },
     {

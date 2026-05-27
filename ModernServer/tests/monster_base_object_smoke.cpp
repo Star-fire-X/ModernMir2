@@ -98,9 +98,13 @@ int main() {
   mir2::LogicRuntime runtime(config);
   runtime.initialize();
 
-  const auto spawn_dispatch = runtime.tick(1000);
+  const auto first = runtime.tick(1000);
+  assert(spawn_traces(first).empty());
+  const auto spawn_dispatch = runtime.tick(1201);
   const auto spawned = spawn_traces(spawn_dispatch);
-  assert(spawned.size() == 1);
+  if (spawned.size() != 1) {
+    return 1;
+  }
   const auto monster_id = spawned.front().actor_id;
 
   const auto snapshot = runtime.legacy_monster_snapshot("0", monster_id);
@@ -133,7 +137,7 @@ int main() {
   assert(snapshot->attack_speed_ms == 200);
   assert(snapshot->legacy_run_time_ms == 0);
   assert(snapshot->legacy_run_next_tick_ms == 250);
-  assert(snapshot->legacy_search_time_ms == 1000);
+  assert(snapshot->legacy_search_time_ms == spawned.front().now_ms);
   assert(snapshot->legacy_search_rate_ms >= 1500);
 
   mir2::LogicCommand enter;
