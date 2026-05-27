@@ -261,6 +261,42 @@ int main() {
   }
 
   {
+    auto record = character("PoisonTicks", {}, 0);
+    record.ability.hp = 20;
+    record.ability.max_hp = 20;
+    mir2::Player player(1, 1500, std::move(record));
+    assert(player.apply_legacy_poison(0, 20, 1, 3, 99, 1));
+
+    const auto early = player.tick_status_effects(3);
+    assert(early.damage == 0);
+
+    const auto first = player.tick_status_effects(4);
+    assert(first.damage == 2);
+    assert(first.source_actor_id == 99);
+    assert(player.character().ability.hp == 18);
+
+    const auto between = player.tick_status_effects(6);
+    assert(between.damage == 0);
+
+    const auto second = player.tick_status_effects(7);
+    assert(second.damage == 2);
+    assert(player.character().ability.hp == 16);
+  }
+
+  {
+    auto record = character("BubbleDamage", {}, 0);
+    mir2::Player player(1, 1501, std::move(record));
+    assert(player.activate_legacy_magic_bubble(1, 1, 11));
+    player.damage_legacy_magic_bubble(1, 3);
+    assert(player.legacy_magic_bubble_active(8));
+    assert(!player.legacy_magic_bubble_active(9));
+    const auto expired = player.tick_status_effects(9);
+    assert(expired.legacy_status_changed);
+    const auto status = static_cast<std::uint32_t>(player.character().status);
+    assert((status & static_cast<std::uint32_t>(kMagicBubbleStatusBit)) == 0);
+  }
+
+  {
     auto config = base_config();
     mir2::LogicRuntime runtime(config);
     runtime.initialize();

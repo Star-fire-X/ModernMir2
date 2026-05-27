@@ -15,10 +15,10 @@
     },
     {
       "name": "spellxy_cooldown",
-      "owner_pr": "PR-6",
+      "owner_pr": "post-stack",
       "source_trace": "spell_failure.json",
       "delphi_rule": "DoSpell deducts MP and broadcasts SM_SPELL before SpellNow branch failures decide effect/fire packets.",
-      "current_cpp_status": "partly_covered_by_skill_phase_smoke",
+      "current_cpp_status": "known_gap_partly_covered_by_skill_phase_smoke",
       "required_coverage": ["LatestSpellTime", "LatestSpellDelay", "SM_SPELL before branch failure", "SM_MAGICFIRE_FAIL nofire path"]
     },
     {
@@ -66,7 +66,7 @@
       "owner_pr": "PR-6",
       "source_trace": "death_player.json",
       "delphi_rule": "Damage, revival decision, death/drop settlement, and SM_STRUCK/SM_DEATH/SM_NOWDEATH order must be fixed from Delphi traces.",
-      "current_cpp_status": "needs_snapshot",
+      "current_cpp_status": "implemented_pr6",
       "required_coverage": ["player lethal hit", "revival ring", "SM_DEATH", "SM_NOWDEATH", "monster death drop"]
     },
     {

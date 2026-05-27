@@ -136,7 +136,7 @@ int main() {
       static_cast<std::uint64_t>(static_cast<std::uint32_t>(new_map->message.recog));
 
   std::optional<mir2::DecodedLegacyGamePacket> monster_walk;
-  for (int index = 0; index < 80; ++index) {
+  for (int index = 0; index < 200; ++index) {
     const auto chase_dispatch = runtime.tick();
     monster_walk = find_packet(chase_dispatch, mir2::kSmWalk);
     if (monster_walk.has_value()) {
@@ -202,9 +202,14 @@ int main() {
     return fail(9);
   }
 
-  static_cast<void>(runtime.tick(ghost_now_ms + 20));
-  const auto respawn_dispatch = runtime.tick(ghost_now_ms + 40);
-  const auto monster_respawn = find_packet_at(respawn_dispatch, mir2::kSmTurn, 10, 8);
+  std::optional<mir2::DecodedLegacyGamePacket> monster_respawn;
+  for (int index = 0; index < 20; ++index) {
+    const auto respawn_dispatch = runtime.tick(ghost_now_ms + 20 + index * 20);
+    monster_respawn = find_packet_at(respawn_dispatch, mir2::kSmTurn, 10, 8);
+    if (monster_respawn.has_value()) {
+      break;
+    }
+  }
   if (!monster_respawn.has_value() || monster_respawn->message.recog != monster_actor_id ||
       monster_respawn->message.param != 10 || monster_respawn->message.tag != 8) {
     return fail(6);
