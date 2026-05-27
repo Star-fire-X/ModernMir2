@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "artifact": "legacy_combat.canonical_combat_snapshots",
+  "baseline_commit": "d7dcc0d7af37a91b2f1abaa9e1f741abc28d6f61",
+  "status": "pr6_canonicalized",
+  "snapshots": [
+    {
+      "name": "basic_hit",
+      "owner_pr": "PR-3",
+      "coverage": ["attack_protocol_golden_smoke.cpp", "legacy_combat_formula_smoke.cpp"]
+    },
+    {
+      "name": "basic_miss",
+      "owner_pr": "PR-3",
+      "coverage": ["attack_protocol_golden_smoke.cpp", "legacy_combat_resolution_smoke.cpp"]
+    },
+    {
+      "name": "basic_death",
+      "owner_pr": "PR-6",
+      "coverage": ["player_death_drop_smoke.cpp", "player_death_revive_smoke.cpp"]
+    },
+    {
+      "name": "longhit_second_tile",
+      "owner_pr": "PR-4",
+      "coverage": ["skill_weapon_sword_common_smoke.cpp", "skill_weapon_sword_phase5_smoke.cpp"]
+    },
+    {
+      "name": "widehit_multi_target",
+      "owner_pr": "PR-4",
+      "coverage": ["skill_weapon_sword_common_smoke.cpp"]
+    },
+    {
+      "name": "firehit",
+      "owner_pr": "PR-4",
+      "coverage": ["skill_weapon_sword_common_smoke.cpp"]
+    },
+    {
+      "name": "magic_hit",
+      "owner_pr": "PR-6",
+      "coverage": ["skill_active_spell_phase3_smoke.cpp", "skill_event_spell_phase4_smoke.cpp"]
+    },
+    {
+      "name": "poison",
+      "owner_pr": "PR-6",
+      "coverage": ["skill_status_poison_buff_hide_shield_smoke.cpp", "player_death_revive_smoke.cpp"]
+    },
+    {
+      "name": "firewall_tick",
+      "owner_pr": "PR-6",
+      "coverage": ["legacy_event_manager_smoke.cpp", "skill_event_spell_phase4_smoke.cpp"]
+    },
+    {
+      "name": "monster_attack_player",
+      "owner_pr": "PR-6",
+      "coverage": ["monster_attack_legacy_smoke.cpp", "monster_legacy_tick_ai_smoke.cpp"]
+    },
+    {
+      "name": "player_death_revival_ring",
+      "owner_pr": "PR-6",
+      "coverage": ["equipment_special_combat_smoke.cpp", "player_death_revive_smoke.cpp"]
+    },
+    {
+      "name": "monster_death_drop",
+      "owner_pr": "PR-6",
+      "coverage": ["monster_death_drop_smoke.cpp"]
+    }
+  ]
+}

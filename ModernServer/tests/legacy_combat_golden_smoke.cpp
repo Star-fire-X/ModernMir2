@@ -79,10 +79,32 @@ bool check_smoke_classification(const std::string& classification) {
                           "\"test\": \"monster_special_race_smoke.cpp\"",
                           "\"test\": \"monster_attack_legacy_smoke.cpp\"",
                           "\"test\": \"legacy_action_cadence_smoke.cpp\"",
-                          "\"contains_known_parity_gap\": true",
                           "\"contains_known_parity_gap\": false",
                           "Player HitXY cadence now uses Delphi window semantics",
                           "monster ATTACK_SPD >= 200 is not a combat bug",
+                          "monster active search using imported search_rate_ms",
+                      });
+}
+
+bool check_canonical_snapshots(const std::string& snapshots) {
+  return contains_all(snapshots,
+                      {
+                          "\"artifact\": \"legacy_combat.canonical_combat_snapshots\"",
+                          "\"status\": \"pr6_canonicalized\"",
+                          "\"name\": \"basic_hit\"",
+                          "\"name\": \"basic_miss\"",
+                          "\"name\": \"basic_death\"",
+                          "\"name\": \"longhit_second_tile\"",
+                          "\"name\": \"widehit_multi_target\"",
+                          "\"name\": \"firehit\"",
+                          "\"name\": \"magic_hit\"",
+                          "\"name\": \"poison\"",
+                          "\"name\": \"firewall_tick\"",
+                          "\"name\": \"monster_attack_player\"",
+                          "\"name\": \"player_death_revival_ring\"",
+                          "\"name\": \"monster_death_drop\"",
+                          "skill_status_poison_buff_hide_shield_smoke.cpp",
+                          "monster_legacy_tick_ai_smoke.cpp",
                       });
 }
 
@@ -97,6 +119,7 @@ bool check_audit_doc(const std::string& audit) {
                           "monster `ATTACK_SPD >= 200` import clamp",
                           "not a combat compatibility bug",
                           "ModernServer/tests/golden/legacy_combat/combat_sequence_cases.json",
+                          "ModernServer/tests/golden/legacy_combat/canonical_combat_snapshots.json",
                           "PR-2",
                           "PR-3",
                           "PR-4",
@@ -138,6 +161,10 @@ int main() {
   }
   if (!check_smoke_classification(read_text(fixture_root / "combat_smoke_classification.json"))) {
     return fail("smoke classification");
+  }
+  if (!check_canonical_snapshots(read_text(fixture_root /
+                                           "canonical_combat_snapshots.json"))) {
+    return fail("canonical snapshots");
   }
   if (!check_audit_doc(read_text(repo_root / "docs" /
                                  "delphi_cpp_combat_compatibility_audit.md"))) {

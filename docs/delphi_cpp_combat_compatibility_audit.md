@@ -33,7 +33,9 @@ The stack consumes these existing PR-1 audit traces:
 | death/revival/death packet order | `docs/pr1_delphi_audit/golden_traces/death_player.json` |
 
 The CTest-facing fixture entry point is
-`ModernServer/tests/golden/legacy_combat/combat_sequence_cases.json`.
+`ModernServer/tests/golden/legacy_combat/combat_sequence_cases.json`. PR-6 also fixes the
+canonical end-state list in
+`ModernServer/tests/golden/legacy_combat/canonical_combat_snapshots.json`.
 
 ## Smoke Classification
 

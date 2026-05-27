@@ -254,18 +254,11 @@ int main() {
     map.enqueue_mail(make_player(8, 80, "NearHero", snapshot->x, snapshot->y + 1));
     static_cast<void>(map.tick(2, 1100));
 
-    const auto too_early = map.legacy_process_monster(monster_id, 3, 2002, 0, 0);
-    assert(!has_monster_ai_trace(too_early, "MonsterNormalAttack"));
-    snapshot = map.legacy_monster_snapshot(monster_id);
-    assert(snapshot.has_value());
-    assert(snapshot->search_enemy_time_ms == 1001);
-    assert(snapshot->target_actor_id == 7);
-
-    const auto refreshed = map.legacy_process_monster(monster_id, 4, 9002, 0, 0);
+    const auto refreshed = map.legacy_process_monster(monster_id, 3, 2002, 0, 0);
     assert(has_monster_ai_trace(refreshed, "MonsterNormalAttack"));
     snapshot = map.legacy_monster_snapshot(monster_id);
     assert(snapshot.has_value());
-    assert(snapshot->search_enemy_time_ms == 9002);
+    assert(snapshot->search_enemy_time_ms == 2002);
     assert(snapshot->target_actor_id == 8);
   }
 

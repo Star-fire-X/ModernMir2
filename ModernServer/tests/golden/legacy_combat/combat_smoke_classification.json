@@ -39,8 +39,8 @@
       "test": "legacy_combat_resolution_smoke.cpp",
       "role": "delphi_parity_smoke",
       "owner_pr": "PR-3/PR-4/PR-6",
-      "contains_known_parity_gap": true,
-      "known_gap": "Current trace order covers stable behavior but does not yet prove death/revival packet timing."
+      "contains_known_parity_gap": false,
+      "status": "Formula and target-chain coverage remains paired with PR-6 death/drop timing smoke."
     },
     {
       "test": "legacy_combat_formula_smoke.cpp",
@@ -53,8 +53,8 @@
       "test": "attack_protocol_golden_smoke.cpp",
       "role": "delphi_parity_smoke",
       "owner_pr": "PR-4/PR-6",
-      "contains_known_parity_gap": true,
-      "known_gap": "PR-6 still owns lethal-hit death/revival packet ordering after PR-4's 200ms/500ms struck-delay coverage."
+      "contains_known_parity_gap": false,
+      "status": "PR-4 covers delayed struck timing; PR-6 pairs lethal packet ordering with dedicated death/drop smoke."
     },
     {
       "test": "pk_attack_mode_rules_smoke.cpp",
@@ -67,8 +67,50 @@
       "test": "player_death_revive_smoke.cpp",
       "role": "delphi_parity_smoke",
       "owner_pr": "PR-6",
-      "contains_known_parity_gap": true,
-      "known_gap": "PR-6 owns revival decision and SM_STRUCK/SM_DEATH/SM_NOWDEATH ordering."
+      "contains_known_parity_gap": false,
+      "status": "Covers manual revival, poison lethal tick health-before-death ordering, SM_DEATH, and SM_NOWDEATH."
+    },
+    {
+      "test": "player_death_drop_smoke.cpp",
+      "role": "delphi_parity_smoke",
+      "owner_pr": "PR-6",
+      "contains_known_parity_gap": false,
+      "status": "Covers player death settlement and item/equipment/drop packets before SM_DEATH/SM_NOWDEATH."
+    },
+    {
+      "test": "monster_death_drop_smoke.cpp",
+      "role": "delphi_parity_smoke",
+      "owner_pr": "PR-6",
+      "contains_known_parity_gap": false,
+      "status": "Covers monster exp, mapquest, drop, then SM_DEATH ordering."
+    },
+    {
+      "test": "equipment_special_combat_smoke.cpp",
+      "role": "delphi_parity_smoke",
+      "owner_pr": "PR-6",
+      "contains_known_parity_gap": false,
+      "status": "Covers revival-ring lethal-hit decision before death packets."
+    },
+    {
+      "test": "skill_status_poison_buff_hide_shield_smoke.cpp",
+      "role": "delphi_parity_smoke",
+      "owner_pr": "PR-6",
+      "contains_known_parity_gap": false,
+      "status": "Covers poison tick cadence and STATE_BUBBLEDEFENCEUP decrement/expiry semantics."
+    },
+    {
+      "test": "skill_event_spell_phase4_smoke.cpp",
+      "role": "delphi_parity_smoke",
+      "owner_pr": "PR-6",
+      "contains_known_parity_gap": false,
+      "status": "Covers fire-wall event damage cadence and fire-burn death path."
+    },
+    {
+      "test": "monster_legacy_tick_ai_smoke.cpp",
+      "role": "delphi_parity_smoke",
+      "owner_pr": "PR-6",
+      "contains_known_parity_gap": false,
+      "status": "Covers monster active search using imported search_rate_ms rather than fixed 1000/8000ms gates."
     }
   ]
 }

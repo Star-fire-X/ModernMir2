@@ -1028,10 +1028,7 @@ void MapActor::legacy_active_search(Monster& monster, RuntimeDispatch& dispatch,
     return;
   }
 
-  const auto elapsed =
-      static_cast<std::int64_t>(now_ms) -
-      static_cast<std::int64_t>(monster.search_enemy_time_ms());
-  if (elapsed <= 8000 && (monster.target_actor_id() != 0 || elapsed <= 1000)) {
+  if (now_ms <= monster.search_enemy_time_ms() + monster.legacy_search_rate_ms()) {
     return;
   }
 
