@@ -4,7 +4,17 @@
 
 PR1 已在 `docs/pr1_delphi_audit/` 内完成收口: P0 攻击/施法时序和 P1 公式/技能规则不再保留开放问题。后续 PR 需要实现或测试这些已冻结行为, 不能重新解释 Delphi 语义。
 
-本 PR 只产出文档和 golden trace JSON, 不修改 C++ 生产代码、测试目标或协议常量。
+本目录是原始 Delphi 语义证据。重排后的 combat stack PR-1 额外提供
+`docs/delphi_cpp_combat_compatibility_audit.md` 和
+`ModernServer/tests/golden/legacy_combat/` 作为 CTest 消费入口, 但仍不修改 C++
+生产代码或协议常量。
+
+## 2026 Stack Refresh
+
+重排后的基线固定为 `origin/main@d7dcc0d7af37a91b2f1abaa9e1f741abc28d6f61`。
+`safe_zone / area_state / home_leash / visibility order / monster ATTACK_SPD >= 200`
+均按主线已吸收或部分吸收处理。尤其 monster `ATTACK_SPD >= 200` 是当前导入与
+运行时速度下限基线, 不再列为本轮 combat stack 的兼容 bug。
 
 ## 已解决项
 
