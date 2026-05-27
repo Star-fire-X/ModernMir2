@@ -79,6 +79,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         auto* player = find_player(mail.actor_id);
         if (player != nullptr) {
           player->set_legacy_name_color(mail.legacy_name_color);
+          player->set_legacy_group_id(mail.legacy_group_id);
           player->restore_legacy_buffs_from_transfer(mail.legacy_buffs, current_tick);
           player->refresh_derived_state(item_configs_);
           player->set_in_safe_zone(is_safe_zone(config_, player->x(), player->y()));
@@ -122,6 +123,16 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         delayed_mail_wheel_.schedule(current_tick, 1, std::move(retry_mail));
       } else if (player == nullptr && !mail.character.account_id.empty()) {
         queue_save_character(dispatch, mail.character);
+      }
+      break;
+    }
+    case ActorMailKind::group_membership_sync: {
+      if (auto* player = find_player(mail.actor_id); player != nullptr) {
+        player->set_legacy_group_id(mail.legacy_group_id);
+      } else if (player == nullptr && mail.retry_count < kCrossMapSyncRetryLimit) {
+        auto retry_mail = mail;
+        ++retry_mail.retry_count;
+        delayed_mail_wheel_.schedule(current_tick, 1, std::move(retry_mail));
       }
       break;
     }
@@ -2671,6 +2682,25 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                        make_system_notice_packet(attacker->session_id(), block_reason));
           break;
         }
+      } else if (auto* monster_target = as_monster(target);
+                 monster_target != nullptr && monster_target->is_slave() &&
+                 monster_target->master_actor_id() != 0) {
+        if (auto master_it = objects_.find(monster_target->master_actor_id());
+            master_it != objects_.end()) {
+          if (auto* master = as_player(master_it->second.get()); master != nullptr) {
+            const auto block_reason =
+                resolve_pk_block_reason(config_, *attacker, *master, now_ms);
+            if (!block_reason.empty()) {
+              add_legacy_trace(dispatch, "LegacyCombat", "pk_block", effective_mail,
+                               current_tick, now_ms, false, 0, 0, block_reason);
+              queue_packet(dispatch, attacker->session_id(),
+                           make_ack_packet(attacker->session_id(), false));
+              queue_packet(dispatch, attacker->session_id(),
+                           make_system_notice_packet(attacker->session_id(), block_reason));
+              break;
+            }
+          }
+        }
       }
 
       if (prepared_sword_magic_id != 0) {
@@ -2843,6 +2873,21 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             add_legacy_trace(dispatch, "LegacyCombat", "pk_block", effective_mail,
                              current_tick, now_ms, false, 0, 0, block_reason);
             return;
+          }
+        } else if (auto* monster_target = as_monster(&direct_target);
+                   monster_target != nullptr && monster_target->is_slave() &&
+                   monster_target->master_actor_id() != 0) {
+          if (auto master_it = objects_.find(monster_target->master_actor_id());
+              master_it != objects_.end()) {
+            if (auto* master = as_player(master_it->second.get()); master != nullptr) {
+              const auto block_reason =
+                  resolve_pk_block_reason(config_, *attacker, *master, now_ms);
+              if (!block_reason.empty()) {
+                add_legacy_trace(dispatch, "LegacyCombat", "pk_block", effective_mail,
+                                 current_tick, now_ms, false, 0, 0, block_reason);
+                return;
+              }
+            }
           }
         }
         const auto direct_hit_roll =

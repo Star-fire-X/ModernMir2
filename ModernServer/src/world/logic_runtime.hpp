@@ -190,11 +190,16 @@ class LogicRuntime {
       std::string_view account_id, std::string_view character_name) const;
   [[nodiscard]] std::optional<std::uint64_t> find_actor_session_by_name(
       std::string_view character_name) const;
-  void create_legacy_group(std::uint64_t owner_session_id, std::string_view target_name);
-  void add_legacy_group_member(std::uint64_t owner_session_id, std::string_view target_name);
+  void sync_legacy_group_member(ActorLocator& locator, std::uint64_t group_id,
+                                RuntimeDispatch& dispatch);
+  void create_legacy_group(std::uint64_t owner_session_id, std::string_view target_name,
+                           RuntimeDispatch& dispatch);
+  void add_legacy_group_member(std::uint64_t owner_session_id, std::string_view target_name,
+                               RuntimeDispatch& dispatch);
   void remove_legacy_group_member_by_name(std::uint64_t owner_session_id,
-                                          std::string_view target_name);
-  void remove_legacy_group_member(std::uint64_t session_id);
+                                          std::string_view target_name,
+                                          RuntimeDispatch& dispatch);
+  void remove_legacy_group_member(std::uint64_t session_id, RuntimeDispatch& dispatch);
   [[nodiscard]] ActorMail make_player_mail(const LogicCommand& command,
                                            const ActorLocator& locator) const;
   [[nodiscard]] bool handle_legacy_chat_command(const LogicCommand& command,

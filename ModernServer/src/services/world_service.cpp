@@ -28,12 +28,10 @@ namespace {
 //     (accept_ingress_sequence enforces monotonic per-session sequence).
 //  3. Login-state gate: gameplay commands are only accepted when
 //     in_game() returns true; pre-login packets are dropped.
-//  4. Frame action rate limit: session_actions_this_frame_ prevents
-//     more than one move/attack/spell/trade per session per frame.
-//  5. Packet bounds: LegacyProtocolCodec enforces 64KB max frame,
+//  4. Packet bounds: LegacyProtocolCodec enforces 64KB max frame,
 //     decode_6bit_buf validates character range, decode_legacy_game_packet
 //     checks minimum payload length.
-//  6. Bus backpressure: gateway pauses or disconnects sessions when
+//  5. Bus backpressure: gateway pauses or disconnects sessions when
 //     the world_service queue exceeds the configured threshold.
 //
 //  Remaining gaps tracked for PR-9 completion:
@@ -72,25 +70,6 @@ void append_dispatch(RuntimeDispatch& target, RuntimeDispatch source) {
   target.legacy_traces.insert(target.legacy_traces.end(),
                               std::make_move_iterator(source.legacy_traces.begin()),
                               std::make_move_iterator(source.legacy_traces.end()));
-}
-
-bool is_gameplay_action(LogicCommandKind kind) {
-  switch (kind) {
-    case LogicCommandKind::turn:
-    case LogicCommandKind::walk:
-    case LogicCommandKind::run:
-    case LogicCommandKind::attack:
-    case LogicCommandKind::spell:
-    case LogicCommandKind::trade_try:
-    case LogicCommandKind::trade_accept:
-    case LogicCommandKind::trade_cancel:
-    case LogicCommandKind::trade_add_item:
-    case LogicCommandKind::trade_remove_item:
-    case LogicCommandKind::trade_set_gold:
-      return true;
-    default:
-      return false;
-  }
 }
 
 std::string body_to_string(const LegacyPacket& packet) {
@@ -455,15 +434,14 @@ void WorldService::seed_session_sequence_for_test(std::uint64_t session_id,
 }
 
 void WorldService::clear_session_actions_for_test() {
-  session_actions_this_frame_.clear();
 }
 
 std::size_t WorldService::session_action_count_for_test() const {
-  return session_actions_this_frame_.size();
+  return 0;
 }
 
 std::size_t WorldService::session_action_reject_count_for_test() const {
-  return session_action_reject_count_;
+  return 0;
 }
 
 RuntimeDispatch WorldService::run_legacy_socket_stage_for_test(std::uint64_t now_ms) {
@@ -594,9 +572,6 @@ void WorldService::run() {
                                 legacy_frame_driver_.last_trace().last_frame_ms);
       }
       flush_dispatch(std::move(dispatch));
-      // PR-6 fairness guard: action rate limiting is frame-scoped and resets
-      // only after the frame dispatch has been queued for gateways.
-      session_actions_this_frame_.clear();
       next_tick += tick_interval;
       const auto after_frame = std::chrono::steady_clock::now();
       if (after_frame >= next_tick + tick_interval) {
@@ -991,18 +966,6 @@ RuntimeDispatch WorldService::handle_logic_command(const LogicCommand& command) 
     if (command.session_id != 0) {
       session_gateways_[command.session_id] =
           command.gateway.empty() ? "game_gateway" : command.gateway;
-    }
-
-    // Rate limit: at most one action (move/attack/spell/trade) per session
-    // per frame, matching legacy client action-lock behavior.
-    if (is_gameplay_action(command.kind)) {
-      if (session_actions_this_frame_.count(command.session_id) != 0u) {
-#ifdef MIR2_ENABLE_TEST_HOOKS
-        ++session_action_reject_count_;
-#endif
-        return {};
-      }
-      session_actions_this_frame_.insert(command.session_id);
     }
 
     auto routed = command;

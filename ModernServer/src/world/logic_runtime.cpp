@@ -790,13 +790,25 @@ std::optional<std::uint64_t> LogicRuntime::find_actor_session_by_name(
   return std::nullopt;
 }
 
-void LogicRuntime::remove_legacy_group_member(std::uint64_t session_id) {
+void LogicRuntime::sync_legacy_group_member(ActorLocator& locator, std::uint64_t group_id,
+                                            RuntimeDispatch& dispatch) {
+  locator.legacy_group_id = group_id;
+  ActorMail mail;
+  mail.kind = ActorMailKind::group_membership_sync;
+  mail.map_id = locator.map_id;
+  mail.actor_id = locator.actor_id;
+  mail.legacy_group_id = group_id;
+  append_dispatch(dispatch, route_actor_mail(mail));
+}
+
+void LogicRuntime::remove_legacy_group_member(std::uint64_t session_id,
+                                              RuntimeDispatch& dispatch) {
   auto locator_it = session_index_.find(session_id);
   if (locator_it == session_index_.end()) {
     return;
   }
   const auto group_id = locator_it->second.legacy_group_id;
-  locator_it->second.legacy_group_id = 0;
+  sync_legacy_group_member(locator_it->second, 0, dispatch);
   if (group_id == 0) {
     return;
   }
@@ -813,14 +825,15 @@ void LogicRuntime::remove_legacy_group_member(std::uint64_t session_id) {
   for (const auto member_session_id : remaining_members) {
     if (auto member_it = session_index_.find(member_session_id);
         member_it != session_index_.end()) {
-      member_it->second.legacy_group_id = 0;
+      sync_legacy_group_member(member_it->second, 0, dispatch);
     }
   }
   legacy_groups_.erase(group_it);
 }
 
 void LogicRuntime::create_legacy_group(std::uint64_t owner_session_id,
-                                       std::string_view target_name) {
+                                       std::string_view target_name,
+                                       RuntimeDispatch& dispatch) {
   auto owner_it = session_index_.find(owner_session_id);
   const auto target_session_id = find_actor_session_by_name(target_name);
   if (owner_it == session_index_.end() || !target_session_id.has_value() ||
@@ -835,12 +848,13 @@ void LogicRuntime::create_legacy_group(std::uint64_t owner_session_id,
 
   const auto group_id = next_legacy_group_id_++;
   legacy_groups_[group_id].members = {owner_session_id, *target_session_id};
-  owner_it->second.legacy_group_id = group_id;
-  target_it->second.legacy_group_id = group_id;
+  sync_legacy_group_member(owner_it->second, group_id, dispatch);
+  sync_legacy_group_member(target_it->second, group_id, dispatch);
 }
 
 void LogicRuntime::add_legacy_group_member(std::uint64_t owner_session_id,
-                                           std::string_view target_name) {
+                                           std::string_view target_name,
+                                           RuntimeDispatch& dispatch) {
   auto owner_it = session_index_.find(owner_session_id);
   const auto target_session_id = find_actor_session_by_name(target_name);
   if (owner_it == session_index_.end() || owner_it->second.legacy_group_id == 0 ||
@@ -854,11 +868,12 @@ void LogicRuntime::add_legacy_group_member(std::uint64_t owner_session_id,
     return;
   }
   group_it->second.members.push_back(*target_session_id);
-  target_it->second.legacy_group_id = owner_it->second.legacy_group_id;
+  sync_legacy_group_member(target_it->second, owner_it->second.legacy_group_id, dispatch);
 }
 
 void LogicRuntime::remove_legacy_group_member_by_name(std::uint64_t owner_session_id,
-                                                      std::string_view target_name) {
+                                                      std::string_view target_name,
+                                                      RuntimeDispatch& dispatch) {
   auto owner_it = session_index_.find(owner_session_id);
   const auto target_session_id = find_actor_session_by_name(target_name);
   if (owner_it == session_index_.end() || owner_it->second.legacy_group_id == 0 ||
@@ -870,7 +885,7 @@ void LogicRuntime::remove_legacy_group_member_by_name(std::uint64_t owner_sessio
       target_it->second.legacy_group_id != owner_it->second.legacy_group_id) {
     return;
   }
-  remove_legacy_group_member(*target_session_id);
+  remove_legacy_group_member(*target_session_id, dispatch);
 }
 
 ActorMail LogicRuntime::make_player_mail(const LogicCommand& command,
@@ -2005,13 +2020,13 @@ RuntimeDispatch LogicRuntime::route_logic_command(const LogicCommand& command) {
       break;
     }
     case LogicCommandKind::group_create:
-      create_legacy_group(command.session_id, command.text);
+      create_legacy_group(command.session_id, command.text, dispatch);
       break;
     case LogicCommandKind::group_add_member:
-      add_legacy_group_member(command.session_id, command.text);
+      add_legacy_group_member(command.session_id, command.text, dispatch);
       break;
     case LogicCommandKind::group_remove_member:
-      remove_legacy_group_member_by_name(command.session_id, command.text);
+      remove_legacy_group_member_by_name(command.session_id, command.text, dispatch);
       break;
     case LogicCommandKind::turn:
     case LogicCommandKind::walk:
@@ -2194,7 +2209,7 @@ RuntimeDispatch LogicRuntime::mark_session_disconnected(std::uint64_t session_id
   if (locator_it == session_index_.end()) {
     return dispatch;
   }
-  remove_legacy_group_member(session_id);
+  remove_legacy_group_member(session_id, dispatch);
   append_dispatch(dispatch, relocate_no_reconnect_player(session_id, last_now_ms_));
   const auto relocated_locator_it = session_index_.find(session_id);
   if (relocated_locator_it == session_index_.end()) {
@@ -2770,7 +2785,7 @@ void LogicRuntime::process_user_humans(std::uint64_t now_ms,
     const auto locator = locator_it->second;
     auto map_it = maps_.find(locator.map_id);
     if (map_it == maps_.end()) {
-      remove_legacy_group_member(session_id);
+      remove_legacy_group_member(session_id, dispatch);
       session_index_.erase(locator_it);
       run_user_order_.erase(run_user_order_.begin() + static_cast<std::ptrdiff_t>(index));
       ++processed;
@@ -2788,7 +2803,7 @@ void LogicRuntime::process_user_humans(std::uint64_t now_ms,
       close_records_[util::lower_copy(locator.character_name)] =
           CloseRecord{session_id, locator.account_id, locator.character_name, now_ms,
                       "closed"};
-      remove_legacy_group_member(session_id);
+      remove_legacy_group_member(session_id, dispatch);
       session_index_.erase(session_id);
       run_user_order_.erase(run_user_order_.begin() + static_cast<std::ptrdiff_t>(index));
     } else {

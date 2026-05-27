@@ -5074,7 +5074,14 @@ std::string resolve_pk_block_reason(const MapConfig& map_config, const Player& a
     return "Map change protection forbids PK.";
   }
   const auto mode = attacker.attack_mode();
-  if (mode == kHamAll || mode == kHamGroup) {
+  if (mode == kHamAll) {
+    return {};
+  }
+  if (mode == kHamGroup) {
+    if (attacker.legacy_group_id() != 0 &&
+        attacker.legacy_group_id() == target.legacy_group_id()) {
+      return "Group mode protects group members.";
+    }
     return {};
   }
   if (mode == kHamPeace) {
@@ -5086,7 +5093,7 @@ std::string resolve_pk_block_reason(const MapConfig& map_config, const Player& a
   }
   if (mode == kHamGuild) {
     if (!attacker.character().guild_name.empty() &&
-        attacker.character().guild_name == target.character().guild_name) {
+        equals_ignore_case(attacker.character().guild_name, target.character().guild_name)) {
       return "Guild mode protects guild members.";
     }
   }

@@ -391,7 +391,7 @@ mir2::LogicCommand action_command(mir2::LogicCommandKind kind, std::uint64_t ses
   return command;
 }
 
-bool check_frame_action_gate() {
+bool check_frame_action_fifo() {
   mir2::HostConfig config;
   config.maps.push_back(mir2::MapConfig{"0", "ActionGateMap", {}, 0, 0, 10, 10});
 
@@ -408,9 +408,9 @@ bool check_frame_action_gate() {
 
   const auto first_dispatch = world.process_ingress_batch_for_test(same_frame);
   if (!same_frame.empty() || !first_dispatch.audit_events.empty() ||
-      world.session_action_count_for_test() != 2 ||
-      world.session_action_reject_count_for_test() != 3) {
-    std::cerr << "frame_action_gate_same_frame\n";
+      world.session_action_count_for_test() != 0 ||
+      world.session_action_reject_count_for_test() != 0) {
+    std::cerr << "frame_action_fifo_same_frame\n";
     return false;
   }
 
@@ -421,9 +421,9 @@ bool check_frame_action_gate() {
 
   const auto second_dispatch = world.process_ingress_batch_for_test(next_frame);
   if (!next_frame.empty() || !second_dispatch.audit_events.empty() ||
-      world.session_action_count_for_test() != 1 ||
-      world.session_action_reject_count_for_test() != 3) {
-    std::cerr << "frame_action_gate_next_frame\n";
+      world.session_action_count_for_test() != 0 ||
+      world.session_action_reject_count_for_test() != 0) {
+    std::cerr << "frame_action_fifo_next_frame\n";
     return false;
   }
   return true;
@@ -450,7 +450,7 @@ int main() {
   if (!check_session_fifo_ordering()) {
     return 1;
   }
-  if (!check_frame_action_gate()) {
+  if (!check_frame_action_fifo()) {
     return 1;
   }
   return 0;

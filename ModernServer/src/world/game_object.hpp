@@ -408,6 +408,7 @@ class Player : public GameObject {
   void mark_legacy_revival(std::uint64_t now_ms);
   [[nodiscard]] std::int32_t apply_legacy_suck_health(std::int32_t damage);
   [[nodiscard]] std::uint8_t attack_mode() const { return character_.attack_mode; }
+  [[nodiscard]] std::uint64_t legacy_group_id() const { return legacy_group_id_; }
   [[nodiscard]] std::int32_t pk_point() const { return character_.pk_point; }
   [[nodiscard]] std::int32_t pk_level() const;
   [[nodiscard]] std::int32_t body_luck_level() const;
@@ -511,6 +512,7 @@ class Player : public GameObject {
   void set_job(std::int32_t value);
   void toggle_sex();
   void set_legacy_name_color(std::int32_t value);
+  void set_legacy_group_id(std::uint64_t value) { legacy_group_id_ = value; }
   void mark_birth_items_granted();
   void set_guild_membership(std::string guild_name, std::string guild_title);
   void clear_guild_membership();
@@ -652,6 +654,7 @@ class Player : public GameObject {
   LegacyNpcItemMode legacy_npc_item_mode_{LegacyNpcItemMode::none};
   std::uint64_t legacy_npc_item_actor_id_{0};
   std::uint8_t legacy_name_color_{255};
+  std::uint64_t legacy_group_id_{0};
   LegacyBuffContainer legacy_buffs_{};
   std::int32_t legacy_prepared_sword_magic_id_{0};
   std::uint64_t legacy_prepared_sword_expire_tick_{0};

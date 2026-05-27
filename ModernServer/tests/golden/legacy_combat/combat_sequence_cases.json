@@ -50,7 +50,7 @@
       "owner_pr": "PR-5",
       "source_trace": "protocol_sequence.md",
       "delphi_rule": "IsProperTarget and CheckAttackRule2 decide HAM_ALL/HAM_PEACE/HAM_GROUP/HAM_GUILD/HAM_PKATTACK plus safety and ownership guards.",
-      "current_cpp_status": "partly_covered_with_parity_gaps",
+      "current_cpp_status": "implemented_pr5",
       "required_coverage": ["HAM_ALL", "HAM_PEACE", "HAM_GROUP", "HAM_GUILD", "HAM_PKATTACK", "safe zone", "newbie protection", "3s map-change protection", "pet inherits owner PK mode"]
     },
     {

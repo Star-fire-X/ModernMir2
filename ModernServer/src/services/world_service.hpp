@@ -9,7 +9,6 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
-#include <unordered_set>
 
 #include "core/module.hpp"
 #include "protocol/canonical_login_state.hpp"
@@ -92,10 +91,6 @@ class WorldService : public Module {
   std::unordered_map<std::string, std::uint64_t> character_save_versions_{};
   std::unordered_map<std::uint64_t, std::string> session_gateways_{};
   std::unordered_map<std::uint64_t, std::uint64_t> session_sequence_watermarks_{};
-  std::unordered_set<std::uint64_t> session_actions_this_frame_{};
-#ifdef MIR2_ENABLE_TEST_HOOKS
-  std::size_t session_action_reject_count_{0};
-#endif
   std::uint64_t next_ingress_seq_{0};
   std::uint64_t current_frame_now_ms_{0};
   mutable std::mutex gate_events_mutex_{};

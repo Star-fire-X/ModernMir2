@@ -1182,6 +1182,24 @@ void MapActor::legacy_monster_temp_attack(Monster& monster, Player& target,
                                           RuntimeDispatch& dispatch,
                                           std::uint64_t current_tick,
                                           std::uint64_t now_ms) {
+  ActorMail trace_mail;
+  trace_mail.kind = ActorMailKind::attack;
+  trace_mail.map_id = config_.id;
+  trace_mail.actor_id = monster.id();
+  trace_mail.target_actor_id = target.id();
+  if (monster.is_slave() && monster.master_actor_id() != 0) {
+    if (auto master_it = objects_.find(monster.master_actor_id());
+        master_it != objects_.end()) {
+      if (auto* master = as_player(master_it->second.get()); master != nullptr) {
+        const auto block_reason = resolve_pk_block_reason(config_, *master, target, now_ms);
+        if (!block_reason.empty()) {
+          add_legacy_trace(dispatch, "MonsterCombat", "pk_block", trace_mail,
+                           current_tick, now_ms, false, 0, 0, block_reason);
+          return;
+        }
+      }
+    }
+  }
   for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
     if (!is_legacy_visible_to(watcher, monster)) {
       return;
@@ -1189,11 +1207,6 @@ void MapActor::legacy_monster_temp_attack(Monster& monster, Player& target,
     queue_packet(dispatch, watcher.session_id(),
                  make_hit_packet(watcher.session_id(), monster, kCmHit));
   });
-  ActorMail trace_mail;
-  trace_mail.kind = ActorMailKind::attack;
-  trace_mail.map_id = config_.id;
-  trace_mail.actor_id = monster.id();
-  trace_mail.target_actor_id = target.id();
   add_legacy_trace(dispatch, "MonsterCombat", "attack_broadcast", trace_mail,
                    current_tick, now_ms, true, 0, 0, "SM_HIT");
 
