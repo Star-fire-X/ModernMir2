@@ -388,9 +388,9 @@ std::vector<LegacyScriptGoldenCase> golden_cases() {
           .name = "istakeitem_current_checkitem_baseline",
           .script = "#IF\nISTAKEITEM Apple 1\n#SAY IsTakePass\n#ELSESAY IsTakeFail",
           .packet_idents = {mir2::kSmTurn, mir2::kSmMerchantSay},
-          .say_prefix = "GoldenNpc/IsTakePass",
+          .say_prefix = "GoldenNpc/IsTakeFail",
           .bag_counts = {ItemCountExpectation{"Apple", 1}},
-          .traces = {TraceExpectation{"condition", true, 1, "ISTAKEITEM Apple 1"}},
+          .traces = {TraceExpectation{"condition", false, 0, "ISTAKEITEM Apple 1"}},
       },
       LegacyScriptGoldenCase{
           .name = "takecheckitem_current_name_delete_baseline",

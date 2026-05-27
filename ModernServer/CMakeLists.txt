@@ -756,6 +756,12 @@ if(BUILD_TESTING)
   add_test(NAME mir2_legacy_script_deferred_actions_smoke
     COMMAND mir2_legacy_script_deferred_actions_smoke)
 
+  add_executable(mir2_legacy_script_context_smoke
+    tests/legacy_script_context_smoke.cpp)
+  target_link_libraries(mir2_legacy_script_context_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_script_context_smoke
+    COMMAND mir2_legacy_script_context_smoke)
+
   add_executable(mir2_legacy_script_command_decode_full_smoke
     tests/legacy_script_command_decode_full_smoke.cpp)
   target_link_libraries(mir2_legacy_script_command_decode_full_smoke PRIVATE mir2_hostlib)
@@ -1184,6 +1190,7 @@ if(BUILD_TESTING)
       mir2_legacy_script_golden_baseline_smoke
       mir2_legacy_script_live_p0_smoke
       mir2_legacy_script_deferred_actions_smoke
+      mir2_legacy_script_context_smoke
       mir2_legacy_mapquest_import_trigger_smoke
       mir2_legacy_gbk_import_smoke
       mir2_special_consumables_legacy_smoke
