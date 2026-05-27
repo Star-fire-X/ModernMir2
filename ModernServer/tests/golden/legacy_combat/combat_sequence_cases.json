@@ -10,7 +10,7 @@
       "owner_pr": "PR-2",
       "source_trace": "attack_basic.json",
       "delphi_rule": "GetTickCount - LatestHitTime >= 900 - HitSpeed*60; early attempts increment HitTimeOverCount/HitTimeOverSum and remain allowed while <4 and <6.",
-      "current_cpp_status": "parity_gap",
+      "current_cpp_status": "implemented_pr2",
       "required_coverage": ["HitSpeed 0", "HitSpeed 5", "HitSpeed 10", "HitSpeed 12", "HitSpeed 14", "HitSpeed 15", "HitSpeed 16", "HitSpeed -1", "SpeedHackTimerOverCount > 8"]
     },
     {
