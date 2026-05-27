@@ -40,7 +40,7 @@
       "role": "delphi_parity_smoke",
       "owner_pr": "PR-3/PR-4/PR-6",
       "contains_known_parity_gap": true,
-      "known_gap": "Current trace order covers stable behavior but does not yet prove dual-target long-hit or death/revival packet timing."
+      "known_gap": "Current trace order covers stable behavior but does not yet prove death/revival packet timing."
     },
     {
       "test": "legacy_combat_formula_smoke.cpp",
@@ -54,7 +54,7 @@
       "role": "delphi_parity_smoke",
       "owner_pr": "PR-4/PR-6",
       "contains_known_parity_gap": true,
-      "known_gap": "Protocol snapshots must be extended to distinguish immediate action packets from 200ms/500ms delayed struck packets."
+      "known_gap": "PR-6 still owns lethal-hit death/revival packet ordering after PR-4's 200ms/500ms struck-delay coverage."
     },
     {
       "test": "pk_attack_mode_rules_smoke.cpp",

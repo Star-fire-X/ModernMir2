@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "protocol/legacy_game_codec.hpp"
@@ -218,6 +219,18 @@ std::int32_t count_packet_ident(const mir2::RuntimeDispatch& dispatch, std::uint
       }));
 }
 
+std::vector<std::pair<std::int32_t, std::int32_t>> packet_recogs_and_delays(
+    const mir2::RuntimeDispatch& dispatch, std::uint16_t ident) {
+  std::vector<std::pair<std::int32_t, std::int32_t>> values;
+  for (const auto& event : dispatch.session_events) {
+    const auto decoded = mir2::decode_legacy_game_packet(event.packet);
+    if (decoded.has_value() && decoded->message.ident == ident) {
+      values.push_back({decoded->message.recog, event.delay_ms});
+    }
+  }
+  return values;
+}
+
 std::int32_t count_trace(const mir2::RuntimeDispatch& dispatch, const std::string& action) {
   return static_cast<std::int32_t>(std::count_if(
       dispatch.legacy_traces.begin(), dispatch.legacy_traces.end(),
@@ -382,8 +395,13 @@ int main() {
     append(dispatch, runtime.route_logic_command(attack(1217, 0, 0, mir2::kCmLongHit)));
     append(dispatch, runtime.tick(3000));
     assert(has_packet_ident(dispatch, mir2::legacy::kSmLongHit));
-    assert(count_trace(dispatch, "struck") == 1);
+    assert(count_trace(dispatch, "struck") == 2);
+    assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 200) == 1);
     assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 500) == 1);
+    const auto struck = packet_recogs_and_delays(dispatch, mir2::kSmStruck);
+    assert(struck.size() == 2);
+    assert(struck[0] == std::make_pair(2, 500));
+    assert(struck[1] == std::make_pair(1, 200));
   }
 
   {
@@ -430,6 +448,11 @@ int main() {
     assert(count_trace(dispatch, "struck") == 3);
     assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 200) == 1);
     assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 500) == 2);
+    const auto struck = packet_recogs_and_delays(dispatch, mir2::kSmStruck);
+    assert(struck.size() == 3);
+    assert(struck[0] == std::make_pair(1, 500));
+    assert(struck[1] == std::make_pair(3, 500));
+    assert(struck[2] == std::make_pair(2, 200));
     const auto left = runtime.legacy_monster_snapshot("0", 1);
     assert(left.has_value() && left->hp < left->max_hp);
   }

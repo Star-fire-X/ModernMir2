@@ -2607,10 +2607,16 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
 
       const auto attack_range = resolve_attack_range(effective_ident);
       GameObject* target = nullptr;
+      std::vector<GameObject*> direct_attack_targets;
       if (effective_ident == kCmLongHit) {
         const auto [dx, dy] = direction_delta(actor_dir(*attacker));
-        target = find_attack_target_by_position(objects_, *attacker, attacker->x() + dx * 2,
-                                                attacker->y() + dy * 2, attack_range);
+        if (auto* long_target = find_attack_target_by_position(
+                objects_, *attacker, attacker->x() + dx * 2, attacker->y() + dy * 2,
+                attack_range);
+            long_target != nullptr) {
+          direct_attack_targets.push_back(long_target);
+        }
+        target = find_attack_target_in_front(objects_, *attacker, 1);
       } else {
         target =
             find_attack_target_by_actor_id(objects_, *attacker, mail.target_actor_id, attack_range);
@@ -2631,18 +2637,22 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
               : std::vector<GameObject*>{};
       if (effective_ident == kCmWideHit) {
         target = find_attack_target_in_front(objects_, *attacker, 1);
+        direct_attack_targets = wide_targets;
       }
       auto direct_only_primary = false;
       if (effective_ident == kCmCrossHit) {
         target = find_attack_target_in_front(objects_, *attacker, 1);
+        direct_attack_targets = cross_targets;
       }
-      if (target == nullptr && effective_ident == kCmWideHit && !wide_targets.empty()) {
-        target = wide_targets.front();
+      if (target == nullptr && !direct_attack_targets.empty()) {
+        target = direct_attack_targets.front();
+        direct_attack_targets.erase(direct_attack_targets.begin());
         direct_only_primary = true;
       }
-      if (target == nullptr && effective_ident == kCmCrossHit && !cross_targets.empty()) {
-        target = cross_targets.front();
-        direct_only_primary = true;
+      if (target != nullptr) {
+        direct_attack_targets.erase(
+            std::remove(direct_attack_targets.begin(), direct_attack_targets.end(), target),
+            direct_attack_targets.end());
       }
       if (target == nullptr && prepared_sword_magic_id != 0) {
         effective_ident = kCmHit;
@@ -2724,7 +2734,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       };
       advance_power_hit_proc();
 
-      if (target == nullptr) {
+      if (target == nullptr && direct_attack_targets.empty()) {
         add_legacy_trace(dispatch, "LegacyCombat", "no_target", effective_mail, current_tick, now_ms,
                          false, 0, 0, "attack");
         break;
@@ -2740,6 +2750,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       auto attack_power =
           roll_legacy_player_attack_power(*attacker, *target, attack_roll_ident, dispatch,
                                           "LegacyCombat", "attack", current_tick, now_ms);
+      auto direct_attack_power = attack_power;
       if (sword_magic_id == 7 && power_hit_active) {
         const auto* power_magic = attacker->learned_magic(7);
         const auto power_level =
@@ -2758,12 +2769,15 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         if (const auto magic_it = magic_configs_.find(12); magic_it != magic_configs_.end()) {
           max_train_level = std::max(0, magic_it->second.legacy.max_train_level);
         }
-        attack_power = delphi_round(static_cast<double>(attack_power) /
-                                    static_cast<double>(max_train_level + 2) *
-                                    static_cast<double>(long_level + 2));
+        direct_attack_power = delphi_round(static_cast<double>(attack_power) /
+                                           static_cast<double>(max_train_level + 2) *
+                                           static_cast<double>(long_level + 2));
         add_legacy_trace(dispatch, "LegacyCombat", "long_hit_power", effective_mail,
-                         current_tick, now_ms, true, long_level, attack_power,
+                         current_tick, now_ms, true, long_level, direct_attack_power,
                          "PLongHitSkill");
+        if (direct_only_primary) {
+          attack_power = direct_attack_power;
+        }
       }
       if (sword_magic_id == 25) {
         const auto* wide_magic = attacker->learned_magic(25);
@@ -2773,12 +2787,15 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         if (const auto magic_it = magic_configs_.find(25); magic_it != magic_configs_.end()) {
           max_train_level = std::max(0, magic_it->second.legacy.max_train_level);
         }
-        attack_power = delphi_round(static_cast<double>(attack_power) /
-                                    static_cast<double>(max_train_level + 10) *
-                                    static_cast<double>(wide_level + 2));
+        direct_attack_power = delphi_round(static_cast<double>(attack_power) /
+                                           static_cast<double>(max_train_level + 10) *
+                                           static_cast<double>(wide_level + 2));
         add_legacy_trace(dispatch, "LegacyCombat", "wide_hit_power", effective_mail,
-                         current_tick, now_ms, true, wide_level, attack_power,
+                         current_tick, now_ms, true, wide_level, direct_attack_power,
                          "PWideHitSkill");
+        if (direct_only_primary) {
+          attack_power = direct_attack_power;
+        }
       }
       auto cross_attack_power = 0;
       if (sword_magic_id == 34) {
@@ -2793,6 +2810,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             delphi_round(static_cast<double>(attack_power) /
                          static_cast<double>(cross_max_train_level + 11) *
                          static_cast<double>(cross_level + 3));
+        direct_attack_power = cross_attack_power;
         if (direct_only_primary) {
           attack_power = cross_attack_power;
           if (as_player(target) != nullptr) {
@@ -2811,6 +2829,139 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         add_legacy_trace(dispatch, "LegacyCombat", "fire_hit_bonus", effective_mail,
                          current_tick, now_ms, true, fire_bonus, attack_power, "HitDouble");
       }
+      bool monster_damaged = false;
+      auto apply_direct_attack_target = [&](GameObject& direct_target,
+                                            std::int32_t direct_damage,
+                                            std::string_view miss_label) {
+        if (!is_attackable_target(direct_target)) {
+          return;
+        }
+        if (auto* player_target = as_player(&direct_target); player_target != nullptr) {
+          const auto block_reason =
+              resolve_pk_block_reason(config_, *attacker, *player_target, now_ms);
+          if (!block_reason.empty()) {
+            add_legacy_trace(dispatch, "LegacyCombat", "pk_block", effective_mail,
+                             current_tick, now_ms, false, 0, 0, block_reason);
+            return;
+          }
+        }
+        const auto direct_hit_roll =
+            legacy_random_value(dispatch, "LegacyCombat", "hit_check",
+                                legacy_speed_point(direct_target), attacker->id(),
+                                direct_target.id(), "direct_attack", now_ms, current_tick);
+        if (legacy_accuracy_point(*attacker) <= direct_hit_roll) {
+          add_legacy_trace(dispatch, "LegacyCombat", "miss", effective_mail, current_tick,
+                           now_ms, false, direct_hit_roll, 0, std::string(miss_label));
+          return;
+        }
+
+        const auto direct_applied_damage_value = std::max(0, direct_damage);
+        std::int32_t direct_applied_damage = 0;
+        bool direct_target_died = false;
+        Monster* direct_slain_monster = nullptr;
+        if (auto* player_target = as_player(&direct_target); player_target != nullptr) {
+          if (!config_.fight_zone && !config_.fight3_zone && player_target->pk_level() < 2) {
+            player_target->record_pk_hiter(attacker->id(), now_ms);
+          }
+          if (direct_applied_damage_value > 0) {
+            static_cast<void>(apply_legacy_struck_equipment_durability(
+                *player_target, attacker->id(), dispatch, current_tick, now_ms,
+                "LegacyCombat"));
+          }
+          const auto damage_result =
+              player_target->apply_damage(direct_applied_damage_value, current_tick);
+          direct_applied_damage = damage_result.hp_damage;
+          direct_target_died = player_target->is_dead();
+          if (direct_target_died &&
+              try_legacy_revival(*player_target, dispatch, current_tick, now_ms)) {
+            direct_target_died = false;
+          }
+          if (direct_target_died) {
+            const auto death_clear = player_target->mark_dead(now_ms);
+            dispatch_player_status_tick_result(*player_target, death_clear, dispatch, false);
+            apply_bad_kill_penalty(*attacker, *player_target, dispatch, current_tick,
+                                   now_ms, "LegacyCombat");
+            static_cast<void>(
+                settle_player_death(*player_target, dispatch, current_tick, now_ms));
+          }
+        } else if (auto* monster_target = as_monster(&direct_target);
+                   monster_target != nullptr) {
+          direct_applied_damage = apply_legacy_monster_damage(
+              objects_, *monster_target, direct_applied_damage_value, attacker->id(),
+              config_, current_tick, now_ms);
+          if (direct_applied_damage > 0) {
+            monster_damaged = true;
+            notify_owned_slaves_target(*attacker, monster_target->id(), now_ms);
+          }
+          direct_target_died = monster_target->is_dead();
+          direct_slain_monster = direct_target_died ? monster_target : nullptr;
+        }
+        if (direct_applied_damage <= 0) {
+          return;
+        }
+        auto pending_direct_death_packets =
+            direct_target_died && direct_slain_monster != nullptr
+                ? collect_legacy_death_packets(objects_, direct_target)
+                : std::vector<PendingLegacyPacket>{};
+        if (!direct_target_died || direct_slain_monster == nullptr) {
+          for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+            if (watcher.id() != direct_target.id() &&
+                !is_legacy_visible_to(watcher, direct_target)) {
+              return;
+            }
+            queue_packet(dispatch, watcher.session_id(),
+                         direct_target_died
+                             ? make_death_packet(watcher.session_id(), direct_target,
+                                                 watcher.id() == direct_target.id())
+                             : make_struck_packet(watcher.session_id(), direct_target,
+                                                  attacker->id(), direct_applied_damage, false),
+                         direct_target_died ? 0 : kLegacyDirectStruckDelayMs);
+          });
+        }
+        if (direct_slain_monster != nullptr) {
+          finalize_monster_death(direct_slain_monster->id(), attacker->id(), dispatch,
+                                 current_tick);
+          add_legacy_trace(dispatch, "LegacyCombat", "exp", effective_mail, current_tick,
+                           now_ms, true, sword_magic_id, direct_applied_damage, "WinExp");
+          queue_legacy_packets(dispatch, std::move(pending_direct_death_packets));
+        }
+        add_legacy_trace(dispatch, "LegacyCombat",
+                         direct_target_died ? "death" : "struck", effective_mail,
+                         current_tick, now_ms, true, sword_magic_id, direct_applied_damage,
+                         direct_target_died ? "SM_DEATH" : "SM_STRUCK");
+      };
+      if (effective_ident == kCmLongHit) {
+        for (auto* direct_target : direct_attack_targets) {
+          if (direct_target != nullptr && direct_target != target) {
+            apply_direct_attack_target(*direct_target, direct_attack_power,
+                                       "LongHit AccuracyPoint<=Random(SpeedPoint)");
+          }
+        }
+        direct_attack_targets.clear();
+      } else if (effective_ident == kCmWideHit) {
+        for (auto* direct_target : direct_attack_targets) {
+          if (direct_target != nullptr && direct_target != target) {
+            apply_direct_attack_target(*direct_target, direct_attack_power,
+                                       "WideHit AccuracyPoint<=Random(SpeedPoint)");
+          }
+        }
+        direct_attack_targets.clear();
+        wide_targets.clear();
+      } else if (effective_ident == kCmCrossHit) {
+        for (auto* direct_target : direct_attack_targets) {
+          if (direct_target == nullptr || direct_target == target) {
+            continue;
+          }
+          auto direct_damage = direct_attack_power;
+          if (as_player(direct_target) != nullptr) {
+            direct_damage = delphi_round(static_cast<double>(direct_damage) * 0.8);
+          }
+          apply_direct_attack_target(*direct_target, direct_damage,
+                                     "CrossHit AccuracyPoint<=Random(SpeedPoint)");
+        }
+        direct_attack_targets.clear();
+        cross_targets.clear();
+      }
       const auto undead_power = legacy_player_undead_power(*attacker, item_configs_);
       const auto hit_roll =
           legacy_random_value(dispatch, "LegacyCombat", "hit_check",
@@ -2822,7 +2973,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
-      const auto direct_primary_hit = effective_ident == kCmLongHit || direct_only_primary;
+      const auto direct_primary_hit = direct_only_primary;
       auto damage = std::max(0, attack_power);
       if (!direct_primary_hit) {
         const auto [ac_min, ac_max] = actor_physical_defense_range(*target);
@@ -2842,7 +2993,6 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       bool target_died = false;
       Monster* slain_monster = nullptr;
       std::int32_t weapon_durability_loss = 0;
-      bool monster_damaged = false;
 
       if (auto* player_target = as_player(target); player_target != nullptr) {
         if (!config_.fight_zone && !config_.fight3_zone && player_target->pk_level() < 2) {
