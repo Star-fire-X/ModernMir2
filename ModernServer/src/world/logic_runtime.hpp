@@ -240,6 +240,10 @@ class LogicRuntime {
                                                              std::uint64_t now_ms);
   void process_legacy_event_creates(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void process_legacy_random_space_moves(RuntimeDispatch& dispatch, std::uint64_t now_ms);
+  void process_legacy_batch_move_requests(RuntimeDispatch& dispatch, std::uint64_t now_ms);
+  void process_legacy_batch_moves(RuntimeDispatch& dispatch, std::uint64_t now_ms);
+  void execute_legacy_batch_move_request(const LegacyBatchMoveRequest& request,
+                                         RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void process_legacy_time_recall_requests(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void process_legacy_time_recalls(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void process_cross_map_mails(RuntimeDispatch& dispatch);
@@ -262,6 +266,7 @@ class LogicRuntime {
   std::unordered_map<std::uint64_t, LegacyGroupState> legacy_groups_{};
   std::unordered_map<std::uint64_t, LegacyTimeRecallState> legacy_time_recalls_{};
   WheelTimer<LegacyTimeRecallDue> legacy_time_recall_wheel_{1024};
+  WheelTimer<LegacyBatchMoveRequest> legacy_batch_move_wheel_{1024};
   std::uint64_t next_legacy_time_recall_generation_{1};
   std::unordered_map<std::string, std::unique_ptr<MapActor>> maps_{};
   std::vector<std::string> map_order_{};

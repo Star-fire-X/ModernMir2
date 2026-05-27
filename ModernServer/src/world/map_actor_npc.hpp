@@ -78,6 +78,15 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
   std::array<std::int32_t, 5> local_param_values{};
   std::array<std::string, 5> local_param_text{};
   std::array<bool, 5> local_param_set{};
+  std::vector<LegacyBatchMoveRequest> batch_move_requests;
+
+  auto legacy_seconds_to_ticks = [&](std::int32_t seconds) {
+    const auto tick_ms =
+        static_cast<std::uint64_t>(std::max<std::uint32_t>(budgets_.tick_ms, 1));
+    const auto delay_ms = static_cast<std::uint64_t>(std::max(seconds, 0)) * 1000ULL;
+    return delay_ms == 0 ? 1ULL : std::max<std::uint64_t>((delay_ms + tick_ms - 1) / tick_ms, 1);
+  };
+  std::uint64_t batch_delay_ticks = legacy_seconds_to_ticks(10);
 
   auto script_value = [&](std::string_view raw) -> std::int32_t {
     auto token = util::trim(std::string(raw));
@@ -1018,10 +1027,62 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("time_recall_cancel", true, 0, action_line);
       return std::nullopt;
     }
-    if (command_name == "EXCHANGEMAP" || command_name == "RECALLMAP" ||
-        command_name == "ADDBATCH" || command_name == "BATCHDELAY" ||
-        command_name == "BATCHMOVE") {
-      trace("deferred_action", true, 0, action_line);
+    if (command_name == "EXCHANGEMAP") {
+      if (tokens.empty()) {
+        trace("deferred_action_reject", false, 0, action_line);
+        return std::nullopt;
+      }
+      dispatch.legacy_batch_move_requests.push_back(LegacyBatchMoveRequest{
+          LegacyBatchMoveRequestKind::exchange_map, player.id(), config_.id,
+          util::trim(tokens[0]), 0});
+      trace("deferred_action", true, 1, action_line);
+      return std::nullopt;
+    }
+    if (command_name == "RECALLMAP") {
+      if (tokens.empty()) {
+        trace("deferred_action_reject", false, 0, action_line);
+        return std::nullopt;
+      }
+      dispatch.legacy_batch_move_requests.push_back(LegacyBatchMoveRequest{
+          LegacyBatchMoveRequestKind::recall_map, player.id(), util::trim(tokens[0]),
+          config_.id, 0});
+      trace("deferred_action", true, 1, action_line);
+      return std::nullopt;
+    }
+    if (command_name == "BATCHDELAY") {
+      const auto seconds = tokens.empty() ? 10 : std::max(int_token(0, 10), 0);
+      batch_delay_ticks = legacy_seconds_to_ticks(seconds);
+      trace("deferred_action", true, seconds, action_line);
+      return std::nullopt;
+    }
+    if (command_name == "ADDBATCH") {
+      if (tokens.empty()) {
+        trace("deferred_action_reject", false, 0, action_line);
+        return std::nullopt;
+      }
+      batch_move_requests.push_back(LegacyBatchMoveRequest{
+          LegacyBatchMoveRequestKind::random_actor_to_map, player.id(), config_.id,
+          util::trim(tokens[0]), batch_delay_ticks});
+      trace("deferred_action", true, static_cast<std::int32_t>(batch_move_requests.size()),
+            action_line);
+      return std::nullopt;
+    }
+    if (command_name == "BATCHMOVE") {
+      if (!tokens.empty()) {
+        batch_move_requests.push_back(LegacyBatchMoveRequest{
+            LegacyBatchMoveRequestKind::random_actor_to_map, player.id(), config_.id,
+            util::trim(tokens[0]), batch_delay_ticks});
+      }
+      if (batch_move_requests.empty()) {
+        trace("deferred_action_reject", false, 0, action_line);
+        return std::nullopt;
+      }
+      const auto request_count = static_cast<std::int32_t>(batch_move_requests.size());
+      for (auto& request : batch_move_requests) {
+        dispatch.legacy_batch_move_requests.push_back(std::move(request));
+      }
+      batch_move_requests.clear();
+      trace("deferred_action", true, request_count, action_line);
       return std::nullopt;
     }
 

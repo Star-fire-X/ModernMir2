@@ -107,6 +107,20 @@ struct LegacyTimeRecallRequest {
   std::uint64_t delay_ticks{1};
 };
 
+enum class LegacyBatchMoveRequestKind {
+  random_actor_to_map,
+  recall_map,
+  exchange_map
+};
+
+struct LegacyBatchMoveRequest {
+  LegacyBatchMoveRequestKind kind{LegacyBatchMoveRequestKind::random_actor_to_map};
+  std::uint64_t actor_id{0};
+  std::string source_map_id{};
+  std::string target_map_id{};
+  std::uint64_t delay_ticks{1};
+};
+
 struct RuntimeDispatch {
   std::vector<SessionEvent> session_events{};
   std::vector<AuditEvent> audit_events{};
@@ -116,6 +130,7 @@ struct RuntimeDispatch {
   std::vector<LegacyHolyCurtainGroup> legacy_holy_curtain_groups{};
   std::vector<LegacyRandomSpaceMoveRequest> legacy_random_space_moves{};
   std::vector<LegacyTimeRecallRequest> legacy_time_recall_requests{};
+  std::vector<LegacyBatchMoveRequest> legacy_batch_move_requests{};
   std::vector<LegacyRuntimeTrace> legacy_traces{};
 };
 
