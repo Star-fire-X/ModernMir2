@@ -1672,7 +1672,8 @@ std::optional<CharacterRecord> MapActor::persistent_snapshot_player(std::uint64_
 RuntimeDispatch MapActor::legacy_spawn_player(const ActorMail& mail,
                                               std::uint64_t current_tick,
                                               std::uint64_t now_ms,
-                                              bool fast_initialize) {
+                                              bool fast_initialize,
+                                              bool run_startup_quest) {
   RuntimeDispatch dispatch;
   if (mail.kind != ActorMailKind::spawn_player) {
     return dispatch;
@@ -1703,7 +1704,9 @@ RuntimeDispatch MapActor::legacy_spawn_player(const ActorMail& mail,
                    make_space_move_show2_packet(player->session_id(), *player));
     }
   }
-  static_cast<void>(trigger_startup_quest(*player, dispatch, current_tick, now_ms));
+  if (run_startup_quest) {
+    static_cast<void>(trigger_startup_quest(*player, dispatch, current_tick, now_ms));
+  }
   static_cast<void>(
       trigger_map_quest(*player, {}, {}, false, "enter", dispatch, current_tick, now_ms));
   return dispatch;

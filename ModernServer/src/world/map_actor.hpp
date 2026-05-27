@@ -95,7 +95,8 @@ class MapActor {
   [[nodiscard]] RuntimeDispatch legacy_spawn_player(const ActorMail& mail,
                                                     std::uint64_t current_tick,
                                                     std::uint64_t now_ms,
-                                                    bool fast_initialize);
+                                                    bool fast_initialize,
+                                                    bool run_startup_quest = false);
   [[nodiscard]] RuntimeDispatch legacy_process_player(std::uint64_t actor_id,
                                                       std::uint64_t current_tick,
                                                       std::uint64_t now_ms,

@@ -2082,7 +2082,8 @@ RuntimeDispatch LogicRuntime::route_actor_mail(const ActorMail& mail) {
   if (map_it != maps_.end()) {
     if (mail.kind == ActorMailKind::spawn_player) {
       append_dispatch(dispatch,
-                      map_it->second->legacy_spawn_player(mail, current_tick_, last_now_ms_, true));
+                      map_it->second->legacy_spawn_player(mail, current_tick_, last_now_ms_,
+                                                          true, false));
     } else {
       map_it->second->enqueue_mail(mail);
     }
@@ -2710,7 +2711,7 @@ void LogicRuntime::process_ready_users(std::uint64_t now_ms, RuntimeDispatch& di
 
     append_dispatch(dispatch,
                     map_it->second->legacy_spawn_player(mail, current_tick_, now_ms,
-                                                        ready.fast_initialize));
+                                                        ready.fast_initialize, true));
     if (!map_it->second->legacy_player_state(mail.actor_id).has_value()) {
       continue;
     }

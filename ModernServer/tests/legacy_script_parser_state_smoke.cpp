@@ -149,7 +149,9 @@ void write_base_config(const std::filesystem::path& root) {
              "  { id = \"writer\", map_id = \"0\", name = \"Writer\", x = 11, y = 10, "
              "script = \"npc_scripts/Npc_def/writer-0.txt\", service = \"none\" },\n"
              "  { id = \"reader\", map_id = \"1\", name = \"Reader\", x = 11, y = 10, "
-             "script = \"npc_scripts/Npc_def/reader-1.txt\", service = \"none\" }\n"
+             "script = \"npc_scripts/Npc_def/reader-1.txt\", service = \"none\" },\n"
+             "  { id = \"mover\", map_id = \"0\", name = \"Mover\", x = 12, y = 10, "
+             "script = \"npc_scripts/Npc_def/mover-0.txt\", service = \"none\" }\n"
              "]\n");
   write_file(root / "npc_scripts" / "Npc_def" / "writer-0.txt",
              "#DEFINE @GREETING Hidden\n"
@@ -175,6 +177,12 @@ void write_base_config(const std::filesystem::path& root) {
              "SharedOk\n"
              "#ELSESAY\n"
              "SharedFail\n");
+  write_file(root / "npc_scripts" / "Npc_def" / "mover-0.txt",
+             "[@main]\n"
+             "#IF\n"
+             "CHECKLEVEL 1\n"
+             "#ACT\n"
+             "MAPMOVE 1 10 10\n");
 }
 
 }  // namespace
@@ -217,6 +225,13 @@ int main() {
   assert(has_notice(writer_dispatch, "Keep\\Together"));
   hero = runtime.snapshot_character_actor("Hero");
   assert(hero.has_value());
+  assert(apple_count(*hero) == 2);
+
+  static_cast<void>(
+      route_due(runtime, now_ms, npc_command(mir2::LogicCommandKind::click_npc, 12, 3)));
+  hero = runtime.snapshot_character_actor("Hero");
+  assert(hero.has_value());
+  assert(hero->map_id == "1");
   assert(apple_count(*hero) == 2);
 
   static_cast<void>(runtime.route_logic_command(enter_world(13, "other", "Other", "1")));
