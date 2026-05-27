@@ -2816,7 +2816,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           legacy_random_value(dispatch, "LegacyCombat", "hit_check",
                               legacy_speed_point(*target), attacker->id(),
                               target->id(), "attack", now_ms, current_tick);
-      if (legacy_accuracy_point(*attacker) <= hit_roll) {
+      if (!legacy_hit_roll_succeeds(legacy_accuracy_point(*attacker), hit_roll)) {
         add_legacy_trace(dispatch, "LegacyCombat", "miss", effective_mail, current_tick, now_ms, false,
                          hit_roll, 0, "AccuracyPoint<=Random(SpeedPoint)");
         break;
@@ -2967,7 +2967,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
               legacy_random_value(dispatch, "LegacyCombat", "hit_check",
                                   legacy_speed_point(*extra_target), attacker->id(),
                                   extra_target->id(), "wide_hit", now_ms, current_tick);
-          if (legacy_accuracy_point(*attacker) <= extra_hit_roll) {
+          if (!legacy_hit_roll_succeeds(legacy_accuracy_point(*attacker), extra_hit_roll)) {
             add_legacy_trace(dispatch, "LegacyCombat", "miss", effective_mail, current_tick,
                              now_ms, false, extra_hit_roll, 0,
                              "WideHit AccuracyPoint<=Random(SpeedPoint)");
@@ -3059,7 +3059,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
               legacy_random_value(dispatch, "LegacyCombat", "hit_check",
                                   legacy_speed_point(*extra_target), attacker->id(),
                                   extra_target->id(), "cross_hit", now_ms, current_tick);
-          if (legacy_accuracy_point(*attacker) <= extra_hit_roll) {
+          if (!legacy_hit_roll_succeeds(legacy_accuracy_point(*attacker), extra_hit_roll)) {
             add_legacy_trace(dispatch, "LegacyCombat", "miss", effective_mail, current_tick,
                              now_ms, false, extra_hit_roll, 0,
                              "CrossHit AccuracyPoint<=Random(SpeedPoint)");

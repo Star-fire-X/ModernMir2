@@ -289,11 +289,11 @@ int main() {
     constexpr std::uint64_t session_id = 50;
 
     auto map = make_map();
-    map.enqueue_mail(make_monster(monster_id));
+    map.enqueue_mail(make_monster(monster_id, 20, 320));
     static_cast<void>(map.tick(1, 0));
     static_cast<void>(map.legacy_spawn_player(
-        make_player(player_id, session_id, "NoAccuracy", 10, 10, 8, 40, 0), 1, 0,
-        true));
+        make_player(player_id, session_id, "AccuracyEqualsRoll", 10, 10, 8, 40, 10),
+        1, 0, true));
 
     mir2::LegacyRandom random(1);
     map.set_legacy_random(&random);

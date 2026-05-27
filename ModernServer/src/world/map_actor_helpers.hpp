@@ -583,6 +583,10 @@ std::int32_t legacy_sword_skill_for_attack_ident(std::uint16_t ident) {
   }
 }
 
+bool legacy_hit_roll_succeeds(std::int32_t accuracy_point, std::int32_t hit_roll) {
+  return hit_roll < accuracy_point;
+}
+
 bool is_alive(const GameObject& object) {
   if (const auto* player = as_player(&object); player != nullptr) {
     return !player->is_dead();
