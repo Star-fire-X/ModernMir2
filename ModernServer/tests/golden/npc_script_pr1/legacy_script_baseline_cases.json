@@ -1,38 +1,39 @@
 {
   "schema_version": 1,
-  "description": "PR-1 characterization baseline for current NPC script behavior before compatibility fixes. Later stacked PRs update these cases as runtime semantics are aligned with Delphi.",
+  "description": "PR-2 golden expectations for NPC script compatibility fixes, updated from the PR-1 characterization baseline.",
   "protocol_constants": {
     "SM_TURN": 10,
     "SM_ADDITEM": 200,
     "SM_BAGITEMS": 201,
     "SM_WEIGHTCHANGED": 622,
-    "SM_MERCHANTSAY": 643
+    "SM_MERCHANTSAY": 643,
+    "SM_GOLDCHANGED": 653
   },
   "legacy_coin_token": "\u91d1\u5e01",
   "cases": [
     {
       "name": "take_give_legacy_coin_token_current_item_baseline",
-      "current_behavior": "The localized legacy coin token is resolved as a normal item name when an item config exists; gold remains unchanged.",
-      "expected_packets": ["SM_TURN", "SM_ADDITEM", "SM_ADDITEM", "SM_BAGITEMS", "SM_WEIGHTCHANGED", "SM_BAGITEMS", "SM_WEIGHTCHANGED", "SM_MERCHANTSAY"],
-      "expected_state": {"gold": 100, "legacy_coin_items": 1, "quest_mark0": 128, "map_id": "0", "x": 10, "y": 10}
+      "current_behavior": "The localized legacy coin token is resolved as gold, not as an inventory item name.",
+      "expected_packets": ["SM_TURN", "SM_GOLDCHANGED", "SM_GOLDCHANGED", "SM_MERCHANTSAY"],
+      "expected_state": {"gold": 101, "legacy_coin_items": 0, "quest_mark0": 128, "map_id": "0", "x": 10, "y": 10}
     },
     {
       "name": "checkmonmap_current_name_count_baseline",
-      "current_behavior": "CHECKMONMAP with two tokens is interpreted as monster-name plus count on the current MapActor.",
+      "current_behavior": "CHECKMONMAP with two tokens is interpreted as map-id plus required monster count.",
       "expected_packets": ["SM_TURN", "SM_MERCHANTSAY"],
-      "expected_trace": {"action": "condition", "success": false, "value": 0, "label": "CHECKMONMAP 1 1"}
+      "expected_trace": {"action": "condition", "success": true, "value": 1, "label": "CHECKMONMAP 1 1"}
     },
     {
       "name": "checkhum_current_count_only_baseline",
-      "current_behavior": "CHECKHUM reads only the first integer as a required count and counts players on the current MapActor.",
+      "current_behavior": "CHECKHUM with two tokens is interpreted as map-id plus required player count.",
       "expected_packets": ["SM_TURN", "SM_MERCHANTSAY"],
-      "expected_trace": {"action": "condition", "success": true, "value": 1, "label": "CHECKHUM 1 2"}
+      "expected_trace": {"action": "condition", "success": true, "value": 2, "label": "CHECKHUM 1 2"}
     },
     {
       "name": "monclear_current_name_baseline",
-      "current_behavior": "MONCLEAR treats the first token as a monster name on the current MapActor.",
+      "current_behavior": "MONCLEAR treats the first token as a target map id and clears monsters on that map.",
       "expected_packets": ["SM_TURN", "SM_MERCHANTSAY"],
-      "expected_trace": {"action": "monclear", "success": true, "value": 0, "label": "MONCLEAR 1"}
+      "expected_trace": {"action": "monclear", "success": true, "value": 1, "label": "MONCLEAR 1"}
     },
     {
       "name": "istakeitem_current_checkitem_baseline",

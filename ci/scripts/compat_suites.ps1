@@ -94,6 +94,7 @@ function Get-CiBuildTargets {
     "mir2_scripted_merchant_smoke",
     "mir2_scripted_npc_dialog_smoke",
     "mir2_legacy_script_golden_baseline_smoke",
+    "mir2_legacy_script_live_p0_smoke",
     "mir2_legacy_mapquest_import_trigger_smoke",
     "mir2_legacy_gbk_import_smoke",
     "mir2_npc_shop_protocol_golden_smoke",

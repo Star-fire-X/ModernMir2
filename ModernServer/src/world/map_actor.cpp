@@ -1351,6 +1351,10 @@ void MapActor::enqueue_mail(ActorMail mail) { mailbox_.push_back(std::move(mail)
 
 void MapActor::set_legacy_random(LegacyRandom* legacy_random) { legacy_random_ = legacy_random; }
 
+void MapActor::set_legacy_script_map_hooks(LegacyScriptMapHooks hooks) {
+  legacy_script_map_hooks_ = std::move(hooks);
+}
+
 std::int32_t MapActor::allocate_make_index() {
   return make_index_allocator_ != nullptr ? make_index_allocator_->allocate()
                                           : fallback_make_index_allocator_.allocate();
@@ -2187,6 +2191,51 @@ bool MapActor::legacy_monster_counts_for_spawn(std::uint64_t actor_id) const {
   }
   const auto* monster = as_monster(it->second.get());
   return monster != nullptr && !monster->legacy_ghosted() && !monster->is_dead();
+}
+
+std::int32_t MapActor::legacy_live_monster_count() const {
+  std::int32_t count = 0;
+  for (const auto& [_, object] : objects_) {
+    const auto* monster = as_monster(object.get());
+    if (monster != nullptr && !monster->legacy_ghosted() && !monster->is_dead()) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+std::int32_t MapActor::legacy_live_player_count() const {
+  std::int32_t count = 0;
+  for (const auto& [_, object] : objects_) {
+    const auto* player = as_player(object.get());
+    if (player != nullptr && !player->is_dead()) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+std::int32_t MapActor::legacy_clear_monsters(RuntimeDispatch& dispatch,
+                                             std::uint64_t current_tick,
+                                             std::uint64_t now_ms) {
+  static_cast<void>(current_tick);
+  static_cast<void>(now_ms);
+  std::vector<std::uint64_t> remove_ids;
+  for (const auto& [actor_id, object] : objects_) {
+    if (as_monster(object.get()) != nullptr) {
+      remove_ids.push_back(actor_id);
+    }
+  }
+  for (const auto actor_id : remove_ids) {
+    if (const auto it = objects_.find(actor_id); it != objects_.end()) {
+      static_cast<void>(environment_.delete_from_map(
+          it->second->x(), it->second->y(), LegacyMapObjectShape::moving_object,
+          it->second->id()));
+      remove_actor_from_visibility(actor_id, dispatch);
+      objects_.erase(it);
+    }
+  }
+  return static_cast<std::int32_t>(remove_ids.size());
 }
 
 std::optional<MonsterSnapshot> MapActor::legacy_monster_snapshot(std::uint64_t actor_id) const {
