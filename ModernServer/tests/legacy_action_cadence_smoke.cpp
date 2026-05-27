@@ -183,12 +183,40 @@ mir2::LogicCommand attack(std::uint64_t session_id, std::int32_t x, std::int32_t
   return command;
 }
 
+mir2::LogicCommand walk(std::uint64_t session_id, std::int32_t x, std::int32_t y,
+                        std::uint8_t dir = 0) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::walk;
+  command.session_id = session_id;
+  command.x = x;
+  command.y = y;
+  command.dir = dir;
+  return command;
+}
+
 mir2::LogicCommand spell(std::uint64_t session_id, std::int32_t magic_id) {
   mir2::LogicCommand command;
   command.kind = mir2::LogicCommandKind::spell;
   command.session_id = session_id;
   command.game_message.ident = mir2::kCmSpell;
   command.game_message.tag = static_cast<std::uint16_t>(magic_id);
+  return command;
+}
+
+mir2::LogicCommand drop_gold(std::uint64_t session_id, std::int32_t amount) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::drop_gold;
+  command.session_id = session_id;
+  command.amount = amount;
+  return command;
+}
+
+mir2::LogicCommand pickup(std::uint64_t session_id, std::int32_t x, std::int32_t y) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::pickup_item;
+  command.session_id = session_id;
+  command.x = x;
+  command.y = y;
   return command;
 }
 
@@ -215,6 +243,65 @@ void assert_budget_batch_window_allows_second_attack() {
   assert(has_trace(dispatch, "LegacyCombat", "attack_broadcast"));
   assert(has_trace(dispatch, "LegacyCombat", "struck"));
   assert(!has_trace(dispatch, "LegacyCombat", "attack_cooldown_reject"));
+}
+
+void assert_walk_hit_pickup_batch_executes() {
+  auto config = base_config();
+  mir2::MonsterDefConfig stationary;
+  stationary.name = "PickupBatchTarget";
+  stationary.hp = 500;
+  stationary.ai_profile = mir2::MonsterAiProfile::stationary;
+  config.monsters.push_back(stationary);
+  config.spawns.push_back(target("PickupBatchTarget", 10, 11));
+  mir2::LogicRuntime runtime(config);
+  runtime.initialize();
+
+  auto hero = character("PickupBatchHero");
+  hero.gold = 50;
+  enter_player(runtime, 107, std::move(hero));
+
+  static_cast<void>(runtime.route_logic_command(drop_gold(107, 10)));
+  auto dispatch = tick_player(runtime, 2000);
+  assert(count_packet_ident(dispatch, mir2::kSmItemShow) == 1);
+
+  static_cast<void>(runtime.route_logic_command(walk(107, 10, 9, 0)));
+  dispatch = tick_player(runtime, 2200);
+  assert(count_ack(dispatch, 107, true) == 1);
+  for (std::uint64_t frame = 0; frame < 20; ++frame) {
+    static_cast<void>(tick_player(runtime, 2220 + frame * 20));
+  }
+
+  static_cast<void>(runtime.route_logic_command(walk(107, 10, 10, 4)));
+  static_cast<void>(runtime.route_logic_command(attack(107, 10, 11, mir2::kCmHit, 4)));
+  static_cast<void>(runtime.route_logic_command(pickup(107, 10, 10)));
+  dispatch = tick_player(runtime, 3200, 3);
+
+  assert(count_ack(dispatch, 107, true) >= 1);
+  assert(has_trace(dispatch, "LegacyCombat", "struck"));
+  assert(count_packet_ident(dispatch, mir2::kSmItemHide) == 1);
+  assert(count_packet_ident(dispatch, mir2::kSmGoldChanged) == 1);
+}
+
+void assert_walk_hit_spell_batch_executes() {
+  auto config = base_config();
+  config.magics.push_back(long_hit_magic());
+  config.spawns.push_back(target("SpellBatchTarget", 10, 8));
+  mir2::LogicRuntime runtime(config);
+  runtime.initialize();
+
+  auto hero = character("SpellBatchHero");
+  hero.magics[0].magic_id = 12;
+  hero.magics[0].level = 0;
+  enter_player(runtime, 108, std::move(hero));
+
+  static_cast<void>(runtime.route_logic_command(walk(108, 10, 9, 0)));
+  static_cast<void>(runtime.route_logic_command(attack(108, 10, 8)));
+  static_cast<void>(runtime.route_logic_command(spell(108, 12)));
+  const auto dispatch = tick_player(runtime, 2000, 3);
+
+  assert(count_ack(dispatch, 108, true) >= 1);
+  assert(has_trace(dispatch, "LegacyCombat", "struck"));
+  assert(has_trace(dispatch, "LegacySkill", "sword_toggle"));
 }
 
 void assert_base_interval_allows_later_attack() {
@@ -418,6 +505,8 @@ int main() {
   assert_server_attack_interval_formula();
   assert_hit_speed_window_cases();
   assert_budget_batch_window_allows_second_attack();
+  assert_walk_hit_pickup_batch_executes();
+  assert_walk_hit_spell_batch_executes();
   assert_base_interval_allows_later_attack();
   assert_equipped_hit_speed_reduces_interval();
   assert_no_target_attack_consumes_cooldown();

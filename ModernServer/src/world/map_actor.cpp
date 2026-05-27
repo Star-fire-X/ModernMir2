@@ -1609,6 +1609,7 @@ RuntimeDispatch MapActor::legacy_space_move_player(
   transfer.legacy_name_color = player->legacy_name_color();
   transfer.legacy_spawn_reason =
       show2 ? LegacySpawnReason::space_move_show2 : LegacySpawnReason::space_move;
+  transfer.legacy_group_id = player->legacy_group_id();
 
   if (show2) {
     queue_actor_origin_packet(objects_, dispatch, *player, true,

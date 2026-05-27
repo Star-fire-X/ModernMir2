@@ -136,7 +136,8 @@ mir2::ActorMail make_player(std::uint64_t actor_id, std::uint64_t session_id,
                             const std::string& name, std::int32_t x, std::int32_t y,
                             std::int32_t hp = 40, std::int32_t ac_min = 1,
                             std::int32_t ac_max = 1,
-                            std::optional<mir2::LegacyUserItem> dress = std::nullopt) {
+                            std::optional<mir2::LegacyUserItem> dress = std::nullopt,
+                            std::uint8_t attack_mode = 0) {
   mir2::CharacterRecord hero;
   hero.account_id = name;
   hero.character_name = name;
@@ -154,6 +155,7 @@ mir2::ActorMail make_player(std::uint64_t actor_id, std::uint64_t session_id,
   hero.ability.max_weight = 100;
   hero.ability.max_wear_weight = 100;
   hero.ability.max_hand_weight = 100;
+  hero.attack_mode = attack_mode;
   if (dress.has_value()) {
     hero.equipped_items[mir2::kEquipDress] = *dress;
   }
@@ -174,6 +176,15 @@ mir2::MapActor make_map() {
   budgets.tick_ms = 20;
   return mir2::MapActor(mir2::MapConfig{"0", "MonsterAttack", {}, 0, 0, 30, 30},
                         budgets, {}, {});
+}
+
+mir2::MapActor make_fight_map() {
+  mir2::MapConfig config{"0", "MonsterAttackPk", {}, 0, 0, 30, 30};
+  config.allow_pk = true;
+  config.fight_zone = true;
+  mir2::LogicBudgetConfig budgets;
+  budgets.tick_ms = 20;
+  return mir2::MapActor(config, budgets, {}, {});
 }
 
 void spawn(mir2::MapActor& map, const std::vector<mir2::ActorMail>& mails) {
@@ -222,6 +233,24 @@ int main() {
     assert(monster.has_value());
     assert(monster->hit_time_ms == 1001);
     assert(monster->target_focus_time_ms == 1001);
+  }
+
+  {
+    auto map = make_fight_map();
+    constexpr std::uint64_t owner_id = 11;
+    constexpr std::uint64_t target_id = 12;
+    constexpr std::uint64_t slave_id = 110;
+    spawn(map, {make_player(owner_id, 1101, "Owner", 9, 10, 40, 1, 1, std::nullopt, 1),
+                make_player(target_id, 1102, "Target", 10, 10),
+                make_monster(slave_id, 10, 9, target_id, 20, 2, 7, 40, 200, 200,
+                             owner_id)});
+
+    const auto dispatch = map.legacy_process_monster(slave_id, 2, 1001, 0, 0);
+    assert(find_trace(dispatch, "pk_block").has_value());
+    assert(!find_packet_by_recog(dispatch, mir2::kSmHit,
+                                 static_cast<std::int32_t>(slave_id)).has_value());
+    assert(!find_packet_by_recog(dispatch, mir2::kSmStruck,
+                                 static_cast<std::int32_t>(target_id)).has_value());
   }
 
   {

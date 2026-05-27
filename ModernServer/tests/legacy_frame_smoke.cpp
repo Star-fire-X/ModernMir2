@@ -391,12 +391,52 @@ mir2::LogicCommand action_command(mir2::LogicCommandKind kind, std::uint64_t ses
   return command;
 }
 
-bool check_frame_action_gate() {
+mir2::LogicCommand enter_command(std::uint64_t session_id, std::string name,
+                                 std::int32_t x, std::int32_t y) {
+  mir2::CharacterRecord character;
+  character.account_id = "acct_" + name;
+  character.character_name = name;
+  character.map_id = "0";
+  character.x = x;
+  character.y = y;
+  character.ability.level = 20;
+  character.ability.hp = 100;
+  character.ability.max_hp = 100;
+  character.ability.mp = 100;
+  character.ability.max_mp = 100;
+
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::enter_world;
+  command.gateway = "client_v1_game_gateway";
+  command.session_id = session_id;
+  command.account_id = character.account_id;
+  command.character_name = character.character_name;
+  command.map_id = character.map_id;
+  command.x = x;
+  command.y = y;
+  command.character = std::move(character);
+  return command;
+}
+
+bool check_frame_action_fifo() {
   mir2::HostConfig config;
   config.maps.push_back(mir2::MapConfig{"0", "ActionGateMap", {}, 0, 0, 10, 10});
 
   mir2::WorldService world;
   world.initialize_runtime_for_test(config);
+
+  mir2::WorldIngressBatch enter_frame;
+  enter_frame.push(enter_command(501, "FrameActionA", 1, 1), 1);
+  enter_frame.push(enter_command(502, "FrameActionB", 2, 1), 2);
+  enter_frame.mark_frame(9);
+  const auto enter_dispatch = world.process_ingress_batch_for_test(enter_frame);
+  static_cast<void>(world.tick_runtime_for_test(1000));
+  if (!enter_frame.empty() || !enter_dispatch.audit_events.empty() ||
+      world.legacy_session_inbox_size_for_test(501) != 0 ||
+      world.legacy_session_inbox_size_for_test(502) != 0) {
+    std::cerr << "frame_action_fifo_enter\n";
+    return false;
+  }
 
   mir2::WorldIngressBatch same_frame;
   same_frame.push(action_command(mir2::LogicCommandKind::walk, 501, 1), 1);
@@ -408,22 +448,23 @@ bool check_frame_action_gate() {
 
   const auto first_dispatch = world.process_ingress_batch_for_test(same_frame);
   if (!same_frame.empty() || !first_dispatch.audit_events.empty() ||
-      world.session_action_count_for_test() != 2 ||
-      world.session_action_reject_count_for_test() != 3) {
-    std::cerr << "frame_action_gate_same_frame\n";
+      world.legacy_session_inbox_sequences_for_test(501) !=
+          std::vector<std::uint64_t>{1, 2, 3, 4} ||
+      world.legacy_session_inbox_sequences_for_test(502) !=
+          std::vector<std::uint64_t>{1}) {
+    std::cerr << "frame_action_fifo_same_frame\n";
     return false;
   }
 
-  world.clear_session_actions_for_test();
   mir2::WorldIngressBatch next_frame;
   next_frame.push(action_command(mir2::LogicCommandKind::run, 501, 5), 6);
   next_frame.mark_frame(11);
 
   const auto second_dispatch = world.process_ingress_batch_for_test(next_frame);
   if (!next_frame.empty() || !second_dispatch.audit_events.empty() ||
-      world.session_action_count_for_test() != 1 ||
-      world.session_action_reject_count_for_test() != 3) {
-    std::cerr << "frame_action_gate_next_frame\n";
+      world.legacy_session_inbox_sequences_for_test(501) !=
+          std::vector<std::uint64_t>{1, 2, 3, 4, 5}) {
+    std::cerr << "frame_action_fifo_next_frame\n";
     return false;
   }
   return true;
@@ -450,7 +491,7 @@ int main() {
   if (!check_session_fifo_ordering()) {
     return 1;
   }
-  if (!check_frame_action_gate()) {
+  if (!check_frame_action_fifo()) {
     return 1;
   }
   return 0;

@@ -223,6 +223,7 @@ enum class ActorMailKind {
   spawn_npc,
   system_notice,
   guild_membership_sync,
+  group_membership_sync,
   turn,
   move,
   run,
@@ -369,6 +370,7 @@ struct ActorMail {
   std::int32_t monster_target_y{0};
   std::uint8_t legacy_name_color{255};
   LegacySpawnReason legacy_spawn_reason{LegacySpawnReason::login};
+  std::uint64_t legacy_group_id{0};
   std::uint32_t respawn_ms{0};
   std::uint8_t dir{0};
   std::uint8_t retry_count{0};

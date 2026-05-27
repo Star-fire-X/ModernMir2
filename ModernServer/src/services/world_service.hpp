@@ -9,7 +9,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
-#include <unordered_set>
+#include <vector>
 
 #include "core/module.hpp"
 #include "protocol/canonical_login_state.hpp"
@@ -37,9 +37,11 @@ class WorldService : public Module {
   void initialize_runtime_for_test(const HostConfig& config);
   void enqueue_gate_event_for_test(SessionEvent event);
   void seed_session_sequence_for_test(std::uint64_t session_id, std::uint64_t session_seq);
-  void clear_session_actions_for_test();
-  [[nodiscard]] std::size_t session_action_count_for_test() const;
-  [[nodiscard]] std::size_t session_action_reject_count_for_test() const;
+  [[nodiscard]] std::size_t legacy_session_inbox_size_for_test(
+      std::uint64_t session_id) const;
+  [[nodiscard]] std::vector<std::uint64_t> legacy_session_inbox_sequences_for_test(
+      std::uint64_t session_id) const;
+  [[nodiscard]] RuntimeDispatch tick_runtime_for_test(std::uint64_t now_ms);
   [[nodiscard]] RuntimeDispatch run_legacy_socket_stage_for_test(std::uint64_t now_ms);
   [[nodiscard]] RuntimeDispatch process_ingress_batch_for_test(WorldIngressBatch& batch);
 #endif
@@ -92,10 +94,6 @@ class WorldService : public Module {
   std::unordered_map<std::string, std::uint64_t> character_save_versions_{};
   std::unordered_map<std::uint64_t, std::string> session_gateways_{};
   std::unordered_map<std::uint64_t, std::uint64_t> session_sequence_watermarks_{};
-  std::unordered_set<std::uint64_t> session_actions_this_frame_{};
-#ifdef MIR2_ENABLE_TEST_HOOKS
-  std::size_t session_action_reject_count_{0};
-#endif
   std::uint64_t next_ingress_seq_{0};
   std::uint64_t current_frame_now_ms_{0};
   mutable std::mutex gate_events_mutex_{};

@@ -55,8 +55,17 @@ mir2::LogicCommand make_attack(std::uint64_t session_id, std::uint64_t target_ac
   return command;
 }
 
+mir2::LogicCommand group_create(std::uint64_t session_id, std::string target_name) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::group_create;
+  command.session_id = session_id;
+  command.text = std::move(target_name);
+  return command;
+}
+
 mir2::CharacterRecord make_player(std::string name, std::uint8_t attack_mode,
-                                  std::uint8_t level = 20, std::int32_t pk_point = 0) {
+                                  std::uint8_t level = 20, std::int32_t pk_point = 0,
+                                  std::string guild_name = {}) {
   mir2::CharacterRecord character;
   character.account_id = "acct_" + name;
   character.character_name = std::move(name);
@@ -74,6 +83,7 @@ mir2::CharacterRecord make_player(std::string name, std::uint8_t attack_mode,
   character.ability.max_hand_weight = 100;
   character.attack_mode = attack_mode;
   character.pk_point = pk_point;
+  character.guild_name = std::move(guild_name);
   return character;
 }
 
@@ -91,17 +101,19 @@ struct DuelState {
 };
 
 DuelState make_duel(mir2::MapConfig map, std::uint8_t hero_mode, std::uint8_t hero_level = 20,
-                    std::int32_t rival_pk = 0, std::uint8_t rival_level = 20) {
+                    std::int32_t rival_pk = 0, std::uint8_t rival_level = 20,
+                    std::string hero_guild = {}, std::string rival_guild = {}) {
   mir2::HostConfig config;
   config.runtime.legacy_random_seed = 1;
   config.maps.push_back(std::move(map));
   DuelState state{std::make_unique<mir2::LogicRuntime>(config), 0};
   state.runtime->initialize();
   static_cast<void>(
-      state.runtime->route_logic_command(make_enter(301, make_player("Hero", hero_mode, hero_level))));
+      state.runtime->route_logic_command(make_enter(
+          301, make_player("Hero", hero_mode, hero_level, 0, std::move(hero_guild)))));
   static_cast<void>(state.runtime->tick());
   static_cast<void>(state.runtime->route_logic_command(
-      make_enter(302, make_player("Rival", 0, rival_level, rival_pk))));
+      make_enter(302, make_player("Rival", 0, rival_level, rival_pk, std::move(rival_guild)))));
   const auto rival_login = state.runtime->tick();
   const auto rival_map = find_packet(rival_login, mir2::kSmNewMap, 302);
   if (rival_map.has_value()) {
@@ -181,6 +193,29 @@ int main() {
   }
 
   {
+    auto state = make_duel(fight_pk_map(), 2);
+    static_cast<void>(state.runtime->route_logic_command(group_create(301, "Rival")));
+    static_cast<void>(advance(*state.runtime, 161));
+    static_cast<void>(state.runtime->route_logic_command(make_attack(301, state.rival_actor_id)));
+    const auto blocked = state.runtime->tick();
+    if (!has_notice(blocked, 301, "Group") ||
+        find_packet(blocked, mir2::kSmStruck, 302).has_value()) {
+      return fail(6);
+    }
+  }
+
+  {
+    auto state = make_duel(fight_pk_map(), 3, 20, 0, 20, "Warriors", "warriors");
+    static_cast<void>(advance(*state.runtime, 160));
+    static_cast<void>(state.runtime->route_logic_command(make_attack(301, state.rival_actor_id)));
+    const auto blocked = state.runtime->tick();
+    if (!has_notice(blocked, 301, "Guild") ||
+        find_packet(blocked, mir2::kSmStruck, 302).has_value()) {
+      return fail(7);
+    }
+  }
+
+  {
     auto map = pk_map();
     map.allow_pk = false;
     auto state = make_duel(map, 0);
@@ -188,7 +223,7 @@ int main() {
     static_cast<void>(state.runtime->route_logic_command(make_attack(301, state.rival_actor_id)));
     const auto blocked = state.runtime->tick();
     if (!has_notice(blocked, 301, "forbids PK")) {
-      return fail(6);
+      return fail(8);
     }
   }
 
@@ -200,7 +235,7 @@ int main() {
     static_cast<void>(state.runtime->route_logic_command(make_attack(301, state.rival_actor_id)));
     const auto blocked = state.runtime->tick();
     if (!has_notice(blocked, 301, "Safe zone")) {
-      return fail(7);
+      return fail(9);
     }
   }
 
@@ -210,7 +245,7 @@ int main() {
     static_cast<void>(state.runtime->route_logic_command(make_attack(301, state.rival_actor_id)));
     const auto blocked = state.runtime->tick();
     if (!has_notice(blocked, 301, "Newbie")) {
-      return fail(8);
+      return fail(10);
     }
   }
 
