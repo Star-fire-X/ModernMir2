@@ -2196,7 +2196,7 @@ void MapActor::remove_expired_ground_items(RuntimeDispatch& dispatch, std::uint6
     static_cast<void>(environment_.delete_from_map(
         item.x, item.y, LegacyMapObjectShape::item_object, item.id));
     remove_item_from_visibility(item.id, dispatch, now_ms,
-                                ItemVisibilityRemovalMode::delayed_all);
+                                ItemVisibilityRemovalMode::immediate_all);
     ground_items_.erase(item_it);
   }
 }
