@@ -2245,6 +2245,8 @@ RuntimeDispatch LogicRuntime::tick(std::uint64_t now_ms, LegacyRuntimeContext co
   }
 
   process_legacy_event_creates(combined, now_ms);
+  process_legacy_batch_move_requests(combined, now_ms);
+  process_legacy_batch_moves(combined, now_ms);
   process_legacy_random_space_moves(combined, now_ms);
   process_cross_map_mails(combined);
   process_legacy_time_recall_requests(combined, now_ms);
@@ -2321,6 +2323,136 @@ void LogicRuntime::process_legacy_event_creates(RuntimeDispatch& dispatch,
       static_cast<void>(legacy_event_manager_.enqueue_holy_curtain_group(
           std::move(group), now_ms));
     }
+  }
+}
+
+void LogicRuntime::execute_legacy_batch_move_request(const LegacyBatchMoveRequest& request,
+                                                     RuntimeDispatch& dispatch,
+                                                     std::uint64_t now_ms) {
+  auto trace = [&](std::string action, bool success, std::int32_t value,
+                   std::string label) {
+    LegacyRuntimeTrace runtime_trace;
+    runtime_trace.stage = "LegacyBatchMove";
+    runtime_trace.action = std::move(action);
+    runtime_trace.map_id = request.source_map_id;
+    runtime_trace.actor_id = request.actor_id;
+    runtime_trace.now_ms = now_ms;
+    runtime_trace.current_tick = current_tick_;
+    runtime_trace.value = value;
+    runtime_trace.success = success;
+    runtime_trace.label = std::move(label);
+    dispatch.legacy_traces.push_back(std::move(runtime_trace));
+  };
+
+  auto find_locator_by_actor = [&](std::uint64_t actor_id) -> const ActorLocator* {
+    for (const auto& [_, locator] : session_index_) {
+      if (locator.actor_id == actor_id) {
+        return &locator;
+      }
+    }
+    return nullptr;
+  };
+
+  auto map_exists = [&](const std::string& map_id) {
+    return maps_.find(map_id.empty() ? default_map_id_ : map_id) != maps_.end();
+  };
+
+  auto queue_random_move = [&](const ActorLocator& locator, std::string target_map_id) {
+    dispatch.legacy_random_space_moves.push_back(LegacyRandomSpaceMoveRequest{
+        locator.map_id, std::move(target_map_id), locator.actor_id, 0});
+  };
+
+  if (request.kind == LegacyBatchMoveRequestKind::random_actor_to_map) {
+    const auto* locator = find_locator_by_actor(request.actor_id);
+    if (locator == nullptr || !map_exists(request.target_map_id)) {
+      trace("batch_move_reject", false, 0, request.target_map_id);
+      return;
+    }
+    queue_random_move(*locator, request.target_map_id);
+    trace("batch_move", true, 1, request.target_map_id);
+    return;
+  }
+
+  if (request.kind == LegacyBatchMoveRequestKind::recall_map) {
+    const auto source_map_id =
+        request.source_map_id.empty() ? default_map_id_ : request.source_map_id;
+    const auto target_map_id =
+        request.target_map_id.empty() ? default_map_id_ : request.target_map_id;
+    if (maps_.find(source_map_id) == maps_.end() ||
+        maps_.find(target_map_id) == maps_.end()) {
+      trace("recall_map_reject", false, 0, request.source_map_id);
+      return;
+    }
+    std::int32_t count = 0;
+    for (const auto& [_, locator] : session_index_) {
+      if (resolve_map_id(locator.map_id) != source_map_id) {
+        continue;
+      }
+      queue_random_move(locator, target_map_id);
+      ++count;
+    }
+    trace("recall_map", true, count, request.source_map_id);
+    return;
+  }
+
+  if (request.kind == LegacyBatchMoveRequestKind::exchange_map) {
+    const auto* locator = find_locator_by_actor(request.actor_id);
+    const auto target_map_id =
+        request.target_map_id.empty() ? default_map_id_ : request.target_map_id;
+    if (locator == nullptr || maps_.find(target_map_id) == maps_.end()) {
+      trace("exchange_map_reject", false, 0, request.target_map_id);
+      return;
+    }
+    const ActorLocator* candidate = nullptr;
+    for (const auto& [_, other] : session_index_) {
+      if (other.actor_id != request.actor_id && resolve_map_id(other.map_id) == target_map_id) {
+        candidate = &other;
+        break;
+      }
+    }
+    queue_random_move(*locator, target_map_id);
+    std::int32_t moved = 1;
+    if (candidate != nullptr) {
+      queue_random_move(*candidate, resolve_map_id(locator->map_id));
+      moved = 2;
+    }
+    trace("exchange_map", true, moved, request.target_map_id);
+  }
+}
+
+void LogicRuntime::process_legacy_batch_move_requests(RuntimeDispatch& dispatch,
+                                                      std::uint64_t now_ms) {
+  while (!dispatch.legacy_batch_move_requests.empty()) {
+    auto requests = std::move(dispatch.legacy_batch_move_requests);
+    dispatch.legacy_batch_move_requests.clear();
+    for (auto& request : requests) {
+      if (request.delay_ticks > 1) {
+        LegacyRuntimeTrace trace;
+        trace.stage = "LegacyBatchMove";
+        trace.action = "schedule";
+        trace.map_id = request.source_map_id;
+        trace.actor_id = request.actor_id;
+        trace.now_ms = now_ms;
+        trace.current_tick = current_tick_;
+        trace.value = static_cast<std::int32_t>(std::min<std::uint64_t>(
+            request.delay_ticks,
+            static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())));
+        trace.success = true;
+        trace.label = request.target_map_id;
+        dispatch.legacy_traces.push_back(std::move(trace));
+        legacy_batch_move_wheel_.schedule(current_tick_, request.delay_ticks,
+                                          std::move(request));
+        continue;
+      }
+      execute_legacy_batch_move_request(request, dispatch, now_ms);
+    }
+  }
+}
+
+void LogicRuntime::process_legacy_batch_moves(RuntimeDispatch& dispatch,
+                                              std::uint64_t now_ms) {
+  for (const auto& request : legacy_batch_move_wheel_.pop_ready(current_tick_)) {
+    execute_legacy_batch_move_request(request, dispatch, now_ms);
   }
 }
 
@@ -3352,6 +3484,10 @@ void LogicRuntime::append_dispatch(RuntimeDispatch& target, RuntimeDispatch sour
       target.legacy_time_recall_requests.end(),
       std::make_move_iterator(source.legacy_time_recall_requests.begin()),
       std::make_move_iterator(source.legacy_time_recall_requests.end()));
+  target.legacy_batch_move_requests.insert(
+      target.legacy_batch_move_requests.end(),
+      std::make_move_iterator(source.legacy_batch_move_requests.begin()),
+      std::make_move_iterator(source.legacy_batch_move_requests.end()));
   target.legacy_traces.insert(target.legacy_traces.end(),
                               std::make_move_iterator(source.legacy_traces.begin()),
                               std::make_move_iterator(source.legacy_traces.end()));

@@ -62,6 +62,10 @@ void append_runtime_dispatch(RuntimeDispatch& target, RuntimeDispatch source) {
       target.legacy_time_recall_requests.end(),
       std::make_move_iterator(source.legacy_time_recall_requests.begin()),
       std::make_move_iterator(source.legacy_time_recall_requests.end()));
+  target.legacy_batch_move_requests.insert(
+      target.legacy_batch_move_requests.end(),
+      std::make_move_iterator(source.legacy_batch_move_requests.begin()),
+      std::make_move_iterator(source.legacy_batch_move_requests.end()));
   target.legacy_traces.insert(target.legacy_traces.end(),
                               std::make_move_iterator(source.legacy_traces.begin()),
                               std::make_move_iterator(source.legacy_traces.end()));
