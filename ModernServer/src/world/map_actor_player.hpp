@@ -76,8 +76,8 @@ void MapActor::dispatch_legacy_initialize(Player& player, RuntimeDispatch& dispa
   dispatch_login_sequence(dispatch, player, config_, item_configs_, magic_configs_,
                           area_state_mask(config_, player.x(), player.y()));
 
-  sync_player_visibility(player, dispatch, true);
-  sync_all_player_visibility(dispatch);
+  sync_player_visibility(player, dispatch, true, now_ms);
+  sync_all_player_visibility(dispatch, now_ms);
 
   dispatch.audit_events.push_back(
       AuditEvent{"world.initialize", player.character().account_id + ":" +
@@ -198,7 +198,7 @@ void MapActor::legacy_operate_player_running(std::uint64_t actor_id, Player& pla
 
   trace_player_operate(dispatch, player, "pre_periodic", current_tick, now_ms);
   sync_area_state(dispatch, config_, player);
-  sync_player_visibility(player, dispatch, false);
+  sync_player_visibility(player, dispatch, false, now_ms);
 
   trace_player_operate(dispatch, player, "operate_timers", current_tick, now_ms);
 
@@ -236,7 +236,7 @@ void MapActor::legacy_operate_player_running(std::uint64_t actor_id, Player& pla
                          static_cast<std::int32_t>(current_player->legacy_inbox_size()));
   }
   trace_player_operate(dispatch, *current_player, "post_operate", current_tick, now_ms);
-  sync_player_visibility(*current_player, dispatch, false);
+  sync_player_visibility(*current_player, dispatch, false, now_ms);
 
   if (current_player->is_dead() && current_player->death_time_ms() != 0 &&
       now_ms > current_player->death_time_ms() + kPlayerCorpseMs) {

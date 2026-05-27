@@ -177,6 +177,21 @@ class MapActor {
     std::unordered_set<std::uint64_t> actors{};
     std::unordered_set<std::uint64_t> items{};
     std::unordered_set<std::uint64_t> events{};
+    std::vector<std::uint64_t> actor_order{};
+    std::vector<std::uint64_t> item_order{};
+    std::vector<std::uint64_t> event_order{};
+    std::unordered_map<std::uint64_t, std::uint64_t> delayed_item_hides_until_ms{};
+  };
+
+  enum class ItemVisibilityRemovalMode {
+    immediate_all,
+    delayed_all,
+    immediate_single_session
+  };
+
+  struct LegacyRefTargetCache {
+    std::vector<std::uint64_t> watcher_ids{};
+    std::uint64_t collected_at_ms{0};
   };
 
   struct TradeOffer {
@@ -340,27 +355,36 @@ class MapActor {
                         std::int32_t damage = 0,
                         std::string label = {}) const;
   void schedule_actor(std::uint64_t current_tick, const GameObject& object);
-  void sync_player_visibility(Player& player, RuntimeDispatch& dispatch, bool force);
-  void sync_all_player_visibility(RuntimeDispatch& dispatch);
+  void sync_player_visibility(Player& player, RuntimeDispatch& dispatch, bool force,
+                              std::uint64_t now_ms);
+  void sync_all_player_visibility(RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void sync_visibility_after_actor_move(const GameObject& actor, std::int32_t old_x,
                                         std::int32_t old_y, std::int32_t new_x,
-                                        std::int32_t new_y, RuntimeDispatch& dispatch);
+                                        std::int32_t new_y, RuntimeDispatch& dispatch,
+                                        std::uint64_t now_ms);
   void sync_visibility_after_item_change(std::int32_t item_x, std::int32_t item_y,
                                          RuntimeDispatch& dispatch,
+                                         std::uint64_t now_ms,
                                          std::optional<std::uint64_t> refresh_item_id = std::nullopt);
   void sync_visibility_after_event_change(std::int32_t event_x, std::int32_t event_y,
-                                          RuntimeDispatch& dispatch);
+                                          RuntimeDispatch& dispatch, std::uint64_t now_ms);
   void force_refresh_after_same_map_transfer(Player& player, std::int32_t old_x,
                                              std::int32_t old_y, RuntimeDispatch& dispatch,
                                              std::uint64_t now_ms,
                                              std::uint16_t space_move_hide_ident = kSmSpaceMoveHide,
                                              std::uint16_t space_move_show_ident = kSmSpaceMoveShow);
   void remove_actor_from_visibility(std::uint64_t actor_id, RuntimeDispatch& dispatch);
-  void remove_item_from_visibility(std::uint64_t item_id, RuntimeDispatch& dispatch);
+  void remove_item_from_visibility(
+      std::uint64_t item_id, RuntimeDispatch& dispatch,
+      std::uint64_t now_ms,
+      ItemVisibilityRemovalMode mode = ItemVisibilityRemovalMode::immediate_all,
+      std::uint64_t immediate_session_id = 0);
   [[nodiscard]] std::vector<std::uint64_t> ordered_player_ids() const;
   [[nodiscard]] std::vector<std::uint64_t> ordered_visible_actor_ids(
       const Player& player) const;
   [[nodiscard]] std::vector<std::uint64_t> ordered_visible_item_ids(
+      const Player& player) const;
+  [[nodiscard]] std::vector<std::uint64_t> ordered_visible_event_ids(
       const Player& player) const;
   void refresh_ground_item_ownership(GroundItem& item, std::uint64_t now_ms);
   void remove_expired_ground_items(RuntimeDispatch& dispatch, std::uint64_t now_ms);
@@ -477,6 +501,8 @@ class MapActor {
                          std::uint64_t current_tick, std::uint64_t now_ms);
   bool trigger_startup_quest(Player& player, RuntimeDispatch& dispatch,
                              std::uint64_t current_tick, std::uint64_t now_ms);
+  [[nodiscard]] std::vector<std::uint64_t> legacy_ref_target_player_ids(
+      const GameObject& origin, std::uint64_t now_ms);
 
   MapConfig config_{};
   LogicBudgetConfig budgets_{};
@@ -507,6 +533,7 @@ class MapActor {
   std::unordered_map<std::uint64_t, std::pair<std::int32_t, std::int32_t>> event_objects_{};
   std::unordered_map<std::uint64_t, LegacyEventType> event_object_types_{};
   std::unordered_map<std::uint64_t, PlayerVisibility> visibility_{};
+  std::unordered_map<std::uint64_t, LegacyRefTargetCache> legacy_ref_target_cache_{};
   std::shared_ptr<std::array<std::int32_t, 10>> script_global_params_{};
   std::shared_ptr<LegacyNameListRepository> script_name_lists_{};
   std::uint64_t next_ground_item_id_{1};

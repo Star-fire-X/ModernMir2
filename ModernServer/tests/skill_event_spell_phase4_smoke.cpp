@@ -481,6 +481,7 @@ int main() {
     assert(located->first == "0");
     assert(has_packet(dispatch, mir2::kSmSpaceMoveHide2));
     assert(has_packet(dispatch, mir2::kSmSpaceMoveShow2));
+    assert(!has_packet(dispatch, mir2::kSmTurn));
   }
 
   {

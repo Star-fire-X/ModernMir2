@@ -285,6 +285,13 @@ enum class LegacyChatDeliveryKind {
   system
 };
 
+enum class LegacySpawnReason {
+  login,
+  map_transfer,
+  space_move,
+  space_move_show2
+};
+
 struct LegacyBuffTransferState {
   std::int32_t kind{0};
   std::uint64_t expire_tick{0};
@@ -361,7 +368,7 @@ struct ActorMail {
   std::int32_t monster_target_x{0};
   std::int32_t monster_target_y{0};
   std::uint8_t legacy_name_color{255};
-  bool legacy_space_move_show2{false};
+  LegacySpawnReason legacy_spawn_reason{LegacySpawnReason::login};
   std::uint32_t respawn_ms{0};
   std::uint8_t dir{0};
   std::uint8_t retry_count{0};

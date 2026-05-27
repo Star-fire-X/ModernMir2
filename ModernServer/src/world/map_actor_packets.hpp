@@ -185,12 +185,14 @@ LegacyClientMagic make_client_magic(
 }
 
 LegacyPacket make_new_map_packet(std::uint64_t session_id, const Player& player,
-                                 const MapConfig& map_config) {
+                                 const MapConfig& map_config,
+                                 std::int32_t x, std::int32_t y,
+                                 std::uint16_t darkness) {
   return make_legacy_game_packet(
       session_id, 0, 0,
       make_default_message(kSmNewMap, static_cast<std::int32_t>(player.id()),
-                           static_cast<std::uint16_t>(player.x()),
-                           static_cast<std::uint16_t>(player.y()), 0),
+                           static_cast<std::uint16_t>(x),
+                           static_cast<std::uint16_t>(y), darkness),
       legacy_encode_text(map_config.id));
 }
 
@@ -434,10 +436,14 @@ LegacyPacket make_clear_objects_packet(std::uint64_t session_id) {
                                  make_default_message(kSmClearObjects, 0, 0, 0, 0));
 }
 
-LegacyPacket make_change_map_packet(std::uint64_t session_id, const std::string& map_id) {
+LegacyPacket make_change_map_packet(std::uint64_t session_id, std::string map_id,
+                                    std::int32_t x, std::int32_t y,
+                                    std::uint16_t darkness) {
   return make_legacy_game_packet(session_id, 0, 0,
-                                 make_default_message(kSmChangeMap, 0, 0, 0, 0),
-                                 legacy_encode_text(map_id));
+                                 make_default_message(kSmChangeMap, 0,
+                                                      static_cast<std::uint16_t>(x),
+                                                      static_cast<std::uint16_t>(y), darkness),
+                                 legacy_encode_text(std::move(map_id)));
 }
 
 LegacyPacket make_spell_packet(
@@ -585,7 +591,8 @@ LegacyPacket make_char_status_changed_packet(std::uint64_t session_id, const Pla
   return make_legacy_game_packet(
       session_id, 0, 0,
       make_default_message(kSmCharStatusChanged, static_cast<std::int32_t>(player.id()),
-                           low_word(status), high_word(status), 0));
+                           low_word(status), high_word(status),
+                           low_word(actor_hit_speed(player))));
 }
 
 LegacyPacket make_weight_changed_packet(std::uint64_t session_id, const CharacterRecord& character) {
@@ -895,6 +902,16 @@ LegacyPacket make_death_packet(std::uint64_t session_id, const GameObject& targe
       legacy_encode_buffer(&desc, sizeof(desc)));
 }
 
+LegacyPacket make_skeleton_packet(std::uint64_t session_id, const GameObject& target) {
+  const auto desc = make_char_desc(target);
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(legacy::kSmSkeleton, static_cast<std::int32_t>(target.id()),
+                           static_cast<std::uint16_t>(target.x()),
+                           static_cast<std::uint16_t>(target.y()), actor_dir(target)),
+      legacy_encode_buffer(&desc, sizeof(desc)));
+}
+
 LegacyPacket make_space_move_hide2_packet(std::uint64_t session_id, const GameObject& object) {
   return make_legacy_game_packet(
       session_id, 0, 0,
@@ -978,7 +995,10 @@ void dispatch_login_sequence(RuntimeDispatch& dispatch, const Player& player,
                              const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
                              const std::unordered_map<std::int32_t, MagicConfig>& magic_configs,
                              std::int32_t area_state) {
-  queue_packet(dispatch, player.session_id(), make_new_map_packet(player.session_id(), player, map_config));
+  const auto darkness = legacy_map_darkness(map_config);
+  queue_packet(dispatch, player.session_id(),
+               make_new_map_packet(player.session_id(), player, map_config, player.x(), player.y(),
+                                   darkness));
   queue_packet(dispatch, player.session_id(), make_logon_packet(player.session_id(), player));
   queue_packet(dispatch, player.session_id(),
                make_username_packet(player.session_id(), player.id(), player.character().character_name,

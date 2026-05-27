@@ -379,6 +379,7 @@ class Player : public GameObject {
   [[nodiscard]] bool can_spend_gold(std::int32_t amount) const;
   [[nodiscard]] std::int32_t accuracy_point() const { return accuracy_point_; }
   [[nodiscard]] std::int32_t speed_point() const { return speed_point_; }
+  [[nodiscard]] std::int32_t legacy_hit_speed() const { return legacy_hit_speed_; }
   [[nodiscard]] const LegacyEquipmentSpecials& legacy_equipment_specials() const {
     return legacy_equipment_specials_;
   }

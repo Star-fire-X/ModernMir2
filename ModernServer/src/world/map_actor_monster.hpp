@@ -389,7 +389,7 @@ void MapActor::restore_saved_slaves(Player& player, RuntimeDispatch& dispatch,
       if (auto* refreshed_master = find_player(master_id); refreshed_master != nullptr) {
         refreshed_master->add_slave_actor_id(slave_id);
       }
-      sync_all_player_visibility(dispatch);
+      sync_all_player_visibility(dispatch, now_ms);
       add_legacy_trace(dispatch, "LegacySlave", "restore", *spawn, current_tick,
                        now_ms, true, static_cast<std::int32_t>(spawn->actor_id & 0x7fffffff),
                        record.slave_exp_level, record.name);
@@ -468,7 +468,8 @@ void MapActor::recall_owned_slaves_to_master(Player& player, RuntimeDispatch& di
       context.items = &item_configs_;
       context.magics = &magic_configs_;
       slave->on_mail(move_mail, context);
-      sync_visibility_after_actor_move(*slave, old_x, old_y, target_x, target_y, dispatch);
+      sync_visibility_after_actor_move(*slave, old_x, old_y, target_x, target_y, dispatch,
+                                       now_ms);
     }
   }
 }
@@ -752,7 +753,7 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
         existing->second.owner_actor_id = 0;
         existing->second.ownership_expire_ms = 0;
       }
-      sync_visibility_after_item_change(existing->second.x, existing->second.y, dispatch,
+      sync_visibility_after_item_change(existing->second.x, existing->second.y, dispatch, now_ms,
                                         existing->second.id);
     } else {
       const auto item_id = ground_item.id;
@@ -760,7 +761,7 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
       const auto item_y = ground_item.y;
       ++next_ground_item_id_;
       ground_items_[ground_item.id] = std::move(ground_item);
-      sync_visibility_after_item_change(item_x, item_y, dispatch, item_id);
+      sync_visibility_after_item_change(item_x, item_y, dispatch, now_ms, item_id);
     }
     return true;
   };
@@ -825,7 +826,7 @@ void MapActor::finalize_monster_ghost(std::uint64_t monster_id, RuntimeDispatch&
   }
   remove_actor_from_visibility(monster_id, dispatch);
   objects_.erase(monster_id);
-  sync_all_player_visibility(dispatch);
+  sync_all_player_visibility(dispatch, now_ms);
 }
 
 std::size_t MapActor::legacy_dup_count(std::int32_t x, std::int32_t y) const {
@@ -880,14 +881,16 @@ bool MapActor::legacy_try_monster_walk(Monster& monster, std::uint8_t dir,
   context.magics = &magic_configs_;
   monster.on_mail(move_mail, context);
 
-  for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
-    if (!is_legacy_visible_to(watcher, monster)) {
-      return;
+  for (const auto watcher_id : legacy_ref_target_player_ids(monster, now_ms)) {
+    const auto* watcher = find_player(watcher_id);
+    if (watcher == nullptr || watcher->id() == monster.id()) {
+      continue;
     }
-  queue_packet(dispatch, watcher.session_id(),
-                 make_turn_like_packet(watcher.session_id(), kSmWalk, monster, false));
-  });
-  sync_visibility_after_actor_move(monster, old_x, old_y, monster.x(), monster.y(), dispatch);
+    queue_packet(dispatch, watcher->session_id(),
+                 make_turn_like_packet(watcher->session_id(), kSmWalk, monster, false));
+  }
+  sync_visibility_after_actor_move(monster, old_x, old_y, monster.x(), monster.y(), dispatch,
+                                   now_ms);
   return true;
 }
 
@@ -1765,7 +1768,7 @@ bool MapActor::legacy_monster_special_run(Monster& monster, RuntimeDispatch& dis
       monster.set_appear_time_ms(now_ms);
       monster.select_target(target->id(), now_ms);
       refresh_moving_object_state(monster, now_ms);
-      sync_all_player_visibility(dispatch);
+      sync_all_player_visibility(dispatch, now_ms);
       ActorMail trace_mail;
       trace_mail.kind = ActorMailKind::turn;
       trace_mail.map_id = config_.id;
