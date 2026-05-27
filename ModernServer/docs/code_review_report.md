@@ -331,7 +331,7 @@ Delphi 的做法是使用不同的 TList 分别管理：`HumansList`, `MonsterLi
 | **P0** | PK/善恶系统 | 仅有 `allow_pk` 标志位 | `TBaseObject.PKLevel` |
 | **P0** | 组队系统 | 完全缺失 | `TGroup` |
 | **P0** | 交易系统 | 玩家间直接交易缺失 | `TUserMsg.Deal` |
-| **P1** | 脚本引擎 | 所有 NPC 行为硬编码在 C++ switch 中 | `TMarketScript` |
+| **P1** | NPC 脚本兼容 | 已有 legacy NPC 脚本解析和同步执行路径，缺口集中在命令语义、解析细节、golden 覆盖和现网脚本兼容 | `TMarketScript` |
 | **P1** | 行会战/沙巴克攻城完整逻辑 | 行会管理框架已有但战争机制不完整 | `TGuild` / `TCastle` |
 | **P1** | 任务/事件系统 | `EventObject` 类为空壳 | `TEventManager` |
 | **P1** | 九宫格视野广播优化 | 当前全图广播 | `SendRefMsg` range 参数 |
@@ -373,8 +373,8 @@ Delphi 的做法是使用不同的 TList 分别管理：`HumansList`, `MonsterLi
 |---|------|---------|
 | 11 | 移除 `LogicCommandKind` → `ActorMailKind` 双重枚举转换 | `world/logic_runtime.cpp`, `world/map_actor.cpp` |
 | 12 | 统一 `apply_runtime_castle_defaults` 到单一位置 | `world/logic_runtime.cpp`, `services/world_service.cpp` |
-| 13 | 对话框模板移到 Lua 或 JSON 配置 | `config/models.hpp`, `world/map_actor.cpp` |
-| 14 | 实现基于 NPC 脚本文件的脚本引擎 | `config/npc_scripts/market_def/*.txt` |
+| 13 | 补齐 NPC 脚本命令兼容 golden | `tests/golden/npc_script_pr1`, `world/map_actor_npc.hpp` |
+| 14 | 收敛 legacy NPC 脚本解析兼容 | `config/npc_scripts/market_def/*.txt`, `config/config_loader.cpp` |
 | 15 | 添加组队系统 | 新增 `world/party_system.*` |
 | 16 | 修复 MonPlayer 走和跑的间隔 | `world/game_object.cpp:333-334`（当前走和跑均为 250ms） |
 
@@ -426,7 +426,7 @@ WorldService::run() {
 
 ### 8.2 中期 — 优化可维护性
 
-1. **引入 Lua 脚本引擎**用于 NPC 对话框逻辑。将已有 `config/npc_scripts/market_def/` 目录下的 `.txt` 文件格式（`[@main]` 段落格式）解析为 Lua 表，在 C++ 层面只保留核心战斗/移动/物品逻辑。
+1. **继续收敛 legacy NPC 脚本运行时**。当前服务端已经支持脚本文件加载、段落解析和同步执行；中期重点应放在 Delphi 命令语义、解析状态机、golden 夹具和现网脚本回归，而不是另起一套 Lua/JSON 对话 DSL。
 
 2. **将重复的辅助函数提取到独立文件**：
    - `world/item_utils.hpp` — `item_name`, `find_item_config`, `packed_min/max` 等
