@@ -512,19 +512,21 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, success ? 1 : 0, condition_line);
       return success;
     }
-    if (command_name == "CHECKNAMELIST" || command_name == "CHECK_DELETE_NAMELIST" ||
-        command_name == "CHECK_DELETE_IDLIST") {
+    if (command_name == "CHECKNAMELIST" || command_name == "CHECKIDLIST" ||
+        command_name == "CHECK_DELETE_NAMELIST" || command_name == "CHECK_DELETE_IDLIST") {
       const auto key = list_key(tokens.empty() ? std::string{} : tokens[0]);
       const auto subject = tokens.size() > 1 ? util::lower_copy(tokens[1])
-                                             : util::lower_copy(command_name == "CHECK_DELETE_IDLIST"
-                                                                    ? player.character().account_id
-                                                                    : player.character().character_name);
-      auto& list = script_name_lists_[key];
-      const auto found = list.find(subject) != list.end();
-      if (found && command_name != "CHECKNAMELIST") {
-        list.erase(subject);
+                                             : util::lower_copy(command_name == "CHECKIDLIST" ||
+                                                                       command_name == "CHECK_DELETE_IDLIST"
+                                                                   ? player.character().account_id
+                                                                   : player.character().character_name);
+      const auto found = script_name_lists_->contains(key, subject);
+      std::size_t list_size = script_name_lists_->size(key);
+      if (found && (command_name == "CHECK_DELETE_NAMELIST" ||
+                    command_name == "CHECK_DELETE_IDLIST")) {
+        list_size = script_name_lists_->remove(key, subject);
       }
-      trace("condition", found, static_cast<std::int32_t>(list.size()), condition_line);
+      trace("condition", found, static_cast<std::int32_t>(list_size), condition_line);
       return found;
     }
     if (command_name == "IFGETDAILYQUEST") {
@@ -764,17 +766,19 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("variable", ok, value, action_line);
       return std::nullopt;
     }
-    if (command_name == "ADDNAMELIST" || command_name == "DELNAMELIST") {
+    if (command_name == "ADDNAMELIST" || command_name == "DELNAMELIST" ||
+        command_name == "ADDIDLIST" || command_name == "DELIDLIST") {
       const auto key = list_key(tokens.empty() ? std::string{} : tokens[0]);
       const auto subject = tokens.size() > 1 ? util::lower_copy(tokens[1])
-                                             : util::lower_copy(player.character().character_name);
-      auto& list = script_name_lists_[key];
-      if (command_name == "ADDNAMELIST") {
-        list.insert(subject);
-      } else {
-        list.erase(subject);
-      }
-      trace("namelist", true, static_cast<std::int32_t>(list.size()), action_line);
+                                             : util::lower_copy(command_name == "ADDIDLIST" ||
+                                                                       command_name == "DELIDLIST"
+                                                                   ? player.character().account_id
+                                                                   : player.character().character_name);
+      const auto list_size =
+          command_name == "ADDNAMELIST" || command_name == "ADDIDLIST"
+              ? script_name_lists_->add(key, subject)
+              : script_name_lists_->remove(key, subject);
+      trace("namelist", true, static_cast<std::int32_t>(list_size), action_line);
       return std::nullopt;
     }
     if (command_name == "SETDAILYQUEST" || command_name == "RANDOMSETDAILYQUEST") {
@@ -1218,6 +1222,29 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     queue_save_character(dispatch, player);
   }
 
+  return true;
+}
+
+bool MapActor::trigger_startup_quest(Player& player, RuntimeDispatch& dispatch,
+                                     std::uint64_t current_tick, std::uint64_t now_ms) {
+  if (startup_quest_dialog_sections_.empty()) {
+    return false;
+  }
+
+  Npc quest_npc(kStartupQuestNpcObjectId, "StartupQuest", config_.id, player.x(), player.y(),
+                "none", {}, startup_quest_dialog_sections_);
+  ActorMail trace_mail;
+  trace_mail.kind = ActorMailKind::merchant_select;
+  trace_mail.map_id = config_.id;
+  trace_mail.actor_id = player.id();
+  trace_mail.session_id = player.session_id();
+  trace_mail.target_actor_id = quest_npc.id();
+  trace_mail.payload = "StartupQuest";
+  add_legacy_trace(dispatch, "LegacyScript", "startupquest_trigger", trace_mail, current_tick,
+                   now_ms, true, 0, 0, "enter");
+  LegacyScriptExecutionContext script_context;
+  static_cast<void>(legacy_execute_npc_script(player, quest_npc, "@main", dispatch,
+                                              current_tick, now_ms, script_context, 0));
   return true;
 }
 

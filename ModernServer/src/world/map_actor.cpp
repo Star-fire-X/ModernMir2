@@ -1314,7 +1314,9 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
                    MakeIndexAllocator* make_index_allocator,
                    std::string black_stone_name,
                    bool legacy_approval_mode,
-                   std::shared_ptr<std::array<std::int32_t, 10>> script_global_params)
+                   std::shared_ptr<std::array<std::int32_t, 10>> script_global_params,
+                   std::shared_ptr<LegacyNameListRepository> script_name_lists,
+                   std::vector<NpcDialogSectionConfig> startup_quest_dialog_sections)
     : config_(std::move(config)),
       budgets_(std::move(budgets)),
       item_configs_(std::move(item_configs)),
@@ -1325,10 +1327,15 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
       black_stone_name_(std::move(black_stone_name)),
       legacy_approval_mode_(legacy_approval_mode),
       castle_dialog_context_(std::move(castle_dialog_context)),
+      startup_quest_dialog_sections_(std::move(startup_quest_dialog_sections)),
       make_index_allocator_(make_index_allocator),
-      script_global_params_(std::move(script_global_params)) {
+      script_global_params_(std::move(script_global_params)),
+      script_name_lists_(std::move(script_name_lists)) {
   if (script_global_params_ == nullptr) {
     script_global_params_ = std::make_shared<std::array<std::int32_t, 10>>();
+  }
+  if (script_name_lists_ == nullptr) {
+    script_name_lists_ = std::make_shared<LegacyNameListRepository>();
   }
   movement_map_ = legacy::decode_map_file(config_.source_map);
   if (movement_map_ != nullptr) {
@@ -1665,7 +1672,8 @@ std::optional<CharacterRecord> MapActor::persistent_snapshot_player(std::uint64_
 RuntimeDispatch MapActor::legacy_spawn_player(const ActorMail& mail,
                                               std::uint64_t current_tick,
                                               std::uint64_t now_ms,
-                                              bool fast_initialize) {
+                                              bool fast_initialize,
+                                              bool run_startup_quest) {
   RuntimeDispatch dispatch;
   if (mail.kind != ActorMailKind::spawn_player) {
     return dispatch;
@@ -1695,6 +1703,9 @@ RuntimeDispatch MapActor::legacy_spawn_player(const ActorMail& mail,
       queue_packet(dispatch, player->session_id(),
                    make_space_move_show2_packet(player->session_id(), *player));
     }
+  }
+  if (run_startup_quest) {
+    static_cast<void>(trigger_startup_quest(*player, dispatch, current_tick, now_ms));
   }
   static_cast<void>(
       trigger_map_quest(*player, {}, {}, false, "enter", dispatch, current_tick, now_ms));

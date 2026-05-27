@@ -79,9 +79,9 @@ int main() {
   npc.y = 10;
   npc.service = "none";
   npc.dialog_sections.push_back(
-      {"@recall", "#IF\\CHECKLEVEL 1\\#ACT\\SET [1] 1\\TIMERECALL 1\\MAPMOVE Q001 5 5"});
+      {"@recall", "#IF\nCHECKLEVEL 1\n#ACT\nSET [1] 1\nTIMERECALL 1\nMAPMOVE Q001 5 5"});
   npc.dialog_sections.push_back(
-      {"@cancel", "#IF\\CHECKLEVEL 1\\#ACT\\TIMERECALL 1\\BREAKTIMERECALL\\MAPMOVE Q001 6 6"});
+      {"@cancel", "#IF\nCHECKLEVEL 1\n#ACT\nTIMERECALL 1\nBREAKTIMERECALL\nMAPMOVE Q001 6 6"});
   config.npcs.push_back(std::move(npc));
 
   mir2::MapQuestConfig enter_quest;
@@ -90,7 +90,7 @@ int main() {
   enter_quest.value = 1;
   enter_quest.qfile = "enter_recall.txt";
   enter_quest.dialog_sections.push_back(
-      {"@main", "#IF\\CHECKLEVEL 1\\#ACT\\TIMERECALL 0\\SET [1] 0\\MAPMOVE Q001 7 7"});
+      {"@main", "#IF\nCHECKLEVEL 1\n#ACT\nTIMERECALL 0\nSET [1] 0\nMAPMOVE Q001 7 7"});
   config.map_quests.push_back(std::move(enter_quest));
 
   mir2::LogicRuntime runtime(config);

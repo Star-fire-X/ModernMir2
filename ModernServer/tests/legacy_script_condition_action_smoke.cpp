@@ -110,39 +110,39 @@ int main() {
   npc.service = "none";
   npc.dialog_sections.push_back(
       {"@main",
-       "#IF\\CHECKLEVEL 10\\CHECKGOLD 50\\CHECKITEM Apple 1\\RANDOM 10\\#ACT\\"
-       "#TAKE Gold 50\\#TAKE Apple 1\\#GIVE Gold 75\\#GIVE Apple 1\\#SAY Reward\\"
+       "#IF\nCHECKLEVEL 10\nCHECKGOLD 50\nCHECKITEM Apple 1\nRANDOM 10\n#ACT\n"
+       "#TAKE Gold 50\n#TAKE Apple 1\n#GIVE Gold 75\n#GIVE Apple 1\n#SAY Reward\n"
        "#ELSESAY Failed"});
   npc.dialog_sections.push_back(
       {"@fail",
-       "#IF\\CHECKLEVEL 99\\#ACT\\#SAY ShouldNotShow\\#ELSESAY Failed"});
+       "#IF\nCHECKLEVEL 99\n#ACT\n#SAY ShouldNotShow\n#ELSESAY Failed"});
   npc.dialog_sections.push_back(
-      {"@bagok", "#IF\\CHECKBAGGAGE Apple\\#SAY BagOk\\#ELSESAY BagFail"});
+      {"@bagok", "#IF\nCHECKBAGGAGE Apple\n#SAY BagOk\n#ELSESAY BagFail"});
   npc.dialog_sections.push_back(
-      {"@bagfail", "#IF\\CHECKBAGGAGE Anvil\\#SAY BagOk\\#ELSESAY BagFail"});
+      {"@bagfail", "#IF\nCHECKBAGGAGE Anvil\n#SAY BagOk\n#ELSESAY BagFail"});
   npc.dialog_sections.push_back(
-      {"@daily", "#IF\\IFGETDAILYQUEST\\#SAY DailyFree\\#ELSESAY DailyBusy"});
+      {"@daily", "#IF\nIFGETDAILYQUEST\n#SAY DailyFree\n#ELSESAY DailyBusy"});
   npc.dialog_sections.push_back(
-      {"@setdaily", "#IF\\CHECKLEVEL 1\\#ACT\\SETDAILYQUEST 2\\GOTO @daily"});
+      {"@setdaily", "#IF\nCHECKLEVEL 1\n#ACT\nSETDAILYQUEST 2\nGOTO @daily"});
   npc.dialog_sections.push_back(
-      {"@dura", "#IF\\CHECKDURAEVA Apple 1\\#SAY DuraOk\\#ELSESAY DuraFail"});
+      {"@dura", "#IF\nCHECKDURAEVA Apple 1\n#SAY DuraOk\n#ELSESAY DuraFail"});
   npc.dialog_sections.push_back(
       {"@elesact",
-       "#IF\\CHECKLEVEL 99\\#ACT\\#SAY ShouldNotShow\\#ELESACT\\SAY ElesActOk"});
+       "#IF\nCHECKLEVEL 99\n#ACT\n#SAY ShouldNotShow\n#ELESACT\nSAY ElesActOk"});
   npc.dialog_sections.push_back(
       {"@multiproc",
-       "#IF\\CHECKLEVEL 1\\#SAY Before <$STR(P0)>\\#ACT\\MOV P0 7\\#IF\\EQUAL P0 7\\"
-       "#SAY After <$STR(P0)>\\#ACT\\SET [4] 1"});
+       "#IF\nCHECKLEVEL 1\n#SAY Before <$STR(P0)>\n#ACT\nMOV P0 7\n#IF\nEQUAL P0 7\n"
+       "#SAY After <$STR(P0)>\n#ACT\nSET [4] 1"});
   npc.dialog_sections.push_back(
       {"@breakmulti",
-       "#IF\\CHECKLEVEL 1\\#SAY Keep\\#ACT\\BREAK\\#IF\\CHECKLEVEL 1\\#SAY Hidden\\"
-       "#ACT\\SET [5] 1"});
+       "#IF\nCHECKLEVEL 1\n#SAY Keep\n#ACT\nBREAK\n#IF\nCHECKLEVEL 1\n#SAY Hidden\n"
+       "#ACT\nSET [5] 1"});
   npc.dialog_sections.push_back(
-      {"@closesay", "#IF\\CHECKLEVEL 1\\#SAY ShouldNotSend\\#ACT\\CLOSE"});
+      {"@closesay", "#IF\nCHECKLEVEL 1\n#SAY ShouldNotSend\n#ACT\nCLOSE"});
   npc.dialog_sections.push_back(
-      {"@luckok", "#IF\\CHECKLUCKYPOINT 2\\#SAY LuckyOk\\#ELSESAY LuckyFail"});
+      {"@luckok", "#IF\nCHECKLUCKYPOINT 2\n#SAY LuckyOk\n#ELSESAY LuckyFail"});
   npc.dialog_sections.push_back(
-      {"@luckfail", "#IF\\CHECKLUCKYPOINT 3\\#SAY LuckyOk\\#ELSESAY LuckyFail"});
+      {"@luckfail", "#IF\nCHECKLUCKYPOINT 3\n#SAY LuckyOk\n#ELSESAY LuckyFail"});
   config.npcs.push_back(npc);
 
   mir2::LogicRuntime runtime(config);

@@ -26,6 +26,7 @@ constexpr std::int32_t kLegacyMonsterGoldDropMaxChunks = 17;
 constexpr std::uint64_t kDoorAutoCloseMs = 5000;
 constexpr std::uint64_t kStaticGateObjectBase = 0x7000000000000000ULL;
 constexpr std::uint64_t kMapQuestNpcObjectBase = 0x7100000000000000ULL;
+constexpr std::uint64_t kStartupQuestNpcObjectId = 0x71ffff0000000000ULL;
 constexpr std::size_t kNpcDialogPageSize = 6;
 constexpr std::int32_t kPoisonDecHealth = 0;
 constexpr std::int32_t kLegacyPoisonStone = 5;
@@ -1253,9 +1254,9 @@ std::vector<std::string> split_legacy_script_lines(std::string_view text) {
   std::vector<std::string> lines;
   std::string current;
   for (const auto ch : text) {
-    if (ch == '\\' || ch == '\n' || ch == '\r') {
+    if (ch == '\n' || ch == '\r') {
       auto line = util::trim(current);
-      if (!line.empty() && !util::starts_with(line, ";")) {
+      if (!line.empty() && !util::starts_with(line, ";") && !util::starts_with(line, "/")) {
         lines.push_back(std::move(line));
       }
       current.clear();
@@ -1264,7 +1265,7 @@ std::vector<std::string> split_legacy_script_lines(std::string_view text) {
     current.push_back(ch);
   }
   auto line = util::trim(current);
-  if (!line.empty() && !util::starts_with(line, ";")) {
+  if (!line.empty() && !util::starts_with(line, ";") && !util::starts_with(line, "/")) {
     lines.push_back(std::move(line));
   }
   return lines;
@@ -1311,7 +1312,7 @@ bool is_legacy_script_condition(std::string_view command_name) {
       "CHECKJOB", "CHECKITEM", "CHECKITEMW", "CHECKGOLD", "ISTAKEITEM", "CHECKDURA",
       "CHECKDURAEVA", "DAYOFWEEK", "HOUR", "MIN", "CHECKPKPOINT", "CHECKLUCKYPOINT",
       "CHECKMONMAP", "CHECKMONAREA", "CHECKHUM", "CHECKBAGGAGE", "CHECKNAMELIST",
-      "CHECK_DELETE_NAMELIST", "CHECK_DELETE_IDLIST", "IFGETDAILYQUEST",
+      "CHECKIDLIST", "CHECK_DELETE_NAMELIST", "CHECK_DELETE_IDLIST", "IFGETDAILYQUEST",
       "CHECKDAILYQUEST", "RANDOMEX", "EQUAL", "LARGE", "SMALL"};
   return std::find(std::begin(kConditions), std::end(kConditions), command_name) !=
          std::end(kConditions);
