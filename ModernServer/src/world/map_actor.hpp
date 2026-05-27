@@ -454,12 +454,20 @@ class MapActor {
                                                  std::string command,
                                                  std::uint64_t now_ms,
                                                  std::uint64_t current_tick);
+  struct LegacyScriptExecutionContext {
+    std::optional<std::string> last_taken_item_name{};
+    std::optional<LegacyUserItem> last_checked_item{};
+    std::optional<std::string> last_checked_item_name{};
+    bool end_quest{false};
+  };
   bool legacy_execute_npc_script(Player& player, const Npc& npc, std::string action,
                                  RuntimeDispatch& dispatch, std::uint64_t current_tick,
                                  std::uint64_t now_ms);
   bool legacy_execute_npc_script(Player& player, const Npc& npc, std::string action,
                                  RuntimeDispatch& dispatch, std::uint64_t current_tick,
-                                 std::uint64_t now_ms, std::int32_t depth);
+                                 std::uint64_t now_ms,
+                                 LegacyScriptExecutionContext& script_context,
+                                 std::int32_t depth);
   bool trigger_map_quest(Player& player, std::string monster_name, std::string item_name,
                          bool group_call, std::string source, RuntimeDispatch& dispatch,
                          std::uint64_t current_tick, std::uint64_t now_ms);

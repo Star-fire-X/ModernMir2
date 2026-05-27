@@ -37,8 +37,9 @@
     },
     {
       "name": "istakeitem_current_checkitem_baseline",
-      "current_behavior": "ISTAKEITEM is currently equivalent to CHECKITEM and does not consume or bind to a previously taken item.",
+      "current_behavior": "ISTAKEITEM checks the item name most recently removed by TAKE/TAKEW within the same script execution context.",
       "expected_packets": ["SM_TURN", "SM_MERCHANTSAY"],
+      "expected_trace": {"action": "condition", "success": false, "value": 0, "label": "ISTAKEITEM Apple 1"},
       "expected_state": {"apple_items": 1}
     },
     {

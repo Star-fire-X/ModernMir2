@@ -1570,6 +1570,44 @@ std::int32_t count_player_equipped_items_by_name(
   return count;
 }
 
+std::vector<std::size_t> legacy_equipment_slots_for_alias(std::string_view alias_text) {
+  const auto alias = script_upper_copy(strip_legacy_mark_token(std::string(alias_text)));
+  if (alias == "DRESS" || alias == "ARMOUR" || alias == "ARMOR") {
+    return {kEquipDress};
+  }
+  if (alias == "WEAPON") {
+    return {kEquipWeapon};
+  }
+  if (alias == "RIGHTHAND" || alias == "RIGHT" || alias == "TORCH") {
+    return {kEquipRightHand};
+  }
+  if (alias == "NECKLACE" || alias == "NECK") {
+    return {kEquipNecklace};
+  }
+  if (alias == "HELMET" || alias == "HELM") {
+    return {kEquipHelmet};
+  }
+  if (alias == "ARMRING" || alias == "BRACELET") {
+    return {kEquipArmRingLeft, kEquipArmRingRight};
+  }
+  if (alias == "RING") {
+    return {kEquipRingLeft, kEquipRingRight};
+  }
+  if (alias == "BUJUK") {
+    return {kEquipBujuk};
+  }
+  if (alias == "BELT") {
+    return {kEquipBelt};
+  }
+  if (alias == "BOOTS" || alias == "BOOT") {
+    return {kEquipBoots};
+  }
+  if (alias == "CHARM") {
+    return {kEquipCharm};
+  }
+  return {};
+}
+
 std::string json_escape(std::string_view text) {
   std::string escaped;
   escaped.reserve(text.size());

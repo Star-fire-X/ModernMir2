@@ -5,14 +5,16 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
                                          RuntimeDispatch& dispatch,
                                          std::uint64_t current_tick,
                                          std::uint64_t now_ms) {
+  LegacyScriptExecutionContext script_context;
   return legacy_execute_npc_script(player, npc, std::move(action), dispatch, current_tick,
-                                   now_ms, 0);
+                                   now_ms, script_context, 0);
 }
 
 bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::string action,
                                          RuntimeDispatch& dispatch,
                                          std::uint64_t current_tick,
                                          std::uint64_t now_ms,
+                                         LegacyScriptExecutionContext& script_context,
                                          std::int32_t depth) {
   action = util::trim(std::move(action));
   if (action.empty()) {
@@ -253,15 +255,51 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, value, condition_line);
       return success;
     }
-    if (command_name == "CHECKITEM" || command_name == "ISTAKEITEM") {
+    if (command_name == "CHECKITEM") {
       const auto target = parse_script_amount_target(payload);
       const auto count = count_player_bag_items_by_name(player, target.target, item_configs_);
       const auto success = count >= target.amount;
+      script_context.last_checked_item.reset();
+      script_context.last_checked_item_name.reset();
+      if (success) {
+        const auto wanted = util::lower_copy(util::trim(target.target));
+        for (const auto& item : player.character().bag_items) {
+          if (!is_empty(item) && util::lower_copy(item_name(item, item_configs_)) == wanted) {
+            script_context.last_checked_item = item;
+            script_context.last_checked_item_name = item_name(item, item_configs_);
+            break;
+          }
+        }
+      }
       trace("condition", success, count, condition_line);
+      return success;
+    }
+    if (command_name == "ISTAKEITEM") {
+      const auto target = parse_script_amount_target(payload);
+      const auto wanted = util::lower_copy(util::trim(target.target));
+      const auto taken = script_context.last_taken_item_name.has_value()
+                             ? util::lower_copy(util::trim(*script_context.last_taken_item_name))
+                             : std::string{};
+      const auto success = !wanted.empty() && wanted == taken;
+      const auto value = success ? 1 : 0;
+      trace("condition", success, value, condition_line);
       return success;
     }
     if (command_name == "CHECKITEMW") {
       const auto target = parse_script_amount_target(payload);
+      const auto slots = legacy_equipment_slots_for_alias(target.target);
+      if (!slots.empty()) {
+        std::int32_t count = 0;
+        for (const auto slot : slots) {
+          const auto* item = player.equipped_item(slot);
+          if (item != nullptr && !is_empty(*item)) {
+            ++count;
+          }
+        }
+        const auto success = count >= target.amount;
+        trace("condition", success, count, condition_line);
+        return success;
+      }
       const auto count = count_player_equipped_items_by_name(player, target.target, item_configs_);
       const auto success = count >= target.amount;
       trace("condition", success, count, condition_line);
@@ -648,8 +686,14 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace(util::lower_copy(command_name), true, channel, message);
       return std::nullopt;
     }
-    if (command_name == "BREAK" || command_name == "ENDQUEST") {
-      trace(util::lower_copy(command_name), true, 0, action_line);
+    if (command_name == "BREAK") {
+      trace("break", true, 0, action_line);
+      stop_script = true;
+      return std::nullopt;
+    }
+    if (command_name == "ENDQUEST") {
+      script_context.end_quest = true;
+      trace("endquest", true, 0, action_line);
       stop_script = true;
       return std::nullopt;
     }
@@ -820,19 +864,35 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
         removed.push_back(*item);
       }
       trace("take_item", true, target.amount, action_line);
+      if (!removed.empty()) {
+        script_context.last_taken_item_name = item_name(removed.back(), item_configs_);
+      }
       script_state_mutated = true;
       queue_inventory_refresh();
       return std::nullopt;
     }
     if (command_name == "TAKECHECKITEM") {
       const auto target = parse_script_amount_target(payload);
-      if (target.amount > 0 && count_bag_items_by_name(target.target) < target.amount) {
-        trace("takecheckitem_reject", false, count_bag_items_by_name(target.target), action_line);
+      if (target.amount <= 0) {
+        trace("takecheckitem", true, 0, action_line);
+        return std::nullopt;
+      }
+      if (!script_context.last_checked_item.has_value()) {
+        trace("takecheckitem_reject", false, 0, action_line);
         queue_inventory_refresh();
         return std::nullopt;
       }
       std::vector<LegacyUserItem> removed;
-      for (std::int32_t index = 0; index < target.amount; ++index) {
+      auto checked_item = player.remove_bag_item(
+          script_context.last_checked_item->make_index,
+          script_context.last_checked_item_name.value_or(std::string{}), item_configs_);
+      if (!checked_item.has_value()) {
+        trace("takecheckitem_reject", false, 0, action_line);
+        queue_inventory_refresh();
+        return std::nullopt;
+      }
+      removed.push_back(*checked_item);
+      for (std::int32_t index = 1; index < target.amount; ++index) {
         auto item = remove_bag_item_by_name(target.target);
         if (!item.has_value()) {
           for (const auto& rollback_item : removed) {
@@ -851,6 +911,38 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     }
     if (command_name == "TAKEW") {
       const auto target = parse_script_amount_target(payload);
+      const auto slots = legacy_equipment_slots_for_alias(target.target);
+      if (!slots.empty()) {
+        std::int32_t equipped_count = 0;
+        for (const auto slot : slots) {
+          const auto* item = player.equipped_item(slot);
+          if (item != nullptr && !is_empty(*item)) {
+            ++equipped_count;
+          }
+        }
+        if (equipped_count < target.amount) {
+          trace("takew_reject", false, equipped_count, action_line);
+          return std::nullopt;
+        }
+        std::int32_t removed_count = 0;
+        for (const auto slot : slots) {
+          auto* item = player.equipped_item_mutable(slot);
+          if (item == nullptr || is_empty(*item)) {
+            continue;
+          }
+          script_context.last_taken_item_name = item_name(*item, item_configs_);
+          *item = LegacyUserItem{};
+          ++removed_count;
+          if (removed_count >= target.amount) {
+            break;
+          }
+        }
+        const auto success = removed_count >= target.amount;
+        script_state_mutated = script_state_mutated || success;
+        queue_inventory_refresh();
+        trace("takew", success, removed_count, action_line);
+        return std::nullopt;
+      }
       const auto wanted = util::lower_copy(util::trim(target.target));
       if (count_player_equipped_items_by_name(player, target.target, item_configs_) < target.amount) {
         trace("takew_reject", false, 0, action_line);
@@ -864,6 +956,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
             util::lower_copy(item_name(*item, item_configs_)) != wanted) {
           continue;
         }
+        script_context.last_taken_item_name = item_name(*item, item_configs_);
         *item = LegacyUserItem{};
         ++removed_count;
       }
@@ -1109,7 +1202,8 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       if (maybe_goto.has_value()) {
         flush_pending_say();
         static_cast<void>(legacy_execute_npc_script(player, npc, *maybe_goto, dispatch,
-                                                   current_tick, now_ms, depth + 1));
+                                                   current_tick, now_ms, script_context,
+                                                   depth + 1));
         stop_script = true;
         break;
       }
@@ -1185,9 +1279,13 @@ bool MapActor::trigger_map_quest(Player& player, std::string monster_name, std::
     trace_mail.payload = "MapQuest:" + quest.qfile;
     add_legacy_trace(dispatch, "LegacyScript", "mapquest_trigger", trace_mail, current_tick,
                      now_ms, true, static_cast<std::int32_t>(index), 0, source);
-    static_cast<void>(
-        legacy_execute_npc_script(player, quest_npc, "@main", dispatch, current_tick, now_ms));
+    LegacyScriptExecutionContext script_context;
+    static_cast<void>(legacy_execute_npc_script(player, quest_npc, "@main", dispatch,
+                                                current_tick, now_ms, script_context, 0));
     triggered = true;
+    if (script_context.end_quest) {
+      break;
+    }
   }
   return triggered;
 }
