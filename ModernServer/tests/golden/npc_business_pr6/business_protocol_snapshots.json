@@ -1,0 +1,52 @@
+{
+  "name": "npc_business_pr6_protocol_snapshots",
+  "packets": [
+    {
+      "name": "merchant_dialog",
+      "ident": "SM_MERCHANTSAY",
+      "recog": 1,
+      "body_text": "Trader/<Buy/@buy>\\<Sell/@sell>\\<Repair/@repair>",
+      "wire_hex": "233c4c3c3c3c44483e3c3c3c3c3c3c3c3c5143455d5542516e476f6d3e5953606b4c4245715a4f75584b41496157426c6b4c43496157426c7a533f6d4e55533d5d5653446b4c43456158424165585f7421"
+    },
+    {
+      "name": "goods_list",
+      "ident": "SM_SENDGOODSLIST",
+      "recog": 1,
+      "param": 2,
+      "body_text": "Potion/0/60/2/Bronze Sword/1/180/1/",
+      "wire_hex": "233c4c3c3c3c44503e3c5c3c3c3c3c3c3c504279705652796a476f3c6b495f3c6b485e793e5862796a5a62505c5073596b58624c6b484e786d4a3f3c6b484e7821"
+    },
+    {
+      "name": "restocked_goods_list",
+      "ident": "SM_SENDGOODSLIST",
+      "recog": 1,
+      "param": 2,
+      "body_text": "Bronze Sword/1/180/1/Potion/0/66/2/",
+      "wire_hex": "233c4c3c3c3c44503e3c5c3c3c3c3c3c3c4c63456b576365614441497357734560476f406b484f5c6c476f406b504279705652796a476f3c6b495f546b485e7821"
+    },
+    {
+      "name": "repair_ok",
+      "ident": "SM_USERREPAIRITEM_OK",
+      "recog": 490,
+      "param": 987,
+      "tag": 987,
+      "wire_hex": "23765c403c3c45703e726c4b573c6c3c3c21"
+    },
+    {
+      "name": "storage_list",
+      "ident": "SM_SAVEITEMLIST",
+      "recog": 1,
+      "series": 1,
+      "item_make_index": 3003,
+      "wire_hex": "233c4c3c3c3c483c3e3c3c3c3c3c3c403c3f4149705773455d5572505c5062616a556c3c3c415c403d3c3c3c3c3c3c483c763c483c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c413c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c4768473c3c3f643c7a5c3f2f21"
+    }
+  ],
+  "state": {
+    "normal_repair_gold": 490,
+    "normal_repair_dura": 987,
+    "normal_repair_dura_max": 987,
+    "special_repair_cost": 30,
+    "weapon_upgrade_ready_delay_ms": 3600000,
+    "weapon_upgrade_expire_after_ready_ms": 259200000
+  }
+}
