@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "artifact": "legacy_combat.combat_sequence_cases",
+  "baseline_commit": "d7dcc0d7af37a91b2f1abaa9e1f741abc28d6f61",
+  "source_trace_root": "docs/pr1_delphi_audit/golden_traces",
+  "status": "source_evidence_frozen_for_stacked_prs",
+  "cases": [
+    {
+      "name": "hitxy_cadence_window",
+      "owner_pr": "PR-2",
+      "source_trace": "attack_basic.json",
+      "delphi_rule": "GetTickCount - LatestHitTime >= 900 - HitSpeed*60; early attempts increment HitTimeOverCount/HitTimeOverSum and remain allowed while <4 and <6.",
+      "current_cpp_status": "parity_gap",
+      "required_coverage": ["HitSpeed 0", "HitSpeed 5", "HitSpeed 10", "HitSpeed 12", "HitSpeed 14", "HitSpeed 15", "HitSpeed 16", "HitSpeed -1", "SpeedHackTimerOverCount > 8"]
+    },
+    {
+      "name": "spellxy_cooldown",
+      "owner_pr": "PR-6",
+      "source_trace": "spell_failure.json",
+      "delphi_rule": "DoSpell deducts MP and broadcasts SM_SPELL before SpellNow branch failures decide effect/fire packets.",
+      "current_cpp_status": "partly_covered_by_skill_phase_smoke",
+      "required_coverage": ["LatestSpellTime", "LatestSpellDelay", "SM_SPELL before branch failure", "SM_MAGICFIRE_FAIL nofire path"]
+    },
+    {
+      "name": "attack_longhit_dual_target_chain",
+      "owner_pr": "PR-4",
+      "source_trace": "attack_longhit.json",
+      "delphi_rule": "SwordLongAttack applies the range-2 DirectAttack path and the normal front-target path when both targets exist.",
+      "current_cpp_status": "parity_gap",
+      "required_coverage": ["LongFrontBlocker", "LongBehindBlocker", "main target delay 200ms", "secondary DirectAttack delay 500ms"]
+    },
+    {
+      "name": "attack_widehit_order",
+      "owner_pr": "PR-4",
+      "source_trace": "attack_widehit.json",
+      "delphi_rule": "SwordWideAttack uses Delphi valarr order and no damage falloff.",
+      "current_cpp_status": "needs_snapshot",
+      "required_coverage": ["target order", "damage order", "delay 500ms for DirectAttack targets"]
+    },
+    {
+      "name": "attack_crosshit_order",
+      "owner_pr": "PR-4",
+      "source_trace": "attack_crosshit.json",
+      "delphi_rule": "CrossHit uses the frozen Delphi target order and applies 80% damage for PvP targets.",
+      "current_cpp_status": "needs_snapshot",
+      "required_coverage": ["target order", "PvP 80 percent", "delay 500ms for DirectAttack targets"]
+    },
+    {
+      "name": "pk_target_rules",
+      "owner_pr": "PR-5",
+      "source_trace": "protocol_sequence.md",
+      "delphi_rule": "IsProperTarget and CheckAttackRule2 decide HAM_ALL/HAM_PEACE/HAM_GROUP/HAM_GUILD/HAM_PKATTACK plus safety and ownership guards.",
+      "current_cpp_status": "partly_covered_with_parity_gaps",
+      "required_coverage": ["HAM_ALL", "HAM_PEACE", "HAM_GROUP", "HAM_GUILD", "HAM_PKATTACK", "safe zone", "newbie protection", "3s map-change protection", "pet inherits owner PK mode"]
+    },
+    {
+      "name": "struck_delay_200_500",
+      "owner_pr": "PR-4",
+      "source_trace": "struck_delay_player_vs_monster.json",
+      "delphi_rule": "Main-target visible SM_STRUCK is delayed 200ms; DirectAttack visible SM_STRUCK is delayed 500ms; monster internal RM_STRUCK is immediate and not socket-visible.",
+      "current_cpp_status": "parity_gap",
+      "required_coverage": ["SM_HIT immediate", "main SM_STRUCK 200ms", "DirectAttack SM_STRUCK 500ms", "monster internal immediate reaction"]
+    },
+    {
+      "name": "death_revival_packet_order",
+      "owner_pr": "PR-6",
+      "source_trace": "death_player.json",
+      "delphi_rule": "Damage, revival decision, death/drop settlement, and SM_STRUCK/SM_DEATH/SM_NOWDEATH order must be fixed from Delphi traces.",
+      "current_cpp_status": "needs_snapshot",
+      "required_coverage": ["player lethal hit", "revival ring", "SM_DEATH", "SM_NOWDEATH", "monster death drop"]
+    },
+    {
+      "name": "hit_rng_sword4_heavy_big",
+      "owner_pr": "PR-3",
+      "source_trace": "attack_basic.json",
+      "delphi_rule": "Hit check is Random(SpeedPoint) < AccuracyPoint; skill 4 participates in sword-skill chains only if Delphi evidence does; HeavyHit/BigHit multipliers require direct evidence.",
+      "current_cpp_status": "parity_gap",
+      "required_coverage": ["AccuracyPoint 0", "SpeedPoint 0", "off-by-one hit roll", "skill 4", "HeavyHit", "BigHit", "Luck random order"]
+    }
+  ]
+}

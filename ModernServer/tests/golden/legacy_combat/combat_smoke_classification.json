@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "artifact": "legacy_combat.combat_smoke_classification",
+  "baseline_commit": "d7dcc0d7af37a91b2f1abaa9e1f741abc28d6f61",
+  "classifications": [
+    {
+      "test": "combat_smoke.cpp",
+      "role": "current_stability_smoke",
+      "reason": "General runtime combat regression coverage; not a Delphi parity proof for cadence, target chain, or delayed struck timing."
+    },
+    {
+      "test": "safe_zone_legacy_smoke.cpp",
+      "role": "current_stability_smoke",
+      "reason": "Mainline safe-zone blocking baseline is already absorbed and should remain stable."
+    },
+    {
+      "test": "monster_home_leash_smoke.cpp",
+      "role": "current_stability_smoke",
+      "reason": "Mainline monster home-leash baseline is already absorbed and should remain stable."
+    },
+    {
+      "test": "monster_special_race_smoke.cpp",
+      "role": "current_stability_smoke",
+      "reason": "Mainline monster special-race behavior remains in scope only for regression protection."
+    },
+    {
+      "test": "monster_attack_legacy_smoke.cpp",
+      "role": "current_stability_smoke",
+      "reason": "Protects current monster attack timing and importer speed-floor behavior; monster ATTACK_SPD >= 200 is not a combat bug in this stack."
+    },
+    {
+      "test": "legacy_action_cadence_smoke.cpp",
+      "role": "delphi_parity_smoke",
+      "owner_pr": "PR-2",
+      "contains_known_parity_gap": true,
+      "known_gap": "Player legacy_server_attack_interval_ms still locks HitSpeed >= 12 to 200ms; PR-2 changes this to Delphi HitXY window semantics."
+    },
+    {
+      "test": "legacy_combat_resolution_smoke.cpp",
+      "role": "delphi_parity_smoke",
+      "owner_pr": "PR-3/PR-4/PR-6",
+      "contains_known_parity_gap": true,
+      "known_gap": "Current trace order covers stable behavior but does not yet prove Hit RNG boundaries, dual-target long-hit, or death/revival packet timing."
+    },
+    {
+      "test": "legacy_combat_formula_smoke.cpp",
+      "role": "delphi_parity_smoke",
+      "owner_pr": "PR-3",
+      "contains_known_parity_gap": true,
+      "known_gap": "PR-3 owns Random(SpeedPoint) < AccuracyPoint, skill 4 inclusion, HeavyHit/BigHit cleanup, and random-call order."
+    },
+    {
+      "test": "attack_protocol_golden_smoke.cpp",
+      "role": "delphi_parity_smoke",
+      "owner_pr": "PR-4/PR-6",
+      "contains_known_parity_gap": true,
+      "known_gap": "Protocol snapshots must be extended to distinguish immediate action packets from 200ms/500ms delayed struck packets."
+    },
+    {
+      "test": "pk_attack_mode_rules_smoke.cpp",
+      "role": "delphi_parity_smoke",
+      "owner_pr": "PR-5",
+      "contains_known_parity_gap": true,
+      "known_gap": "PR-5 owns Delphi IsProperTarget + CheckAttackRule2 parity, including pet owner inheritance and map-change protection."
+    },
+    {
+      "test": "player_death_revive_smoke.cpp",
+      "role": "delphi_parity_smoke",
+      "owner_pr": "PR-6",
+      "contains_known_parity_gap": true,
+      "known_gap": "PR-6 owns revival decision and SM_STRUCK/SM_DEATH/SM_NOWDEATH ordering."
+    }
+  ]
+}
