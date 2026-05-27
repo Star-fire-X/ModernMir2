@@ -80,7 +80,8 @@ bool check_smoke_classification(const std::string& classification) {
                           "\"test\": \"monster_attack_legacy_smoke.cpp\"",
                           "\"test\": \"legacy_action_cadence_smoke.cpp\"",
                           "\"contains_known_parity_gap\": true",
-                          "Player legacy_server_attack_interval_ms still locks HitSpeed >= 12 to 200ms",
+                          "\"contains_known_parity_gap\": false",
+                          "Player HitXY cadence now uses Delphi window semantics",
                           "monster ATTACK_SPD >= 200 is not a combat bug",
                       });
 }

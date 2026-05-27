@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <iterator>
@@ -74,7 +75,7 @@ bool has_trace(const mir2::RuntimeDispatch& dispatch, std::string_view stage,
                      });
 }
 
-mir2::ItemConfig speed_weapon_config(std::int32_t id) {
+mir2::ItemConfig speed_weapon_config(std::int32_t id, std::int32_t hit_speed = 2) {
   mir2::ItemConfig item;
   item.id = id;
   item.name = "Speed Sword";
@@ -82,7 +83,8 @@ mir2::ItemConfig speed_weapon_config(std::int32_t id) {
   item.equip_slot = static_cast<std::int32_t>(mir2::kEquipWeapon);
   item.weight = 1;
   item.dura_max = 1000;
-  item.mac = mir2::make_word(0, 12);
+  const auto mac_high = hit_speed > 0 ? hit_speed + 10 : -hit_speed;
+  item.mac = mir2::make_word(0, static_cast<std::uint8_t>(mac_high));
   item.dc = mir2::make_word(4, 4);
   return item;
 }
@@ -197,7 +199,7 @@ void enter_player(mir2::LogicRuntime& runtime, std::uint64_t session_id,
   assert(count_packet_ident(login, mir2::kSmNewMap) == 1);
 }
 
-void assert_budget_batch_rejects_second_attack() {
+void assert_budget_batch_window_allows_second_attack() {
   auto config = base_config();
   config.spawns.push_back(target("BatchTarget", 10, 9));
   mir2::LogicRuntime runtime(config);
@@ -208,11 +210,11 @@ void assert_budget_batch_rejects_second_attack() {
   static_cast<void>(runtime.route_logic_command(attack(101, 10, 9)));
   const auto dispatch = tick_player(runtime, 2000, 2);
 
-  assert(count_ack(dispatch, 101, true) == 1);
-  assert(count_ack(dispatch, 101, false) == 1);
+  assert(count_ack(dispatch, 101, true) == 2);
+  assert(count_ack(dispatch, 101, false) == 0);
   assert(has_trace(dispatch, "LegacyCombat", "attack_broadcast"));
   assert(has_trace(dispatch, "LegacyCombat", "struck"));
-  assert(has_trace(dispatch, "LegacyCombat", "attack_cooldown_reject"));
+  assert(!has_trace(dispatch, "LegacyCombat", "attack_cooldown_reject"));
 }
 
 void assert_base_interval_allows_later_attack() {
@@ -228,7 +230,8 @@ void assert_base_interval_allows_later_attack() {
 
   static_cast<void>(runtime.route_logic_command(attack(102, 10, 9)));
   dispatch = tick_player(runtime, 2800);
-  assert(count_ack(dispatch, 102, false) == 1);
+  assert(count_ack(dispatch, 102, true) == 1);
+  assert(has_trace(dispatch, "LegacyCombat", "struck"));
 
   static_cast<void>(runtime.route_logic_command(attack(102, 10, 9)));
   dispatch = tick_player(runtime, 3700);
@@ -259,9 +262,72 @@ void assert_server_attack_interval_formula() {
   assert(mir2::legacy_server_attack_interval_ms(0) == 900);
   assert(mir2::legacy_server_attack_interval_ms(5) == 600);
   assert(mir2::legacy_server_attack_interval_ms(10) == 300);
-  assert(mir2::legacy_server_attack_interval_ms(12) == 200);
-  assert(mir2::legacy_server_attack_interval_ms(99) == 200);
+  assert(mir2::legacy_server_attack_interval_ms(12) == 180);
+  assert(mir2::legacy_server_attack_interval_ms(14) == 60);
+  assert(mir2::legacy_server_attack_interval_ms(15) == 0);
+  assert(mir2::legacy_server_attack_interval_ms(16) == -60);
   assert(mir2::legacy_server_attack_interval_ms(-1) == 960);
+}
+
+void assert_hit_speed_window_cases() {
+  struct HitSpeedCase {
+    std::int32_t hit_speed;
+    std::int32_t interval_ms;
+  };
+  constexpr std::array<HitSpeedCase, 8> kCases{{
+      {0, 900},
+      {5, 600},
+      {10, 300},
+      {12, 180},
+      {14, 60},
+      {15, 0},
+      {16, -60},
+      {-1, 960},
+  }};
+
+  for (std::size_t index = 0; index < kCases.size(); ++index) {
+    const auto test_case = kCases[index];
+    auto config = base_config();
+    config.spawns.push_back(target("WindowTarget", 10, 9, 5000));
+    if (test_case.hit_speed != 0) {
+      config.items.push_back(speed_weapon_config(5, test_case.hit_speed));
+    }
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+
+    auto hero = character("WindowHero" + std::to_string(index));
+    if (test_case.hit_speed != 0) {
+      hero.equipped_items[mir2::kEquipWeapon] = user_item(5001, 5);
+    }
+    const auto session_id = 200 + index;
+    enter_player(runtime, session_id, std::move(hero));
+
+    static_cast<void>(runtime.route_logic_command(attack(session_id, 10, 9)));
+    auto dispatch = tick_player(runtime, 2000);
+    assert(count_ack(dispatch, session_id, true) == 1);
+
+    if (test_case.interval_ms <= 0) {
+      static_cast<void>(runtime.route_logic_command(attack(session_id, 10, 9)));
+      dispatch = tick_player(runtime, 2000);
+      assert(count_ack(dispatch, session_id, true) == 1);
+      assert(count_ack(dispatch, session_id, false) == 0);
+      continue;
+    }
+
+    const auto early_ms = 2000 + static_cast<std::uint64_t>(test_case.interval_ms - 1);
+    mir2::RuntimeDispatch combined;
+    for (int attempt = 0; attempt < 4; ++attempt) {
+      static_cast<void>(runtime.route_logic_command(attack(session_id, 10, 9)));
+      append(combined, tick_player(runtime, early_ms));
+    }
+    assert(count_ack(combined, session_id, true) == 3);
+    assert(count_ack(combined, session_id, false) == 1);
+    assert(has_trace(combined, "LegacyCombat", "attack_cooldown_reject"));
+
+    static_cast<void>(runtime.route_logic_command(attack(session_id, 10, 9)));
+    dispatch = tick_player(runtime, early_ms + static_cast<std::uint64_t>(test_case.interval_ms));
+    assert(count_ack(dispatch, session_id, true) == 1);
+  }
 }
 
 void assert_no_target_attack_consumes_cooldown() {
@@ -276,15 +342,14 @@ void assert_no_target_attack_consumes_cooldown() {
   assert(count_ack(dispatch, 106, true) == 1);
   assert(has_trace(dispatch, "LegacyCombat", "no_target"));
 
-  static_cast<void>(runtime.route_logic_command(attack(106, 10, 9)));
-  dispatch = tick_player(runtime, 2800);
-  assert(count_ack(dispatch, 106, false) == 1);
-  assert(has_trace(dispatch, "LegacyCombat", "attack_cooldown_reject"));
-
-  static_cast<void>(runtime.route_logic_command(attack(106, 10, 9)));
-  dispatch = tick_player(runtime, 3700);
-  assert(count_ack(dispatch, 106, true) == 1);
-  assert(has_trace(dispatch, "LegacyCombat", "struck"));
+  mir2::RuntimeDispatch combined;
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    static_cast<void>(runtime.route_logic_command(attack(106, 10, 9)));
+    append(combined, tick_player(runtime, 2010 + static_cast<std::uint64_t>(attempt) * 10));
+  }
+  assert(count_ack(combined, 106, true) == 3);
+  assert(count_ack(combined, 106, false) == 1);
+  assert(has_trace(combined, "LegacyCombat", "attack_cooldown_reject"));
 }
 
 void assert_repeated_fast_attack_disconnects() {
@@ -299,10 +364,11 @@ void assert_repeated_fast_attack_disconnects() {
   assert(count_ack(dispatch, 104, true) == 1);
 
   mir2::RuntimeDispatch combined;
-  for (int index = 0; index < 9; ++index) {
+  for (int index = 0; index < 12; ++index) {
     static_cast<void>(runtime.route_logic_command(attack(104, 10, 9)));
     append(combined, tick_player(runtime, 2010 + static_cast<std::uint64_t>(index) * 10));
   }
+  assert(count_ack(combined, 104, true) == 3);
   assert(count_ack(combined, 104, false) == 9);
   assert(has_force_disconnect(combined, 104, "speed_hack_attack"));
 }
@@ -327,13 +393,19 @@ void assert_rejected_attack_keeps_toggled_sword_skill() {
   dispatch = tick_player(runtime, 2100);
   assert(has_trace(dispatch, "LegacySkill", "sword_toggle"));
 
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    static_cast<void>(runtime.route_logic_command(attack(105, 1, 1)));
+    dispatch = tick_player(runtime, 2110 + static_cast<std::uint64_t>(attempt) * 10);
+    assert(count_ack(dispatch, 105, true) == 1);
+  }
+
   static_cast<void>(runtime.route_logic_command(attack(105, 10, 8, mir2::kCmLongHit)));
-  dispatch = tick_player(runtime, 2110);
+  dispatch = tick_player(runtime, 2140);
   assert(count_ack(dispatch, 105, false) == 1);
   assert(count_packet_ident(dispatch, mir2::legacy::kSmLongHit) == 0);
 
   static_cast<void>(runtime.route_logic_command(attack(105, 10, 8, mir2::kCmLongHit)));
-  dispatch = tick_player(runtime, 3010);
+  dispatch = tick_player(runtime, 3030);
   assert(count_ack(dispatch, 105, true) == 1);
   assert(count_packet_ident(dispatch, mir2::legacy::kSmLongHit) == 1);
   assert(has_trace(dispatch, "LegacyCombat", "struck"));
@@ -344,7 +416,8 @@ void assert_rejected_attack_keeps_toggled_sword_skill() {
 
 int main() {
   assert_server_attack_interval_formula();
-  assert_budget_batch_rejects_second_attack();
+  assert_hit_speed_window_cases();
+  assert_budget_batch_window_allows_second_attack();
   assert_base_interval_allows_later_attack();
   assert_equipped_hit_speed_reduces_interval();
   assert_no_target_attack_consumes_cooldown();

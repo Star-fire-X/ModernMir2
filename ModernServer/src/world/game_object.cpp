@@ -934,22 +934,31 @@ LegacySpellThrottleResult Player::begin_spell_attempt(std::uint64_t now_ms,
 
 LegacyAttackThrottleResult Player::begin_attack_attempt(std::uint64_t now_ms) {
   const auto interval_ms = legacy_server_attack_interval_ms(legacy_hit_speed_);
-  if (latest_hit_time_ms_ != 0 && now_ms - latest_hit_time_ms_ < interval_ms) {
+  const auto elapsed_ms =
+      now_ms > latest_hit_time_ms_ ? now_ms - latest_hit_time_ms_ : 0;
+  if (latest_hit_time_ms_ != 0 && interval_ms > 0 &&
+      elapsed_ms < static_cast<std::uint64_t>(interval_ms)) {
     ++hit_time_over_count_;
+    if (hit_time_over_count_ >= 4) {
+      ++hit_speed_hack_timer_over_count_;
+      return LegacyAttackThrottleResult{false, hit_speed_hack_timer_over_count_ > 8,
+                                        hit_time_over_count_};
+    }
     ++hit_time_over_sum_;
-    latest_hit_time_ms_ = now_ms;
-    ++hit_speed_hack_timer_over_count_;
-    return LegacyAttackThrottleResult{false, hit_speed_hack_timer_over_count_ > 8,
-                                      hit_time_over_count_};
-  }
-
-  hit_time_over_count_ = 0;
-  if (hit_time_over_sum_ > 0) {
-    --hit_time_over_sum_;
+    if (hit_time_over_sum_ >= 6) {
+      ++hit_speed_hack_timer_over_count_;
+      return LegacyAttackThrottleResult{false, hit_speed_hack_timer_over_count_ > 8,
+                                        hit_time_over_count_};
+    }
+  } else {
+    hit_time_over_count_ = 0;
+    if (hit_time_over_sum_ > 0) {
+      --hit_time_over_sum_;
+    }
   }
 
   latest_hit_time_ms_ = now_ms;
-  return {};
+  return LegacyAttackThrottleResult{true, false, hit_time_over_count_};
 }
 
 void Player::reset_move_throttle() {
