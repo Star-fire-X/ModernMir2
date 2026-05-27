@@ -26,7 +26,7 @@
       "owner_pr": "PR-4",
       "source_trace": "attack_longhit.json",
       "delphi_rule": "SwordLongAttack applies the range-2 DirectAttack path and the normal front-target path when both targets exist.",
-      "current_cpp_status": "parity_gap",
+      "current_cpp_status": "implemented_pr4",
       "required_coverage": ["LongFrontBlocker", "LongBehindBlocker", "main target delay 200ms", "secondary DirectAttack delay 500ms"]
     },
     {
@@ -34,7 +34,7 @@
       "owner_pr": "PR-4",
       "source_trace": "attack_widehit.json",
       "delphi_rule": "SwordWideAttack uses Delphi valarr order and no damage falloff.",
-      "current_cpp_status": "needs_snapshot",
+      "current_cpp_status": "implemented_pr4",
       "required_coverage": ["target order", "damage order", "delay 500ms for DirectAttack targets"]
     },
     {
@@ -42,7 +42,7 @@
       "owner_pr": "PR-4",
       "source_trace": "attack_crosshit.json",
       "delphi_rule": "CrossHit uses the frozen Delphi target order and applies 80% damage for PvP targets.",
-      "current_cpp_status": "needs_snapshot",
+      "current_cpp_status": "implemented_pr4",
       "required_coverage": ["target order", "PvP 80 percent", "delay 500ms for DirectAttack targets"]
     },
     {
@@ -58,7 +58,7 @@
       "owner_pr": "PR-4",
       "source_trace": "struck_delay_player_vs_monster.json",
       "delphi_rule": "Main-target visible SM_STRUCK is delayed 200ms; DirectAttack visible SM_STRUCK is delayed 500ms; monster internal RM_STRUCK is immediate and not socket-visible.",
-      "current_cpp_status": "parity_gap",
+      "current_cpp_status": "implemented_pr4",
       "required_coverage": ["SM_HIT immediate", "main SM_STRUCK 200ms", "DirectAttack SM_STRUCK 500ms", "monster internal immediate reaction"]
     },
     {

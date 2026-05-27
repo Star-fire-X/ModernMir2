@@ -512,25 +512,20 @@ bool target_in_attack_line(const GameObject& attacker, const GameObject& target,
 std::vector<GameObject*> collect_wide_hit_targets(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     const Player& attacker, const MapConfig& map_config, std::uint64_t now_ms) {
+  static constexpr std::array<std::uint8_t, 3> kWideDirs{{7, 1, 2}};
   const auto dir = actor_dir(attacker);
-  const auto [fx, fy] = direction_delta(dir);
-  const auto [lx, ly] = direction_delta(static_cast<std::uint8_t>((dir + 7) % 8));
-  const auto [rx, ry] = direction_delta(static_cast<std::uint8_t>((dir + 1) % 8));
-  const std::array<std::pair<std::int32_t, std::int32_t>, 3> cells{{
-      {attacker.x() + fx, attacker.y() + fy},
-      {attacker.x() + lx, attacker.y() + ly},
-      {attacker.x() + rx, attacker.y() + ry},
-  }};
-
   std::vector<GameObject*> targets;
-  targets.reserve(cells.size());
-  for (const auto& cell : cells) {
+  targets.reserve(kWideDirs.size());
+  for (const auto offset : kWideDirs) {
+    const auto [dx, dy] = direction_delta(static_cast<std::uint8_t>((dir + offset) % 8));
+    const auto tx = attacker.x() + dx;
+    const auto ty = attacker.y() + dy;
     GameObject* target = nullptr;
     for (auto& [actor_id, object] : objects) {
       if (actor_id == attacker.id() || !is_attackable_target(*object)) {
         continue;
       }
-      if (object->x() == cell.first && object->y() == cell.second) {
+      if (object->x() == tx && object->y() == ty) {
         target = object.get();
         break;
       }

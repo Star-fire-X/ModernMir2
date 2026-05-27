@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "protocol/legacy_game_codec.hpp"
@@ -168,6 +169,18 @@ std::int32_t count_packet_ident_delay(const mir2::RuntimeDispatch& dispatch,
       }));
 }
 
+std::vector<std::pair<std::int32_t, std::int32_t>> packet_recogs_and_delays(
+    const mir2::RuntimeDispatch& dispatch, std::uint16_t ident) {
+  std::vector<std::pair<std::int32_t, std::int32_t>> values;
+  for (const auto& event : dispatch.session_events) {
+    const auto decoded = mir2::decode_legacy_game_packet(event.packet);
+    if (decoded.has_value() && decoded->message.ident == ident) {
+      values.push_back({decoded->message.recog, event.delay_ms});
+    }
+  }
+  return values;
+}
+
 bool has_raw_prefix(const mir2::RuntimeDispatch& dispatch, const std::string& prefix) {
   return std::any_of(dispatch.session_events.begin(), dispatch.session_events.end(),
                      [&](const mir2::SessionEvent& event) {
@@ -228,6 +241,10 @@ int main() {
     append(dispatch, runtime.tick());
     assert(has_packet_ident(dispatch, mir2::legacy::kSmCrossHit));
     assert(count_trace(dispatch, "struck") >= 2);
+    const auto struck = packet_recogs_and_delays(dispatch, mir2::kSmStruck);
+    assert(struck.size() >= 2);
+    assert(struck[0] == std::make_pair(2, 500));
+    assert(struck[1] == std::make_pair(1, 200));
     assert(has_trace(dispatch, "train_skill"));
     assert(has_trace(dispatch, "train_skill", 1));
 
