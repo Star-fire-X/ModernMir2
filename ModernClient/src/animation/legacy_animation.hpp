@@ -213,7 +213,7 @@ struct ActorRenderPose {
   std::uint8_t alpha{255};        ///< 透明度（0-255，用于隐身/渐隐效果）
   std::uint8_t dir{0};            ///< 面向方向（0-7）
   int current_frame{0};           ///< 当前帧序号（动作内的帧序号，非绝对索引）
-  std::array<ActorOverlaySprite, 2> overlays{};
+  std::array<ActorOverlaySprite, 8> overlays{};
   std::uint8_t overlay_count{0};
 };
 
@@ -288,6 +288,7 @@ struct LegacySpecialEffectEvent {
   enum class Kind : std::uint8_t {
     projectile,
     magic_projectile,
+    map_effect,
   };
 
   Kind kind{Kind::projectile};
@@ -500,6 +501,7 @@ class LegacyActorAnimation {
   bool action_reverse_{false};
   bool action_lock_single_frame_{false};
   bool rush_kung_move_{false};
+  bool hold_end_until_next_move_tick_{false};
   std::uint8_t move_shift_dir_{0};
   int move_return_x_{0};
   int move_return_y_{0};
@@ -512,6 +514,18 @@ class LegacyActorAnimation {
   bool dead_{false};      ///< 是否死亡
   bool lock_end_frame_{false};
   bool self_actor_{false};
+  int gen_ani_count_{0};
+  int cur_bubble_struck_{0};
+  int cur_weapon_effect_{0};
+  int cur_glimmer_{0};
+  int centipede_attack_overlay_frame_{0};
+  bool weapon_break_active_{false};
+  bool centipede_attack_overlay_active_{false};
+  std::uint64_t gen_ani_count_time_ms_{0};
+  std::uint64_t weapon_break_frame_ms_{0};
+  std::uint64_t glimmer_frame_ms_{0};
+  std::uint64_t centipede_attack_overlay_frame_ms_{0};
+  std::uint64_t last_weapon_break_started_ms_{0};
 
   std::vector<ActorState> pending_actions_{};
   std::uint64_t active_action_started_ms_{0};
