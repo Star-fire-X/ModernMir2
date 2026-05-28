@@ -8751,7 +8751,13 @@ class WorldScene final : public Scene {
     }
     std::stable_sort(actors.begin(), actors.end(), [](const RowActorDraw& left,
                                                        const RowActorDraw& right) {
-      return left.draw_row < right.draw_row;
+      if (left.draw_row != right.draw_row) {
+        return left.draw_row < right.draw_row;
+      }
+      if (left.pose.dead != right.pose.dead) {
+        return left.pose.dead && !right.pose.dead;
+      }
+      return false;
     });
     return actors;
   }

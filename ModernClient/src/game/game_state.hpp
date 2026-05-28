@@ -160,6 +160,8 @@ struct ActorState {
   bool action_magic_failed{false};
   std::uint64_t action_started_ms{0};
   std::uint64_t action_duration_ms{0};
+  std::uint64_t legacy_struck_frame_ms{80};
+  std::uint64_t legacy_weapon_break_started_ms{0};
   int legacy_old_x{0};
   int legacy_old_y{0};
   std::uint8_t legacy_old_dir{0};
@@ -849,12 +851,40 @@ struct GameStateStore {
     return message.kind == LegacyActorMessage::Kind::death;
   }
 
+  static bool legacy_actor_message_is_struck(const LegacyActorMessage& message) {
+    return message.kind == LegacyActorMessage::Kind::action &&
+           message.action_kind == client_v1::ActorActionKind::struck;
+  }
+
   static bool legacy_actor_bundle_is_hurry(const LegacyActorBundleMessage& bundle) {
     return !bundle.actor_messages.empty() &&
            std::all_of(bundle.actor_messages.begin(), bundle.actor_messages.end(),
                        [](const LegacyActorMessage& message) {
                          return legacy_actor_message_is_hurry(message);
                        });
+  }
+
+  static bool legacy_actor_bundle_has_struck(const LegacyActorBundleMessage& bundle) {
+    return std::any_of(bundle.actor_messages.begin(), bundle.actor_messages.end(),
+                       [](const LegacyActorMessage& message) {
+                         return legacy_actor_message_is_struck(message);
+                       });
+  }
+
+  static bool legacy_actor_is_structure(const ActorState& actor) {
+    const auto race = static_cast<std::uint8_t>(actor.feature & 0xFF);
+    return actor.actor_type != client_v1::ActorType::player && (race == 98 || race == 99);
+  }
+
+  static bool legacy_actor_can_cancel_for_struck(const ActorState& actor) {
+    return actor.current_action == client_v1::ActorActionKind::hit &&
+           actor.legacy_action_ident == legacy::kSmHit &&
+           !legacy_actor_is_structure(actor);
+  }
+
+  static void cancel_legacy_actor_action_for_struck(ActorState& actor) {
+    actor.action_started_ms = 0;
+    actor.action_duration_ms = 0;
   }
 
   static bool legacy_actor_accepts_hurry_magic(const ActorState& actor) {
@@ -1075,6 +1105,14 @@ struct GameStateStore {
     }
   }
 
+  std::uint64_t legacy_struck_frame_ms_for(const ActorState& actor) const {
+    if (actor.actor_id != world.self_actor_id) {
+      return 80;
+    }
+    const auto frame_ms = 200 - static_cast<int>(world.self_ability_detail.level) * 5;
+    return static_cast<std::uint64_t>(std::max(80, frame_ms));
+  }
+
   void start_legacy_actor_action(ActorState& actor, const LegacyActorMessage& message,
                                  const std::uint64_t now_ms) {
     const auto legacy_ident =
@@ -1138,8 +1176,9 @@ struct GameStateStore {
       actor.dead = false;
       actor.skeleton = false;
     }
-    record_legacy_actor_event(actor);
     if (message.action_kind == client_v1::ActorActionKind::struck) {
+      actor.legacy_struck_frame_ms = legacy_struck_frame_ms_for(actor);
+      actor.action_duration_ms = actor.legacy_struck_frame_ms * 3U;
       actor.last_damage = message.value;
       actor.last_hitter_id = message.target_actor_id;
       actor.last_damage_magic = message.magic;
@@ -1147,6 +1186,7 @@ struct GameStateStore {
         world.latest_struck_ms = actor.action_started_ms;
       }
     }
+    record_legacy_actor_event(actor);
     // Delphi ClMain.pas updates LatestRushRushTime only for SM_RUSH, not SM_RUSHKUNG.
     if (actor.actor_id == world.self_actor_id && legacy_ident == legacy::kSmRush) {
       world.latest_rush_rush_ms = actor.action_started_ms;
@@ -1389,7 +1429,11 @@ struct GameStateStore {
           continue;
         }
         if (actor_action_animating(actor, now_ms)) {
-          continue;
+          if (!legacy_actor_bundle_has_struck(actor.legacy_actor_bundle_queue.front()) ||
+              !legacy_actor_can_cancel_for_struck(actor)) {
+            continue;
+          }
+          cancel_legacy_actor_action_for_struck(actor);
         }
         auto bundle = actor.legacy_actor_bundle_queue.front();
         actor.legacy_actor_bundle_queue.pop_front();
@@ -1407,7 +1451,11 @@ struct GameStateStore {
         continue;
       }
       if (actor_action_animating(actor, now_ms)) {
-        continue;
+        if (!legacy_actor_message_is_struck(actor.legacy_action_queue.front()) ||
+            !legacy_actor_can_cancel_for_struck(actor)) {
+          continue;
+        }
+        cancel_legacy_actor_action_for_struck(actor);
       }
       auto message = actor.legacy_action_queue.front();
       actor.legacy_action_queue.pop_front();
@@ -2379,6 +2427,10 @@ struct GameStateStore {
     } else if (tag == "UFIR") {
       world.next_time_fire_hit = false;
       world.latest_fire_hit_ms = 0;
+    } else if (tag == "BREAKWEAPON" || tag == "SM_BREAKWEAPON") {
+      if (auto it = world.actors.find(world.self_actor_id); it != world.actors.end()) {
+        it->second.legacy_weapon_break_started_ms = detail::monotonic_ms();
+      }
     }
   }
 

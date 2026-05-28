@@ -217,6 +217,59 @@ void test_spell_and_magic_fire_share_queue_tick() {
   assert(actor.action_magic_effect_type == 5);
 }
 
+void test_struck_cancels_plain_hit_only() {
+  auto state = make_store();
+  state.apply(ActorAction{2, ActorActionKind::hit, 11, 10, 4, 1, 0, legacy::kSmHit, 0, false, 0});
+  state.process_legacy_actor_queues(1000);
+  state.world.actors[2].action_started_ms = 1000;
+  state.world.actors[2].action_duration_ms = 10000;
+
+  state.apply(ActorAction{2, ActorActionKind::struck, 0, 0, 4, 1, 7, 31, 0, false, 0});
+  state.process_legacy_actor_queues(1100);
+  const auto& actor = state.world.actors[2];
+  assert(actor.current_action == ActorActionKind::struck);
+  assert(actor.legacy_struck_frame_ms == 80);
+  assert(actor.action_duration_ms == 240);
+  assert(actor.last_damage == 7);
+  assert(actor.legacy_action_queue.empty());
+}
+
+void test_struck_does_not_cancel_spell_or_structure_hit() {
+  auto state = make_store();
+  state.apply(MagicList{{MagicEntry{9, 1, 0, 0, 1000, "Fireball", 1, 900, 1}}});
+  state.apply(ActorAction{1, ActorActionKind::spell, 13, 10, 2, 2, 0, 17, 9, true, 1});
+  state.process_legacy_actor_queues(1000);
+  state.world.actors[1].action_started_ms = 1000;
+  state.world.actors[1].action_duration_ms = 10000;
+  state.apply(ActorAction{1, ActorActionKind::struck, 0, 0, 2, 2, 5, 31, 0, false, 0});
+  state.process_legacy_actor_queues(1100);
+  assert(state.world.actors[1].current_action == ActorActionKind::spell);
+  assert(state.world.actors[1].legacy_action_queue.size() == 1);
+
+  state.world.actors[2].feature = 98;
+  state.apply(ActorAction{2, ActorActionKind::hit, 11, 10, 4, 1, 0, legacy::kSmHit, 0, false, 0});
+  state.process_legacy_actor_queues(2000);
+  state.world.actors[2].action_started_ms = 2000;
+  state.world.actors[2].action_duration_ms = 10000;
+  state.apply(ActorAction{2, ActorActionKind::struck, 0, 0, 4, 1, 7, 31, 0, false, 0});
+  state.process_legacy_actor_queues(2100);
+  assert(state.world.actors[2].current_action == ActorActionKind::hit);
+  assert(state.world.actors[2].legacy_action_queue.size() == 1);
+}
+
+void test_self_struck_frame_time_uses_level() {
+  auto state = make_store();
+  SelfAbility ability;
+  ability.level = 20;
+  state.apply(ability);
+  state.apply(ActorAction{1, ActorActionKind::struck, 0, 0, 2, 2, 5, 31, 0, false, 0});
+  state.process_legacy_actor_queues(1000);
+  const auto& actor = state.world.actors[1];
+  assert(actor.current_action == ActorActionKind::struck);
+  assert(actor.legacy_struck_frame_ms == 100);
+  assert(actor.action_duration_ms == 300);
+}
+
 void test_remove_delay_matches_legacy_hide() {
   auto state = make_store();
   state.apply(ActorRemove{3, 30});
@@ -276,6 +329,9 @@ int main() {
   test_magic_fire_waits_behind_unstarted_spell();
   test_active_spell_consumes_magic_fire_behind_normal_head();
   test_spell_and_magic_fire_share_queue_tick();
+  test_struck_cancels_plain_hit_only();
+  test_struck_does_not_cancel_spell_or_structure_hit();
+  test_self_struck_frame_time_uses_level();
   test_remove_delay_matches_legacy_hide();
   test_independent_visual_state_events();
   test_actor_action_queue_does_not_drop_fifo_after_64_messages();
