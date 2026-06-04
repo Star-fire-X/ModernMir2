@@ -1,3 +1,10 @@
+/**
+ * @file legacy_inventory_ui.cpp
+ * @brief 旧版背包/装备界面布局实现 —— 背包窗口、装备栏、物品提示的坐标计算
+ * @details 实现背包网格（8x5）、装备槽位（9 格）和物品提示的布局计算。
+ *          对应 Delphi 客户端的 TItemBagForm 和 TEquipForm 窗口布局。
+ */
+
 #include "scene/legacy_inventory_ui.hpp"
 
 #include "text/encoding.hpp"

@@ -395,6 +395,22 @@ int main() {
     assert(hit_pose.has_value());
     return hit_pose->body_index - appearance.body_offset;
   };
+  auto hit_overlay_frame_for = [&](const std::uint16_t legacy_ident) {
+    WorldViewState hit_world;
+    hit_world.self_actor_id = 1;
+    auto hit_actor = actor;
+    hit_actor.current_action = mir2::client_v1::ActorActionKind::hit;
+    hit_actor.legacy_action_ident = legacy_ident;
+    hit_actor.action_started_ms = 9100 + legacy_ident;
+    hit_world.actors[1] = hit_actor;
+
+    AnimationManager hit_animations;
+    hit_animations.reset(9000);
+    hit_animations.update(hit_world, hit_actor.action_started_ms);
+    const auto hit_pose = hit_animations.pose_for(1);
+    assert(hit_pose.has_value());
+    return hit_pose->overlay_count > 0 ? hit_pose->overlays[0].frame_index : -1;
+  };
 
   assert(hit_body_index_for(mir2::legacy::kSmHeavyHit) ==
          legacy_frame_index(legacy_human_action_info(LegacyHumanAction::heavy_hit), 2, 0));
@@ -412,10 +428,43 @@ int main() {
          legacy_frame_index(legacy_human_action_info(LegacyHumanAction::hit), 2, 0));
   assert(hit_body_index_for(25) ==
          legacy_frame_index(legacy_human_action_info(LegacyHumanAction::hit), 2, 0));
+  assert(hit_overlay_frame_for(mir2::legacy::kSmPowerHit) == 820);
+  assert(hit_overlay_frame_for(mir2::legacy::kSmLongHit) == 1430);
+  assert(hit_overlay_frame_for(mir2::legacy::kSmWideHit) == 1720);
+  assert(hit_overlay_frame_for(mir2::legacy::kSmFireHit) == 3500);
+  assert(hit_overlay_frame_for(mir2::legacy::kSmCrossHit) == 60);
+  assert(hit_overlay_frame_for(mir2::legacy::kSmHeavyHit) == -1);
+
+  WorldViewState queued_hit_world;
+  queued_hit_world.self_actor_id = 1;
+  auto queued_hit_actor = actor;
+  queued_hit_world.actors[1] = queued_hit_actor;
+  AnimationManager queued_hit_animations;
+  queued_hit_animations.reset(8600);
+  queued_hit_animations.sync_world(queued_hit_world, 8600);
+  auto queued_power_hit = actor;
+  queued_power_hit.current_action = mir2::client_v1::ActorActionKind::hit;
+  queued_power_hit.legacy_action_ident = mir2::legacy::kSmPowerHit;
+  queued_power_hit.action_started_ms = 8700;
+  queued_power_hit.legacy_event_sequence = 1;
+  auto queued_long_hit = actor;
+  queued_long_hit.current_action = mir2::client_v1::ActorActionKind::hit;
+  queued_long_hit.legacy_action_ident = mir2::legacy::kSmLongHit;
+  queued_long_hit.action_started_ms = 8701;
+  queued_long_hit.legacy_event_sequence = 2;
+  queued_hit_actor = queued_long_hit;
+  queued_hit_actor.legacy_pending_actions = {queued_power_hit, queued_long_hit};
+  queued_hit_world.actors[1] = queued_hit_actor;
+  queued_hit_animations.update(queued_hit_world, 8700);
+  const auto queued_hit_pose = queued_hit_animations.pose_for(1);
+  assert(queued_hit_pose.has_value());
+  assert(queued_hit_pose->overlay_count == 1);
+  assert(queued_hit_pose->overlays[0].frame_index == 820);
 
   WorldViewState struck_world;
   struck_world.self_actor_id = 1;
   auto struck_actor = actor;
+  struck_actor.level = 10;
   struck_world.actors[1] = struck_actor;
   AnimationManager struck_animations;
   struck_animations.reset(8900);
@@ -425,14 +474,58 @@ int main() {
   struck_world.actors[1] = struck_actor;
   struck_animations.sync_world(struck_world, 9000);
   struck_animations.update(struck_world, 9000);
-  const auto struck_pose = struck_animations.pose_for(1);
+  auto struck_pose = struck_animations.pose_for(1);
   assert(struck_pose.has_value());
   assert(struck_pose->body_index ==
          appearance.body_offset +
              legacy_frame_index(legacy_human_action_info(LegacyHumanAction::struck), 2, 0));
   assert(struck_pose->overlay_count == 1);
   assert(struck_pose->overlays[0].archive == ArchiveId::magic);
-  assert(struck_pose->overlays[0].frame_index == 800);
+  assert(struck_pose->overlays[0].frame_index == 820);
+  struck_animations.update(struck_world, 9149);
+  struck_pose = struck_animations.pose_for(1);
+  assert(struck_pose.has_value());
+  assert(struck_pose->current_frame ==
+         legacy_frame_index(legacy_human_action_info(LegacyHumanAction::struck), 2, 0));
+  struck_animations.update(struck_world, 9151);
+  struck_pose = struck_animations.pose_for(1);
+  assert(struck_pose.has_value());
+  assert(struck_pose->current_frame ==
+         legacy_frame_index(legacy_human_action_info(LegacyHumanAction::struck), 2, 1));
+
+  struck_animations.reset(9200);
+  struck_actor = actor;
+  struck_actor.level = 30;
+  struck_actor.current_action = mir2::client_v1::ActorActionKind::struck;
+  struck_actor.last_damage_magic = true;
+  struck_actor.action_started_ms = 9300;
+  struck_world.actors[1] = struck_actor;
+  struck_animations.update(struck_world, 9300);
+  struck_pose = struck_animations.pose_for(1);
+  assert(struck_pose.has_value());
+  assert(struck_pose->overlay_count == 1);
+  assert(struck_pose->overlays[0].archive == ArchiveId::magic2);
+  assert(struck_pose->overlays[0].frame_index == 60);
+  assert(GameStateStore::action_duration_ms(
+             mir2::client_v1::ActorActionKind::struck, legacy_sm::kStruck, struck_actor.level) ==
+         240);
+
+  WorldViewState status_world;
+  status_world.self_actor_id = 1;
+  auto status_actor = actor;
+  status_actor.status = static_cast<std::int32_t>(0x80900000U);
+  status_world.actors[1] = status_actor;
+  AnimationManager status_animations;
+  status_animations.reset(10000);
+  status_animations.update(status_world, 10000);
+  const auto status_pose = status_animations.pose_for(1);
+  assert(status_pose.has_value());
+  assert(status_pose->alpha == 168);
+  assert(status_pose->color_effect);
+  assert(status_pose->color_effect_kind == LegacyActorColorEffect::green);
+  assert(status_pose->overlay_count == 1);
+  assert(status_pose->overlays[0].archive == ArchiveId::magic);
+  assert(status_pose->overlays[0].frame_index == 3892);
 
   WorldViewState death_mode_world;
   death_mode_world.self_actor_id = 1;
@@ -801,6 +894,91 @@ int main() {
   assert(skel_overlay.overlay_count == 1);
   assert(skel_overlay.overlays[0].archive == ArchiveId::mon5);
   assert(skel_overlay.overlays[0].frame_index == 3300);
+
+  WorldViewState queued_skel_world;
+  queued_skel_world.width = 80;
+  queued_skel_world.height = 80;
+  ActorState queued_skel_actor;
+  queued_skel_actor.actor_id = 463;
+  queued_skel_actor.actor_type = mir2::client_v1::ActorType::monster;
+  queued_skel_actor.x = 30;
+  queued_skel_actor.y = 30;
+  queued_skel_actor.from_x = 30;
+  queued_skel_actor.from_y = 30;
+  queued_skel_actor.dir = 2;
+  queued_skel_actor.feature = 63;
+  queued_skel_world.actors[queued_skel_actor.actor_id] = queued_skel_actor;
+  AnimationManager queued_skel_animations;
+  queued_skel_animations.reset(30200);
+  queued_skel_animations.sync_world(queued_skel_world, 30200);
+  auto queued_skel_fly_axe = queued_skel_actor;
+  queued_skel_fly_axe.current_action = mir2::client_v1::ActorActionKind::hit;
+  queued_skel_fly_axe.legacy_action_ident = mir2::legacy::kSmFlyAxe;
+  queued_skel_fly_axe.action_started_ms = 30300;
+  queued_skel_fly_axe.legacy_event_sequence = 1;
+  auto queued_skel_lighting = queued_skel_actor;
+  queued_skel_lighting.current_action = mir2::client_v1::ActorActionKind::hit;
+  queued_skel_lighting.legacy_action_ident = mir2::legacy::kSmLighting;
+  queued_skel_lighting.action_started_ms = 30301;
+  queued_skel_lighting.legacy_event_sequence = 2;
+  queued_skel_actor = queued_skel_lighting;
+  queued_skel_actor.legacy_pending_actions = {queued_skel_fly_axe, queued_skel_lighting};
+  queued_skel_world.actors[queued_skel_actor.actor_id] = queued_skel_actor;
+  queued_skel_animations.update(queued_skel_world, 30300);
+  const auto queued_skel_pose = queued_skel_animations.pose_for(queued_skel_actor.actor_id);
+  assert(queued_skel_pose.has_value());
+  assert(queued_skel_pose->overlay_count == 1);
+  assert(queued_skel_pose->overlays[0].archive == ArchiveId::mon5);
+  assert(queued_skel_pose->overlays[0].frame_index == 3300);
+  for (int step = 1; step <= 4; ++step) {
+    queued_skel_animations.update(
+        queued_skel_world, 30300 + static_cast<std::uint64_t>(step) * 250U);
+  }
+  assert(queued_skel_animations.effects().fly_count() == 1);
+  const auto& queued_skel_fly = queued_skel_animations.effects().fly_effects().front();
+  assert(queued_skel_fly.archive == ArchiveId::mon5);
+  assert(queued_skel_fly.effect_base == 3570);
+  assert(queued_skel_fly.magic_type == LegacyMagicType::fire_ball);
+
+  LegacyActorAnimation repeated_special_animation;
+  ActorState repeated_special_actor;
+  repeated_special_actor.actor_id = 464;
+  repeated_special_actor.actor_type = mir2::client_v1::ActorType::monster;
+  repeated_special_actor.x = 30;
+  repeated_special_actor.y = 30;
+  repeated_special_actor.from_x = 30;
+  repeated_special_actor.from_y = 30;
+  repeated_special_actor.dir = 2;
+  repeated_special_actor.feature = 63;
+  repeated_special_animation.sync_actor(repeated_special_actor, 34000);
+  auto repeated_first_fly_axe = repeated_special_actor;
+  repeated_first_fly_axe.current_action = mir2::client_v1::ActorActionKind::hit;
+  repeated_first_fly_axe.legacy_action_ident = mir2::legacy::kSmFlyAxe;
+  repeated_first_fly_axe.action_started_ms = 34100;
+  repeated_first_fly_axe.legacy_event_sequence = 1;
+  repeated_first_fly_axe.action_target_x = 34;
+  repeated_first_fly_axe.action_target_y = 30;
+  auto repeated_second_fly_axe = repeated_first_fly_axe;
+  repeated_second_fly_axe.legacy_event_sequence = 2;
+  repeated_special_actor = repeated_second_fly_axe;
+  repeated_special_actor.legacy_pending_actions = {repeated_first_fly_axe,
+                                                   repeated_second_fly_axe};
+  repeated_special_animation.sync_actor(repeated_special_actor, 34100);
+  LegacyAnimationClock repeated_special_clock;
+  repeated_special_clock.reset(34100);
+  auto repeated_special_events = 0;
+  for (int step = 0; step <= 12; ++step) {
+    const auto now = 34100 + static_cast<std::uint64_t>(step) * 250U;
+    repeated_special_animation.update(repeated_special_actor, repeated_special_clock, now);
+    const auto events = repeated_special_animation.drain_special_effect_events();
+    repeated_special_events += static_cast<int>(events.size());
+    for (const auto& event : events) {
+      assert(event.archive == ArchiveId::mon5);
+      assert(event.effect_base == 3570);
+      assert(event.magic_type == LegacyMagicType::fire_ball);
+    }
+  }
+  assert(repeated_special_events == 2);
 
   const auto banya_overlay = overlay_pose_for(71, mir2::legacy::kSmLighting,
                                               mir2::client_v1::ActorActionKind::hit);
@@ -1405,12 +1583,17 @@ int main() {
 
   auto firegun_matrix = spawn_matrix_magic(5, 9, 9);
   assert(firegun_matrix.fly_count() == 1);
-  const auto& firegun_effect = firegun_matrix.fly_effects().front();
+  auto& firegun_effect = firegun_matrix.fly_effects().front();
   assert(firegun_effect.archive == ArchiveId::magic);
   assert(firegun_effect.effect_base == 930);
   assert(firegun_effect.explosion_base == 930);
-  assert(firegun_effect.fixed_effect);
+  assert(!firegun_effect.fixed_effect);
   assert(firegun_effect.target_actor_id == 0);
+  assert(firegun_effect.fire_node_count() == 0);
+  firegun_matrix.update(8051);
+  assert(firegun_effect.fire_node_count() == 1);
+  firegun_matrix.update(8131);
+  assert(firegun_effect.fire_node_count() == 2);
 
   auto thunder_matrix = spawn_matrix_magic(7, 8, 11);
   assert(thunder_matrix.fly_count() == 1);
@@ -1443,6 +1626,7 @@ int main() {
   assert(explo_bujauk_effect.effect_base == 1160);
   assert(explo_bujauk_effect.explosion_base == 1360);
   assert(!explo_bujauk_effect.fixed_effect);
+  assert(explo_bujauk_effect.frame_count == 3);
 
   auto explo_bujauk_alt_matrix = spawn_matrix_magic(8, 17, 19);
   assert(explo_bujauk_alt_matrix.fly_count() == 1);
@@ -1450,10 +1634,23 @@ int main() {
 
   auto bujauk_matrix = spawn_matrix_magic(9, 11, 14);
   assert(bujauk_matrix.fly_count() == 1);
-  const auto& bujauk_effect = bujauk_matrix.fly_effects().front();
+  auto& bujauk_effect = bujauk_matrix.fly_effects().front();
   assert(bujauk_effect.effect_base == 1160);
   assert(bujauk_effect.explosion_frame_count == 16);
   assert(!bujauk_effect.fixed_effect);
+  assert(bujauk_effect.frame_count == 3);
+  for (std::uint64_t now = 8051; now <= 9000; now += 80) {
+    bujauk_matrix.update(now);
+  }
+  assert(bujauk_effect.fixed_effect);
+  assert(bujauk_effect.draw_frame_index() >= 1320);
+
+  auto lighting_matrix = spawn_matrix_magic(6, 9, 10);
+  assert(lighting_matrix.fly_count() == 1);
+  auto& lighting_effect = lighting_matrix.fly_effects().front();
+  assert(lighting_effect.effect_base == 970);
+  assert(lighting_effect.magic_type == LegacyMagicType::lighting_thunder);
+  assert(lighting_effect.draw_frame_index() == 1010);
 
   auto ground_matrix = spawn_matrix_magic(13, 32, 22);
   assert(ground_matrix.ground_count() == 1);

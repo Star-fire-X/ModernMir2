@@ -656,6 +656,82 @@ void draw_sprite(SoftwareRenderer& renderer, const std::shared_ptr<const SpriteF
   renderer.surface().blit_rgba(x, y, frame->width, frame->height, frame->pixels.data(), alpha);
 }
 
+std::uint32_t apply_actor_color_effect_pixel(const std::uint32_t pixel,
+                                             const LegacyActorColorEffect effect) {
+  const auto alpha = static_cast<std::uint8_t>((pixel >> 24U) & 0xFFU);
+  if (alpha == 0 || effect == LegacyActorColorEffect::none) {
+    return pixel;
+  }
+
+  auto red = static_cast<std::uint8_t>((pixel >> 16U) & 0xFFU);
+  auto green = static_cast<std::uint8_t>((pixel >> 8U) & 0xFFU);
+  auto blue = static_cast<std::uint8_t>(pixel & 0xFFU);
+  const auto max_channel = [](const std::uint8_t a, const std::uint8_t b,
+                              const std::uint8_t c) {
+    return static_cast<std::uint8_t>(std::max({a, b, c}));
+  };
+
+  switch (effect) {
+    case LegacyActorColorEffect::green:
+      red /= 3;
+      blue /= 3;
+      green = max_channel(green, static_cast<std::uint8_t>(170), green);
+      break;
+    case LegacyActorColorEffect::red:
+      green /= 3;
+      blue /= 3;
+      red = max_channel(red, static_cast<std::uint8_t>(170), red);
+      break;
+    case LegacyActorColorEffect::blue:
+      red /= 3;
+      green /= 3;
+      blue = max_channel(blue, static_cast<std::uint8_t>(170), blue);
+      break;
+    case LegacyActorColorEffect::yellow:
+      blue /= 3;
+      red = max_channel(red, static_cast<std::uint8_t>(160), red);
+      green = max_channel(green, static_cast<std::uint8_t>(160), green);
+      break;
+    case LegacyActorColorEffect::fuchsia:
+      green /= 3;
+      red = max_channel(red, static_cast<std::uint8_t>(160), red);
+      blue = max_channel(blue, static_cast<std::uint8_t>(160), blue);
+      break;
+    case LegacyActorColorEffect::grayscale: {
+      const auto gray = static_cast<std::uint8_t>(
+          (static_cast<int>(red) * 30 + static_cast<int>(green) * 59 +
+           static_cast<int>(blue) * 11) /
+          100);
+      red = gray;
+      green = gray;
+      blue = gray;
+      break;
+    }
+    case LegacyActorColorEffect::none:
+    default:
+      break;
+  }
+
+  return (static_cast<std::uint32_t>(alpha) << 24U) |
+         (static_cast<std::uint32_t>(red) << 16U) |
+         (static_cast<std::uint32_t>(green) << 8U) | blue;
+}
+
+void draw_sprite_with_color_effect(SoftwareRenderer& renderer,
+                                   const std::shared_ptr<const SpriteFrame>& frame,
+                                   const int x, const int y,
+                                   const LegacyActorColorEffect effect,
+                                   const std::uint8_t alpha = 255U) {
+  if (frame == nullptr || frame->empty()) {
+    return;
+  }
+  std::vector<std::uint32_t> pixels(frame->pixels);
+  for (auto& pixel : pixels) {
+    pixel = apply_actor_color_effect_pixel(pixel, effect);
+  }
+  renderer.surface().blit_rgba(x, y, frame->width, frame->height, pixels.data(), alpha);
+}
+
 void draw_sprite_legacy_blend(SoftwareRenderer& renderer,
                               const std::shared_ptr<const SpriteFrame>& frame, const int x,
                               const int y) {
@@ -8981,6 +9057,15 @@ class WorldScene final : public Scene {
     const auto base_x = legacy::legacy_actor_base_x(viewport, pose.rx, pose.shift_x);
     const auto base_y = legacy::legacy_actor_base_y(viewport, pose.ry, pose.shift_y);
     const auto alpha = alpha_override > 0 ? alpha_override : pose.alpha;
+    const auto draw_actor_part = [&](const std::shared_ptr<const SpriteFrame>& frame,
+                                     const int draw_x, const int draw_y) {
+      if (pose.color_effect) {
+        draw_sprite_with_color_effect(*context.renderer, frame, draw_x, draw_y,
+                                      pose.color_effect_kind, alpha);
+        return;
+      }
+      draw_sprite(*context.renderer, frame, draw_x, draw_y, alpha);
+    };
 
     const auto body = context.assets->get_frame(pose.body_archive, pose.body_index);
     const auto hair = pose.hair_index >= 0
@@ -8998,11 +9083,9 @@ class WorldScene final : public Scene {
     }
 
     if (pose.weapon_before_body && weapon != nullptr) {
-      draw_sprite(*context.renderer, weapon, base_x + weapon->hotspot_x,
-                  base_y + weapon->hotspot_y, alpha);
+      draw_actor_part(weapon, base_x + weapon->hotspot_x, base_y + weapon->hotspot_y);
     }
-    draw_sprite(*context.renderer, body, base_x + body->hotspot_x, base_y + body->hotspot_y,
-                alpha);
+    draw_actor_part(body, base_x + body->hotspot_x, base_y + body->hotspot_y);
     for (std::uint8_t index = 0; index < pose.overlay_count; ++index) {
       const auto& overlay = pose.overlays[index];
       const auto frame = context.assets->get_frame(overlay.archive, overlay.frame_index);
@@ -9012,12 +9095,10 @@ class WorldScene final : public Scene {
       }
     }
     if (hair != nullptr) {
-      draw_sprite(*context.renderer, hair, base_x + hair->hotspot_x, base_y + hair->hotspot_y,
-                  alpha);
+      draw_actor_part(hair, base_x + hair->hotspot_x, base_y + hair->hotspot_y);
     }
     if (!pose.weapon_before_body && weapon != nullptr) {
-      draw_sprite(*context.renderer, weapon, base_x + weapon->hotspot_x,
-                  base_y + weapon->hotspot_y, alpha);
+      draw_actor_part(weapon, base_x + weapon->hotspot_x, base_y + weapon->hotspot_y);
     }
   }
 

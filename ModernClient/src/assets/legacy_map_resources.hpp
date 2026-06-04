@@ -1,3 +1,12 @@
+/**
+ * @file legacy_map_resources.hpp
+ * @brief 旧版地图资源查找 —— 根据地图单元格数据确定对应的精灵归档和帧索引
+ *
+ * @details 提供根据地图区域编号（area）确定 Objects 归档、根据背景图/中间层图
+ *          索引查找瓦片帧、根据物件帧索引查找物件精灵的函数。
+ *          所有查找逻辑与 Delphi 客户端的资源加载行为一致。
+ */
+
 #pragma once
 
 #include <cstdint>

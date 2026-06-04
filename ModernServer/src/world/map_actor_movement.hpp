@@ -1,6 +1,30 @@
+/**
+ * @file map_actor_movement.hpp
+ * @brief 门、传送门和地图移动成员的 MapActor 实现细节
+ * @details 该文件是 map_actor.cpp 的实现细节部分，包含以下核心功能：
+ *          - broadcast_open_doors/broadcast_close_doors: 门开关广播
+ *          - has_event_at: 检查指定位置是否存在特定类型事件
+ *          - target_map_can_enter: 检查目标地图是否可进入
+ *          - target_entry_allowed: 检查玩家是否满足进入条件（等级、任务、标志位）
+ *          - try_gate_transfer: 尝试传送门转移（同地图和跨地图）
+ *          - random_item_scroll_target: 随机卷轴传送目标位置
+ *          - try_item_map_move: 尝试物品触发的跨地图移动
+ *
+ *          这些函数实现了玩家在地图中的移动逻辑，包括门交互、传送门转移、
+ *          以及物品触发的空间移动。
+ */
+
 #pragma once
 
 // Implementation detail for map_actor.cpp: door, gate, and map movement members.
+
+/**
+ * @brief 广播开门事件给所有可见玩家
+ * @param tiles 需要打开的门坐标列表
+ * @param dispatch 运行时调度输出
+ * @details 遍历所有门坐标，对每个门坐标向视野范围内的所有玩家
+ *          广播开门包。用于传送门自动开门和物品触发开门场景。
+ */
 void MapActor::broadcast_open_doors(
     const std::vector<std::pair<std::int32_t, std::int32_t>>& tiles,
     RuntimeDispatch& dispatch) {
@@ -15,6 +39,13 @@ void MapActor::broadcast_open_doors(
   }
 }
 
+/**
+ * @brief 广播关门事件给所有可见玩家
+ * @param tiles 需要关闭的门坐标列表
+ * @param dispatch 运行时调度输出
+ * @details 遍历所有门坐标，对每个门坐标向视野范围内的所有玩家
+ *          广播关门包。用于门超时自动关闭场景。
+ */
 void MapActor::broadcast_close_doors(
     const std::vector<std::pair<std::int32_t, std::int32_t>>& tiles,
     RuntimeDispatch& dispatch) {
@@ -29,6 +60,15 @@ void MapActor::broadcast_close_doors(
   }
 }
 
+/**
+ * @brief 检查指定位置是否存在特定类型的事件对象
+ * @param x 目标 X 坐标
+ * @param y 目标 Y 坐标
+ * @param type 事件类型（如挖僵尸、圣言等）
+ * @return true 如果该位置存在指定类型的事件对象
+ * @details 遍历 event_objects_ 映射表，检查是否有事件位于指定坐标
+ *          且类型与传入类型匹配。用于传送门进入条件检查（need_hole）。
+ */
 bool MapActor::has_event_at(std::int32_t x, std::int32_t y, LegacyEventType type) const {
   for (const auto& [event_id, xy] : event_objects_) {
     if (xy.first != x || xy.second != y) {
@@ -42,6 +82,16 @@ bool MapActor::has_event_at(std::int32_t x, std::int32_t y, LegacyEventType type
   return false;
 }
 
+/**
+ * @brief 检查目标地图是否允许进入（基于地图配置和传送门状态）
+ * @param rule 地图入口规则配置
+ * @param gate 传送门状态信息（目标坐标）
+ * @return true 如果目标位置可行走且在地图范围内
+ * @details 根据规则判断目标位置的可进入性：
+ *          - 同地图：检查目标坐标是否在地图边界内且可行走
+ *          - 跨地图：解码目标地图文件后检查可行性
+ *          - 无地图文件时：仅检查边界范围
+ */
 bool MapActor::target_map_can_enter(const MapEntryRuleConfig& rule,
                                     const LegacyMapGateState& gate) const {
   if (rule.map_id == config_.id) {
@@ -62,6 +112,22 @@ bool MapActor::target_map_can_enter(const MapEntryRuleConfig& rule,
   return true;
 }
 
+/**
+ * @brief 检查玩家是否满足传送门的进入条件
+ * @param player 目标玩家
+ * @param gate 传送门状态信息
+ * @param dispatch 运行时调度输出
+ * @param current_tick 当前逻辑 tick
+ * @param now_ms 当前系统时间（毫秒）
+ * @return true 如果玩家满足所有进入条件
+ * @details 依次检查以下条件：
+ *          1. 是否需要洞口事件（digout_zombi）
+ *          2. 是否满足等级要求
+ *          3. 是否需要执行任务脚本（MapEntryQuest）
+ *          4. 是否满足任务标志位要求
+ *          5. 最后调用 target_map_can_enter 检查目标位置可行性
+ * @note 任务脚本执行后可能改变玩家状态，因此执行后重新获取玩家指针
+ */
 bool MapActor::target_entry_allowed(Player& player, const LegacyMapGateState& gate,
                                     RuntimeDispatch& dispatch,
                                     std::uint64_t current_tick,
@@ -122,6 +188,21 @@ bool MapActor::target_entry_allowed(Player& player, const LegacyMapGateState& ga
   return target_map_can_enter(rule, gate);
 }
 
+/**
+ * @brief 尝试执行传送门转移
+ * @param player 目标玩家
+ * @param dispatch 运行时调度输出
+ * @param current_tick 当前逻辑 tick
+ * @param now_ms 当前系统时间（毫秒）
+ * @return true 如果传送成功
+ * @details 传送流程：
+ *          1. 检查玩家当前位置是否有传送门
+ *          2. 如果传送门需要开门，尝试自动开门
+ *          3. 检查进入条件（target_entry_allowed）
+ *          4. 同地图转移：直接移动对象，刷新可见性
+ *          5. 跨地图转移：清除当前地图对象，发送跨地图邮件
+ * @note 跨地图转移时会断开宠物奴隶关系，释放 Buff
+ */
 bool MapActor::try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
                                  std::uint64_t current_tick, std::uint64_t now_ms) {
   const auto* gate = environment_.gate_at(player.x(), player.y());
@@ -229,6 +310,17 @@ bool MapActor::try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
   return true;
 }
 
+/**
+ * @brief 获取随机卷轴传送的目标位置
+ * @param dispatch 运行时调度输出
+ * @param player 使用卷轴的玩家
+ * @param current_tick 当前逻辑 tick
+ * @param now_ms 当前系统时间（毫秒）
+ * @return 目标坐标对，如果找不到可行走位置则返回 std::nullopt
+ * @details 在地图范围内随机尝试最多 30 次，寻找可行走的位置。
+ *          使用地图的 movement_width() 和 movement_height() 确定搜索范围。
+ *          随机数通过 legacy_random_value 生成以支持可重现追踪。
+ */
 std::optional<std::pair<std::int32_t, std::int32_t>>
 MapActor::random_item_scroll_target(RuntimeDispatch& dispatch, const Player& player,
                                     std::uint64_t current_tick, std::uint64_t now_ms) {
@@ -249,6 +341,21 @@ MapActor::random_item_scroll_target(RuntimeDispatch& dispatch, const Player& pla
   return std::nullopt;
 }
 
+/**
+ * @brief 尝试执行物品触发的跨地图移动（如传送卷轴、随机卷轴）
+ * @param player 目标玩家
+ * @param target_map_id 目标地图 ID（空字符串表示当前地图）
+ * @param target_x 目标 X 坐标
+ * @param target_y 目标 Y 坐标
+ * @param dispatch 运行时调度输出
+ * @param current_tick 当前逻辑 tick
+ * @param now_ms 当前系统时间（毫秒）
+ * @return true 如果移动成功
+ * @details 和 try_gate_transfer 类似，由物品使用触发：
+ *          - 同地图移动：直接移动对象位置
+ *          - 跨地图移动：清除当前对象，发送跨地图 spawn 邮件
+ * @see try_gate_transfer
+ */
 bool MapActor::try_item_map_move(Player& player, std::string target_map_id,
                                  std::int32_t target_x, std::int32_t target_y,
                                  RuntimeDispatch& dispatch, std::uint64_t current_tick,
@@ -342,4 +449,3 @@ bool MapActor::try_item_map_move(Player& player, std::string target_map_id,
                  snapshot.map_id});
   return true;
 }
-

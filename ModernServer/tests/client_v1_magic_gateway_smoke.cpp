@@ -65,9 +65,10 @@ mir2::LegacyPacket make_magic_fire_fail_packet(std::uint64_t session_id) {
       session_id, 0, 0, mir2::make_default_message(mir2::kSmMagicFireFail, 42, 0, 0, 0));
 }
 
-mir2::LegacyPacket make_actor_walk_packet(std::uint64_t session_id) {
+mir2::LegacyPacket make_actor_walk_packet(std::uint64_t session_id,
+                                          std::int32_t actor_id = 42) {
   return mir2::make_legacy_game_packet(
-      session_id, 0, 0, mir2::make_default_message(mir2::kSmWalk, 42, 12, 13, 2));
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmWalk, actor_id, 12, 13, 2));
 }
 
 mir2::LegacyPacket make_actor_struck_packet(std::uint64_t session_id) {
@@ -116,10 +117,17 @@ mir2::LegacyPacket make_change_map_packet(std::uint64_t session_id,
       mir2::legacy_encode_string("1"));
 }
 
-mir2::LegacyPacket make_new_map_packet(std::uint64_t session_id) {
+mir2::LegacyPacket make_new_map_packet(std::uint64_t session_id,
+                                       std::int32_t actor_id = 42) {
   return mir2::make_legacy_game_packet(
-      session_id, 0, 0, mir2::make_default_message(mir2::kSmNewMap, 42, 14, 15, 3),
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmNewMap, actor_id, 14, 15, 3),
       mir2::legacy_encode_string("1"));
+}
+
+mir2::LegacyPacket make_level_up_packet(std::uint64_t session_id, std::int32_t level) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmLevelUp, 0,
+                                                   static_cast<std::uint16_t>(level), 0, 0));
 }
 
 mir2::LegacyPacket make_map_description_packet(std::uint64_t session_id) {
@@ -446,5 +454,40 @@ int main() {
   assert(std::holds_alternative<mir2::client_v1::MapChange>(messages[1]));
   assert(std::holds_alternative<mir2::client_v1::MapEntered>(messages[2]));
   assert(std::holds_alternative<mir2::client_v1::MapDoorState>(messages[3]));
+
+  constexpr std::uint64_t kLevelOwnerSessionId = 910;
+  constexpr std::uint64_t kLevelViewerSessionId = 911;
+  auto level_admissions = std::make_shared<mir2::ClientV1AdmissionRegistry>();
+  mir2::ClientV1GameGatewayService level_service(level_admissions);
+  level_service.seed_session_for_test(kLevelOwnerSessionId);
+  level_service.seed_session_for_test(kLevelViewerSessionId);
+  messages.clear();
+  level_service.translate_legacy_packet_for_test(
+      kLevelOwnerSessionId, make_new_map_packet(kLevelOwnerSessionId, 42), messages);
+  messages.clear();
+  level_service.translate_legacy_packet_for_test(
+      kLevelOwnerSessionId, make_level_up_packet(kLevelOwnerSessionId, 37), messages);
+  messages.clear();
+  level_service.translate_legacy_packet_for_test(
+      kLevelViewerSessionId, make_new_map_packet(kLevelViewerSessionId, 100), messages);
+  messages.clear();
+  level_service.translate_legacy_packet_for_test(
+      kLevelViewerSessionId, make_level_up_packet(kLevelViewerSessionId, 29), messages);
+
+  messages.clear();
+  level_service.translate_legacy_packet_for_test(
+      kLevelViewerSessionId, make_actor_walk_packet(kLevelViewerSessionId, 100), messages);
+  assert(messages.size() == 2);
+  const auto* self_walk_upsert = std::get_if<mir2::client_v1::ActorUpsert>(&messages[0]);
+  assert(self_walk_upsert != nullptr);
+  assert(self_walk_upsert->actor.level == 29);
+
+  messages.clear();
+  level_service.translate_legacy_packet_for_test(
+      kLevelViewerSessionId, make_actor_walk_packet(kLevelViewerSessionId, 42), messages);
+  assert(messages.size() == 2);
+  const auto* peer_walk_upsert = std::get_if<mir2::client_v1::ActorUpsert>(&messages[0]);
+  assert(peer_walk_upsert != nullptr);
+  assert(peer_walk_upsert->actor.level == 37);
   return 0;
 }

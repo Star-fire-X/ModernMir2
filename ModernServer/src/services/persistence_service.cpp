@@ -1,9 +1,26 @@
+/**
+ * @file persistence_service.cpp
+ * @brief 持久化服务实现
+ *
+ * @details 实现 PersistenceService 类的所有方法，包括工作线程主循环、
+ *          各类持久化请求的同步处理逻辑。所有数据库操作通过 Repository
+ *          类执行，确保了 SQLite 访问的单线程化。
+ *
+ * @note 关闭时使用 drain 模式：设置 running=false 后，继续处理
+ *       队列中剩余的请求直到队列为空，确保数据不会丢失。
+ */
+
 #include "services/persistence_service.hpp"
 
 namespace mir2 {
 
 namespace {
 
+/**
+ * @brief 获取持久化请求类型的可读名称
+ * @param kind 请求类型枚举
+ * @return 对应的字符串名称
+ */
 std::string persist_request_kind_name(PersistRequestKind kind) {
   switch (kind) {
     case PersistRequestKind::ensure_schema:
@@ -56,6 +73,14 @@ std::string persist_request_kind_name(PersistRequestKind kind) {
 
 }  // namespace
 
+/**
+ * @brief 启动持久化服务
+ *
+ * @details 初始化 SQLite 数据库仓库，创建表结构，填充运行时数据，
+ *          然后启动工作线程处理请求。
+ *
+ * @param context 宿主上下文
+ */
 void PersistenceService::start(HostContext& context) {
   context_ = &context;
   endpoint_ = context.bus->register_endpoint(name(), context.config.runtime.default_queue_capacity);
@@ -82,6 +107,13 @@ std::unordered_map<std::string, std::string> PersistenceService::snapshot() cons
           {"last_request_id", last_request_id_}};
 }
 
+/**
+ * @brief 工作线程主循环
+ *
+ * @details 运行中状态使用 100ms 超时等待，关闭状态(drain模式)
+ *          使用 1ms 超时以快速排空队列。确保所有待处理的请求
+ *          在服务关闭前被处理。
+ */
 void PersistenceService::run() {
   while (running_.load(std::memory_order_relaxed) || endpoint_->queue->size() > 0) {
     const auto timeout = running_.load(std::memory_order_relaxed) ? std::chrono::milliseconds(100)
@@ -96,6 +128,15 @@ void PersistenceService::run() {
   }
 }
 
+/**
+ * @brief 处理单个持久化请求
+ *
+ * @details 根据请求类型执行对应的数据库操作并返回结果。
+ *          switch 语句覆盖所有 PersistRequestKind 枚举值。
+ *          异常时捕获 std::exception 并返回错误结果。
+ *
+ * @param request 持久化请求
+ */
 void PersistenceService::handle_request(const PersistRequest& request) {
   ++handled_requests_;
   last_request_kind_ = request.kind;

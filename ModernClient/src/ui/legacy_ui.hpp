@@ -1,3 +1,17 @@
+/**
+ * @file legacy_ui.hpp
+ * @brief 旧版 UI 管理器 —— LegacyUiManager 和绘制追踪系统
+ *
+ * @details 提供旧版传奇 UI 系统的管理接口：
+ *          - LegacyUiManager：封装 UiTree，提供窗口/控件的创建、显示、隐藏、销毁
+ *          - LegacyUiTrace：UI 绘制层追踪（用于测试和 Delphi 行为对比）
+ *          - 旧版类型别名：将通用 UiNode/Window/Button 等映射为 Legacy* 别名
+ *
+ * 绘制层顺序（与 Delphi 客户端的 DC 绘制顺序对应）：
+ * map_tiles → map_objects → actors → skill_effects → scene_top →
+ * ui_windows → top_sys_messages → hint → moving_item → mouse_cursor → present
+ */
+
 #pragma once
 
 #include <functional>

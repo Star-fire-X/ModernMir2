@@ -1,3 +1,10 @@
+/**
+ * @file legacy_ui.cpp
+ * @brief 旧版 UI 管理器实现 —— LegacyUiManager 和 LegacyUiTrace 的具体逻辑
+ * @details 实现旧版 UI 系统的输入路由、窗口管理和输入事件序列化。
+ *          对应 Delphi 客户端的 TWinControl 控件管理逻辑。
+ */
+
 #include "ui/legacy_ui.hpp"
 
 #include <algorithm>

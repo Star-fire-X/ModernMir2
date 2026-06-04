@@ -1,3 +1,10 @@
+/**
+ * @file legacy_ui_lifecycle.cpp
+ * @brief 旧版 UI 生命周期管理实现 —— 场景切换/断线时的 UI 清理行为
+ * @details 实现 UI 生命周期追踪标签的字符串转换和清理逻辑。
+ *          确保 UI 状态在场景切换时正确重置，与 Delphi 客户端行为一致。
+ */
+
 #include "scene/legacy_ui_lifecycle.hpp"
 
 namespace mir2::client::legacy_ui_lifecycle {

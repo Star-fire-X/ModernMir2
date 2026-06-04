@@ -145,6 +145,7 @@ struct ActorState {
   std::int32_t feature{0};  ///< 外观特征编码（包含 race/dress/weapon/hair 编码在一个 32 位值中）
   std::int32_t status{0};
   client_v1::ActorType actor_type{client_v1::ActorType::player};  ///< 角色类型（玩家/怪物/NPC）
+  std::uint16_t level{1};              ///< 角色等级（用于旧版受击帧时长等视觉语义）
   std::uint64_t move_started_ms{0};     ///< 移动开始的时间戳（用于插值计算）
   std::uint64_t move_duration_ms{0};    ///< 移动持续时间（行走 180ms，跑步 140ms）
   bool running{false};                  ///< 是否在跑步（跑步比行走快，但增加饥饿度）
@@ -791,6 +792,10 @@ inline int legacy_visual_effect_type(const std::uint16_t magic_id, const int eff
   }
 }
 
+inline std::uint64_t legacy_struck_frame_time_ms(const std::uint16_t level) {
+  return static_cast<std::uint64_t>(std::max(80, 200 - static_cast<int>(level) * 5));
+}
+
 /// 游戏状态主存储：包含所有子状态和协议消息的 apply 方法
 /// 这是客户端数据层的中心点，所有状态变更都通过此结构
 struct GameStateStore {
@@ -1049,7 +1054,8 @@ struct GameStateStore {
   /// 这些时间值基于对经典传奇客户端的逆向分析，
   /// 与 Delphi 客户端的动作帧播放速度一致
   static std::uint64_t action_duration_ms(client_v1::ActorActionKind kind,
-                                          std::uint16_t legacy_ident) {
+                                          std::uint16_t legacy_ident,
+                                          const std::uint16_t level = 1) {
     switch (kind) {
       case client_v1::ActorActionKind::walk:
         return 540;    // 行走动画总时长
@@ -1068,7 +1074,7 @@ struct GameStateStore {
       case client_v1::ActorActionKind::spell:
         return 360;    // 施法动画
       case client_v1::ActorActionKind::struck:
-        return 210;    // 受击后仰动画
+        return legacy_struck_frame_time_ms(level) * 3U;
       case client_v1::ActorActionKind::turn:
       default:
         return 200;    // 转身/待机
@@ -1095,7 +1101,7 @@ struct GameStateStore {
       apply_magic_metadata(actor, message.magic_id);
     }
     actor.action_started_ms = now_ms;
-    actor.action_duration_ms = action_duration_ms(message.action_kind, legacy_ident);
+    actor.action_duration_ms = action_duration_ms(message.action_kind, legacy_ident, actor.level);
     const auto forced_move = message.action_kind == client_v1::ActorActionKind::rush ||
                              message.action_kind == client_v1::ActorActionKind::rush_kung ||
                              message.action_kind == client_v1::ActorActionKind::backstep ||
@@ -1198,7 +1204,8 @@ struct GameStateStore {
                                       : LegacyDeathMode::instant_corpse;
         actor.action_started_ms = now_ms;
         actor.action_duration_ms =
-            action_duration_ms(client_v1::ActorActionKind::turn, actor.legacy_action_ident);
+            action_duration_ms(client_v1::ActorActionKind::turn, actor.legacy_action_ident,
+                               actor.level);
         record_legacy_actor_event(actor);
         break;
     }
@@ -1223,6 +1230,7 @@ struct GameStateStore {
     actor.feature = message.actor.feature;
     actor.status = message.actor.status;
     actor.actor_type = message.actor.actor_type;
+    actor.level = message.actor.level;
     if (actor.dead && actor.hp > 0) {
       revive_actor(actor);
       record_legacy_actor_event(actor);
@@ -1905,7 +1913,7 @@ struct GameStateStore {
     for (const auto& actor : message.actors) {
       world.actors[actor.actor_id] = ActorState{actor.actor_id, actor.name, actor.x, actor.y,
                                                 actor.x, actor.y, actor.dir, actor.feature,
-                                                actor.status, actor.actor_type};
+                                                actor.status, actor.actor_type, actor.level};
       world.actor_draw_order.push_back(actor.actor_id);
     }
     world.map_clear_waiting_for_change = false;
@@ -2001,6 +2009,7 @@ struct GameStateStore {
     actor.feature = message.actor.feature;
     actor.status = message.actor.status;
     actor.actor_type = message.actor.actor_type;
+    actor.level = message.actor.level;
     if (actor.dead && actor.hp > 0) {
       revive_actor(actor);
       record_legacy_actor_event(actor);
@@ -2181,6 +2190,9 @@ struct GameStateStore {
     world.self_ability_detail.max_exp = message.max_exp;
     world.self_ability_detail.weight = message.weight;
     world.self_ability_detail.max_weight = message.max_weight;
+    if (auto self = world.actors.find(world.self_actor_id); self != world.actors.end()) {
+      self->second.level = message.level;
+    }
   }
 
   /// 应用主角完整能力摘要，状态窗口四页读取该状态
@@ -2192,6 +2204,9 @@ struct GameStateStore {
     world.self_ability.max_exp = message.max_exp;
     world.self_ability.weight = message.weight;
     world.self_ability.max_weight = message.max_weight;
+    if (auto self = world.actors.find(world.self_actor_id); self != world.actors.end()) {
+      self->second.level = message.level;
+    }
   }
 
   /// 应用聊天板行

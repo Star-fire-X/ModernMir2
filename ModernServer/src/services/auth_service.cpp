@@ -1,3 +1,19 @@
+/**
+ * @file auth_service.cpp
+ * @brief 用户认证服务实现
+ *
+ * @details 实现 AuthService 类的全部接口，包括与登录网关、持久化服务的
+ *          异步消息通信、请求节流、重复登录检测、状态机驱动等核心逻辑。
+ *          处理所有与账号认证相关的客户端请求，包括密码认证、注册、更新、
+ *          密码修改、角色管理(查询/创建/删除/选择)等操作。
+ *
+ * @note 认证流程设计要点：
+ *       1. 请求节流：同一会话的账号操作间隔不少于5秒
+ *       2. 重复登录检测：同一账号不允许同时在线，会强制踢出旧会话
+ *       3. 请求-响应匹配：使用 request_id 实现异步回调的精确匹配
+ *       4. 审计日志：所有认证操作均记录审计事件
+ */
+
 #include "services/auth_service.hpp"
 
 #include <algorithm>
@@ -14,9 +30,23 @@ namespace mir2 {
 
 namespace {
 
+/// @brief 最大角色槽位数
 constexpr std::size_t kMaxCharacterSlots = 2;
+
+/// @brief 账号指令节流间隔(毫秒)，同一会话的指令间隔不可小于此值
 constexpr std::int64_t kAccountCommandThrottleMs = 5 * 1000;
 
+/**
+ * @brief 构建标准响应数据包
+ * @param session_id 会话ID
+ * @param ident 消息标识符
+ * @param recog 识别码(默认为0)
+ * @param param 参数(默认为0)
+ * @param tag 标签(默认为0)
+ * @param series 系列号(默认为0)
+ * @param body 消息体(默认为空)
+ * @return 构建好的 LegacyPacket 数据包
+ */
 LegacyPacket make_response_packet(std::uint64_t session_id, std::uint16_t ident,
                                   std::int32_t recog = 0, std::uint16_t param = 0,
                                   std::uint16_t tag = 0, std::uint16_t series = 0,
@@ -25,6 +55,12 @@ LegacyPacket make_response_packet(std::uint64_t session_id, std::uint16_t ident,
                                  make_default_message(ident, recog, param, tag, series), body);
 }
 
+/**
+ * @brief 构建错误响应数据包
+ * @param session_id 会话ID
+ * @param kind 登录错误类型
+ * @return 根据错误类型映射构建的错误响应数据包
+ */
 LegacyPacket make_error_response_packet(std::uint64_t session_id,
                                         CanonicalLoginErrorKind kind) {
   const auto response = canonical_login_error_mapping(kind).legacy;
@@ -32,17 +68,36 @@ LegacyPacket make_error_response_packet(std::uint64_t session_id,
                               response.tag, response.series);
 }
 
+/**
+ * @brief 向登录网关发送数据包
+ * @param context 宿主上下文，用于获取消息总线
+ * @param session_id 目标会话ID
+ * @param packet 要发送的 LegacyPacket 数据包
+ */
 void post_gateway_packet(HostContext& context, std::uint64_t session_id, LegacyPacket packet) {
   context.bus->post("login_gateway",
                     SessionEvent{SessionEventKind::send_packet, "login_gateway", session_id, {},
                                  std::move(packet), {}});
 }
 
+/**
+ * @brief 记录审计事件
+ * @param context 宿主上下文
+ * @param category 审计类别
+ * @param message 审计消息
+ * @param session_key 会话标识键
+ */
 void audit(HostContext& context, std::string category, std::string message, std::string session_key) {
   context.bus->post("log_service",
                     AuditEvent{std::move(category), std::move(message), std::move(session_key)});
 }
 
+/**
+ * @brief 分割遗留编码的字段字符串
+ * @param text 输入的遗留编码文本视图
+ * @param delimiter 分隔符
+ * @return 分割后的字符串向量
+ */
 std::vector<std::string> split_fields(std::string_view text, char delimiter) {
   std::vector<std::string> fields;
   for (const auto& field : split_legacy_fields(LegacyStringView{text}, delimiter)) {
@@ -51,6 +106,11 @@ std::vector<std::string> split_fields(std::string_view text, char delimiter) {
   return fields;
 }
 
+/**
+ * @brief 将字符串解析为 int32_t
+ * @param text 待解析的字符串
+ * @return 如果解析成功则返回 int32_t 值，否则返回 std::nullopt
+ */
 std::optional<std::int32_t> parse_i32(std::string_view text) {
   std::int32_t value = 0;
   const auto* begin = text.data();
@@ -62,12 +122,22 @@ std::optional<std::int32_t> parse_i32(std::string_view text) {
   return value;
 }
 
+/**
+ * @brief 获取当前时间戳(毫秒)
+ * @return 当前系统时间的毫秒数
+ */
 std::int64_t now_ms() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
              std::chrono::system_clock::now().time_since_epoch())
       .count();
 }
 
+/**
+ * @brief 判断是否应该对指令进行节流(限速)
+ * @param last_command_at_ms 上一次指令的时间戳(引用，会被更新)
+ * @param current_ms 当前时间戳
+ * @return true 表示应节流(请求被忽略)，false 表示允许执行
+ */
 bool should_throttle(std::int64_t& last_command_at_ms, std::int64_t current_ms) {
   if (last_command_at_ms != 0 && current_ms - last_command_at_ms <= kAccountCommandThrottleMs) {
     return true;
@@ -76,10 +146,20 @@ bool should_throttle(std::int64_t& last_command_at_ms, std::int64_t current_ms) 
   return false;
 }
 
+/**
+ * @brief 检查账号是否需要补充信息
+ * @param account 账号记录
+ * @return true 如果用户名为空或密保问题2为空，需要补充信息
+ */
 bool requires_account_update(const AccountRecord& account) {
   return account.user_name.empty() || account.quiz2.empty();
 }
 
+/**
+ * @brief 获取指定类型的遗留编码缓冲区大小
+ * @tparam T 要编码的结构体类型
+ * @return 编码后的缓冲区大小(字节)
+ */
 template <typename T>
 std::size_t encoded_buffer_size() {
   static const auto size = [] {
@@ -89,6 +169,13 @@ std::size_t encoded_buffer_size() {
   return size;
 }
 
+/**
+ * @brief 解码用户注册信息体
+ * @param body 编码的消息体
+ * @param info [out] 解码后的用户基本信息
+ * @param add_info [out] 解码后的用户附加信息
+ * @return true 解码成功，false 数据不足或解码失败
+ */
 bool decode_user_entry_body(std::string_view body, LegacyUserEntryInfo& info,
                             LegacyUserEntryAddInfo& add_info) {
   const auto info_size = encoded_buffer_size<LegacyUserEntryInfo>();
@@ -101,6 +188,12 @@ bool decode_user_entry_body(std::string_view body, LegacyUserEntryInfo& info,
          legacy_decode_buffer(add_body, &add_info, sizeof(add_info));
 }
 
+/**
+ * @brief 从遗留编码的用户信息创建 AccountRecord
+ * @param info 遗留编码的用户基本信息
+ * @param add_info 遗留编码的用户附加信息
+ * @return 转换后的 AccountRecord
+ */
 AccountRecord make_account_record(const LegacyUserEntryInfo& info, const LegacyUserEntryAddInfo& add_info) {
   AccountRecord account;
   account.account_id = to_string(info.login_id);
@@ -121,6 +214,11 @@ AccountRecord make_account_record(const LegacyUserEntryInfo& info, const LegacyU
   return account;
 }
 
+/**
+ * @brief 从 AccountRecord 创建遗留编码的用户信息
+ * @param account 账号记录
+ * @return 填充好的 LegacyUserEntryInfo 结构体
+ */
 LegacyUserEntryInfo make_user_entry_info(const AccountRecord& account) {
   LegacyUserEntryInfo info;
   set_short_string(info.login_id, account.account_id);
@@ -134,6 +232,15 @@ LegacyUserEntryInfo make_user_entry_info(const AccountRecord& account) {
   return info;
 }
 
+/**
+ * @brief 创建新的角色记录(默认出生在比奇省 330:270)
+ * @param account_id 所属账号ID
+ * @param character_name 角色名
+ * @param job 职业
+ * @param sex 性别
+ * @param hair 发型
+ * @return 初始化好的角色记录(1级,默认属性)
+ */
 CharacterRecord make_new_character(const std::string& account_id, const std::string& character_name,
                                    std::uint8_t job, std::uint8_t sex, std::uint8_t hair) {
   CharacterRecord record;
@@ -166,17 +273,36 @@ CharacterRecord make_new_character(const std::string& account_id, const std::str
   return record;
 }
 
+/**
+ * @brief 编码选择服务器响应体
+ * @param context 宿主上下文，获取游戏网关地址和端口
+ * @param certification 认证凭据
+ * @return 遗留编码的响应体字符串，格式 "地址/端口/凭据"
+ */
 std::string encode_select_server_body(const HostContext& context, std::int32_t certification) {
   return legacy_encode_string(context.config.ports.game_gateway.address + "/" +
                               std::to_string(context.config.ports.game_gateway.port) + "/" +
                               std::to_string(certification));
 }
 
+/**
+ * @brief 编码开始游戏响应体
+ * @param context 宿主上下文，获取游戏网关地址和端口
+ * @return 遗留编码的响应体字符串，格式 "地址/端口"
+ */
 std::string encode_start_play_body(const HostContext& context) {
   return legacy_encode_string(context.config.ports.game_gateway.address + "/" +
                               std::to_string(context.config.ports.game_gateway.port));
 }
 
+/**
+ * @brief 编码角色列表响应体
+ * @param characters 角色记录列表
+ * @param selected_character 已选择的角色名(留空则选第一个)
+ * @return 遗留编码的角色列表体字符串
+ * @note 每个角色用 "/" 分隔字段：名称/职业/发型/等级/性别
+ *       选中的角色名前加 "*" 前缀
+ */
 std::string encode_character_list_body(const std::vector<CharacterRecord>& characters,
                                        std::string selected_character) {
   if (selected_character.empty() && !characters.empty()) {
@@ -227,6 +353,16 @@ std::unordered_map<std::string, std::string> AuthService::snapshot() const {
 
 std::string AuthService::make_request_id() { return "auth:" + std::to_string(next_request_id_++); }
 
+/**
+ * @brief 工作线程主循环
+ *
+ * @details 从消息队列获取消息，根据消息类型分发给对应的处理函数：
+ *          - SessionEvent: 处理会话事件(数据包接收、断开等)
+ *          - LogicCommand: 处理逻辑指令(撤销认证等)
+ *          - PersistResult: 处理持久化结果回调
+ *
+ *          使用 100ms 超时的等待弹出，避免忙等待消耗 CPU。
+ */
 void AuthService::run() {
   while (running_.load(std::memory_order_relaxed)) {
     auto message = endpoint_->queue->wait_pop_for(std::chrono::milliseconds(100));
@@ -243,6 +379,23 @@ void AuthService::run() {
   }
 }
 
+/**
+ * @brief 处理会话事件(数据包接收/断开连接)
+ *
+ * @details 根据不同的消息标识符处理各类客户端请求：
+ *          - kCmIdPassword: 账号密码认证
+ *          - kCmAddNewUser: 创建新账号
+ *          - kCmUpdateUser: 更新账号信息
+ *          - kCmChangePassword: 修改密码
+ *          - kCmSelectServer: 选择游戏服务器
+ *          - kCmQueryChr: 查询角色列表
+ *          - kCmNewChr: 创建新角色
+ *          - kCmDelChr: 删除角色
+ *          - kCmSelChr: 选择角色
+ *
+ *          所有请求都通过 request_id 与持久化服务异步通信。
+ *          断开连接时清理该会话的所有待处理请求和相关状态。
+ */
 void AuthService::handle_session_event(const SessionEvent& event) {
   if (context_ == nullptr) {
     return;
@@ -614,6 +767,14 @@ void AuthService::handle_session_event(const SessionEvent& event) {
   }
 }
 
+/**
+ * @brief 处理逻辑指令
+ *
+ * @details 目前仅处理撤销认证指令(LogicCommandKind::revoke_authentication)，
+ *          根据凭据值或账号ID清除对应的准入记录。
+ *
+ * @param command 逻辑指令
+ */
 void AuthService::handle_logic_command(const LogicCommand& command) {
   if (command.kind != LogicCommandKind::revoke_authentication) {
     return;
@@ -632,6 +793,18 @@ void AuthService::handle_logic_command(const LogicCommand& command) {
   }
 }
 
+/**
+ * @brief 处理持久化结果回调
+ *
+ * @details 根据持久化结果类型和待请求类型执行不同的响应逻辑：
+ *          - account_authenticated: 处理认证成功/失败，进行重复登录检测
+ *          - account_created/updated/password_changed: 返回操作结果给客户端
+ *          - characters_listed: 处理角色查询/创建预检查/角色选择
+ *          - character_created/deleted: 返回操作结果
+ *          - error: 统一错误处理
+ *
+ * @param result 持久化操作结果
+ */
 void AuthService::handle_persist_result(const PersistResult& result) {
   if (context_ == nullptr || result.request_id.empty()) {
     return;

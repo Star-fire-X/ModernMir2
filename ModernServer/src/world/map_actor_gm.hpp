@@ -1,11 +1,57 @@
+/**
+ * @file map_actor_gm.hpp
+ * @brief GM 命令处理实现 - MapActor 的 GM 命令执行逻辑
+ * @details 该文件是 map_actor.cpp 的实现细节部分，包含 GM 命令的完整处理逻辑。
+ *          实现以下功能：
+ *          - 匿名命名空间辅助函数：命令名称匹配、参数解析、物品查找等
+ *          - legacy_apply_gm_command：GM 命令主分发器
+ *
+ *          支持的 GM 命令包括：
+ *          - Level/AdjustLevel/AdjustTestLevel：等级调整
+ *          - AdjustExp：经验值调整
+ *          - FreePenalty/PKpoint/IncPkPoint：PK 值管理
+ *          - ChangeLuck/LuckyPoint：幸运值管理
+ *          - hair/NameColor：外观修改
+ *          - ChangeJob/ChangeGender：职业/性别变更
+ *          - Transparency：隐身模式
+ *          - flag/showopen/showunit：标志位查询
+ *          - setflag/setopen/setunit：标志位设置
+ *          - Training/OPTraining：技能等级修改
+ *          - DeleteSkill/OPDeleteSkill：技能删除
+ *          - Make：物品生成
+ *          - DeleteItem：物品删除
+ *          - AddGold/DelGold/Test_GOLD_Change：金币操作
+ *          - WeaponRefinery：武器属性修改
+ *          - ChangeWeaponDura：武器耐久修改
+ *
+ * @see map_actor.hpp
+ * @see map_actor_mail.hpp
+ */
+
 #pragma once
 
 namespace {
 
+/**
+ * @brief GM 命令名称大小写不敏感比较
+ * @param lhs 命令名称左值
+ * @param rhs 命令名称右值
+ * @return true 如果两个名称忽略大小写后相等
+ * @details 将两个字符串都转换为小写后进行比较，实现对 GM 命令名称的
+ *          大小写不敏感匹配。注意：此函数在每次调用时都会创建两个 std::string。
+ */
 bool gm_command_equals(std::string_view lhs, std::string_view rhs) {
   return util::lower_copy(std::string(lhs)) == util::lower_copy(std::string(rhs));
 }
 
+/**
+ * @brief 从 GM 命令参数列表中解析整数
+ * @param args 参数列表
+ * @param index 要解析的参数索引
+ * @param fallback 解析失败时的默认值
+ * @return 解析后的整数值，如果索引越界或解析失败则返回 fallback
+ * @details 使用 parse_int32 进行解析，解析前会去除参数前后的空白字符。
+ */
 std::int32_t gm_parse_int(const std::vector<std::string>& args, std::size_t index,
                           std::int32_t fallback = 0) {
   if (index >= args.size()) {
@@ -14,6 +60,14 @@ std::int32_t gm_parse_int(const std::vector<std::string>& args, std::size_t inde
   return parse_int32(util::trim(args[index])).value_or(fallback);
 }
 
+/**
+ * @brief 从 GM 命令参数列表中解析双精度浮点数
+ * @param args 参数列表
+ * @param index 要解析的参数索引
+ * @param fallback 解析失败时的默认值（默认 0.0）
+ * @return 解析后的双精度浮点值，如果索引越界或解析失败则返回 fallback
+ * @note 使用 std::stod 进行转换，捕获所有异常类型以确保稳健性
+ */
 double gm_parse_double(const std::vector<std::string>& args, std::size_t index,
                        double fallback = 0.0) {
   if (index >= args.size()) {
@@ -26,6 +80,15 @@ double gm_parse_double(const std::vector<std::string>& args, std::size_t index,
   }
 }
 
+/**
+ * @brief 将 GM 命令参数列表中的一段连接为字符串
+ * @param args 参数列表
+ * @param begin 起始索引（包含）
+ * @param end 结束索引（不包含）
+ * @return 连接后的字符串，各参数间用空格分隔
+ * @details 用于将多个单词组成的物品名称重新连接成一个完整的字符串。
+ *          例如参数 ["木", "剑"] 会连接成 "木 剑"。
+ */
 std::string gm_join_args(const std::vector<std::string>& args, std::size_t begin,
                          std::size_t end) {
   std::string result;
@@ -38,6 +101,14 @@ std::string gm_join_args(const std::vector<std::string>& args, std::size_t begin
   return result;
 }
 
+/**
+ * @brief 根据名称或 ID 查找魔法配置
+ * @param magic_configs 魔法配置表
+ * @param value 魔法名称或 ID 字符串
+ * @return 魔法配置指针，未找到时返回 nullptr
+ * @details 首先尝试将 value 解析为整数 ID，如果成功则在配置表中按 ID 查找。
+ *          如果不是有效 ID 或未找到，则按名称（忽略大小写）遍历查找。
+ */
 const MagicConfig* gm_find_magic(
     const std::unordered_map<std::int32_t, MagicConfig>& magic_configs,
     std::string_view value) {
@@ -56,6 +127,16 @@ const MagicConfig* gm_find_magic(
   return nullptr;
 }
 
+/**
+ * @brief 根据参数列表查找物品配置及数量
+ * @param item_configs 物品配置表
+ * @param args GM 命令参数列表
+ * @param count [输出] 物品数量
+ * @return 物品配置指针，未找到时返回 nullptr
+ * @details 从参数末尾开始往前匹配物品名称，以支持多词物品名称。
+ *          第一个匹配的物品名称部分之前的所有参数被视为数量值。
+ *          例如 args=["5", "木", "剑"] 会匹配到"木 剑"数量为 5。
+ */
 const ItemConfig* gm_find_item_arg(
     const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
     const std::vector<std::string>& args, std::int32_t& count) {
@@ -74,11 +155,25 @@ const ItemConfig* gm_find_item_arg(
   return nullptr;
 }
 
+/**
+ * @brief 获取物品最大耐久度（适配 uint16_t 范围）
+ * @param item_config 物品配置
+ * @return 裁剪到 [0, 65535] 范围内的最大耐久度值
+ * @details 如果配置的 dura_max 为 0（表示不可磨损物品），则使用 1000 作为默认值。
+ */
 std::uint16_t gm_item_dura_max(const ItemConfig& item_config) {
   const auto dura_max = item_config.dura_max > 0 ? item_config.dura_max : 1000;
   return static_cast<std::uint16_t>(std::clamp(dura_max, 0, 65535));
 }
 
+/**
+ * @brief 创建 GM 生成的物品实例
+ * @param item_config 物品配置
+ * @param make_index 制造索引（用于物品唯一标识）
+ * @return 创建的 LegacyUserItem 实例
+ * @details 使用物品配置创建新的物品实例，分配制造索引，
+ *          设置标准耐久度（最大耐久等于当前耐久）。
+ */
 LegacyUserItem gm_make_item(const ItemConfig& item_config, std::int32_t make_index) {
   LegacyUserItem item;
   item.make_index = make_index;
@@ -88,6 +183,14 @@ LegacyUserItem gm_make_item(const ItemConfig& item_config, std::int32_t make_ind
   return item;
 }
 
+/**
+ * @brief 刷新玩家能力值并发送数据包
+ * @param dispatch 运行时调度输出
+ * @param player 目标玩家
+ * @param item_configs 物品配置表
+ * @details 重新计算玩家派生状态（装备效果、Buff 等），
+ *          发送能力值、子能力值和生命值变化三个数据包给客户端。
+ */
 void gm_refresh_ability(RuntimeDispatch& dispatch, Player& player,
                         const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
   player.refresh_derived_state(item_configs);
@@ -98,6 +201,14 @@ void gm_refresh_ability(RuntimeDispatch& dispatch, Player& player,
                make_health_spell_changed_packet(player.session_id(), player));
 }
 
+/**
+ * @brief 刷新玩家负重并发送数据包
+ * @param dispatch 运行时调度输出
+ * @param player 目标玩家
+ * @param item_configs 物品配置表
+ * @details 重新计算玩家重量状态，发送负重变更数据包给客户端。
+ *          通常用于物品增删后的重量同步。
+ */
 void gm_refresh_weight(RuntimeDispatch& dispatch, Player& player,
                        const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
   player.refresh_derived_state(item_configs);
@@ -105,6 +216,14 @@ void gm_refresh_weight(RuntimeDispatch& dispatch, Player& player,
                make_weight_changed_packet(player.session_id(), player.character()));
 }
 
+/**
+ * @brief 广播玩家外观特征变更给所有观察者
+ * @param objects 地图上所有游戏对象映射表
+ * @param dispatch 运行时调度输出
+ * @param player 变更外观的玩家
+ * @details 遍历所有玩家，向能够看到目标玩家的观察者发送 feature_changed 数据包。
+ *          用于发型变更、性别变更等外观变化场景。
+ */
 void gm_broadcast_feature(
     const std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     RuntimeDispatch& dispatch, const Player& player) {
@@ -115,6 +234,14 @@ void gm_broadcast_feature(
   });
 }
 
+/**
+ * @brief 广播玩家名称颜色变更给所有观察者
+ * @param objects 地图上所有游戏对象映射表
+ * @param dispatch 运行时调度输出
+ * @param player 变更名称颜色的玩家
+ * @details 遍历所有玩家，向能够看到目标玩家的观察者发送包含新名称颜色的
+ *          username 数据包。用于 PK 值变化、GM 状态等场景。
+ */
 void gm_broadcast_name_color(
     const std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     RuntimeDispatch& dispatch, const Player& player) {
@@ -126,6 +253,15 @@ void gm_broadcast_name_color(
   });
 }
 
+/**
+ * @brief 生成 GM 标志位查询的响应消息文本
+ * @param player 目标玩家
+ * @param label 标志类型标签（"flag"/"open"/"unit"）
+ * @param index 标志位索引
+ * @param value 标志位当前值（0/1）
+ * @return 格式化的消息字符串
+ * @details 生成如 "角色名: flag[5]=ON" 格式的查询结果文本。
+ */
 std::string gm_mark_text(const Player& player, std::string_view label,
                          std::int32_t index, std::uint8_t value) {
   return player.character().character_name + ": " + std::string(label) + "[" +
@@ -134,6 +270,26 @@ std::string gm_mark_text(const Player& player, std::string_view label,
 
 }  // namespace
 
+/**
+ * @brief 应用 GM 命令
+ * @param actor_id 执行 GM 命令的玩家角色 ID
+ * @param command_name 命令名称（不区分大小写）
+ * @param args 命令参数列表
+ * @param current_tick 当前逻辑 tick
+ * @param now_ms 当前系统时间（毫秒）
+ * @return GM 命令执行结果，包含处理状态、成功标志和返回消息
+ * @details 这是 GM 命令的主分发函数，按命令名称分派到对应的处理逻辑。
+ *          每个命令处理分支通常包含：
+ *          1. 参数验证（数量、类型合法性）
+ *          2. 执行操作（修改玩家状态、生成/删除物品等）
+ *          3. 客户端同步（发送对应的网络数据包）
+ *          4. 持久化保存（如有必要）
+ *
+ *          支持 Level/AdjustExp/FreePenalty/Make/DeleteSkill 等 20+ 种 GM 命令。
+ *          所有命令名称匹配忽略大小写。
+ *
+ * @note 未识别的命令设置 handled=false 供上层继续处理
+ */
 MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     std::uint64_t actor_id, const std::string& command_name,
     const std::vector<std::string>& args, std::uint64_t current_tick,
@@ -146,6 +302,7 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return result;
   }
 
+  // 本地辅助 lambda：保存角色、标记成功、标记失败
   auto save = [&]() { queue_save_character(result.dispatch, *player); };
   auto ok = [&](std::string reason = "ok") {
     result.handled = true;
@@ -160,6 +317,11 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return result;
   };
 
+  // ── 等级调整 ──────────────────────────────────────────────────
+  // Level <level>       : 直接设置等级（上限 40）
+  // Level0 <level>      : Level 的别名
+  // AdjustLevel <level> : 设置等级（参数索引 1，上限 40）
+  // AdjustTestLevel <level> : 设置等级（参数索引 0，上限 50）
   if (gm_command_equals(command_name, "Level") || gm_command_equals(command_name, "Level0") ||
       gm_command_equals(command_name, "AdjustLevel") ||
       gm_command_equals(command_name, "AdjustTestLevel")) {
@@ -174,6 +336,8 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 经验值调整 ─────────────────────────────────────────────────
+  // AdjustExp <exp> : 直接设置经验值
   if (gm_command_equals(command_name, "AdjustExp")) {
     player->set_legacy_exp(gm_parse_int(args, 1, player->character().ability.exp));
     queue_packet(result.dispatch, player->session_id(),
@@ -182,6 +346,8 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 清除红名/PK 值 ──────────────────────────────────────────────
+  // FreePenalty : PK 值归零，广播名称颜色更新
   if (gm_command_equals(command_name, "FreePenalty")) {
     player->set_pk_point(0);
     gm_broadcast_name_color(objects_, result.dispatch, *player);
@@ -190,12 +356,16 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 查看 PK 值 ──────────────────────────────────────────────────
+  // PKpoint : 显示当前 PK 值
   if (gm_command_equals(command_name, "PKpoint")) {
     result.messages.push_back(player->character().character_name + " PK point = " +
                               std::to_string(player->pk_point()));
     return ok();
   }
 
+  // ── 增加 PK 值 ──────────────────────────────────────────────────
+  // IncPkPoint : PK 值增加 100
   if (gm_command_equals(command_name, "IncPkPoint")) {
     player->inc_pk_point(100);
     gm_broadcast_name_color(objects_, result.dispatch, *player);
@@ -203,6 +373,8 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 查看幸运值 ──────────────────────────────────────────────────
+  // LuckyPoint : 显示 BodyLuck 等级/值和 Luck 值
   if (gm_command_equals(command_name, "LuckyPoint")) {
     result.messages.push_back(player->character().character_name + ": BodyLuck= " +
                               std::to_string(player->body_luck_level()) + "/" +
@@ -212,12 +384,16 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 修改幸运值 ──────────────────────────────────────────────────
+  // ChangeLuck <value> : 设置 BodyLuck 值
   if (gm_command_equals(command_name, "ChangeLuck")) {
     player->set_body_luck_value(gm_parse_double(args, 0, player->character().body_luck));
     save();
     return ok();
   }
 
+  // ── 修改发型 ────────────────────────────────────────────────────
+  // hair <index> : 设置发型索引，刷新外观并广播
   if (gm_command_equals(command_name, "hair")) {
     player->set_hair(gm_parse_int(args, 0, player->character().hair));
     gm_refresh_ability(result.dispatch, *player, item_configs_);
@@ -226,12 +402,17 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 修改名称颜色 ────────────────────────────────────────────────
+  // NameColor <color> : 设置名称颜色（0-255），广播更新
   if (gm_command_equals(command_name, "NameColor")) {
     player->set_legacy_name_color(gm_parse_int(args, 0, 255));
     gm_broadcast_name_color(objects_, result.dispatch, *player);
     return ok();
   }
 
+  // ── 变更职业 ────────────────────────────────────────────────────
+  // ChangeJob <job> : 0=Warrior, 1=Wizard, 2=Taoist
+  //                   支持名称 "warrior"/"wizard"/"taoist"
   if (gm_command_equals(command_name, "ChangeJob")) {
     auto job = gm_parse_int(args, 0, -1);
     if (!args.empty()) {
@@ -253,6 +434,8 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 变更性别 ────────────────────────────────────────────────────
+  // ChangeGender : 切换性别，刷新外观和属性并广播
   if (gm_command_equals(command_name, "ChangeGender")) {
     player->toggle_sex();
     gm_refresh_ability(result.dispatch, *player, item_configs_);
@@ -261,6 +444,8 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 隐身模式 ────────────────────────────────────────────────────
+  // Transparency : 切换隐身状态（1 小时持续时间），广播状态变化
   if (gm_command_equals(command_name, "Transparency")) {
     if (player->legacy_transparent_active(current_tick)) {
       static_cast<void>(player->clear_legacy_transparent(current_tick));
@@ -274,6 +459,10 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 标志位查询 ──────────────────────────────────────────────────
+  // flag <index> <value>    : 查询任务标记位
+  // showopen <index> <value> : 查询任务开启单元
+  // showunit <index> <value> : 查询任务单元
   if (gm_command_equals(command_name, "flag") || gm_command_equals(command_name, "showopen") ||
       gm_command_equals(command_name, "showunit")) {
     const auto index = gm_parse_int(args, 1, 0);
@@ -293,6 +482,10 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 标志位设置 ──────────────────────────────────────────────────
+  // setflag <index> <value>  : 设置任务标记位
+  // setopen <index> <value>  : 设置任务开启单元
+  // setunit <index> <value>  : 设置任务单元
   if (gm_command_equals(command_name, "setflag") ||
       gm_command_equals(command_name, "setopen") ||
       gm_command_equals(command_name, "setunit")) {
@@ -318,6 +511,9 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 技能等级修改 ────────────────────────────────────────────────
+  // Training <魔法名称> <等级>       : 设置已学魔法等级
+  // OPTraining <魔法名称> <等级>     : 同上（参数索引偏移不同）
   if (gm_command_equals(command_name, "Training") ||
       gm_command_equals(command_name, "OPTraining")) {
     const auto magic_arg = gm_command_equals(command_name, "OPTraining") ? 1 : 0;
@@ -342,6 +538,9 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 删除技能 ────────────────────────────────────────────────────
+  // DeleteSkill <魔法名称>     : 删除已学魔法（参数索引 0）
+  // OPDeleteSkill <魔法名称>   : 删除已学魔法（参数索引 1）
   if (gm_command_equals(command_name, "DeleteSkill") ||
       gm_command_equals(command_name, "OPDeleteSkill")) {
     const auto magic_arg = gm_command_equals(command_name, "OPDeleteSkill") ? 1 : 0;
@@ -358,6 +557,8 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 生成物品 ────────────────────────────────────────────────────
+  // Make <物品名称> [数量] : 生成 1-50 个物品放入背包
   if (gm_command_equals(command_name, "Make")) {
     if (args.empty()) {
       return fail("bad_args");
@@ -387,6 +588,8 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok("made=" + std::to_string(made));
   }
 
+  // ── 删除物品 ────────────────────────────────────────────────────
+  // DeleteItem <物品名称> [数量] : 从背包删除 1-50 个指定物品
   if (gm_command_equals(command_name, "DeleteItem")) {
     if (args.empty()) {
       return fail("bad_args");
@@ -423,6 +626,10 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok("removed=" + std::to_string(removed));
   }
 
+  // ── 金币操作 ────────────────────────────────────────────────────
+  // AddGold <amount>         : 增加金币
+  // DelGold <amount>         : 减少金币（不超过当前持有量）
+  // Test_GOLD_Change <amount> : 将金币设为指定值（补差或扣除）
   if (gm_command_equals(command_name, "AddGold") ||
       gm_command_equals(command_name, "DelGold") ||
       gm_command_equals(command_name, "Test_GOLD_Change")) {
@@ -443,6 +650,9 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 武器极品属性修改 ────────────────────────────────────────────
+  // WeaponRefinery <dc> <mc> <sc> <accuracy> : 修改武器极品属性
+  //    desc[0]=DC, desc[1]=MC, desc[2]=SC, desc[5]=Accuracy
   if (gm_command_equals(command_name, "WeaponRefinery")) {
     auto* weapon = player->equipped_item_mutable(kEquipWeapon);
     if (weapon == nullptr || is_empty(*weapon)) {
@@ -460,6 +670,9 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 武器耐久修改 ────────────────────────────────────────────────
+  // ChangeWeaponDura <dura_scale> : 修改武器耐久度（0-65 缩放为 0-65000）
+  //    实际耐久 = dura * 1000
   if (gm_command_equals(command_name, "ChangeWeaponDura")) {
     auto* weapon = player->equipped_item_mutable(kEquipWeapon);
     if (weapon == nullptr || is_empty(*weapon)) {
@@ -475,6 +688,7 @@ MapActor::LegacyGmCommandResult MapActor::legacy_apply_gm_command(
     return ok();
   }
 
+  // ── 未识别的命令 ──────────────────────────────────────────────
   result.handled = false;
   return result;
 }

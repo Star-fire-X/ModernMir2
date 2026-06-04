@@ -1,3 +1,10 @@
+/**
+ * @file audio_id_mapping.cpp
+ * @brief 音效 ID 映射表实现 —— 加载 sound_list.txt 并建立音效 ID → 文件路径的映射
+ * @details 实现从音效列表文件解析路径、追加 Delphi 硬编码音效、
+ *          分配动态音效 ID 的完整逻辑。
+ */
+
 #include "audio/audio_id_mapping.hpp"
 
 #include <charconv>

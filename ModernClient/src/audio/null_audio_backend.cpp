@@ -1,3 +1,10 @@
+/**
+ * @file null_audio_backend.cpp
+ * @brief 空音频后端实现 —— 所有操作为空操作，用于测试和无音频环境
+ * @details 实现 IAudioBackend 接口的所有方法为空操作。
+ *          适用于单元测试和 CI 环境（无音频设备）。
+ */
+
 #include "audio/audio_backend.hpp"
 
 namespace mir2::client {
