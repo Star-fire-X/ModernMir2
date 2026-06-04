@@ -92,6 +92,7 @@ struct LegacyMapObject {
   std::uint64_t object_id{0};   ///< 对象唯一ID
   std::uint64_t a_time_ms{0};   ///< 最后活跃时间戳（毫秒）
   bool blocks_walk{false};      ///< 是否阻挡行走
+  std::int32_t event_damage{0}; ///< 事件伤害（火墙等危险事件）
   LegacyMovingObjectState moving{}; ///< 移动对象状态
   LegacyMapItemState item{};    ///< 物品状态
   LegacyMapGateState gate{};    ///< 门状态
@@ -161,6 +162,7 @@ class LegacyMapEnvironment {
   [[nodiscard]] bool static_can_move(std::int32_t x, std::int32_t y) const;               ///< 静态地形是否可通行
   [[nodiscard]] bool static_can_fly(std::int32_t x, std::int32_t y) const;                ///< 静态地形是否可飞行
   [[nodiscard]] bool can_walk(std::int32_t x, std::int32_t y, bool allow_dup) const;     ///< 是否可以走到该格
+  [[nodiscard]] bool can_safe_walk(std::int32_t x, std::int32_t y) const;                ///< 是否可安全行走（避开伤害事件）
   [[nodiscard]] bool can_fly_line(std::int32_t from_x, std::int32_t from_y,               ///< 两点间是否可直线飞行（移动用）
                                   std::int32_t to_x, std::int32_t to_y) const;
   [[nodiscard]] bool can_fire_fly_line(std::int32_t from_x, std::int32_t from_y,          ///< 两点间是否可直线飞行（远程攻击用）
@@ -186,7 +188,8 @@ class LegacyMapEnvironment {
                                             std::uint64_t now_ms,
                                             LegacyMapPlacementPolicy placement_policy =
                                                 LegacyMapPlacementPolicy::passable_only,
-                                            bool blocks_walk = false);
+                                            bool blocks_walk = false,
+                                            std::int32_t event_damage = 0);
   [[nodiscard]] bool add_gate_object(std::int32_t x, std::int32_t y,                ///< 添加门对象
                                      std::uint64_t object_id,
                                      LegacyMapGateState gate,

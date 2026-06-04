@@ -711,6 +711,10 @@ bool is_legacy_response_compensated_command(ActorMailKind kind) {
     case ActorMailKind::run:
     case ActorMailKind::attack:
     case ActorMailKind::spell:
+    case ActorMailKind::say:
+    case ActorMailKind::click_npc:
+    case ActorMailKind::merchant_select:
+    case ActorMailKind::eat_item:
     case ActorMailKind::revive:
       return true;
     default:

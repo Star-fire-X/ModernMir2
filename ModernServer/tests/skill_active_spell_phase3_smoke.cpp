@@ -275,7 +275,7 @@ int main() {
     assert(has_trace(dispatch, "push"));
     assert(has_trace(dispatch, "train_skill"));
     assert(has_packet(dispatch, mir2::kSmMagicFire));
-    assert(has_packet(dispatch, mir2::kSmWalk));
+    assert(has_packet(dispatch, mir2::kSmBackStep));
   }
 
   {
@@ -568,8 +568,8 @@ int main() {
     static_cast<void>(runtime.route_logic_command(make_spell(1001, 9, 10, 10)));
     const auto dispatch = runtime.tick();
 
-    assert(has_trace(dispatch, "spell_fail"));
-    assert(has_packet(dispatch, mir2::kSmMagicFireFail));
+    assert(has_trace(dispatch, "magic_fire"));
+    assert(has_packet(dispatch, mir2::kSmMagicFire));
     assert(!has_trace(dispatch, "train_skill"));
   }
 

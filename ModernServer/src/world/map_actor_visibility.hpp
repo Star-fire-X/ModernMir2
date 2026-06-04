@@ -516,6 +516,20 @@ void MapActor::force_refresh_after_same_map_transfer(Player& player, std::int32_
                                                      std::uint64_t now_ms,
                                                      std::uint16_t space_move_hide_ident,
                                                      std::uint16_t space_move_show_ident) {
+  if (space_move_hide_ident == 0 && space_move_show_ident == 0) {
+    remove_actor_from_visibility(player.id(), dispatch);
+    queue_packet(dispatch, player.session_id(), make_clear_objects_packet(player.session_id()));
+    queue_packet(dispatch, player.session_id(),
+                 make_change_map_packet(player.session_id(), config_.id, player.x(), player.y(),
+                                        legacy_map_darkness(config_)));
+    sync_player_visibility(player, dispatch, true, now_ms);
+    sync_all_player_visibility(dispatch, now_ms);
+    queue_save_character(dispatch, player);
+    static_cast<void>(old_x);
+    static_cast<void>(old_y);
+    return;
+  }
+
   for_each_player(objects_, [&](std::uint64_t watcher_id, const Player& watcher) {
     if (watcher.id() != player.id() &&
         !in_legacy_view_range(watcher.x(), watcher.y(), old_x, old_y)) {

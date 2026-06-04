@@ -329,13 +329,30 @@ MapActor::random_item_scroll_target(RuntimeDispatch& dispatch, const Player& pla
   if (width <= 0 || height <= 0) {
     return std::nullopt;
   }
-  for (std::int32_t attempt = 0; attempt < 30; ++attempt) {
-    const auto x = legacy_random_value(dispatch, "LegacyItem", "random_scroll_x", width,
-                                       player.id(), 0, "eat_item", now_ms, current_tick);
-    const auto y = legacy_random_value(dispatch, "LegacyItem", "random_scroll_y", height,
-                                       player.id(), 0, "eat_item", now_ms, current_tick);
-    if (environment_.can_walk(x, y, false)) {
+  const auto edge_y = height < 150 ? (height < 30 ? 2 : 20) : 50;
+  auto x = edge_y + legacy_random_value(dispatch, "LegacyItem", "random_scroll_x",
+                                        std::max(1, width - edge_y - 1), player.id(), 0,
+                                        "eat_item", now_ms, current_tick);
+  auto y = edge_y + legacy_random_value(dispatch, "LegacyItem", "random_scroll_y",
+                                        std::max(1, height - edge_y - 1), player.id(), 0,
+                                        "eat_item", now_ms, current_tick);
+  const auto step = width < 80 ? 3 : 10;
+  const auto edge = height < 150 ? (height < 50 ? 2 : 15) : 50;
+  for (std::int32_t attempt = 0; attempt <= 200; ++attempt) {
+    if (environment_.can_walk(x, y, true)) {
       return std::pair{x, y};
+    }
+    if (x < width - edge - 1) {
+      x += step;
+    } else {
+      x = legacy_random_value(dispatch, "LegacyItem", "random_scroll_retry_x", width,
+                              player.id(), 0, "eat_item", now_ms, current_tick);
+      if (y < height - edge - 1) {
+        y += step;
+      } else {
+        y = legacy_random_value(dispatch, "LegacyItem", "random_scroll_retry_y", height,
+                                player.id(), 0, "eat_item", now_ms, current_tick);
+      }
     }
   }
   return std::nullopt;
@@ -359,7 +376,7 @@ MapActor::random_item_scroll_target(RuntimeDispatch& dispatch, const Player& pla
 bool MapActor::try_item_map_move(Player& player, std::string target_map_id,
                                  std::int32_t target_x, std::int32_t target_y,
                                  RuntimeDispatch& dispatch, std::uint64_t current_tick,
-                                 std::uint64_t now_ms) {
+                                 std::uint64_t now_ms, bool send_space_move_packets) {
   if (target_map_id.empty()) {
     target_map_id = config_.id;
   }
@@ -404,7 +421,10 @@ bool MapActor::try_item_map_move(Player& player, std::string target_map_id,
     context.items = &item_configs_;
     context.magics = &magic_configs_;
     player.on_mail(move_mail, context);
-    force_refresh_after_same_map_transfer(player, old_x, old_y, dispatch, now_ms);
+    force_refresh_after_same_map_transfer(
+        player, old_x, old_y, dispatch, now_ms,
+        send_space_move_packets ? kSmSpaceMoveHide : 0,
+        send_space_move_packets ? kSmSpaceMoveShow : 0);
     recall_owned_slaves_to_master(player, dispatch, current_tick, now_ms);
     return true;
   }

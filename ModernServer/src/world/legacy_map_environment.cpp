@@ -117,20 +117,13 @@ bool LegacyMapEnvironment::can_walk(std::int32_t x, std::int32_t y, bool allow_d
   if (!static_can_move(x, y)) {
     return false;
   }
-  if (allow_dup) {
-    return true;
-  }
-
   const auto* target = cell(x, y);
   if (target == nullptr) {
     return true;
   }
   // 检查动态对象的阻挡情况
   for (const auto& object : target->obj_list) {
-    if (object.shape == LegacyMapObjectShape::event_object && object.blocks_walk) {
-      return false;
-    }
-    if (object.shape == LegacyMapObjectShape::moving_object) {
+    if (!allow_dup && object.shape == LegacyMapObjectShape::moving_object) {
       if (!object.moving.ghost && object.moving.hold_place && !object.moving.death &&
           !object.moving.hide_mode && !object.moving.supervisor_mode) {
         return false;
@@ -150,6 +143,23 @@ bool LegacyMapEnvironment::can_walk(std::int32_t x, std::int32_t y, bool allow_d
  * @param to_y 终点Y
  * @return true 可直线到达，false 中途有阻挡
  */
+
+bool LegacyMapEnvironment::can_safe_walk(std::int32_t x, std::int32_t y) const {
+  if (!static_can_move(x, y)) {
+    return false;
+  }
+  const auto* target = cell(x, y);
+  if (target == nullptr) {
+    return true;
+  }
+  for (const auto& object : target->obj_list) {
+    if (object.shape == LegacyMapObjectShape::event_object && object.event_damage > 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool LegacyMapEnvironment::can_fly_line(std::int32_t from_x, std::int32_t from_y,
                                         std::int32_t to_x, std::int32_t to_y) const {
   if (!in_bounds(from_x, from_y) || !in_bounds(to_x, to_y)) {
@@ -375,7 +385,8 @@ bool LegacyMapEnvironment::add_placeholder_object(std::int32_t x, std::int32_t y
                                                   std::uint64_t object_id,
                                                   std::uint64_t now_ms,
                                                   LegacyMapPlacementPolicy placement_policy,
-                                                  bool blocks_walk) {
+                                                  bool blocks_walk,
+                                                  std::int32_t event_damage) {
   if (placement_policy == LegacyMapPlacementPolicy::passable_only) {
     if (!static_can_move(x, y)) {
       return false;
@@ -394,6 +405,7 @@ bool LegacyMapEnvironment::add_placeholder_object(std::int32_t x, std::int32_t y
   object.object_id = object_id;
   object.a_time_ms = now_ms;
   object.blocks_walk = blocks_walk;
+  object.event_damage = event_damage;
   target->obj_list.push_back(object);
   return true;
 }

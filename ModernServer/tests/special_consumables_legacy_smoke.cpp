@@ -144,6 +144,12 @@ int main() {
   static_cast<void>(runtime.route_logic_command(make_use(702, 2003, "Random Scroll")));
   dispatch = tick_player_due(runtime, now_ms);
   assert(find_packet(dispatch, mir2::kSmEatOk).has_value());
+  assert(find_packet(dispatch, mir2::kSmClearObjects).has_value());
+  assert(find_packet(dispatch, mir2::kSmChangeMap).has_value());
+  assert(find_packet(dispatch, mir2::kSmSpaceMoveHide).has_value());
+  assert(find_packet(dispatch, mir2::kSmSpaceMoveShow).has_value());
+  assert(!find_packet(dispatch, mir2::kSmSpaceMoveHide2).has_value());
+  assert(!find_packet(dispatch, mir2::kSmSpaceMoveShow2).has_value());
   auto moved = runtime.snapshot_character_actor("User");
   assert(moved.has_value());
   assert(moved->map_id == "1");
@@ -153,6 +159,12 @@ int main() {
   static_cast<void>(runtime.route_logic_command(make_use(702, 2002, "Town Portal")));
   dispatch = tick_player_due(runtime, now_ms);
   assert(find_packet(dispatch, mir2::kSmEatOk).has_value());
+  assert(find_packet(dispatch, mir2::kSmClearObjects).has_value());
+  assert(find_packet(dispatch, mir2::kSmChangeMap).has_value());
+  assert(find_packet(dispatch, mir2::kSmSpaceMoveHide).has_value());
+  assert(find_packet(dispatch, mir2::kSmSpaceMoveShow).has_value());
+  assert(!find_packet(dispatch, mir2::kSmSpaceMoveHide2).has_value());
+  assert(!find_packet(dispatch, mir2::kSmSpaceMoveShow2).has_value());
   moved = runtime.snapshot_character_actor("User");
   assert(moved.has_value());
   assert(moved->x == 10);

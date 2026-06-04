@@ -55,6 +55,27 @@ std::vector<std::string> read_draw_layers(const std::filesystem::path& trace_pat
   return layers;
 }
 
+std::vector<std::uint64_t> read_render_actor_ids(const std::filesystem::path& trace_path) {
+  std::ifstream input(trace_path);
+  std::vector<std::uint64_t> actor_ids;
+  std::string line;
+  while (std::getline(input, line)) {
+    if (line.find("reason=render_actor") == std::string::npos ||
+        line.find("render_layer=actor") == std::string::npos) {
+      continue;
+    }
+    const auto marker = line.find(" actor=");
+    if (marker == std::string::npos) {
+      continue;
+    }
+    const auto start = marker + 7;
+    const auto end = line.find(' ', start);
+    actor_ids.push_back(static_cast<std::uint64_t>(
+        std::stoull(line.substr(start, end == std::string::npos ? end : end - start))));
+  }
+  return actor_ids;
+}
+
 std::pair<int, int> mouse_for_tile(const int self_x, const int self_y, const int x, const int y) {
   return mir2::legacy::legacy_screen_from_map(
       mir2::legacy::make_legacy_map_viewport(self_x, self_y), x, y);
@@ -660,6 +681,44 @@ int main() {
   assert(actor_last < selection_blend_first);
   assert(fly_last < selection_blend_first);
   assert(selection_blend_first < actor_overlay_first);
+
+  mir2::client::ActorState corpse;
+  corpse.actor_id = 20;
+  corpse.actor_type = mir2::client_v1::ActorType::player;
+  corpse.x = 49;
+  corpse.y = 50;
+  corpse.from_x = 49;
+  corpse.from_y = 50;
+  corpse.dead = true;
+  mir2::client::ActorState live;
+  live.actor_id = 21;
+  live.actor_type = mir2::client_v1::ActorType::player;
+  live.x = 49;
+  live.y = 50;
+  live.from_x = 49;
+  live.from_y = 50;
+  world.actors[20] = corpse;
+  world.actors[21] = live;
+  world.actor_draw_order = {1, 21, 20};
+  std::filesystem::remove(trace_path);
+  scenes.scene_run(context, 0.0F);
+  scenes.render_scene(context);
+  const auto actor_ids = read_render_actor_ids(trace_path);
+  int corpse_index = -1;
+  int live_index = -1;
+  for (int index = 0; index < static_cast<int>(actor_ids.size()); ++index) {
+    if (actor_ids[static_cast<std::size_t>(index)] == 20) {
+      corpse_index = index;
+    } else if (actor_ids[static_cast<std::size_t>(index)] == 21) {
+      live_index = index;
+    }
+  }
+  assert(corpse_index >= 0);
+  assert(live_index >= 0);
+  assert(corpse_index < live_index);
+  world.actors.erase(20);
+  world.actors.erase(21);
+  world.actor_draw_order = {1};
 
   input = mir2::client::InputState{};
   input.key_pressed[VK_F1] = true;

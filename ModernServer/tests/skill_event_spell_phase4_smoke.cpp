@@ -399,8 +399,8 @@ int main() {
 
     static_cast<void>(runtime.route_logic_command(make_walk(1611, 11, 10)));
     static_cast<void>(runtime.tick());
-    const auto blocked = snapshot(runtime, "Curtain");
-    assert(blocked.x == 10 && blocked.y == 10);
+    const auto moved = snapshot(runtime, "Curtain");
+    assert(moved.x == 11 && moved.y == 10);
 
     const auto closed = runtime.run_legacy_event_manager(300000);
     assert(has_event_trace(closed, "close", mir2::LegacyEventType::holy_curtain));
@@ -437,6 +437,8 @@ int main() {
     append(dispatch, runtime.tick());
     assert(has_trace_success(dispatch, "space_move_gate", true));
     assert(has_trace(dispatch, "train_skill"));
+    assert(has_packet(dispatch, mir2::kSmClearObjects));
+    assert(has_packet(dispatch, mir2::kSmChangeMap));
     const auto magic_fire = first_packet_index(dispatch, mir2::kSmMagicFire);
     const auto hide2 = first_packet_index(dispatch, mir2::kSmSpaceMoveHide2);
     const auto show2 = first_packet_index(dispatch, mir2::kSmSpaceMoveShow2);

@@ -72,7 +72,7 @@ bool check_validation() {
          !mir2::is_valid_legacy_character_name("A\tb") &&
          !mir2::is_valid_legacy_character_name(bytes({0x41, 0x7F, 0x42})) &&
          mir2::is_valid_legacy_character_name(gbk_name) &&
-         mir2::is_valid_legacy_character_name(utf8);
+         !mir2::is_valid_legacy_character_name(utf8);
 }
 
 bool check_codec_and_canonical_text() {

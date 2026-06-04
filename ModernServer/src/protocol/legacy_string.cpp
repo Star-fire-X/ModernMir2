@@ -125,14 +125,22 @@ bool is_valid_legacy_character_name(LegacyStringView name) {
   if (bytes.size() < 3 || bytes.size() > 14) {
     return false;
   }
-  for (const unsigned char ch : bytes) {
+  for (std::size_t index = 0; index < bytes.size(); ++index) {
+    const auto ch = static_cast<unsigned char>(bytes[index]);
     // 不允许控制字符
     if (ch < 0x20 || ch == 0x7F) {
       return false;
     }
     // 非 ASCII 字符（如中文）直接通过
     if (ch >= 0x80) {
-      continue;
+      if (ch >= 0xB0 && ch <= 0xC8 && index + 1 < bytes.size()) {
+        const auto next = static_cast<unsigned char>(bytes[index + 1]);
+        if (next >= 0xA1 && next <= 0xFE) {
+          ++index;
+          continue;
+        }
+      }
+      return false;
     }
     // ASCII 部分只允许字母数字
     if (!is_ascii_alnum(ch)) {
