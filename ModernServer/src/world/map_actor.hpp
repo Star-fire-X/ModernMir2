@@ -127,7 +127,8 @@ class MapActor {
                                              std::int32_t y, std::uint64_t now_ms,
                                              bool blocks_walk = false,
                                              RuntimeDispatch* dispatch = nullptr,
-                                             LegacyEventType type = LegacyEventType::pile_stones);
+                                             LegacyEventType type = LegacyEventType::pile_stones,
+                                             std::int32_t event_damage = 0);
   [[nodiscard]] bool legacy_add_event_object(std::uint64_t event_id, std::int32_t x,
                                              std::int32_t y, std::uint64_t now_ms,
                                              RuntimeDispatch* dispatch);
@@ -371,8 +372,8 @@ class MapActor {
   void force_refresh_after_same_map_transfer(Player& player, std::int32_t old_x,
                                              std::int32_t old_y, RuntimeDispatch& dispatch,
                                              std::uint64_t now_ms,
-                                             std::uint16_t space_move_hide_ident = kSmSpaceMoveHide,
-                                             std::uint16_t space_move_show_ident = kSmSpaceMoveShow);
+                                             std::uint16_t space_move_hide_ident = 0,
+                                             std::uint16_t space_move_show_ident = 0);
   void remove_actor_from_visibility(std::uint64_t actor_id, RuntimeDispatch& dispatch);
   void remove_item_from_visibility(
       std::uint64_t item_id, RuntimeDispatch& dispatch,
@@ -400,7 +401,8 @@ class MapActor {
                                   LegacyEventType type) const;
   bool try_item_map_move(Player& player, std::string target_map_id, std::int32_t target_x,
                          std::int32_t target_y, RuntimeDispatch& dispatch,
-                         std::uint64_t current_tick, std::uint64_t now_ms);
+                         std::uint64_t current_tick, std::uint64_t now_ms,
+                         bool send_space_move_packets = false);
   [[nodiscard]] std::optional<std::pair<std::int32_t, std::int32_t>>
   random_item_scroll_target(RuntimeDispatch& dispatch, const Player& player,
                             std::uint64_t current_tick, std::uint64_t now_ms);

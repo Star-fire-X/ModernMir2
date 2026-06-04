@@ -77,6 +77,16 @@ int main() {
   assert(env.add_placeholder_object(
       0, 1, mir2::LegacyMapObjectShape::event_object, 903, 200,
       mir2::LegacyMapPlacementPolicy::passable_only));
+  assert(env.add_placeholder_object(
+      2, 0, mir2::LegacyMapObjectShape::event_object, 904, 200,
+      mir2::LegacyMapPlacementPolicy::passable_only, true));
+  assert(env.can_walk(2, 0, false));
+  assert(env.can_safe_walk(2, 0));
+  assert(env.add_placeholder_object(
+      2, 1, mir2::LegacyMapObjectShape::event_object, 905, 200,
+      mir2::LegacyMapPlacementPolicy::passable_only, false, 12));
+  assert(env.can_walk(2, 1, false));
+  assert(!env.can_safe_walk(2, 1));
   assert(env.add_item_object(0, 1, 100, {}, 201).ok);
   assert(env.add_item_object(0, 1, 101, {}, 202).ok);
   assert(env.add_item_object(0, 1, 102, {}, 203).ok);

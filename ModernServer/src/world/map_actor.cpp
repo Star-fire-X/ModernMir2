@@ -1041,10 +1041,82 @@ LegacyMagicDamageResult apply_legacy_magic_damage(
   return result;
 }
 
+bool legacy_player_is_proper_human_target(const MapConfig& map_config,
+                                          const Player& attacker,
+                                          const Player& target) {
+  const auto fight_map = map_config.fight_zone || map_config.fight3_zone;
+  auto result = false;
+  switch (attacker.attack_mode()) {
+    case kHamAll:
+      result = true;
+      break;
+    case kHamPeace:
+      result = false;
+      break;
+    case kHamGroup:
+      result = true;
+      if (attacker.legacy_group_id() != 0 &&
+          attacker.legacy_group_id() == target.legacy_group_id()) {
+        result = false;
+      }
+      break;
+    case kHamGuild:
+      result = true;
+      if (!attacker.character().guild_name.empty() &&
+          equals_ignore_case(attacker.character().guild_name,
+                             target.character().guild_name)) {
+        result = false;
+      }
+      break;
+    case kHamPkAttack:
+      result = attacker.pk_level() >= 2 ? target.pk_level() < 2
+                                        : target.pk_level() >= 2;
+      break;
+    default:
+      result = false;
+      break;
+  }
+  if (result && !map_config.allow_pk && !fight_map) {
+    result = false;
+  }
+  return result;
+}
+
+bool legacy_player_is_proper_target(
+    const std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
+    const MapConfig& map_config, const Player& attacker, const GameObject& target,
+    std::uint64_t now_ms) {
+  if (target.id() == attacker.id() || !is_attackable_target(target)) {
+    return false;
+  }
+  if (const auto* player_target = as_player(&target); player_target != nullptr) {
+    return resolve_pk_block_reason(map_config, attacker, *player_target, now_ms).empty();
+  }
+  const auto* monster_target = as_monster(&target);
+  if (monster_target == nullptr) {
+    return false;
+  }
+  if (monster_target->is_slave() && monster_target->master_actor_id() != 0) {
+    if (monster_target->master_actor_id() == attacker.id()) {
+      return attacker.attack_mode() == kHamAll;
+    }
+    if (const auto master_it = objects.find(monster_target->master_actor_id());
+        master_it != objects.end()) {
+      if (const auto* master = as_player(master_it->second.get()); master != nullptr) {
+        return legacy_player_is_proper_human_target(map_config, attacker, *master) &&
+               !is_safe_zone(map_config, attacker.x(), attacker.y()) &&
+               !is_safe_zone(map_config, target.x(), target.y());
+      }
+    }
+  }
+  return true;
+}
+
 std::vector<GameObject*> collect_legacy_area_targets(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     const Player& caster, const MapConfig& map_config, std::int32_t center_x,
-    std::int32_t center_y, std::int32_t wide, bool friends) {
+    std::int32_t center_y, std::int32_t wide, bool friends,
+    bool filter_blocked_players = true) {
   std::vector<GameObject*> targets;
   for (std::int32_t x = center_x - wide; x <= center_x + wide; ++x) {
     for (std::int32_t y = center_y - wide; y <= center_y + wide; ++y) {
@@ -1072,8 +1144,10 @@ std::vector<GameObject*> collect_legacy_area_targets(
         if (object.id() == caster.id()) {
           continue;
         }
-        if (const auto* player_target = as_player(&object); player_target != nullptr) {
-          if (!resolve_pk_block_reason(map_config, caster, *player_target).empty()) {
+        if (filter_blocked_players) {
+          if (const auto* player_target = as_player(&object);
+              player_target != nullptr &&
+              !resolve_pk_block_reason(map_config, caster, *player_target).empty()) {
             continue;
           }
         }
@@ -1387,13 +1461,14 @@ bool MapActor::apply_merchant_state(const MerchantStateRecord& state) {
 bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, std::int32_t y,
                                        std::uint64_t now_ms, bool blocks_walk,
                                        RuntimeDispatch* dispatch,
-                                       LegacyEventType type) {
+                                       LegacyEventType type,
+                                       std::int32_t event_damage) {
   const auto placement_policy = type == LegacyEventType::stone_mine
                                     ? LegacyMapPlacementPolicy::blocked_only
                                     : LegacyMapPlacementPolicy::passable_only;
   const auto added = environment_.add_placeholder_object(x, y, LegacyMapObjectShape::event_object,
                                                         event_id, now_ms, placement_policy,
-                                                        blocks_walk);
+                                                        blocks_walk, event_damage);
   if (added) {
     event_objects_[event_id] = {x, y};
     event_object_types_[event_id] = type;
@@ -2844,8 +2919,10 @@ bool MapActor::handle_legacy_rush_rush(Player& attacker, LegacyUseMagicInfo& use
   const auto dir = static_cast<std::uint8_t>(std::clamp(mail.x, 0, 7));
   const auto [dx, dy] = direction_delta(dir);
   auto moved = false;
-  auto crash = false;
+  auto crash = true;
   auto damage_level = static_cast<std::int32_t>(user_magic.level) + 1;
+  auto self_damage_level = damage_level;
+  GameObject* attack_target = nullptr;
 
   auto move_object = [&](GameObject& object, std::int32_t x, std::int32_t y,
                          std::uint8_t object_dir, std::uint16_t ident) {
@@ -2967,69 +3044,117 @@ bool MapActor::handle_legacy_rush_rush(Player& attacker, LegacyUseMagicInfo& use
   context.magics = &magic_configs_;
   attacker.on_mail(dir_mail, context);
 
+  auto can_push = [&](GameObject& target) {
+    auto result = actor_level(attacker) > actor_level(target);
+    if (const auto* monster_target = as_monster(&target);
+        monster_target != nullptr && monster_target->stick_mode()) {
+      result = false;
+    }
+    if (!result) {
+      add_legacy_trace(dispatch, "LegacySkill", "rush_gate", mail, current_tick, now_ms,
+                       false, 0, 0, "CanPush");
+      return false;
+    }
+    const auto level_gap = actor_level(attacker) - actor_level(target);
+    const auto gate_roll = legacy_random_value(dispatch, "LegacySkill", "rush_gate", 20,
+                                               attacker.id(), target.id(), "Random(20)",
+                                               now_ms, current_tick);
+    result = result && gate_roll < 6 + static_cast<std::int32_t>(user_magic.level) * 3 +
+                              level_gap;
+    if (result) {
+      if (!legacy_player_is_proper_target(objects_, config_, attacker, target, now_ms)) {
+        result = false;
+      }
+    }
+    add_legacy_trace(dispatch, "LegacySkill", "rush_gate", mail, current_tick, now_ms,
+                     result, gate_roll, 0, "CanPush");
+    return result;
+  };
+
+  auto push_one = [&](GameObject& target) {
+    const auto target_new_x = target.x() + dx;
+    const auto target_new_y = target.y() + dy;
+    return environment_.can_walk(target_new_x, target_new_y, false) &&
+           move_object(target, target_new_x, target_new_y,
+                       static_cast<std::uint8_t>((dir + 4) % 8), kSmBackStep);
+  };
+
+  const auto rush_step_limit =
+      std::max<std::int32_t>(2, static_cast<std::int32_t>(user_magic.level) + 1);
+
   auto* front_target = find_attack_target_by_position(objects_, attacker, attacker.x() + dx,
                                                        attacker.y() + dy, 1);
   if (front_target != nullptr) {
-    auto can_push = actor_level(attacker) > actor_level(*front_target);
-    if (const auto* monster_target = as_monster(front_target);
-        monster_target != nullptr && monster_target->stick_mode()) {
-      can_push = false;
-    }
-    if (const auto* player_target = as_player(front_target);
-        player_target != nullptr &&
-        !resolve_pk_block_reason(config_, attacker, *player_target, now_ms).empty()) {
-      can_push = false;
-    }
-    const auto level_gap = actor_level(attacker) - actor_level(*front_target);
-    const auto gate_roll = legacy_random_value(dispatch, "LegacySkill", "rush_gate", 20,
-                                               attacker.id(), front_target->id(),
-                                               "Random(20)", now_ms, current_tick);
-    can_push = can_push && gate_roll < 6 + static_cast<std::int32_t>(user_magic.level) * 3 +
-                                level_gap;
-    add_legacy_trace(dispatch, "LegacySkill", "rush_gate", mail, current_tick, now_ms,
-                     can_push, gate_roll, 0, "CanPush");
-    if (can_push) {
-      const auto target_old_x = front_target->x();
-      const auto target_old_y = front_target->y();
-      const auto target_new_x = front_target->x() + dx;
-      const auto target_new_y = front_target->y() + dy;
-      if (environment_.can_walk(target_new_x, target_new_y, false) &&
-          move_object(*front_target, target_new_x, target_new_y,
-                      static_cast<std::uint8_t>((dir + 4) % 8), kSmWalk) &&
-          move_object(attacker, target_old_x, target_old_y, dir, kSmRush)) {
-        moved = true;
-        --damage_level;
-        add_legacy_trace(dispatch, "LegacySkill", "rush_push", mail, current_tick, now_ms,
-                         true, magic.id, 0, "RM_RUSH");
-        const auto damage_seed = std::max(1, (1 + damage_level) * 5);
-        const auto raw_damage =
-            (1 + damage_level) * 4 +
-            legacy_random_value(dispatch, "LegacyCombat", "rush_damage", damage_seed,
-                                attacker.id(), front_target->id(), "Random", now_ms,
-                                current_tick);
-        static_cast<void>(apply_rush_damage(*front_target, raw_damage, attacker.id(),
-                                            "rush_target"));
-      } else {
-        crash = true;
+    for (std::int32_t step = 0; step <= rush_step_limit; ++step) {
+      front_target = find_attack_target_by_position(objects_, attacker, attacker.x() + dx,
+                                                     attacker.y() + dy, 1);
+      if (front_target == nullptr) {
+        break;
       }
-    } else {
-      crash = true;
+      self_damage_level = 0;
+      if (!can_push(*front_target)) {
+        break;
+      }
+      if (user_magic.level >= 3) {
+        if (auto* chain_target = find_attack_target_by_position(
+                objects_, attacker, attacker.x() + dx * 2, attacker.y() + dy * 2, 2);
+            chain_target != nullptr && can_push(*chain_target)) {
+          static_cast<void>(push_one(*chain_target));
+        }
+      }
+      attack_target = front_target;
+      const auto attacker_target_x = attacker.x() + dx;
+      const auto attacker_target_y = attacker.y() + dy;
+      if (push_one(*front_target)) {
+        if (move_object(attacker, attacker_target_x, attacker_target_y, dir, kSmRush)) {
+          moved = true;
+          add_legacy_trace(dispatch, "LegacySkill", "rush_push", mail, current_tick, now_ms,
+                           true, magic.id, 0, "RM_RUSH");
+          crash = false;
+        }
+        --damage_level;
+      } else {
+        break;
+      }
     }
   } else {
-    const auto step_limit = std::max<std::int32_t>(2, static_cast<std::int32_t>(user_magic.level) + 1);
-    for (std::int32_t step = 0; step < step_limit; ++step) {
+    crash = false;
+    for (std::int32_t step = 0; step <= rush_step_limit; ++step) {
       const auto nx = attacker.x() + dx;
       const auto ny = attacker.y() + dy;
       if (!environment_.can_walk(nx, ny, false)) {
-        crash = true;
+        if (environment_.can_walk(nx, ny, true)) {
+          self_damage_level = 0;
+        } else {
+          crash = true;
+        }
         break;
       }
       if (!move_object(attacker, nx, ny, dir, kSmRush)) {
-        crash = true;
+        if (environment_.can_walk(nx, ny, true)) {
+          self_damage_level = 0;
+        } else {
+          crash = true;
+        }
         break;
       }
       moved = true;
+      --self_damage_level;
     }
+  }
+
+  if (attack_target != nullptr) {
+    if (damage_level < 0) {
+      damage_level = 0;
+    }
+    const auto damage_seed = std::max(1, (1 + damage_level) * 5);
+    const auto raw_damage =
+        (1 + damage_level) * 4 +
+        legacy_random_value(dispatch, "LegacyCombat", "rush_damage", damage_seed,
+                            attacker.id(), attack_target->id(), "Random", now_ms,
+                            current_tick);
+    static_cast<void>(apply_rush_damage(*attack_target, raw_damage, attacker.id(),
+                                        "rush_target"));
   }
 
   if (crash) {
@@ -3044,7 +3169,10 @@ bool MapActor::handle_legacy_rush_rush(Player& attacker, LegacyUseMagicInfo& use
     });
     add_legacy_trace(dispatch, "LegacySkill", "rush_crash", mail, current_tick, now_ms,
                      false, magic.id, 0, "RM_RUSHKUNG");
-    if (damage_level > 0) {
+    if (self_damage_level > 0) {
+      if (damage_level < 0) {
+        damage_level = 0;
+      }
       const auto damage_seed = std::max(1, (1 + damage_level) * 5);
       const auto raw_damage =
           (1 + damage_level) * 5 +

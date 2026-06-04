@@ -82,6 +82,18 @@ mir2::RuntimeDispatch move(mir2::LogicRuntime& runtime, std::uint64_t session_id
   return runtime.tick();
 }
 
+mir2::RuntimeDispatch turn(mir2::LogicRuntime& runtime, std::uint64_t session_id,
+                           int x, int y, std::uint8_t dir) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::turn;
+  command.session_id = session_id;
+  command.x = x;
+  command.y = y;
+  command.dir = dir;
+  static_cast<void>(runtime.route_logic_command(command));
+  return runtime.tick();
+}
+
 void advance(mir2::LogicRuntime& runtime, int ticks) {
   for (int i = 0; i < ticks; ++i) {
     static_cast<void>(runtime.tick());
@@ -182,6 +194,11 @@ void assert_move_fail_packet(const mir2::RuntimeDispatch& dispatch, std::uint64_
   assert(desc.status == character.status);
 }
 
+void assert_turn_fail_packet(const mir2::RuntimeDispatch& dispatch, std::uint64_t session_id) {
+  assert(has_raw_text(dispatch, session_id, "+FAIL/"));
+  assert(!find_packet(dispatch, session_id, mir2::kSmMoveFail).has_value());
+}
+
 }  // namespace
 
 int main() {
@@ -246,6 +263,15 @@ int main() {
   hero = snapshot(runtime, "Hero");
   assert(hero.x == 4 && hero.y == 5);
   assert_move_fail_packet(dispatch, 7, hero);
+  assert(!has_packet_ident(dispatch, 8, mir2::kSmWalk));
+
+  enter(runtime, 13, make_character("RunBlocker", 4, 3));
+  advance(runtime, 12);
+  dispatch = move(runtime, 7, mir2::LogicCommandKind::run, 4, 3);
+  hero = snapshot(runtime, "Hero");
+  assert(hero.x == 4 && hero.y == 5);
+  assert_move_fail_packet(dispatch, 7, hero);
+  assert(!has_packet_ident(dispatch, 8, mir2::kSmRun));
 
   enter(runtime, 9, make_character("LowHp", 1, 8, 9));
   dispatch = move(runtime, 9, mir2::LogicCommandKind::run, 3, 8);
@@ -258,6 +284,14 @@ int main() {
   auto dead = snapshot(runtime, "Dead");
   assert(dead.x == 1 && dead.y == 6);
   assert_move_fail_packet(dispatch, 12, dead);
+
+  enter(runtime, 14, make_character("Turner", 2, 2));
+  advance(runtime, 12);
+  dispatch = turn(runtime, 14, 3, 2, mir2::legacy::kDirRight);
+  const auto turner = snapshot(runtime, "Turner");
+  assert(turner.x == 2 && turner.y == 2);
+  assert(turner.dir == mir2::legacy::kDirDown);
+  assert_turn_fail_packet(dispatch, 14);
 
   enter(runtime, 10, make_character("Sprinter", 1, 1));
   for (int x = 2; x <= 5; ++x) {
@@ -289,6 +323,27 @@ int main() {
     assert(run_index.has_value());
     assert(turn_index.has_value());
     assert(*run_index < *turn_index);
+  }
+
+  {
+    const auto fight3_map = write_test_map(20, 10, {});
+    mir2::HostConfig fight3_config;
+    fight3_config.budgets.tick_ms = 20;
+    auto fight3 = mir2::MapConfig{"0", "Fight3RunBlock", fight3_map, 0, 0, 1, 1};
+    fight3.fight3_zone = true;
+    fight3_config.maps.push_back(fight3);
+    mir2::LogicRuntime fight3_runtime(fight3_config);
+    fight3_runtime.initialize();
+
+    enter(fight3_runtime, 31, make_character("Fight3Hero", 3, 3));
+    enter(fight3_runtime, 32, make_character("Fight3Blocker", 5, 3));
+    advance(fight3_runtime, 12);
+
+    const auto fight3_dispatch =
+        move(fight3_runtime, 31, mir2::LogicCommandKind::run, 5, 3);
+    const auto fight3_hero = snapshot(fight3_runtime, "Fight3Hero");
+    assert(fight3_hero.x == 3 && fight3_hero.y == 3);
+    assert_move_fail_packet(fight3_dispatch, 31, fight3_hero);
   }
 
   return 0;

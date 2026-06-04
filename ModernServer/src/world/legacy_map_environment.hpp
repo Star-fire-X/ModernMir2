@@ -52,6 +52,7 @@ struct LegacyMapObject {
   std::uint64_t object_id{0};
   std::uint64_t a_time_ms{0};
   bool blocks_walk{false};
+  std::int32_t event_damage{0};
   LegacyMovingObjectState moving{};
   LegacyMapItemState item{};
   LegacyMapGateState gate{};
@@ -81,6 +82,7 @@ class LegacyMapEnvironment {
   [[nodiscard]] bool static_can_move(std::int32_t x, std::int32_t y) const;
   [[nodiscard]] bool static_can_fly(std::int32_t x, std::int32_t y) const;
   [[nodiscard]] bool can_walk(std::int32_t x, std::int32_t y, bool allow_dup) const;
+  [[nodiscard]] bool can_safe_walk(std::int32_t x, std::int32_t y) const;
   [[nodiscard]] bool can_fly_line(std::int32_t from_x, std::int32_t from_y,
                                   std::int32_t to_x, std::int32_t to_y) const;
   [[nodiscard]] bool can_fire_fly_line(std::int32_t from_x, std::int32_t from_y,
@@ -104,7 +106,8 @@ class LegacyMapEnvironment {
                                             std::uint64_t now_ms,
                                             LegacyMapPlacementPolicy placement_policy =
                                                 LegacyMapPlacementPolicy::passable_only,
-                                            bool blocks_walk = false);
+                                            bool blocks_walk = false,
+                                            std::int32_t event_damage = 0);
   [[nodiscard]] bool add_gate_object(std::int32_t x, std::int32_t y,
                                      std::uint64_t object_id,
                                      LegacyMapGateState gate,

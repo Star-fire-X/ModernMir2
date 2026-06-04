@@ -2439,7 +2439,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         player->refresh_derived_state(item_configs_);
         const auto character_after_use = player->character();
         if (!try_item_map_move(*player, target_map, target_x, target_y, dispatch, current_tick,
-                               now_ms)) {
+                               now_ms, true)) {
           add_legacy_trace(dispatch, "LegacyItem", "scroll_transfer_reject", mail,
                            current_tick, now_ms, false, target_item.index, 0, kind);
           if (auto* rollback_player = find_player(actor_id); rollback_player != nullptr) {
@@ -3915,9 +3915,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             auto pushed = 0;
             const auto push_level = static_cast<std::int32_t>(user_magic->level);
             auto targets = collect_legacy_area_targets(objects_, *attacker, config_,
-                                                       attacker->x(), attacker->y(), 1, false);
+                                                       attacker->x(), attacker->y(), 1, false,
+                                                       false);
             for (auto* push_target : targets) {
               if (actor_level(*attacker) <= actor_level(*push_target)) {
+                continue;
+              }
+              if (const auto* monster_target = as_monster(push_target);
+                  monster_target != nullptr && monster_target->stick_mode()) {
                 continue;
               }
               const auto level_gap = actor_level(*attacker) - actor_level(*push_target);
@@ -3926,6 +3931,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                now_ms, gate_roll < 6 + push_level * 3 + level_gap,
                                gate_roll, 0, "Random(20)");
               if (gate_roll >= 6 + push_level * 3 + level_gap) {
+                continue;
+              }
+              if (!legacy_player_is_proper_target(objects_, config_, *attacker,
+                                                  *push_target, now_ms)) {
                 continue;
               }
               const auto push_count = 1 + std::max(0, push_level - 1) + random.random(2);
@@ -3961,16 +3970,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                     return;
                   }
                   queue_packet(dispatch, watcher.session_id(),
-                               make_turn_like_packet(watcher.session_id(), kSmWalk,
+                               make_turn_like_packet(watcher.session_id(), kSmBackStep,
                                                      *push_target, false));
                 });
                 ++moved;
               }
-              if (moved > 0) {
-                ++pushed;
-                add_legacy_trace(dispatch, "LegacySpell", "push", mail, current_tick,
-                                 now_ms, true, moved, 0, "RM_PUSH");
-              }
+              ++pushed;
+              add_legacy_trace(dispatch, "LegacySpell", "push", mail, current_tick,
+                               now_ms, true, moved, 0, "RM_PUSH");
             }
             train = pushed > 0;
             break;
@@ -5640,33 +5647,34 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (it != objects_.end()) {
         if (auto* player = as_player(it->second.get()); player != nullptr) {
           ActorMail effective_mail = mail;
-          auto reject_move = [&](bool disconnect) {
+          auto reject_action = [&](bool disconnect, bool send_move_fail) {
             queue_packet(dispatch, player->session_id(), make_ack_packet(player->session_id(), false));
-            queue_packet(dispatch, player->session_id(),
-                         make_move_fail_packet(player->session_id(), *player));
+            if (send_move_fail) {
+              queue_packet(dispatch, player->session_id(),
+                           make_move_fail_packet(player->session_id(), *player));
+            }
             if (disconnect) {
               queue_force_disconnect(dispatch, player->session_id(), "speed_hack_movement");
             }
           };
-
           auto old_x = player->x();
           auto old_y = player->y();
           auto moved_player = false;
           if (mail.kind == ActorMailKind::move || mail.kind == ActorMailKind::run) {
             if (player->is_dead() || !player->can_move_at(current_tick)) {
-              reject_move(false);
+              reject_action(false, true);
               break;
             }
 
             const auto throttle = player->begin_move_attempt(current_tick, budgets_.tick_ms);
             if (!throttle.allowed) {
-              reject_move(throttle.disconnect);
+              reject_action(throttle.disconnect, true);
               break;
             }
 
             if (mail.kind == ActorMailKind::run && player->character().ability.hp < 10) {
               player->reset_move_throttle();
-              reject_move(false);
+              reject_action(false, true);
               break;
             }
 
@@ -5679,7 +5687,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                                       player->y(), mail.x, mail.y);
             if (!expected.has_value() || expected->x != mail.x || expected->y != mail.y) {
               player->reset_move_throttle();
-              reject_move(false);
+              reject_action(false, true);
               break;
             }
 
@@ -5688,20 +5696,20 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                       expected->dir, 1);
               if (!middle.has_value() || !environment_.can_walk(middle->x, middle->y, false)) {
                 player->reset_move_throttle();
-                reject_move(false);
+                reject_action(false, true);
                 break;
               }
             }
             if (!environment_.can_walk(expected->x, expected->y, false)) {
               player->reset_move_throttle();
-              reject_move(false);
+              reject_action(false, true);
               break;
             }
             if (environment_.move_to_moving_object(
                     player->x(), player->y(), player->id(), expected->x, expected->y, false,
                     now_ms, moving_state_for(*player)) != 1) {
               player->reset_move_throttle();
-              reject_move(false);
+              reject_action(false, true);
               break;
             }
 
@@ -5711,8 +5719,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             moved_player = true;
             cancel_trade_for(player->id(), dispatch, true);
             player->clear_legacy_npc_item_mode();
-          } else if (mail.kind == ActorMailKind::turn && effective_mail.dir >= 8) {
-            reject_move(false);
+          } else if (mail.kind == ActorMailKind::turn &&
+                     (effective_mail.dir >= 8 || effective_mail.x != player->x() ||
+                      effective_mail.y != player->y())) {
+            reject_action(false, false);
             break;
           }
 
