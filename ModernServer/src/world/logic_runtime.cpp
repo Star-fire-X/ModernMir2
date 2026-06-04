@@ -520,13 +520,6 @@ std::uint64_t remaining_runtime_ms(std::uint64_t started_ms, std::uint64_t durat
   return elapsed_ms >= duration_ms ? 0 : duration_ms - elapsed_ms;
 }
 
-std::uint64_t wall_now_ms() {
-  return static_cast<std::uint64_t>(
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::system_clock::now().time_since_epoch())
-          .count());
-}
-
 std::string build_castle_payload(const GuildCastleSnapshot& snapshot, std::uint64_t now_ms) {
   const auto& context = snapshot.castle_dialog;
   const auto& runtime = snapshot.castle_runtime;
@@ -544,15 +537,12 @@ std::string build_castle_payload(const GuildCastleSnapshot& snapshot, std::uint6
                         ",\"timeout_warning_sent\":" +
                         std::string(runtime.timeout_warning_sent ? "true" : "false");
   if (runtime.under_attack) {
-    const auto wall_ms = wall_now_ms();
-    payload += ",\"war_end_time_ms\":" +
-               std::to_string(wall_ms + remaining_runtime_ms(runtime.latest_war_start_ms,
-                                                             CastleManager::kWarDurationMs,
-                                                             now_ms)) +
-               ",\"occupation_ready_time_ms\":" +
-               std::to_string(wall_ms + remaining_runtime_ms(runtime.castle_attack_started_ms,
-                                                             CastleManager::kOccupationDelayMs,
-                                                             now_ms));
+    payload += ",\"war_remaining_ms\":" +
+               std::to_string(remaining_runtime_ms(runtime.latest_war_start_ms,
+                                                   CastleManager::kWarDurationMs, now_ms)) +
+               ",\"occupation_remaining_ms\":" +
+               std::to_string(remaining_runtime_ms(runtime.castle_attack_started_ms,
+                                                   CastleManager::kOccupationDelayMs, now_ms));
   }
   payload += ",\"rush_guilds\":[";
   for (std::size_t index = 0; index < runtime.rush_guilds.size(); ++index) {
