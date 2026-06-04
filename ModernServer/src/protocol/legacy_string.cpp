@@ -94,12 +94,20 @@ bool is_valid_legacy_character_name(LegacyStringView name) {
   if (bytes.size() < 3 || bytes.size() > 14) {
     return false;
   }
-  for (const unsigned char ch : bytes) {
+  for (std::size_t index = 0; index < bytes.size(); ++index) {
+    const auto ch = static_cast<unsigned char>(bytes[index]);
     if (ch < 0x20 || ch == 0x7F) {
       return false;
     }
     if (ch >= 0x80) {
-      continue;
+      if (ch >= 0xB0 && ch <= 0xC8 && index + 1 < bytes.size()) {
+        const auto next = static_cast<unsigned char>(bytes[index + 1]);
+        if (next >= 0xA1 && next <= 0xFE) {
+          ++index;
+          continue;
+        }
+      }
+      return false;
     }
     if (!is_ascii_alnum(ch)) {
       return false;

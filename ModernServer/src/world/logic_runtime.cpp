@@ -2301,7 +2301,7 @@ std::uint64_t LogicRuntime::enqueue_legacy_event(LegacyEventRecord record) {
     if (auto map_it = maps_.find(record.map_id); map_it != maps_.end()) {
       static_cast<void>(map_it->second->legacy_add_event_object(
           event_id, record.x, record.y, last_now_ms_, record.blocks_walk, nullptr,
-          record.type));
+          record.type, record.damage));
     }
   }
   return event_id;

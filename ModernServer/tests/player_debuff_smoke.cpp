@@ -67,6 +67,7 @@ int main() {
   auto fail = [](int stage) { return stage; };
 
   mir2::HostConfig config;
+  config.budgets.tick_ms = 20;
   mir2::MapConfig map{"0", "PlayerDebuffMap", {}, 0, 0, 10, 10};
   map.allow_pk = true;
   map.fight_zone = true;

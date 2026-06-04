@@ -50,6 +50,7 @@ int main() {
   auto fail = [](int stage) { return stage; };
 
   mir2::HostConfig config;
+  config.budgets.tick_ms = 20;
   config.maps.push_back(mir2::MapConfig{"0", "DebuffMap", {}, 0, 0, 10, 10});
   config.runtime.legacy_random_seed = 11;
   config.spawns.push_back(
