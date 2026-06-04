@@ -3,6 +3,8 @@
 
 #include <cassert>
 #include <cstddef>
+#include <utility>
+#include <vector>
 
 using namespace mir2::client;
 using namespace mir2::client_v1;
@@ -234,7 +236,7 @@ void test_struck_cancels_plain_hit_only() {
   assert(actor.legacy_action_queue.empty());
 }
 
-void test_struck_does_not_cancel_spell_or_structure_hit() {
+void test_struck_does_not_cancel_spell_or_self_hit() {
   auto state = make_store();
   state.apply(MagicList{{MagicEntry{9, 1, 0, 0, 1000, "Fireball", 1, 900, 1}}});
   state.apply(ActorAction{1, ActorActionKind::spell, 13, 10, 2, 2, 0, 17, 9, true, 1});
@@ -246,7 +248,35 @@ void test_struck_does_not_cancel_spell_or_structure_hit() {
   assert(state.world.actors[1].current_action == ActorActionKind::spell);
   assert(state.world.actors[1].legacy_action_queue.size() == 1);
 
+  state = make_store();
+  state.world.actors[1].name_color = 249;
+  state.apply(ActorAction{1, ActorActionKind::hit, 10, 10, 2, 1, 0, legacy::kSmHit, 0, false, 0});
+  state.process_legacy_actor_queues(2000);
+  state.world.actors[1].action_started_ms = 2000;
+  state.world.actors[1].action_duration_ms = 10000;
+  state.apply(ActorAction{1, ActorActionKind::struck, 0, 0, 2, 2, 5, 31, 0, false, 0});
+  assert(state.world.latest_struck_ms != 0);
+  state.process_legacy_actor_queues(2100);
+  assert(state.world.actors[1].current_action == ActorActionKind::hit);
+  assert(state.world.actors[1].legacy_action_queue.size() == 1);
+}
+
+void test_struck_cancels_structure_plain_hit() {
+  auto state = make_store();
   state.world.actors[2].feature = 98;
+  state.apply(ActorAction{2, ActorActionKind::hit, 11, 10, 4, 1, 0, legacy::kSmHit, 0, false, 0});
+  state.process_legacy_actor_queues(2000);
+  state.world.actors[2].action_started_ms = 2000;
+  state.world.actors[2].action_duration_ms = 10000;
+  state.apply(ActorAction{2, ActorActionKind::struck, 0, 0, 4, 1, 7, 31, 0, false, 0});
+  state.process_legacy_actor_queues(2100);
+  assert(state.world.actors[2].current_action == ActorActionKind::struck);
+  assert(state.world.actors[2].legacy_action_queue.empty());
+}
+
+void test_struck_does_not_cancel_effect_hit() {
+  auto state = make_store();
+  state.world.actors[2].feature = 49;
   state.apply(ActorAction{2, ActorActionKind::hit, 11, 10, 4, 1, 0, legacy::kSmHit, 0, false, 0});
   state.process_legacy_actor_queues(2000);
   state.world.actors[2].action_started_ms = 2000;
@@ -258,16 +288,31 @@ void test_struck_does_not_cancel_spell_or_structure_hit() {
 }
 
 void test_self_struck_frame_time_uses_level() {
+  auto ordinary = make_store();
+  ordinary.apply(ActorAction{1, ActorActionKind::struck, 0, 0, 2, 2, 5, 31, 0, false, 0});
+  assert(ordinary.world.latest_struck_ms == 0);
+
   auto state = make_store();
+  state.world.actors[1].name_color = 249;
   SelfAbility ability;
   ability.level = 20;
   state.apply(ability);
   state.apply(ActorAction{1, ActorActionKind::struck, 0, 0, 2, 2, 5, 31, 0, false, 0});
+  assert(state.world.latest_struck_ms != 0);
   state.process_legacy_actor_queues(1000);
   const auto& actor = state.world.actors[1];
   assert(actor.current_action == ActorActionKind::struck);
   assert(actor.legacy_struck_frame_ms == 100);
   assert(actor.action_duration_ms == 300);
+}
+
+void test_self_struck_bundle_updates_latest_on_receive() {
+  auto state = make_store();
+  state.world.actors[1].name_color = 249;
+  std::vector<Message> messages;
+  messages.emplace_back(ActorAction{1, ActorActionKind::struck, 0, 0, 2, 2, 5, 31, 0, false, 0});
+  state.enqueue_legacy_actor_bundle(std::move(messages));
+  assert(state.world.latest_struck_ms != 0);
 }
 
 void test_remove_delay_matches_legacy_hide() {
@@ -284,6 +329,66 @@ void test_remove_delay_matches_legacy_hide() {
   state.world.actors[2].action_started_ms = 0;
   state.prune_pending_actor_removals(detail::monotonic_ms());
   assert(state.world.actors.find(2) == state.world.actors.end());
+}
+
+void test_grouped_flags_refresh_from_group_members() {
+  auto state = make_store();
+  state.apply(GroupState{true, true, {"Hero", "Target"}});
+  state.refresh_grouped_actor_flags();
+  assert(state.world.actors[1].grouped);
+  assert(state.world.actors[2].grouped);
+  assert(!state.world.actors[3].grouped);
+
+  state.apply(GroupState{true, true, {"Hero"}});
+  state.refresh_grouped_actor_flags();
+  assert(state.world.actors[1].grouped);
+  assert(!state.world.actors[2].grouped);
+}
+
+void test_pending_remove_expires_after_legacy_minute() {
+  auto state = make_store();
+  state.world.actors[2].pending_remove = true;
+  state.world.actors[2].pending_remove_started_ms = 1000;
+  state.world.actors[2].action_started_ms = 1000;
+  state.world.actors[2].action_duration_ms = 120000;
+
+  state.prune_pending_actor_removals(60999);
+  assert(state.world.actors.find(2) != state.world.actors.end());
+  state.prune_pending_actor_removals(61000);
+  assert(state.world.actors.find(2) == state.world.actors.end());
+}
+
+void test_authoritative_actor_update_clears_pending_remove() {
+  auto state = make_store();
+  auto& actor = state.world.actors[2];
+  actor.pending_remove = true;
+  actor.pending_remove_started_ms = 1000;
+  actor.action_started_ms = 1000;
+  actor.action_duration_ms = 120000;
+  state.apply(ActorVitals{2, 30, 40, 10, 20, 0, 0, false, 0});
+  assert(!state.world.actors[2].pending_remove);
+  state.prune_pending_actor_removals(61000);
+  assert(state.world.actors.find(2) != state.world.actors.end());
+
+  auto& refreshed = state.world.actors[2];
+  refreshed.pending_remove = true;
+  refreshed.pending_remove_started_ms = 1000;
+  state.apply(ActorAction{2, ActorActionKind::turn, 11, 10, 4, 0, 0, 10, 0, false, 0});
+  assert(!state.world.actors[2].pending_remove);
+
+  state.world.actors[2].pending_remove = true;
+  state.world.actors[2].pending_remove_started_ms = 1000;
+  state.apply(ActorUpsert{WorldActor{2, "Target", 11, 10, 4, 200, 2, ActorType::monster}});
+  assert(!state.world.actors[2].pending_remove);
+
+  std::vector<Message> messages;
+  state.world.actors[2].pending_remove = true;
+  state.world.actors[2].pending_remove_started_ms = 1000;
+  messages.emplace_back(ActorAction{2, ActorActionKind::turn, 11, 10, 4, 0, 0, 10, 0, false, 0});
+  state.enqueue_legacy_actor_bundle(std::move(messages));
+  assert(!state.world.actors[2].pending_remove);
+  state.prune_pending_actor_removals(61000);
+  assert(state.world.actors.find(2) != state.world.actors.end());
 }
 
 void test_independent_visual_state_events() {
@@ -330,9 +435,15 @@ int main() {
   test_active_spell_consumes_magic_fire_behind_normal_head();
   test_spell_and_magic_fire_share_queue_tick();
   test_struck_cancels_plain_hit_only();
-  test_struck_does_not_cancel_spell_or_structure_hit();
+  test_struck_does_not_cancel_spell_or_self_hit();
+  test_struck_cancels_structure_plain_hit();
+  test_struck_does_not_cancel_effect_hit();
   test_self_struck_frame_time_uses_level();
+  test_self_struck_bundle_updates_latest_on_receive();
   test_remove_delay_matches_legacy_hide();
+  test_grouped_flags_refresh_from_group_members();
+  test_pending_remove_expires_after_legacy_minute();
+  test_authoritative_actor_update_clears_pending_remove();
   test_independent_visual_state_events();
   test_actor_action_queue_does_not_drop_fifo_after_64_messages();
   return 0;

@@ -47,6 +47,8 @@ constexpr std::uint64_t kDeletedCharacterSaveVersionStride = 1ULL << 48;
  */
 constexpr std::uint64_t kMaxSqliteSaveVersion =
     static_cast<std::uint64_t>((std::numeric_limits<sqlite3_int64>::max)());
+constexpr std::uint64_t kCastleOccupationDelayMs = 10ULL * 60ULL * 1000ULL;
+constexpr std::uint64_t kCastleWarDurationMs = 3ULL * 60ULL * 60ULL * 1000ULL;
 
 /**
  * @brief 计算已删除角色的保存版本号屏障值
@@ -510,6 +512,53 @@ std::string column_text(sqlite3_stmt* statement, int column) {
   return text != nullptr ? std::string(text) : std::string{};
 }
 
+std::uint64_t steady_now_ms() {
+  return static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+}
+
+std::uint64_t wall_now_ms() {
+  return static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count());
+}
+
+std::uint64_t remaining_runtime_ms(std::uint64_t started_ms, std::uint64_t duration_ms) {
+  if (started_ms == 0) {
+    return duration_ms;
+  }
+  const auto now_ms = steady_now_ms();
+  const auto elapsed_ms = now_ms - started_ms;
+  return elapsed_ms >= duration_ms ? 0 : duration_ms - elapsed_ms;
+}
+
+std::uint64_t runtime_start_for_remaining(std::uint64_t duration_ms,
+                                          std::uint64_t remaining_ms) {
+  const auto now_ms = steady_now_ms();
+  remaining_ms = std::min(remaining_ms, duration_ms);
+  const auto elapsed_ms = duration_ms - remaining_ms;
+  return now_ms - elapsed_ms;
+}
+
+std::uint64_t runtime_start_for_legacy_start(std::uint64_t started_ms,
+                                             std::uint64_t duration_ms) {
+  const auto now_ms = steady_now_ms();
+  if (started_ms > now_ms) {
+    return now_ms;
+  }
+  const auto elapsed_ms = now_ms - started_ms;
+  const auto remaining_ms = elapsed_ms >= duration_ms ? 0 : duration_ms - elapsed_ms;
+  return runtime_start_for_remaining(duration_ms, remaining_ms);
+}
+
+std::uint64_t remaining_wall_deadline_ms(std::uint64_t deadline_ms) {
+  const auto now_ms = wall_now_ms();
+  return deadline_ms > now_ms ? deadline_ms - now_ms : 0;
+}
+
 /**
  * @brief 计算两个时间戳之间的毫秒差
  * @param now_ms 当前时间戳（毫秒）
@@ -673,6 +722,42 @@ std::optional<std::int32_t> json_int_field(std::string_view json, std::string_vi
   }
 }
 
+std::optional<std::uint64_t> json_u64_field(std::string_view json, std::string_view key) {
+  const auto value_pos = find_json_value_start(json, key);
+  if (!value_pos.has_value() || *value_pos >= json.size()) {
+    return std::nullopt;
+  }
+
+  auto pos = *value_pos;
+  const auto begin = pos;
+  while (pos < json.size() && std::isdigit(static_cast<unsigned char>(json[pos])) != 0) {
+    ++pos;
+  }
+  if (pos == begin) {
+    return std::nullopt;
+  }
+
+  try {
+    return static_cast<std::uint64_t>(std::stoull(std::string(json.substr(begin, pos - begin))));
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+std::optional<bool> json_bool_field(std::string_view json, std::string_view key) {
+  const auto value_pos = find_json_value_start(json, key);
+  if (!value_pos.has_value()) {
+    return std::nullopt;
+  }
+  if (json.substr(*value_pos, 4) == "true") {
+    return true;
+  }
+  if (json.substr(*value_pos, 5) == "false") {
+    return false;
+  }
+  return std::nullopt;
+}
+
 /**
  * @brief 从 JSON 文本中解析指定键的字符串数组值
  * @param json JSON 文本字符串视图
@@ -731,6 +816,73 @@ std::optional<std::vector<std::string>> json_string_array_field(std::string_view
     }
     if (pos < json.size() && json[pos] == ']') {
       return values;
+    }
+  }
+
+  return std::nullopt;
+}
+
+std::optional<std::vector<std::string_view>> json_object_array_field(std::string_view json,
+                                                                     std::string_view key) {
+  const auto value_pos = find_json_value_start(json, key);
+  if (!value_pos.has_value() || *value_pos >= json.size() || json[*value_pos] != '[') {
+    return std::nullopt;
+  }
+
+  std::vector<std::string_view> objects;
+  auto pos = *value_pos + 1;
+  while (pos < json.size()) {
+    skip_json_ws(json, pos);
+    if (pos >= json.size()) {
+      break;
+    }
+    if (json[pos] == ']') {
+      return objects;
+    }
+    if (json[pos] != '{') {
+      return std::nullopt;
+    }
+
+    const auto begin = pos;
+    int depth = 0;
+    bool in_string = false;
+    bool escape = false;
+    for (; pos < json.size(); ++pos) {
+      const auto ch = json[pos];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch == '\\') {
+        escape = in_string;
+        continue;
+      }
+      if (ch == '"') {
+        in_string = !in_string;
+        continue;
+      }
+      if (in_string) {
+        continue;
+      }
+      if (ch == '{') {
+        ++depth;
+      } else if (ch == '}') {
+        --depth;
+        if (depth == 0) {
+          ++pos;
+          objects.push_back(json.substr(begin, pos - begin));
+          break;
+        }
+      }
+    }
+
+    skip_json_ws(json, pos);
+    if (pos < json.size() && json[pos] == ',') {
+      ++pos;
+      continue;
+    }
+    if (pos < json.size() && json[pos] == ']') {
+      return objects;
     }
   }
 
@@ -908,6 +1060,41 @@ GuildState read_guild_state_row(sqlite3_stmt* statement) {
     }
   }
 
+  if (const auto notices = json_string_array_field(payload, "notice_lines");
+      notices.has_value()) {
+    guild_state.notice_lines = *notices;
+  }
+  if (const auto allies = json_string_array_field(payload, "ally_guilds");
+      allies.has_value()) {
+    for (const auto& ally : *allies) {
+      push_unique_member(guild_state.ally_guilds, ally);
+    }
+  }
+  if (const auto wars = json_object_array_field(payload, "hostile_guilds");
+      wars.has_value()) {
+    for (const auto war_json : *wars) {
+      GuildWarState war;
+      if (const auto enemy = json_string_field(war_json, "enemy_guild");
+          enemy.has_value()) {
+        war.enemy_guild = *enemy;
+      }
+      if (const auto remain = json_u64_field(war_json, "remain_ms"); remain.has_value()) {
+        war.remain_ms = *remain;
+      }
+      if (const auto end = json_u64_field(war_json, "end_time_ms"); end.has_value()) {
+        war.remain_ms = remaining_wall_deadline_ms(*end);
+        war.start_ms = runtime_start_for_remaining(war.remain_ms, war.remain_ms);
+      } else if (const auto start = json_u64_field(war_json, "start_ms"); start.has_value()) {
+        war.start_ms = runtime_start_for_legacy_start(*start, war.remain_ms);
+      } else {
+        war.start_ms = steady_now_ms();
+      }
+      if (!war.enemy_guild.empty()) {
+        guild_state.hostile_guilds.push_back(std::move(war));
+      }
+    }
+  }
+
   // 确保领主在成员列表中，并将领主旋转到列表首位
   if (!guild_state.lord.empty()) {
     push_unique_member(guild_state.members, guild_state.lord);
@@ -951,8 +1138,161 @@ std::string build_guild_payload_json(const GuildState& guild_state) {
     }
     payload << '"' << json_escape(guild_state.applicants[index]) << '"';
   }
+  payload << "],\"notice_lines\":[";
+  for (std::size_t index = 0; index < guild_state.notice_lines.size(); ++index) {
+    if (index > 0) {
+      payload << ',';
+    }
+    payload << '"' << json_escape(guild_state.notice_lines[index]) << '"';
+  }
+  payload << "],\"ally_guilds\":[";
+  for (std::size_t index = 0; index < guild_state.ally_guilds.size(); ++index) {
+    if (index > 0) {
+      payload << ',';
+    }
+    payload << '"' << json_escape(guild_state.ally_guilds[index]) << '"';
+  }
+  payload << "],\"hostile_guilds\":[";
+  for (std::size_t index = 0; index < guild_state.hostile_guilds.size(); ++index) {
+    if (index > 0) {
+      payload << ',';
+    }
+    const auto& war = guild_state.hostile_guilds[index];
+    const auto remaining_ms = remaining_runtime_ms(war.start_ms, war.remain_ms);
+    const auto end_time_ms = wall_now_ms() + remaining_ms;
+    payload << "{\"enemy_guild\":\"" << json_escape(war.enemy_guild)
+            << "\",\"remain_ms\":" << remaining_ms
+            << ",\"end_time_ms\":" << end_time_ms << '}';
+  }
   payload << "]}";
   return payload.str();
+}
+
+std::string build_castle_runtime_payload_fields(const CastleRuntimeState& state) {
+  std::string payload = ",\"under_attack\":" +
+                        std::string(state.under_attack ? "true" : "false") +
+                        ",\"timeout_warning_sent\":" +
+                        std::string(state.timeout_warning_sent ? "true" : "false");
+  if (state.under_attack) {
+    const auto now_ms = wall_now_ms();
+    payload += ",\"war_end_time_ms\":" +
+               std::to_string(now_ms + remaining_runtime_ms(state.latest_war_start_ms,
+                                                            kCastleWarDurationMs)) +
+               ",\"occupation_ready_time_ms\":" +
+               std::to_string(now_ms + remaining_runtime_ms(state.castle_attack_started_ms,
+                                                            kCastleOccupationDelayMs));
+  }
+  payload += ",\"rush_guilds\":[";
+  for (std::size_t index = 0; index < state.rush_guilds.size(); ++index) {
+    if (index > 0) {
+      payload += ',';
+    }
+    payload += '"' + json_escape(state.rush_guilds[index]) + '"';
+  }
+  payload += "],\"registrations\":[";
+  for (std::size_t index = 0; index < state.registrations.size(); ++index) {
+    if (index > 0) {
+      payload += ',';
+    }
+    const auto& registration = state.registrations[index];
+    payload += "{\"guild_name\":\"" + json_escape(registration.guild_name) +
+               "\",\"attack_day\":" + std::to_string(registration.attack_day) + '}';
+  }
+  payload += ']';
+  return payload;
+}
+
+std::string append_castle_runtime_payload(std::string payload,
+                                          const CastleRuntimeState& state) {
+  const auto insert_pos = payload.find_last_of('}');
+  if (insert_pos == std::string::npos) {
+    return payload;
+  }
+  payload.insert(insert_pos, build_castle_runtime_payload_fields(state));
+  return payload;
+}
+
+CastleRuntimeState read_castle_runtime_payload(std::string_view payload) {
+  CastleRuntimeState state;
+  if (const auto value = json_bool_field(payload, "under_attack"); value.has_value()) {
+    state.under_attack = *value;
+  }
+  if (const auto value = json_bool_field(payload, "timeout_warning_sent"); value.has_value()) {
+    state.timeout_warning_sent = *value;
+  }
+  if (state.under_attack) {
+    if (const auto value = json_u64_field(payload, "war_end_time_ms"); value.has_value()) {
+      state.latest_war_start_ms =
+          runtime_start_for_remaining(kCastleWarDurationMs,
+                                      remaining_wall_deadline_ms(*value));
+    } else if (const auto value = json_u64_field(payload, "war_remaining_ms");
+               value.has_value()) {
+      state.latest_war_start_ms = runtime_start_for_remaining(kCastleWarDurationMs, *value);
+    } else if (const auto value = json_u64_field(payload, "latest_war_start_ms");
+               value.has_value()) {
+      state.latest_war_start_ms =
+          runtime_start_for_legacy_start(*value, kCastleWarDurationMs);
+    } else {
+      state.latest_war_start_ms = steady_now_ms();
+    }
+    if (const auto value = json_u64_field(payload, "occupation_ready_time_ms");
+        value.has_value()) {
+      state.castle_attack_started_ms =
+          runtime_start_for_remaining(kCastleOccupationDelayMs,
+                                      remaining_wall_deadline_ms(*value));
+    } else if (const auto value = json_u64_field(payload, "occupation_remaining_ms");
+               value.has_value()) {
+      state.castle_attack_started_ms =
+          runtime_start_for_remaining(kCastleOccupationDelayMs, *value);
+    } else if (const auto value = json_u64_field(payload, "castle_attack_started_ms");
+               value.has_value()) {
+      state.castle_attack_started_ms =
+          runtime_start_for_legacy_start(*value, kCastleOccupationDelayMs);
+    } else {
+      state.castle_attack_started_ms = state.latest_war_start_ms;
+    }
+  }
+  if (const auto rush_guilds = json_string_array_field(payload, "rush_guilds");
+      rush_guilds.has_value()) {
+    for (const auto& guild : *rush_guilds) {
+      push_unique_member(state.rush_guilds, guild);
+    }
+  }
+  if (const auto registrations = json_object_array_field(payload, "registrations");
+      registrations.has_value()) {
+    for (const auto registration_json : *registrations) {
+      CastleWarRegistration registration;
+      if (const auto guild = json_string_field(registration_json, "guild_name");
+          guild.has_value()) {
+        registration.guild_name = *guild;
+      }
+      if (const auto day = json_int_field(registration_json, "attack_day"); day.has_value()) {
+        registration.attack_day = *day;
+      }
+      if (!registration.guild_name.empty()) {
+        state.registrations.push_back(std::move(registration));
+      }
+    }
+  }
+  return state;
+}
+
+std::optional<std::string> load_castle_payload(sqlite3* database,
+                                               const std::string& castle_name) {
+  static constexpr const char* kSql =
+      "SELECT payload_json FROM castle_state WHERE castle_name = ?1 LIMIT 1;";
+  sqlite3_stmt* statement = nullptr;
+  if (sqlite3_prepare_v2(database, kSql, -1, &statement, nullptr) != SQLITE_OK) {
+    throw std::runtime_error("Failed to prepare load_castle_payload statement.");
+  }
+
+  bind_text(statement, 1, castle_name);
+  std::optional<std::string> payload;
+  if (sqlite3_step(statement) == SQLITE_ROW) {
+    payload = column_text(statement, 0);
+  }
+  finalize_statement(statement);
+  return payload;
 }
 
 /**
@@ -1672,6 +2012,17 @@ GuildCastleSnapshot Repository::load_guild_castle_snapshot() {
   GuildCastleSnapshot snapshot;
   snapshot.castle_dialog = load_castle_dialog_context();
 
+  static constexpr const char* kCastleSql =
+      "SELECT payload_json FROM castle_state ORDER BY castle_id ASC LIMIT 1;";
+  sqlite3_stmt* castle_statement = nullptr;
+  if (sqlite3_prepare_v2(database_, kCastleSql, -1, &castle_statement, nullptr) != SQLITE_OK) {
+    throw std::runtime_error("Failed to prepare load_guild_castle_snapshot castle statement.");
+  }
+  if (sqlite3_step(castle_statement) == SQLITE_ROW) {
+    snapshot.castle_runtime = read_castle_runtime_payload(column_text(castle_statement, 0));
+  }
+  finalize_statement(castle_statement);
+
   static constexpr const char* kGuildSql =
       "SELECT guild_name, payload_json FROM guilds ORDER BY guild_name ASC;";
   sqlite3_stmt* statement = nullptr;
@@ -1755,6 +2106,17 @@ void Repository::save_guild_state(const GuildState& guild_state) {
     }
   }
   normalized.applicants = std::move(applicants);
+  std::vector<std::string> allies;
+  for (const auto& ally : normalized.ally_guilds) {
+    push_unique_member(allies, ally);
+  }
+  normalized.ally_guilds = std::move(allies);
+  normalized.hostile_guilds.erase(
+      std::remove_if(normalized.hostile_guilds.begin(), normalized.hostile_guilds.end(),
+                     [](const GuildWarState& war) {
+                       return trim_copy(war.enemy_guild).empty();
+                     }),
+      normalized.hostile_guilds.end());
 
   save_guild_payload(normalized.guild_name, build_guild_payload_json(normalized));
 }
@@ -1811,6 +2173,17 @@ void Repository::delete_guild(const std::string& guild_name) {
  * @details 使用 UPSERT 语义，如果城堡已存在则更新 payload_json，否则插入新记录。
  */
 void Repository::save_castle_state(const std::string& castle_name, const std::string& payload_json) {
+  auto normalized_payload = payload_json;
+  if (!json_bool_field(normalized_payload, "under_attack").has_value()) {
+    const auto existing_payload = load_castle_payload(database_, castle_name);
+    if (existing_payload.has_value() &&
+        json_bool_field(*existing_payload, "under_attack").has_value()) {
+      normalized_payload =
+          append_castle_runtime_payload(std::move(normalized_payload),
+                                        read_castle_runtime_payload(*existing_payload));
+    }
+  }
+
   static constexpr const char* kSql =
       "INSERT INTO castle_state(castle_name, payload_json) VALUES(?1, ?2)"
       " ON CONFLICT(castle_name) DO UPDATE SET payload_json = excluded.payload_json;";
@@ -1821,7 +2194,7 @@ void Repository::save_castle_state(const std::string& castle_name, const std::st
   }
 
   bind_text(statement, 1, castle_name);
-  bind_text(statement, 2, payload_json);
+  bind_text(statement, 2, normalized_payload);
   if (sqlite3_step(statement) != SQLITE_DONE) {
     finalize_statement(statement);
     throw std::runtime_error("Failed to execute save_castle_state statement.");

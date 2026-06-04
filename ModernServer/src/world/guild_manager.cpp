@@ -506,6 +506,54 @@ bool Guild::transfer_lord(std::string_view current_lord, std::string_view target
   return true;
 }
 
+void GuildManager::load_states(const std::vector<GuildState>& states) {
+  guilds_.clear();
+  for (const auto& state : states) {
+    auto lord_name = state.lord;
+    if (lord_name.empty() && !state.members.empty()) {
+      lord_name = state.members.front();
+    }
+    auto* guild = create_guild(state.guild_name, lord_name);
+    if (guild == nullptr) {
+      continue;
+    }
+    for (const auto& member : state.members) {
+      if (!equals_name(member, state.lord)) {
+        guild->add_member(member);
+      }
+    }
+    guild->set_notice_lines(state.notice_lines);
+    for (const auto& ally : state.ally_guilds) {
+      guild->make_ally_guild(ally);
+    }
+    for (const auto& war : state.hostile_guilds) {
+      guild->declare_guild_war(war.enemy_guild, war.start_ms, war.remain_ms);
+    }
+  }
+}
+
+std::vector<GuildState> GuildManager::snapshot_states() const {
+  std::vector<GuildState> states;
+  states.reserve(guilds_.size());
+  for (const auto& guild : guilds_) {
+    GuildState state;
+    state.guild_name = guild.name();
+    if (const auto lord = guild.lord_name(); lord.has_value()) {
+      state.lord = std::string(*lord);
+    }
+    for (const auto& rank : guild.ranks()) {
+      for (const auto& member : rank.members) {
+        state.members.push_back(member.name);
+      }
+    }
+    state.notice_lines = guild.notice_lines();
+    state.ally_guilds = guild.ally_guilds();
+    state.hostile_guilds = guild.hostile_guilds();
+    states.push_back(std::move(state));
+  }
+  return states;
+}
+
 // ============================================================================
 // GuildManager 成员方法实现
 // ============================================================================

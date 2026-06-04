@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cassert>
 #include <limits>
 #include <string>
@@ -5,6 +6,8 @@
 #include <utility>
 #include <vector>
 
+#include "services/world_service.hpp"
+#include "world/castle_manager.hpp"
 #include "world/logic_runtime.hpp"
 
 namespace {
@@ -87,16 +90,12 @@ void check_timer_boundaries() {
   assert(has_trace(mission_boundary, "LegacyTimer", "DoorTimer"));
 
   const auto mission = runtime.tick(2001);
-  assert(has_trace(mission, "LegacyMission", "ProcessMissions"));
-  assert(has_trace(mission, "LegacyMission", "CheckServerWaitTimeOut"));
-  assert(has_trace(mission, "LegacyMission", "CheckHolySeizeValid"));
+  assert(!has_trace(mission, "LegacyMission", "ProcessMissions"));
+  assert(!has_trace(mission, "LegacyMission", "CheckHolySeizeValid"));
   assert(!has_trace(mission, "LegacyTimer", "DoorTimer"));
   const auto actions = timer_actions(mission);
   const std::vector<std::string> expected{
-      "ProcessNpcs:begin",
-      "LegacyMission:ProcessMissions",
-      "LegacyMission:CheckServerWaitTimeOut",
-      "LegacyMission:CheckHolySeizeValid"};
+      "ProcessNpcs:begin"};
   assert(actions == expected);
 
   const auto before_door = runtime.tick(2500);
@@ -122,6 +121,10 @@ void check_timer_boundaries() {
   assert(has_trace(ten_min, "LegacyTimer", "Timer10Min"));
   assert(has_trace(ten_min, "LegacyTimer", "NoticeMan.RefreshNoticeList"));
   assert(has_trace(ten_min, "LegacyTimer", "UserCastle.SaveAll"));
+  assert(std::any_of(ten_min.persist_requests.begin(), ten_min.persist_requests.end(),
+                     [](const mir2::PersistRequest& request) {
+                       return request.kind == mir2::PersistRequestKind::save_castle_state;
+                     }));
 }
 
 void check_same_frame_timer_order() {
@@ -131,9 +134,6 @@ void check_same_frame_timer_order() {
   const auto dispatch = runtime.tick(601001);
   const std::vector<std::string> expected{
       "ProcessNpcs:begin",
-      "LegacyMission:ProcessMissions",
-      "LegacyMission:CheckServerWaitTimeOut",
-      "LegacyMission:CheckHolySeizeValid",
       "LegacyTimer:DoorTimer",
       "LegacyTimer:Timer10Min",
       "LegacyTimer:NoticeMan.RefreshNoticeList",
@@ -165,9 +165,6 @@ void check_map_mailbox_runs_before_timers() {
   const std::vector<std::string> expected{
       "ProcessNpcs:begin",
       "MapMailbox:drain",
-      "LegacyMission:ProcessMissions",
-      "LegacyMission:CheckServerWaitTimeOut",
-      "LegacyMission:CheckHolySeizeValid",
       "LegacyTimer:DoorTimer"};
   assert(timer_and_mail_actions(dispatch) == expected);
 }
@@ -187,7 +184,7 @@ void check_wraparound_delta_timers() {
   assert(!has_trace(mission_boundary, "LegacyMission", "ProcessMissions"));
 
   const auto mission = runtime.tick(900);
-  assert(has_trace(mission, "LegacyMission", "ProcessMissions"));
+  assert(!has_trace(mission, "LegacyMission", "ProcessMissions"));
 
   const auto ten_sec_boundary = runtime.tick(9899);
   assert(!has_trace(ten_sec_boundary, "LegacyTimer", "Timer10Sec"));
@@ -202,6 +199,112 @@ void check_wraparound_delta_timers() {
   assert(has_trace(ten_min, "LegacyTimer", "Timer10Min"));
 }
 
+void check_user_count_guild_castle_and_pending_timeout_side_effects() {
+  auto runtime = make_runtime();
+  mir2::GuildCastleSnapshot snapshot;
+  snapshot.castle_dialog.castle_name = "Sabuk";
+  snapshot.guilds.push_back(mir2::GuildState{
+      "Red", "Alice", {"Alice"}, {"Candidate"}, {}, {},
+      {mir2::GuildWarState{"Blue", 1000, 1000}}});
+  snapshot.guilds.push_back(mir2::GuildState{
+      "Blue", "Bob", {"Bob"}, {}, {}, {}, {mir2::GuildWarState{"Red", 1000, 1000}}});
+  runtime.set_guild_castle_snapshot(snapshot);
+
+  static_cast<void>(runtime.tick(1000));
+  const auto dispatch = runtime.tick(11001);
+  assert(has_trace(dispatch, "LegacyTimer", "FrmIDSoc.SendUserCount"));
+  assert(std::any_of(dispatch.audit_events.begin(), dispatch.audit_events.end(),
+                     [](const mir2::AuditEvent& event) {
+                       return event.category == "world.user_count";
+                     }));
+  const auto save_guild_count =
+      std::count_if(dispatch.persist_requests.begin(), dispatch.persist_requests.end(),
+                    [](const mir2::PersistRequest& request) {
+                      return request.kind == mir2::PersistRequestKind::save_guild_state;
+                    });
+  assert(save_guild_count == 2);
+  const auto red_save =
+      std::find_if(dispatch.persist_requests.begin(), dispatch.persist_requests.end(),
+                   [](const mir2::PersistRequest& request) {
+                     return request.kind == mir2::PersistRequestKind::save_guild_state &&
+                            request.guild_name == "Red";
+                   });
+  assert(red_save != dispatch.persist_requests.end());
+  assert(red_save->guild_state.applicants.size() == 1);
+  assert(red_save->guild_state.applicants.front() == "Candidate");
+
+  auto castle_runtime = make_runtime();
+  mir2::GuildCastleSnapshot castle_snapshot;
+  castle_snapshot.castle_dialog.castle_name = "Sabuk";
+  castle_snapshot.castle_runtime.under_attack = true;
+  castle_snapshot.castle_runtime.latest_war_start_ms =
+      1000 + mir2::CastleManager::kWarDurationMs -
+      mir2::CastleManager::kTimeoutWarningLeadMs;
+  castle_snapshot.castle_runtime.castle_attack_started_ms =
+      castle_snapshot.castle_runtime.latest_war_start_ms;
+  castle_runtime.set_guild_castle_snapshot(castle_snapshot);
+  static_cast<void>(castle_runtime.tick(1000));
+  const auto castle_dispatch =
+      castle_runtime.tick(castle_snapshot.castle_runtime.latest_war_start_ms);
+  assert(std::any_of(castle_dispatch.persist_requests.begin(),
+                     castle_dispatch.persist_requests.end(),
+                     [](const mir2::PersistRequest& request) {
+                       return request.kind == mir2::PersistRequestKind::save_castle_state &&
+                              request.payload_json.find("\"timeout_warning_sent\":true") !=
+                                  std::string::npos;
+                     }));
+
+  mir2::LocalBus bus;
+  auto auth = bus.register_endpoint("auth_service", 8);
+  mir2::HostContext context;
+  context.bus = &bus;
+
+  mir2::WorldService world;
+  world.attach_context_for_test(context);
+  world.seed_pending_load_for_test(88, "acct_timeout", "TimeoutHero", 1234, 1000);
+  const auto not_yet = world.expire_pending_loads_for_test(31000);
+  assert(not_yet.session_events.empty());
+  assert(bus.queue_depth("auth_service") == 0);
+  const auto expired = world.expire_pending_loads_for_test(31001);
+  assert(expired.session_events.size() == 1);
+  assert(expired.session_events.front().kind == mir2::SessionEventKind::force_disconnect);
+  assert(has_trace(expired, "LegacyMission", "CheckServerWaitTimeOut"));
+  auto message = auth->queue->try_pop();
+  assert(message.has_value());
+  const auto* revoke = std::get_if<mir2::LogicCommand>(&*message);
+  assert(revoke != nullptr);
+  assert(revoke->kind == mir2::LogicCommandKind::revoke_authentication);
+  assert(revoke->account_id == "acct_timeout");
+  assert(revoke->character_name == "TimeoutHero");
+  assert(revoke->certification == 1234);
+
+  mir2::LocalBus retry_bus;
+  static_cast<void>(retry_bus.register_endpoint("auth_service", 0));
+  mir2::HostContext retry_context;
+  retry_context.bus = &retry_bus;
+
+  mir2::WorldService retry_world;
+  retry_world.attach_context_for_test(retry_context);
+  retry_world.seed_pending_load_for_test(89, "acct_retry", "RetryHero", 2234, 1000);
+  const auto blocked = retry_world.expire_pending_loads_for_test(31001);
+  assert(blocked.session_events.size() == 1);
+  assert(retry_bus.queue_depth("auth_service") == 0);
+
+  auto retry_auth = retry_bus.register_endpoint("auth_service", 8);
+  const auto retried = retry_world.expire_pending_loads_for_test(31002);
+  assert(retried.session_events.empty());
+  assert(retried.audit_events.empty());
+  assert(!has_trace(retried, "LegacyMission", "CheckServerWaitTimeOut"));
+  message = retry_auth->queue->try_pop();
+  assert(message.has_value());
+  revoke = std::get_if<mir2::LogicCommand>(&*message);
+  assert(revoke != nullptr);
+  assert(revoke->kind == mir2::LogicCommandKind::revoke_authentication);
+  assert(revoke->account_id == "acct_retry");
+  assert(revoke->character_name == "RetryHero");
+  assert(revoke->certification == 2234);
+}
+
 }  // namespace
 
 int main() {
@@ -209,5 +312,6 @@ int main() {
   check_same_frame_timer_order();
   check_map_mailbox_runs_before_timers();
   check_wraparound_delta_timers();
+  check_user_count_guild_castle_and_pending_timeout_side_effects();
   return 0;
 }

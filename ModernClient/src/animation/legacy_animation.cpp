@@ -2131,6 +2131,8 @@ void LegacyActorAnimation::initialize(const ActorState& actor, const std::uint64
   last_magic_id_ = actor.magic_id;
   last_dead_ = actor.dead;
   active_action_started_ms_ = actor.action_started_ms;
+  active_action_kind_ = actor.current_action;
+  active_legacy_ident_ = actor.legacy_action_ident;
   pending_actions_.clear();
   lock_end_frame_ = false;
   hold_end_until_next_move_tick_ = false;
@@ -2348,6 +2350,16 @@ void LegacyActorAnimation::queue_or_begin(const ActorState& actor, const bool is
       return;
     }
   }
+  const auto struck_interrupts_active_hit =
+      !self_actor_ && !is_move && actor.current_action == client_v1::ActorActionKind::struck &&
+      motion_kind_ == MotionKind::action &&
+      active_action_kind_ == client_v1::ActorActionKind::hit &&
+      active_legacy_ident_ == legacy::kSmHit &&
+      !legacy_plain_hit_uses_effect(actor);
+  if (struck_interrupts_active_hit) {
+    begin_action(actor, now_ms);
+    return;
+  }
   if (motion_kind_ == MotionKind::idle && !lock_end_frame_) {
     if (is_move) {
       begin_move(actor, now_ms);
@@ -2497,6 +2509,8 @@ void LegacyActorAnimation::begin_motion(const ActorState& actor, const ResolvedA
   dead_ = actor.dead;
   active_action_started_ms_ = actor.action_started_ms;
   active_motion_actor_ = actor;
+  active_action_kind_ = actor.current_action;
+  active_legacy_ident_ = actor.legacy_action_ident;
   lock_end_frame_ = false;
 }
 

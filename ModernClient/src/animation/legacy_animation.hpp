@@ -542,6 +542,8 @@ class LegacyActorAnimation {
   std::vector<ActorState> pending_actions_{};
   std::uint64_t active_action_started_ms_{0};
   ActorState active_motion_actor_{};
+  client_v1::ActorActionKind active_action_kind_{client_v1::ActorActionKind::turn};
+  std::uint16_t active_legacy_ident_{0};
   bool spell_active_{false};
   int cur_eff_frame_{0};
   int spell_frame_{10};

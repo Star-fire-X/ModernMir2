@@ -572,6 +572,26 @@ struct CastleDialogContext {
   std::int32_t guild_create_fee{0};                   ///< @brief 公会创建费用
 };
 
+struct GuildWarState {
+  std::string enemy_guild{};
+  std::uint64_t start_ms{0};
+  std::uint64_t remain_ms{3 * 60 * 60 * 1000};
+};
+
+struct CastleWarRegistration {
+  std::string guild_name{};
+  std::int32_t attack_day{0};
+};
+
+struct CastleRuntimeState {
+  bool under_attack{false};
+  bool timeout_warning_sent{false};
+  std::uint64_t latest_war_start_ms{0};
+  std::uint64_t castle_attack_started_ms{0};
+  std::vector<std::string> rush_guilds{};
+  std::vector<CastleWarRegistration> registrations{};
+};
+
 /**
  * @brief 公会状态
  * @details 表示单个公会的运行时状态，包括名称、会长、成员和申请人列表。
@@ -582,6 +602,9 @@ struct GuildState {
   std::string lord{};                     ///< @brief 会长名称
   std::vector<std::string> members{};     ///< @brief 成员名称列表
   std::vector<std::string> applicants{};  ///< @brief 申请人名称列表
+  std::vector<std::string> notice_lines{};
+  std::vector<std::string> ally_guilds{};
+  std::vector<GuildWarState> hostile_guilds{};
 };
 
 /**
@@ -592,6 +615,7 @@ struct GuildState {
 struct GuildCastleSnapshot {
   CastleDialogContext castle_dialog{};     ///< @brief 城堡对话上下文
   std::vector<GuildState> guilds{};       ///< @brief 公会状态列表
+  CastleRuntimeState castle_runtime{};
 };
 
 /**

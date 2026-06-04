@@ -2899,6 +2899,15 @@ bool Player::legacy_due(std::uint64_t now_ms) const {
          static_cast<std::int64_t>(run_next_tick_ms_);
 }
 
+bool Player::legacy_player_search_due(std::uint64_t now_ms) const {
+  return now_ms - search_time_ms_ > search_rate_ms_;
+}
+
+bool Player::legacy_line_notice_due(std::uint64_t now_ms) const {
+  constexpr std::uint64_t kLineNoticeIntervalMs = 5ULL * 60ULL * 1000ULL;
+  return line_notice_time_ms_ == 0 || now_ms - line_notice_time_ms_ > kLineNoticeIntervalMs;
+}
+
 /** ==================== Player：魔法盾（气泡防御）管理 ==================== */
 
 /**
@@ -3210,6 +3219,15 @@ void Player::mark_legacy_initialize_done(std::uint64_t now_ms) {
  */
 void Player::mark_legacy_running_time(std::uint64_t now_ms) {
   run_time_ms_ = static_cast<std::int64_t>(now_ms);
+}
+
+void Player::mark_legacy_player_search_time(std::uint64_t now_ms) {
+  search_time_ms_ = now_ms;
+}
+
+void Player::mark_legacy_line_notice_time(std::uint64_t now_ms) {
+  line_notice_time_ms_ = now_ms;
+  ++line_notice_index_;
 }
 
 /**

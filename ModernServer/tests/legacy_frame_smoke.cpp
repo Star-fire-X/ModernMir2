@@ -470,6 +470,39 @@ bool check_frame_action_fifo() {
   return true;
 }
 
+bool check_deferred_persist_result_stage() {
+  mir2::HostConfig config;
+  config.maps.push_back(mir2::MapConfig{"0", "DeferredPersistFrame", {}, 0, 0, 10, 10});
+  mir2::HostContext context;
+  context.config = config;
+
+  mir2::WorldService world;
+  world.attach_context_for_test(context);
+  world.initialize_runtime_for_test(config);
+
+  mir2::PersistResult result;
+  result.kind = mir2::PersistResultKind::guild_castle_snapshot_loaded;
+  result.guild_castle_snapshot.guilds.push_back(
+      mir2::GuildState{"FrameGuild", "FrameLord", {"FrameLord"}});
+
+  mir2::WorldIngressBatch batch;
+  batch.push(result, 21);
+  batch.mark_frame(12);
+
+  const auto decoded = world.process_ingress_batch_for_test(batch);
+  if (!batch.empty() || !decoded.audit_events.empty() ||
+      world.snapshot().at("guild_count") != "0") {
+    std::cerr << "deferred_persist_decode_stage\n";
+    return false;
+  }
+  const auto applied = world.run_server_message_stage_for_test(2000);
+  if (!applied.audit_events.empty() || world.snapshot().at("guild_count") != "1") {
+    std::cerr << "deferred_persist_server_message_stage\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -492,6 +525,9 @@ int main() {
     return 1;
   }
   if (!check_frame_action_fifo()) {
+    return 1;
+  }
+  if (!check_deferred_persist_result_stage()) {
     return 1;
   }
   return 0;

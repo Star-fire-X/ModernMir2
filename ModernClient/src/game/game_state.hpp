@@ -187,7 +187,9 @@ struct ActorState {
   std::uint32_t saying_back_color{0x00000000U};
   std::uint64_t saying_started_ms{0};   ///< 头顶说话开始时间，4 秒后隐藏
   std::uint32_t name_color{0xFFFFFFFFU};
+  bool grouped{false};
   bool pending_remove{false};
+  std::uint64_t pending_remove_started_ms{0};
 };
 
 /// 魔法快捷键状态
@@ -635,6 +637,37 @@ inline bool actor_action_animating(const ActorState& actor, const std::uint64_t 
          elapsed_ms(now, actor.action_started_ms) < actor.action_duration_ms;
 }
 
+inline bool legacy_plain_hit_uses_effect(const ActorState& actor) {
+  if (actor.actor_type != client_v1::ActorType::monster) {
+    return false;
+  }
+  switch (static_cast<std::uint8_t>(actor.feature & 0xFFU)) {
+    case 16:
+    case 20:
+    case 21:
+    case 24:
+    case 40:
+    case 49:
+    case 52:
+    case 53:
+    case 54:
+    case 61:
+    case 62:
+    case 63:
+    case 64:
+    case 65:
+    case 66:
+    case 67:
+    case 68:
+    case 70:
+    case 71:
+    case 72:
+      return true;
+    default:
+      return false;
+  }
+}
+
 /// 检查角色是否可以执行下一个动作
 /// 死亡或动作锁定或动画播放中均不可执行新动作
 inline bool can_next_action(const WorldViewState& world, const ActorState& self,
@@ -876,15 +909,10 @@ struct GameStateStore {
                        });
   }
 
-  static bool legacy_actor_is_structure(const ActorState& actor) {
-    const auto race = static_cast<std::uint8_t>(actor.feature & 0xFF);
-    return actor.actor_type != client_v1::ActorType::player && (race == 98 || race == 99);
-  }
-
   static bool legacy_actor_can_cancel_for_struck(const ActorState& actor) {
     return actor.current_action == client_v1::ActorActionKind::hit &&
            actor.legacy_action_ident == legacy::kSmHit &&
-           !legacy_actor_is_structure(actor);
+           !legacy_plain_hit_uses_effect(actor);
   }
 
   static void cancel_legacy_actor_action_for_struck(ActorState& actor) {
@@ -921,6 +949,11 @@ struct GameStateStore {
         actor.legacy_actor_bundle_queue.end());
   }
 
+  static void clear_pending_remove(ActorState& actor) {
+    actor.pending_remove = false;
+    actor.pending_remove_started_ms = 0;
+  }
+
   static void revive_actor(ActorState& actor) {
     actor.dead = false;
     actor.skeleton = false;
@@ -948,6 +981,7 @@ struct GameStateStore {
     event.legacy_actor_bundle_queue.clear();
     event.legacy_pending_actions.clear();
     event.pending_remove = false;
+    event.pending_remove_started_ms = 0;
     event.legacy_event_priority = priority;
     event.legacy_event_sequence = ++legacy_actor_event_sequence;
     actor.legacy_pending_actions.push_back(event);
@@ -1077,6 +1111,18 @@ struct GameStateStore {
     }
     auto& actor = world.actors[actor_id];
     actor.actor_id = actor_id;
+    const auto has_actor_action =
+        std::any_of(bundle.actor_messages.begin(), bundle.actor_messages.end(),
+                    [](const LegacyActorMessage& message) {
+                      return message.kind == LegacyActorMessage::Kind::action;
+                    });
+    if (has_actor_action) {
+      clear_pending_remove(actor);
+    }
+    if (actor_id == world.self_actor_id && actor.name_color == 249U &&
+        legacy_actor_bundle_has_struck(bundle)) {
+      world.latest_struck_ms = detail::monotonic_ms();
+    }
     actor.legacy_actor_bundle_queue.push_back(std::move(bundle));
   }
 
@@ -1188,9 +1234,6 @@ struct GameStateStore {
       actor.last_damage = message.value;
       actor.last_hitter_id = message.target_actor_id;
       actor.last_damage_magic = message.magic;
-      if (actor.actor_id == world.self_actor_id) {
-        world.latest_struck_ms = actor.action_started_ms;
-      }
     }
     record_legacy_actor_event(actor);
     // Delphi ClMain.pas updates LatestRushRushTime only for SM_RUSH, not SM_RUSHKUNG.
@@ -1256,6 +1299,7 @@ struct GameStateStore {
     const auto needs_draw_order = !actor_in_draw_order(actor_id);
     auto& actor = world.actors[actor_id];
     actor.actor_id = actor_id;
+    clear_pending_remove(actor);
     if (!message.actor.name.empty()) {
       actor.name = message.actor.name;
     }
@@ -1414,9 +1458,15 @@ struct GameStateStore {
   }
 
   void prune_pending_actor_removals(const std::uint64_t now_ms) {
+    constexpr std::uint64_t kPendingRemoveTtlMs = 60ULL * 1000ULL;
     std::vector<std::uint64_t> removals;
     for (const auto& [actor_id, actor] : world.actors) {
-      if (actor.pending_remove && !actor_action_animating(actor, now_ms)) {
+      if (!actor.pending_remove) {
+        continue;
+      }
+      const auto expired = actor.pending_remove_started_ms != 0 &&
+                           now_ms >= actor.pending_remove_started_ms + kPendingRemoveTtlMs;
+      if (expired || !actor_action_animating(actor, now_ms)) {
         removals.push_back(actor_id);
       }
     }
@@ -1425,9 +1475,19 @@ struct GameStateStore {
     }
   }
 
-  void process_legacy_actor_queues(const std::uint64_t now_ms) {
+  void refresh_grouped_actor_flags() {
     for (auto& [actor_id, actor] : world.actors) {
       (void)actor_id;
+      actor.grouped =
+          std::find(world.group.members.begin(), world.group.members.end(), actor.name) !=
+          world.group.members.end();
+    }
+  }
+
+  void process_legacy_actor_queues(const std::uint64_t now_ms) {
+    for (auto& [actor_id, actor] : world.actors) {
+      const auto struck_can_cancel_active_action =
+          actor_id != world.self_actor_id && legacy_actor_can_cancel_for_struck(actor);
       if (!actor.legacy_actor_bundle_queue.empty()) {
         const auto hurry = legacy_actor_bundle_is_hurry(actor.legacy_actor_bundle_queue.front());
         if (hurry) {
@@ -1438,7 +1498,7 @@ struct GameStateStore {
         }
         if (actor_action_animating(actor, now_ms)) {
           if (!legacy_actor_bundle_has_struck(actor.legacy_actor_bundle_queue.front()) ||
-              !legacy_actor_can_cancel_for_struck(actor)) {
+              !struck_can_cancel_active_action) {
             continue;
           }
           cancel_legacy_actor_action_for_struck(actor);
@@ -1460,7 +1520,7 @@ struct GameStateStore {
       }
       if (actor_action_animating(actor, now_ms)) {
         if (!legacy_actor_message_is_struck(actor.legacy_action_queue.front()) ||
-            !legacy_actor_can_cancel_for_struck(actor)) {
+            !struck_can_cancel_active_action) {
           continue;
         }
         cancel_legacy_actor_action_for_struck(actor);
@@ -1820,6 +1880,7 @@ struct GameStateStore {
       self.legacy_actor_bundle_queue.clear();
       self.legacy_pending_actions.clear();
       self.pending_remove = false;
+      self.pending_remove_started_ms = 0;
       world.self_actor_id = world.pending_self_actor_id;
       world.actors[self.actor_id] = std::move(self);
       world.actor_draw_order.push_back(world.self_actor_id);
@@ -2011,6 +2072,7 @@ struct GameStateStore {
   void apply(const client_v1::ActorStateDelta& message) {
     auto& actor = world.actors[message.actor_id];
     actor.actor_id = message.actor_id;
+    clear_pending_remove(actor);
     actor.x = message.x;
     actor.y = message.y;
     actor.dir = message.dir;
@@ -2044,6 +2106,7 @@ struct GameStateStore {
     const auto inserted = world.actors.find(message.actor.actor_id) == world.actors.end();
     auto& actor = world.actors[message.actor.actor_id];
     actor.actor_id = message.actor.actor_id;
+    clear_pending_remove(actor);
     if (!message.actor.name.empty()) {
       actor.name = message.actor.name;
     }
@@ -2073,6 +2136,7 @@ struct GameStateStore {
       return;
     }
     auto& actor = it->second;
+    clear_pending_remove(actor);
     if ((message.mask & client_v1::kActorIdentityName) != 0U) {
       actor.name = message.name;
     }
@@ -2101,6 +2165,7 @@ struct GameStateStore {
     auto& actor = it->second;
     if (actor.dead || actor_action_animating(actor, now_ms)) {
       actor.pending_remove = true;
+      actor.pending_remove_started_ms = now_ms;
       return;
     }
     erase_actor(message.actor_id);
@@ -2110,6 +2175,12 @@ struct GameStateStore {
   /// 服务端通知某个角色正在执行某种动作（攻击/施法/受击等）
   void apply(const client_v1::ActorAction& message) {
     auto& actor = world.actors[message.actor_id];
+    clear_pending_remove(actor);
+    if (message.actor_id == world.self_actor_id &&
+        message.kind == client_v1::ActorActionKind::struck &&
+        actor.name_color == 249U) {
+      world.latest_struck_ms = detail::monotonic_ms();
+    }
     const auto legacy_ident =
         message.kind == client_v1::ActorActionKind::hit
             ? legacy::normalize_attack_ident_to_sm(message.legacy_ident)
@@ -2162,6 +2233,7 @@ struct GameStateStore {
   void apply(const client_v1::ActorVitals& message) {
     auto& actor = world.actors[message.actor_id];
     actor.actor_id = message.actor_id;
+    clear_pending_remove(actor);
     if (message.hp >= 0) {
       actor.hp = message.hp;
     }

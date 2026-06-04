@@ -2793,6 +2793,10 @@ RuntimeDispatch MapActor::legacy_process_merchant(std::uint64_t actor_id,
   }
   if (merchant->legacy_search_due(now_ms)) {
     merchant->mark_legacy_search_time(now_ms);
+    sync_all_player_visibility(dispatch, now_ms);
+    dispatch.legacy_traces.push_back(LegacyRuntimeTrace{
+        "ProcessMerchants", "search_refresh", config_.id, {}, 0,
+        now_ms, current_tick, cursor, 0, 0});
   }
   auto& weapon_upgrades = merchant->weapon_upgrades_mutable();
   const auto upgrade_count_before = weapon_upgrades.size();
@@ -2927,6 +2931,10 @@ RuntimeDispatch MapActor::legacy_process_npc(std::uint64_t actor_id,
   }
   if (npc->legacy_search_due(now_ms)) {
     npc->mark_legacy_search_time(now_ms);
+    sync_all_player_visibility(dispatch, now_ms);
+    dispatch.legacy_traces.push_back(LegacyRuntimeTrace{
+        "ProcessNpcs", "search_refresh", config_.id, {}, 0,
+        now_ms, current_tick, cursor, 0, 0});
   }
   MapContext context;
   context.tick = current_tick;
