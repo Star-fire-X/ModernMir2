@@ -490,7 +490,7 @@ int main() {
          appearance.body_offset +
              legacy_frame_index(legacy_human_action_info(LegacyHumanAction::struck), 2, 0));
   assert(hit_interrupt_pose->overlay_count == 1);
-  assert(hit_interrupt_pose->overlays[0].frame_index == 800);
+  assert(hit_interrupt_pose->overlays[0].frame_index == 820);
 
   WorldViewState self_hit_interrupt_world;
   self_hit_interrupt_world.self_actor_id = 1;
@@ -516,28 +516,28 @@ int main() {
 
   WorldViewState queued_hit_interrupt_world;
   queued_hit_interrupt_world.self_actor_id = 2;
-  auto queued_hit_actor = actor;
-  queued_hit_actor.current_action = mir2::client_v1::ActorActionKind::hit;
-  queued_hit_actor.legacy_action_ident = mir2::legacy::kSmHeavyHit;
-  queued_hit_actor.action_started_ms = 9300;
-  queued_hit_interrupt_world.actors[1] = queued_hit_actor;
-  AnimationManager queued_hit_animations;
-  queued_hit_animations.reset(9290);
-  queued_hit_animations.update(queued_hit_interrupt_world, 9300);
+  auto queued_hit_interrupt_actor = actor;
+  queued_hit_interrupt_actor.current_action = mir2::client_v1::ActorActionKind::hit;
+  queued_hit_interrupt_actor.legacy_action_ident = mir2::legacy::kSmHeavyHit;
+  queued_hit_interrupt_actor.action_started_ms = 9300;
+  queued_hit_interrupt_world.actors[1] = queued_hit_interrupt_actor;
+  AnimationManager queued_hit_interrupt_animations;
+  queued_hit_interrupt_animations.reset(9290);
+  queued_hit_interrupt_animations.update(queued_hit_interrupt_world, 9300);
 
-  queued_hit_actor.legacy_action_ident = mir2::legacy::kSmHit;
-  queued_hit_actor.action_started_ms = 9310;
-  queued_hit_interrupt_world.actors[1] = queued_hit_actor;
-  queued_hit_animations.update(queued_hit_interrupt_world, 9310);
+  queued_hit_interrupt_actor.legacy_action_ident = mir2::legacy::kSmHit;
+  queued_hit_interrupt_actor.action_started_ms = 9310;
+  queued_hit_interrupt_world.actors[1] = queued_hit_interrupt_actor;
+  queued_hit_interrupt_animations.update(queued_hit_interrupt_world, 9310);
 
-  queued_hit_actor.current_action = mir2::client_v1::ActorActionKind::struck;
-  queued_hit_actor.legacy_action_ident = 31;
-  queued_hit_actor.action_started_ms = 9320;
-  queued_hit_interrupt_world.actors[1] = queued_hit_actor;
-  queued_hit_animations.update(queued_hit_interrupt_world, 9320);
-  const auto queued_hit_pose = queued_hit_animations.pose_for(1);
-  assert(queued_hit_pose.has_value());
-  assert(queued_hit_pose->body_index ==
+  queued_hit_interrupt_actor.current_action = mir2::client_v1::ActorActionKind::struck;
+  queued_hit_interrupt_actor.legacy_action_ident = 31;
+  queued_hit_interrupt_actor.action_started_ms = 9320;
+  queued_hit_interrupt_world.actors[1] = queued_hit_interrupt_actor;
+  queued_hit_interrupt_animations.update(queued_hit_interrupt_world, 9320);
+  const auto queued_hit_interrupt_pose = queued_hit_interrupt_animations.pose_for(1);
+  assert(queued_hit_interrupt_pose.has_value());
+  assert(queued_hit_interrupt_pose->body_index ==
          appearance.body_offset +
              legacy_frame_index(legacy_human_action_info(LegacyHumanAction::heavy_hit), 2, 0));
 

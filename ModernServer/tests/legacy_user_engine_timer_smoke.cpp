@@ -237,15 +237,14 @@ void check_user_count_guild_castle_and_pending_timeout_side_effects() {
   mir2::GuildCastleSnapshot castle_snapshot;
   castle_snapshot.castle_dialog.castle_name = "Sabuk";
   castle_snapshot.castle_runtime.under_attack = true;
-  castle_snapshot.castle_runtime.latest_war_start_ms =
-      1000 + mir2::CastleManager::kWarDurationMs -
-      mir2::CastleManager::kTimeoutWarningLeadMs;
+  castle_snapshot.castle_runtime.latest_war_start_ms = 1000;
   castle_snapshot.castle_runtime.castle_attack_started_ms =
       castle_snapshot.castle_runtime.latest_war_start_ms;
   castle_runtime.set_guild_castle_snapshot(castle_snapshot);
   static_cast<void>(castle_runtime.tick(1000));
-  const auto castle_dispatch =
-      castle_runtime.tick(castle_snapshot.castle_runtime.latest_war_start_ms);
+  const auto castle_dispatch = castle_runtime.tick(
+      1000 + mir2::CastleManager::kWarDurationMs -
+      mir2::CastleManager::kTimeoutWarningLeadMs);
   assert(std::any_of(castle_dispatch.persist_requests.begin(),
                      castle_dispatch.persist_requests.end(),
                      [](const mir2::PersistRequest& request) {
