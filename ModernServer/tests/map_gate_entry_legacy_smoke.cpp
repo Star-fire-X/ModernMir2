@@ -1,5 +1,6 @@
 #include <cassert>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <utility>
@@ -111,6 +112,20 @@ void assert_transferred(const GateAttempt& attempt) {
 
 int main() {
   {
+    mir2::MapConfig target{"0", "SameMapGate", {}, 20, 20, 5, 5};
+    const auto attempt = try_gate(make_config(target), make_character());
+    assert(has_packet(attempt.dispatch, 1, mir2::kSmClearObjects));
+    assert(has_packet(attempt.dispatch, 1, mir2::kSmChangeMap));
+    assert(!has_packet(attempt.dispatch, 1, mir2::kSmSpaceMoveHide));
+    assert(!has_packet(attempt.dispatch, 1, mir2::kSmSpaceMoveShow));
+    assert(!has_packet(attempt.dispatch, 1, mir2::kSmSpaceMoveHide2));
+    assert(!has_packet(attempt.dispatch, 1, mir2::kSmSpaceMoveShow2));
+    assert(attempt.snapshot.has_value());
+    assert(attempt.snapshot->map_id == "0");
+    assert(attempt.snapshot->x == 5 && attempt.snapshot->y == 5);
+  }
+
+  {
     mir2::MapConfig target{"1", "LevelGate", {}, 20, 20, 5, 5};
     target.need_level = 10;
     const auto attempt = try_gate(make_config(target), make_character(1));
@@ -192,6 +207,24 @@ int main() {
     const auto attempt = try_gate(make_config(target), make_character(), event);
     assert_transferred(attempt);
     assert((attempt.snapshot->quest_marks[0] & 0x80U) != 0U);
+  }
+
+  {
+    mir2::MapConfig target{"1", "MissingSizedMap",
+                           std::filesystem::temp_directory_path() /
+                               "missing_gate_target_sized.map",
+                           20, 20, 5, 5};
+    const auto attempt = try_gate(make_config(target), make_character());
+    assert_rejected(attempt);
+  }
+
+  {
+    mir2::MapConfig target{"1", "MissingUnsizedMap",
+                           std::filesystem::temp_directory_path() /
+                               "missing_gate_target_unsized.map",
+                           0, 0, 5, 5};
+    const auto attempt = try_gate(make_config(target), make_character());
+    assert_rejected(attempt);
   }
 
   return 0;

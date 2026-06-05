@@ -46,6 +46,19 @@ mir2::MagicConfig legacy_magic(std::int32_t id) {
   return magic;
 }
 
+mir2::MonsterDefConfig monster_def(std::string name) {
+  mir2::MonsterDefConfig def;
+  def.name = std::move(name);
+  def.level = 1;
+  def.hp = 40;
+  def.dc = 1;
+  def.dc_max = 5;
+  def.accurate = 10;
+  def.walk_speed_ms = 200;
+  def.attack_speed_ms = 200;
+  return def;
+}
+
 mir2::HostConfig base_config() {
   mir2::HostConfig config;
   config.runtime.legacy_random_seed = 1;
@@ -54,10 +67,11 @@ mir2::HostConfig base_config() {
   map.allow_pk = true;
   map.fight_zone = true;
   config.maps.push_back(map);
-  for (const auto id : {1, 2, 5, 8, 9, 10, 11, 23, 24, 29, 31, 33, 35, 36, 37}) {
+  for (const auto id : {1, 2, 5, 8, 9, 10, 11, 17, 23, 24, 29, 31, 33, 35, 36, 37}) {
     config.magics.push_back(legacy_magic(id));
   }
   config.items.push_back(mir2::ItemConfig{501, "Bujuk", 1, 10, 25, 5, 1, 1000, 9});
+  config.monsters.push_back(monster_def("__WhiteSkeleton"));
   return config;
 }
 
@@ -152,6 +166,14 @@ mir2::RuntimeDispatch advance(mir2::LogicRuntime& runtime, int ticks) {
   return combined;
 }
 
+bool has_packet(const mir2::RuntimeDispatch& dispatch, std::uint16_t ident) {
+  return std::any_of(dispatch.session_events.begin(), dispatch.session_events.end(),
+                     [&](const mir2::SessionEvent& event) {
+                       const auto decoded = mir2::decode_legacy_game_packet(event.packet);
+                       return decoded.has_value() && decoded->message.ident == ident;
+                     });
+}
+
 bool has_trace(const mir2::RuntimeDispatch& dispatch, const std::string& action,
                std::int32_t value = -1) {
   return std::any_of(dispatch.legacy_traces.begin(), dispatch.legacy_traces.end(),
@@ -166,6 +188,14 @@ std::int32_t count_trace(const mir2::RuntimeDispatch& dispatch, const std::strin
       dispatch.legacy_traces.begin(), dispatch.legacy_traces.end(),
       [&](const mir2::LegacyRuntimeTrace& trace) {
         return trace.action == action && trace.value == value;
+      }));
+}
+
+std::int32_t count_trace(const mir2::RuntimeDispatch& dispatch, const std::string& action) {
+  return static_cast<std::int32_t>(std::count_if(
+      dispatch.legacy_traces.begin(), dispatch.legacy_traces.end(),
+      [&](const mir2::LegacyRuntimeTrace& trace) {
+        return trace.action == action;
       }));
 }
 
@@ -239,6 +269,82 @@ int main() {
     static_cast<void>(runtime.tick());
     auto dispatch = runtime.route_logic_command(spell(1331, 37));
     append(dispatch, runtime.tick());
+    assert(has_packet(dispatch, mir2::kSmBackStep));
+    assert(has_trace(dispatch, "push"));
+    assert(has_trace(dispatch, "train_skill"));
+  }
+
+  {
+    auto config = base_config();
+    config.spawns.push_back(spawn("Push37BlockedTarget", 10, 9));
+    config.spawns.push_back(spawn("Push37BackBlocker", 10, 8));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(enter(1332, character("Push37Blocked", {37}))));
+    static_cast<void>(runtime.tick());
+    auto dispatch = runtime.route_logic_command(spell(1332, 37));
+    append(dispatch, runtime.tick());
+    assert(!has_packet(dispatch, mir2::kSmBackStep));
+    assert(has_trace(dispatch, "push", 0));
+    assert(has_trace(dispatch, "train_skill"));
+  }
+
+  {
+    auto config = base_config();
+    config.maps[0].allow_pk = false;
+    config.maps[0].fight_zone = false;
+    config.spawns.push_back(spawn("Push37RngTarget", 10, 9));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto blocked_player = character("Push37PkBlocked", {}, 9, 10);
+    blocked_player.ability.level = 20;
+    static_cast<void>(
+        runtime.route_logic_command(enter(1333, character("Push37RngOrder", {37}))));
+    static_cast<void>(runtime.route_logic_command(enter(1334, std::move(blocked_player))));
+    static_cast<void>(runtime.tick());
+    auto dispatch = runtime.route_logic_command(spell(1333, 37));
+    append(dispatch, runtime.tick());
+    assert(count_trace(dispatch, "push_gate") == 2);
+    assert(has_trace(dispatch, "push"));
+    assert(has_trace(dispatch, "train_skill"));
+  }
+
+  {
+    auto config = base_config();
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(
+        runtime.route_logic_command(enter(1335, character("Push37OwnSlave", {17, 37}))));
+    static_cast<void>(runtime.tick());
+    static_cast<void>(runtime.route_logic_command(spell(1335, 17)));
+    static_cast<void>(runtime.tick());
+    runtime.set_legacy_random_seed(1);
+    auto dispatch = runtime.route_logic_command(spell(1335, 37));
+    append(dispatch, runtime.tick());
+    assert(count_trace(dispatch, "push_gate") == 1);
+    assert(has_packet(dispatch, mir2::kSmBackStep));
+    assert(has_trace(dispatch, "push"));
+    assert(has_trace(dispatch, "train_skill"));
+  }
+
+  {
+    auto config = base_config();
+    config.maps[0].safe_zones.push_back(mir2::MapZoneConfig{10, 10, 1, 1});
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(
+        enter(1336, character("Push37SlaveMaster", {17}, 10, 10))));
+    static_cast<void>(runtime.tick());
+    static_cast<void>(runtime.route_logic_command(spell(1336, 17)));
+    static_cast<void>(runtime.tick());
+    static_cast<void>(
+        runtime.route_logic_command(enter(1337, character("Push37OtherSlave", {37}, 9, 9))));
+    static_cast<void>(runtime.tick());
+    runtime.set_legacy_random_seed(1);
+    auto dispatch = runtime.route_logic_command(spell(1337, 37));
+    append(dispatch, runtime.tick());
+    assert(count_trace(dispatch, "push_gate") == 1);
+    assert(has_packet(dispatch, mir2::kSmBackStep));
     assert(has_trace(dispatch, "push"));
     assert(has_trace(dispatch, "train_skill"));
   }

@@ -26,6 +26,8 @@ std::filesystem::path write_door_map() {
   write_u16(bytes, 2, height);
   const auto offset = 52U + (2U * height + 2U) * 12U;
   bytes[offset + 6U] = 0x80U | 1U;
+  const auto far_offset = 52U + (4U * height + 4U) * 12U;
+  bytes[far_offset + 6U] = 0x80U | 2U;
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
   return path;
@@ -70,6 +72,41 @@ int main() {
   config.maps.push_back(map);
   config.maps.push_back(mir2::MapConfig{"1", "Target", {}, 5, 5, 1, 1});
 
+  {
+    mir2::LogicRuntime adjacent_runtime(config);
+    adjacent_runtime.initialize();
+
+    mir2::LogicCommand adjacent_enter;
+    adjacent_enter.kind = mir2::LogicCommandKind::enter_world;
+    adjacent_enter.session_id = 2;
+    adjacent_enter.account_id = "acct";
+    adjacent_enter.character_name = "Hero";
+    adjacent_enter.map_id = "0";
+    adjacent_enter.x = 1;
+    adjacent_enter.y = 2;
+    adjacent_enter.character = make_character();
+    static_cast<void>(adjacent_runtime.route_logic_command(adjacent_enter));
+    std::uint64_t adjacent_now_ms = 100000;
+    static_cast<void>(adjacent_runtime.tick(adjacent_now_ms));
+    for (int index = 0; index < 12; ++index) {
+      adjacent_now_ms += 20;
+      static_cast<void>(adjacent_runtime.tick(adjacent_now_ms));
+    }
+
+    mir2::LogicCommand adjacent_open_door;
+    adjacent_open_door.kind = mir2::LogicCommandKind::open_door;
+    adjacent_open_door.session_id = 2;
+    adjacent_open_door.x = 2;
+    adjacent_open_door.y = 2;
+    static_cast<void>(adjacent_runtime.route_logic_command(adjacent_open_door));
+    adjacent_now_ms += 20;
+    const auto adjacent_open_dispatch = adjacent_runtime.tick(adjacent_now_ms);
+    const auto adjacent_opened =
+        find_packet(adjacent_open_dispatch, 2, mir2::kSmOpenDoorOk);
+    assert(adjacent_opened.has_value());
+    assert(adjacent_opened->message.param == 2 && adjacent_opened->message.tag == 2);
+  }
+
   mir2::LogicRuntime runtime(config);
   runtime.initialize();
 
@@ -91,6 +128,16 @@ int main() {
     static_cast<void>(runtime.tick(now_ms));
   }
 
+  mir2::LogicCommand far_open_door;
+  far_open_door.kind = mir2::LogicCommandKind::open_door;
+  far_open_door.session_id = 1;
+  far_open_door.x = 4;
+  far_open_door.y = 4;
+  static_cast<void>(runtime.route_logic_command(far_open_door));
+  now_ms += 20;
+  const auto far_open_dispatch = runtime.tick(now_ms);
+  assert(!find_packet(far_open_dispatch, 1, mir2::kSmOpenDoorOk).has_value());
+
   mir2::LogicCommand walk;
   walk.kind = mir2::LogicCommandKind::walk;
   walk.session_id = 1;
@@ -98,13 +145,24 @@ int main() {
   walk.y = 2;
   static_cast<void>(runtime.route_logic_command(walk));
   now_ms += 20;
+  const auto walk_dispatch = runtime.tick(now_ms);
+  assert(!find_packet(walk_dispatch, 1, mir2::kSmOpenDoorOk).has_value());
+  const auto still_source = runtime.snapshot_character_actor("Hero");
+  assert(still_source.has_value() && still_source->map_id == "0" &&
+         still_source->x == 2 && still_source->y == 2);
+
+  mir2::LogicCommand open_door;
+  open_door.kind = mir2::LogicCommandKind::open_door;
+  open_door.session_id = 1;
+  open_door.x = 2;
+  open_door.y = 2;
+  static_cast<void>(runtime.route_logic_command(open_door));
+  now_ms += 20;
   const auto open_time_ms = now_ms;
   const auto open_dispatch = runtime.tick(now_ms);
   const auto opened = find_packet(open_dispatch, 1, mir2::kSmOpenDoorOk);
   assert(opened.has_value());
   assert(opened->message.param == 2 && opened->message.tag == 2);
-  const auto still_source = runtime.snapshot_character_actor("Hero");
-  assert(still_source.has_value() && still_source->map_id == "0");
 
   const auto at_ttl = runtime.tick(open_time_ms + 5000);
   assert(!find_packet(at_ttl, 1, mir2::kSmCloseDoor).has_value());

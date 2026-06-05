@@ -1,6 +1,39 @@
+/**
+ * @file map_actor_npc.hpp
+ * @brief NPC 脚本执行和地图任务触发实现 - MapActor 的脚本引擎
+ * @details 该文件是 map_actor.cpp 的实现细节部分，包含 NPC 脚本引擎的完整实现。
+ *          实现以下核心功能：
+ *          1. legacy_execute_npc_script：NPC 脚本执行主引擎
+ *             - 条件评估系统（CHECK、CHECKLEVEL、RANDOM、DAYTIME 等 20+ 种条件）
+ *             - 动作执行系统（SAY、GOTO、GIVE、TAKE、MAPMOVE、MONGEN 等 30+ 种动作）
+ *             - 变量系统（P0-P4 局部变量、G0-G9 全局变量、D0-D4 骰子变量）
+ *             - 脚本控制流（条件分支、跳转、调用、子过程）
+ *          2. trigger_startup_quest：玩家登录时触发的启动任务
+ *          3. trigger_map_quest：怪物击杀/物品触发的地图任务
+ *
+ *          脚本引擎解析 NPC 对话段（NpcDialogSectionConfig）中的条件-动作对，
+ *          每个过程（proc）包含条件列表、执行行（say_lines）和动作行（act_lines）。
+ *          支持 8 层深度的 GOTO/CALL 嵌套调用保护。
+ *
+ * @see map_actor.hpp
+ * @see game_object.hpp
+ */
+
 #pragma once
 
 // Implementation detail for map_actor.cpp: NPC script and map quest members.
+
+/**
+ * @brief NPC 脚本执行入口（简化版本）
+ * @param player 执行脚本的玩家
+ * @param npc 对话的 NPC 对象
+ * @param action 脚本动作标识（如 "@main"）
+ * @param dispatch 运行时调度输出
+ * @param current_tick 当前逻辑 tick
+ * @param now_ms 当前系统时间（毫秒）
+ * @return 脚本是否执行成功
+ * @details 创建空的脚本执行上下文后委托给完整版本的执行函数。
+ */
 bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::string action,
                                          RuntimeDispatch& dispatch,
                                          std::uint64_t current_tick,
@@ -10,6 +43,48 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
                                    now_ms, script_context, 0);
 }
 
+/**
+ * @brief NPC 脚本执行主引擎（完整版本）
+ * @param player 执行脚本的玩家
+ * @param npc 对话的 NPC 对象
+ * @param action 脚本动作标识（如 "@main"、"@buy" 等）
+ * @param dispatch 运行时调度输出
+ * @param current_tick 当前逻辑 tick
+ * @param now_ms 当前系统时间（毫秒）
+ * @param script_context 脚本执行上下文（跟踪状态副作用）
+ * @param depth 当前递归深度（防止无限递归，上限 8 层）
+ * @return 脚本是否执行成功
+ * @details 这是整个 NPC 脚本系统的核心执行引擎。
+ *
+ *          脚本执行流程：
+ *          1. 规范化动作名称（空 => "@main"）
+ *          2. 处理 @exit 关闭对话框
+ *          3. 查找 NPC 对话段中匹配 action 的脚本块
+ *          4. 解析脚本块为过程列表（procs）
+ *          5. 遍历每个过程，依次评估条件和执行动作
+ *          6. 条件满足时执行 say_lines + act_lines，否则执行 else_say_lines + else_act_lines
+ *          7. 支持 GOTO/CALL 跳转到其他动作段（递归调用）
+ *
+ *          条件命令（evaluate_condition）：
+ *          CHECK/CHECKOPEN/CHECKUNIT、CHECKLEVEL、CHECKJOB、GENDER、
+ *          CHECKGOLD、CHECKITEM、ISTAKEITEM、CHECKITEMW、CHECKDURA、
+ *          RANDOM/RANDOMEX、DAYTIME/DAYOFWEEK/HOUR/MIN、
+ *          CHECKPKPOINT/CHECKLUCKYPOINT、CHECKMONMAP/CHECKMONAREA、
+ *          CHECKHUM/CHECKBAGGAGE、CHECKNAMELIST/CHECKIDLIST、
+ *          IFGETDAILYQUEST/CHECKDAILYQUEST、EQUAL/LARGE/SMALL
+ *
+ *          动作命令（execute_action）：
+ *          SAY、GOTO、CALL、CLOSE、SENDMSG/SYSMSG、BREAK、ENDQUEST、
+ *          SET/RESET/SETOPEN/SETUNIT/RESETUNIT、PARAM1-PARAM4、
+ *          MOV/INC/DEC/SUM/MOVR、ADDNAMELIST/DELNAMELIST/ADDIDLIST/DELIDLIST、
+ *          SETDAILYQUEST/RANDOMSETDAILYQUEST、GIVE、TAKE、TAKECHECKITEM、TAKEW、
+ *          MAPMOVE、MAP、GOQUEST、PLAYDICE、MONGEN、MONCLEAR、
+ *          TIMERECALL/BREAKTIMERECALL、EXCHANGEMAP/RECALLMAP、
+ *          ADDBATCH/BATCHMOVE/BATCHDELAY
+ *
+ * @note 脚本状态变化（物品、金币、标志位等）在脚本结束时自动保存角色
+ * @warning GOTO/CALL 深度超过 8 层将被拒绝执行
+ */
 bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::string action,
                                          RuntimeDispatch& dispatch,
                                          std::uint64_t current_tick,
@@ -38,6 +113,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
 
   trace("begin", true, 0, action);
 
+  // ── 处理 @exit 直接关闭对话框 ──────────────────────────────────
   if (lowered_action == "@exit") {
     queue_packet(dispatch, player.session_id(),
                  make_merchant_dlg_close_packet(player.session_id()));
@@ -45,12 +121,15 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     return true;
   }
 
+  // ── 递归深度保护 ────────────────────────────────────────────────
   if (depth > 8) {
     trace("goto_depth_reject", false, depth, action);
     return true;
   }
 
+  // ── 查找 NPC 对话段 ─────────────────────────────────────────────
   const auto* dialog = find_npc_dialog_text(npc, action);
+  // 如果找不到 @main 段但 NPC 是商人，发送默认对话文本
   if (dialog == nullptr && lowered_action == "@main" && should_open_merchant_dialog(npc)) {
     queue_packet(dispatch, player.session_id(),
                  make_merchant_say_packet(
@@ -66,6 +145,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     return false;
   }
 
+  // ── 解析脚本块并设置局部状态 ──────────────────────────────────
   const auto block = parse_legacy_script_block(*dialog);
   auto& script_global_params = *script_global_params_;
 
@@ -90,6 +170,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
   };
   std::uint64_t batch_delay_ticks = legacy_seconds_to_ticks(10);
 
+  // ── 脚本值读取 ──────────────────────────────────────────────────
   auto script_value = [&](std::string_view raw) -> std::int32_t {
     auto token = util::trim(std::string(raw));
     if (token.empty()) {
@@ -124,6 +205,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     return parse_int32(token).value_or(0);
   };
 
+  // ── 脚本值写入 ──────────────────────────────────────────────────
   auto set_script_value = [&](std::string_view raw, std::int32_t value) {
     auto token = util::trim(std::string(raw));
     const auto upper = script_upper_copy(token);
@@ -145,6 +227,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     return false;
   };
 
+  // ── 检查脚本值是否需要持久化保存 ──────────────────────────────
   auto is_persistent_script_value = [](std::string_view raw) {
     auto token = util::trim(std::string(raw));
     const auto variable = parse_legacy_script_variable_token(token);
@@ -154,6 +237,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     return token.size() >= 2 && token.front() == '[' && token.back() == ']';
   };
 
+  // ── 设置变量组累加和（索引 9 为总和位置） ────────────────────
   auto set_script_group_sum = [&](std::string_view raw, std::int32_t value) {
     auto token = util::trim(std::string(raw));
     const auto variable = parse_legacy_script_variable_token(token);
@@ -171,6 +255,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     return player.set_script_dice_param(9, value);
   };
 
+  // ── 条件评估系统 ──────────────────────────────────────────────
   auto evaluate_condition = [&](const std::string& condition_line) {
     const auto command_name = script_command_name(condition_line);
     const auto payload = script_command_payload(condition_line);
@@ -181,6 +266,8 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       }
       return parse_int32(tokens[index]).value_or(fallback);
     };
+
+    // 通用标志位比较辅助函数
     auto compare_mark = [&](auto reader) {
       if (tokens.empty()) {
         trace("condition", false, 0, condition_line);
@@ -193,6 +280,8 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, actual, condition_line);
       return success;
     };
+
+    // 获取本地时间辅助函数
     auto local_time = [] {
       const auto now = std::chrono::system_clock::now();
       const auto time = std::chrono::system_clock::to_time_t(now);
@@ -204,21 +293,36 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
 #endif
       return tm;
     };
+
+    /// @name 任务标志位条件
+    /// @{
+
+    // CHECK [index] [value] — 检查任务标记位是否等于指定值
     if (command_name == "CHECK") {
       return compare_mark([&](std::int32_t index) { return player.quest_mark(index); });
     }
+    // CHECKOPEN [index] [value] — 检查任务开启单元
     if (command_name == "CHECKOPEN") {
       return compare_mark([&](std::int32_t index) { return player.quest_open_unit(index); });
     }
+    // CHECKUNIT [index] [value] — 检查任务单元
     if (command_name == "CHECKUNIT") {
       return compare_mark([&](std::int32_t index) { return player.quest_unit(index); });
     }
+
+    /// @}
+
+    /// @name 角色属性条件
+    /// @{
+
+    // CHECKLEVEL <level> — 检查等级是否 >= 指定值
     if (command_name == "CHECKLEVEL") {
       const auto value = int_token(0, 0);
       const auto success = player.character().ability.level >= value;
       trace("condition", success, value, condition_line);
       return success;
     }
+    // CHECKJOB <0/1/2|WARRIOR/WIZARD/TAOIST> — 检查职业
     if (command_name == "CHECKJOB") {
       std::int32_t value = int_token(0, -1);
       if (value < 0 && !tokens.empty()) {
@@ -235,6 +339,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, value, condition_line);
       return success;
     }
+    // GENDER <0/1|MAN/WOMAN> — 检查性别
     if (command_name == "GENDER") {
       std::int32_t value = int_token(0, -1);
       if (value < 0 && !tokens.empty()) {
@@ -249,12 +354,20 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, value, condition_line);
       return success;
     }
+
+    /// @}
+
+    /// @name 物品/金币条件
+    /// @{
+
+    // CHECKGOLD <amount> — 检查金币是否 >= 指定值
     if (command_name == "CHECKGOLD") {
       const auto value = int_token(0, 0);
       const auto success = player.character().gold >= value;
       trace("condition", success, value, condition_line);
       return success;
     }
+    // CHECKITEM <物品名称> [数量] — 检查背包中是否有指定数量物品
     if (command_name == "CHECKITEM") {
       const auto target = parse_script_amount_target(payload);
       const auto count = count_player_bag_items_by_name(player, target.target, item_configs_);
@@ -274,6 +387,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, count, condition_line);
       return success;
     }
+    // ISTAKEITEM <物品名称> — 检查最后一次 TAKE 的是否为指定物品
     if (command_name == "ISTAKEITEM") {
       const auto target = parse_script_amount_target(payload);
       const auto wanted = util::lower_copy(util::trim(target.target));
@@ -285,6 +399,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, value, condition_line);
       return success;
     }
+    // CHECKITEMW <物品名称|装备槽别名> [数量] — 检查装备的物品
     if (command_name == "CHECKITEMW") {
       const auto target = parse_script_amount_target(payload);
       const auto slots = legacy_equipment_slots_for_alias(target.target);
@@ -305,6 +420,8 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, count, condition_line);
       return success;
     }
+    // CHECKDURA <物品名称> <耐久值> — 检查背包/装备中最高耐久
+    // CHECKDURAEVA <物品名称> <耐久值> — 检查平均耐久值
     if (command_name == "CHECKDURA" || command_name == "CHECKDURAEVA") {
       const auto target = parse_script_amount_target(payload);
       std::int32_t best_dura = 0;
@@ -339,6 +456,13 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, value, condition_line);
       return success;
     }
+
+    /// @}
+
+    /// @name 随机条件
+    /// @{
+
+    // RANDOM <range> — 1/range 概率成功（random(range) == 0）
     if (command_name == "RANDOM") {
       const auto range = int_token(0, 0);
       const auto value = legacy_random_value(dispatch, "LegacyScript", "RANDOM", range,
@@ -348,6 +472,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, value, condition_line);
       return success;
     }
+    // RANDOMEX <point> <range=100> — point% 概率成功
     if (command_name == "RANDOMEX") {
       const auto point = int_token(0, 0);
       const auto range = std::max(int_token(1, 100), 1);
@@ -358,6 +483,13 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, value, condition_line);
       return success;
     }
+
+    /// @}
+
+    /// @name 时间条件
+    /// @{
+
+    // DAYTIME [DAY/NIGHT] — 检查是否为白天/黑夜
     if (command_name == "DAYTIME") {
       const auto wanted = tokens.empty() ? std::string("DAY") : script_upper_copy(tokens[0]);
       const auto is_day = !config_.darkness;
@@ -365,9 +497,10 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, is_day ? 1 : 0, condition_line);
       return success;
     }
+    // DAYOFWEEK <1-7|SUN/MON/.../SAT> — 检查星期几
     if (command_name == "DAYOFWEEK") {
       const auto tm = local_time();
-      const auto delphi_day = tm.tm_wday + 1;
+      const auto delphi_day = tm.tm_wday + 1;  // Delphi 星期：1=Sun, 2=Mon, ..., 7=Sat
       auto expected = int_token(0, delphi_day);
       if (!tokens.empty()) {
         const auto day = script_upper_copy(tokens[0]);
@@ -391,6 +524,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, delphi_day, condition_line);
       return success;
     }
+    // HOUR <start> [end] — 检查当前小时是否在范围内
     if (command_name == "HOUR") {
       const auto start = int_token(0, 0);
       const auto end = tokens.size() > 1 ? int_token(1, start) : start;
@@ -399,6 +533,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, hour, condition_line);
       return success;
     }
+    // MIN <start> [end] — 检查当前分钟是否在范围内
     if (command_name == "MIN") {
       const auto start = int_token(0, 0);
       const auto end = tokens.size() > 1 ? int_token(1, start) : start;
@@ -407,12 +542,20 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, minute, condition_line);
       return success;
     }
+
+    /// @}
+
+    /// @name PK/幸运条件
+    /// @{
+
+    // CHECKPKPOINT <value> — 检查 PK 值是否 >= 指定值
     if (command_name == "CHECKPKPOINT") {
       const auto value = int_token(0, 0);
       const auto success = player.pk_point() >= value;
       trace("condition", success, player.pk_point(), condition_line);
       return success;
     }
+    // CHECKLUCKYPOINT <value> — 检查幸运等级是否 >= 指定值
     if (command_name == "CHECKLUCKYPOINT") {
       const auto value = int_token(0, 0);
       const auto lucky = player.body_luck_level();
@@ -420,6 +563,13 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, lucky, condition_line);
       return success;
     }
+
+    /// @}
+
+    /// @name 地图/怪物/玩家计数条件
+    /// @{
+
+    // CHECKMONMAP [map_id] <count> — 检查地图上的怪物数量
     if (command_name == "CHECKMONMAP") {
       std::string map_id = config_.id;
       std::int32_t needed = 1;
@@ -440,6 +590,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, count, condition_line);
       return success;
     }
+    // CHECKMONAREA [名称] <数量> [范围] — 检查周围怪物数量
     if (command_name == "CHECKMONAREA") {
       std::string name;
       std::int32_t needed = 1;
@@ -463,9 +614,8 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
         if (!wanted.empty() && util::lower_copy(monster->name()) != wanted) {
           continue;
         }
-        if (command_name == "CHECKMONAREA" &&
-            (std::abs(monster->x() - player.x()) > range ||
-             std::abs(monster->y() - player.y()) > range)) {
+        if (std::abs(monster->x() - player.x()) > range ||
+            std::abs(monster->y() - player.y()) > range) {
           continue;
         }
         ++count;
@@ -474,6 +624,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, count, condition_line);
       return success;
     }
+    // CHECKHUM [map_id] <count> — 检查地图上的玩家数量
     if (command_name == "CHECKHUM") {
       std::string map_id = config_.id;
       std::int32_t needed = 1;
@@ -494,6 +645,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, count, condition_line);
       return success;
     }
+    // CHECKBAGGAGE [物品名称] — 检查背包是否有空位（且能否容纳指定物品）
     if (command_name == "CHECKBAGGAGE") {
       bool success = player.has_free_bag_slot();
       if (success && !tokens.empty()) {
@@ -512,6 +664,16 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, success ? 1 : 0, condition_line);
       return success;
     }
+
+    /// @}
+
+    /// @name 名单条件
+    /// @{
+
+    // CHECKNAMELIST <list> [name] — 检查角色名是否在名单中
+    // CHECKIDLIST <list> [id] — 检查账号 ID 是否在名单中
+    // CHECK_DELETE_NAMELIST <list> [name] — 检查并在名单中删除角色名
+    // CHECK_DELETE_IDLIST <list> [id] — 检查并在名单中删除账号 ID
     if (command_name == "CHECKNAMELIST" || command_name == "CHECKIDLIST" ||
         command_name == "CHECK_DELETE_NAMELIST" || command_name == "CHECK_DELETE_IDLIST") {
       const auto key = list_key(tokens.empty() ? std::string{} : tokens[0]);
@@ -529,17 +691,34 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", found, static_cast<std::int32_t>(list_size), condition_line);
       return found;
     }
+
+    /// @}
+
+    /// @name 日常任务条件
+    /// @{
+
+    // IFGETDAILYQUEST — 检查是否未接取日常任务
     if (command_name == "IFGETDAILYQUEST") {
       const auto success = player.daily_quest() == 0;
       trace("condition", success, static_cast<std::int32_t>(player.daily_quest()), condition_line);
       return success;
     }
+    // CHECKDAILYQUEST <value> — 检查日常任务 ID 是否匹配
     if (command_name == "CHECKDAILYQUEST") {
       const auto expected = int_token(0, static_cast<std::int32_t>(player.daily_quest()));
       const auto success = static_cast<std::int32_t>(player.daily_quest()) == expected;
       trace("condition", success, static_cast<std::int32_t>(player.daily_quest()), condition_line);
       return success;
     }
+
+    /// @}
+
+    /// @name 通用比较条件
+    /// @{
+
+    // EQUAL <lhs> <rhs> — lhs == rhs
+    // LARGE <lhs> <rhs> — lhs > rhs
+    // SMALL <lhs> <rhs> — lhs < rhs
     if (command_name == "EQUAL" || command_name == "LARGE" || command_name == "SMALL") {
       if (tokens.size() < 2) {
         trace("condition", false, 0, condition_line);
@@ -553,10 +732,14 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("condition", success, lhs, condition_line);
       return success;
     }
+
+    /// @}
+
     trace("unsupported_condition", false, 0, condition_line);
     return false;
   };
 
+  // ── 多条件评估（所有条件必须同时满足） ──────────────────────────
   auto evaluate_conditions = [&](const std::vector<std::string>& conditions) {
     for (const auto& condition : conditions) {
       if (!evaluate_condition(condition)) {
@@ -566,12 +749,14 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     return true;
   };
 
+  // ── 脚本执行状态变量 ──────────────────────────────────────────
   bool script_state_mutated = false;
   bool stop_script = false;
   bool player_transferred = false;
   bool suppress_pending_say = false;
   std::vector<std::string> pending_say_lines;
 
+  // 刷新待发送的对话行
   auto flush_pending_say = [&]() {
     if (pending_say_lines.empty() || player_transferred || suppress_pending_say) {
       return;
@@ -586,6 +771,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     pending_say_lines.clear();
   };
 
+  // 按名称从背包中移除物品（移除第一个匹配的）
   auto remove_bag_item_by_name = [&](std::string_view item_name_text) -> std::optional<LegacyUserItem> {
     const auto wanted = util::lower_copy(util::trim(std::string(item_name_text)));
     for (std::size_t slot = 0; slot < player.character().bag_items.size(); ++slot) {
@@ -597,6 +783,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
     return std::nullopt;
   };
 
+  // 统计背包中指定物品的数量
   auto count_bag_items_by_name = [&](std::string_view item_name_text) {
     const auto wanted = util::lower_copy(util::trim(std::string(item_name_text)));
     return static_cast<std::int32_t>(std::count_if(
@@ -606,6 +793,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
         }));
   };
 
+  // 刷新背包物品列表和重量到客户端
   auto queue_inventory_refresh = [&]() {
     player.refresh_derived_state(item_configs_);
     queue_packet(dispatch, player.session_id(),
@@ -614,6 +802,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
                  make_weight_changed_packet(player.session_id(), player.character()));
   };
 
+  // ── 动作执行系统 ──────────────────────────────────────────────
   auto execute_action = [&](const std::string& action_line) -> std::optional<std::string> {
     const auto command_name = script_command_name(action_line);
     const auto payload = script_command_payload(action_line);
@@ -624,6 +813,11 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       }
       return parse_int32(tokens[index]).value_or(fallback);
     };
+
+    /// @name 对话控制
+    /// @{
+
+    // SAY <text> — 发送 NPC 对话文本
     if (command_name == "SAY") {
       queue_packet(dispatch, player.session_id(),
                    make_merchant_say_packet(
@@ -633,6 +827,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("say", true, 0, payload);
       return std::nullopt;
     }
+    // GOTO <@label> — 跳转到其他动作段（递归调用脚本）
     if (command_name == "GOTO") {
       const auto target = util::trim(payload);
       if (target.empty() || util::lower_copy(target) == lowered_action) {
@@ -643,6 +838,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       }
       return std::nullopt;
     }
+    // CALL <@label> — 调用子过程（返回后可继续执行后续动作）
     if (command_name == "CALL") {
       std::string target;
       for (const auto& token : tokens) {
@@ -658,6 +854,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       }
       return std::nullopt;
     }
+    // CLOSE — 关闭 NPC 对话框
     if (command_name == "CLOSE") {
       pending_say_lines.clear();
       suppress_pending_say = true;
@@ -667,6 +864,14 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       stop_script = true;
       return std::nullopt;
     }
+
+    /// @}
+
+    /// @name 消息系统
+    /// @{
+
+    // SENDMSG <channel> <text> — 发送系统消息到客户端
+    // SYSMSG <channel> <text> — 同上
     if (command_name == "SENDMSG" || command_name == "SYSMSG") {
       std::size_t message_start = 0;
       std::int32_t channel = 0;
@@ -688,17 +893,36 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace(util::lower_copy(command_name), true, channel, message);
       return std::nullopt;
     }
+
+    /// @}
+
+    /// @name 流程控制
+    /// @{
+
+    // BREAK — 中断当前脚本执行
     if (command_name == "BREAK") {
       trace("break", true, 0, action_line);
       stop_script = true;
       return std::nullopt;
     }
+    // ENDQUEST — 结束任务（标记后外部可检测）
     if (command_name == "ENDQUEST") {
       script_context.end_quest = true;
       trace("endquest", true, 0, action_line);
       stop_script = true;
       return std::nullopt;
     }
+
+    /// @}
+
+    /// @name 任务标志位（持久化）
+    /// @{
+
+    // SET <index> [value=1]    — 设置任务标记位
+    // RESET <index>            — 重置任务标记位（设为 0）
+    // SETOPEN <index> [value]  — 设置开启单元
+    // SETUNIT <index> [value]  — 设置任务单元
+    // RESETUNIT <index>         — 重置任务单元（设为 0）
     if (command_name == "SET" || command_name == "RESET" || command_name == "SETOPEN" ||
         command_name == "SETUNIT" || command_name == "RESETUNIT") {
       if (tokens.empty()) {
@@ -722,6 +946,14 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("quest_mark", ok, value, action_line);
       return std::nullopt;
     }
+
+    /// @}
+
+    /// @name 参数变量（PARAM1-PARAM4）
+    /// @{
+
+    // PARAM1-PARAM4 <value|variable> — 设置局部参数值
+    // 用于为后续命令（如 MONGEN）提供参数
     if (command_name == "PARAM1" || command_name == "PARAM2" || command_name == "PARAM3" ||
         command_name == "PARAM4") {
       const auto index = command_name.back() - '0';
@@ -733,6 +965,17 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("param", true, value, action_line);
       return std::nullopt;
     }
+
+    /// @}
+
+    /// @name 变量操作
+    /// @{
+
+    // MOV <var> <value> — 变量赋值
+    // INC <var> <amount> — 变量增加
+    // DEC <var> <amount> — 变量减少
+    // SUM <var> <amount> — 设置变量组累加和（索引 9）
+    // MOVR <var> <range> — 随机赋值 [0, range)
     if (command_name == "MOV" || command_name == "INC" || command_name == "DEC" ||
         command_name == "SUM" || command_name == "MOVR") {
       if (tokens.empty()) {
@@ -766,6 +1009,16 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("variable", ok, value, action_line);
       return std::nullopt;
     }
+
+    /// @}
+
+    /// @name 名单管理
+    /// @{
+
+    // ADDNAMELIST <list> [name] — 添加角色名到名单
+    // DELNAMELIST <list> [name] — 从名单删除角色名
+    // ADDIDLIST <list> [id] — 添加账号 ID 到名单
+    // DELIDLIST <list> [id] — 从名单删除账号 ID
     if (command_name == "ADDNAMELIST" || command_name == "DELNAMELIST" ||
         command_name == "ADDIDLIST" || command_name == "DELIDLIST") {
       const auto key = list_key(tokens.empty() ? std::string{} : tokens[0]);
@@ -781,6 +1034,14 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("namelist", true, static_cast<std::int32_t>(list_size), action_line);
       return std::nullopt;
     }
+
+    /// @}
+
+    /// @name 日常任务
+    /// @{
+
+    // SETDAILYQUEST <id> — 设置日常任务 ID
+    // RANDOMSETDAILYQUEST <id1> [id2...] — 随机选择并设置日常任务 ID
     if (command_name == "SETDAILYQUEST" || command_name == "RANDOMSETDAILYQUEST") {
       std::int32_t value = int_token(0, 0);
       if (command_name == "RANDOMSETDAILYQUEST") {
@@ -795,6 +1056,13 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("daily_quest", true, value, action_line);
       return std::nullopt;
     }
+
+    /// @}
+
+    /// @name 物品/金币操作
+    /// @{
+
+    // GIVE <物品名称|Gold> <数量> — 给予物品或金币
     if (command_name == "GIVE") {
       const auto target = parse_script_amount_target(payload);
       if (is_legacy_script_gold_token(target.target)) {
@@ -835,6 +1103,8 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       queue_inventory_refresh();
       return std::nullopt;
     }
+
+    // TAKE <物品名称|Gold> <数量> — 取走物品或金币
     if (command_name == "TAKE") {
       const auto target = parse_script_amount_target(payload);
       if (is_legacy_script_gold_token(target.target)) {
@@ -875,6 +1145,8 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       queue_inventory_refresh();
       return std::nullopt;
     }
+
+    // TAKECHECKITEM <物品名称> <数量> — 取走 CHECKITEM 检查到的特定物品
     if (command_name == "TAKECHECKITEM") {
       const auto target = parse_script_amount_target(payload);
       if (target.amount <= 0) {
@@ -913,6 +1185,8 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       queue_inventory_refresh();
       return std::nullopt;
     }
+
+    // TAKEW <装备别名|物品名称> <数量> — 取走已装备的物品
     if (command_name == "TAKEW") {
       const auto target = parse_script_amount_target(payload);
       const auto slots = legacy_equipment_slots_for_alias(target.target);
@@ -970,6 +1244,13 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("takew", success, removed_count, action_line);
       return std::nullopt;
     }
+
+    /// @}
+
+    /// @name 地图传送
+    /// @{
+
+    // MAPMOVE <map_id> <x> <y> — 传送到指定地图的指定坐标
     if (command_name == "MAPMOVE") {
       if (tokens.size() < 3) {
         trace("mapmove_reject", false, 0, action_line);
@@ -996,6 +1277,8 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("mapmove", true, 0, action_line);
       return std::nullopt;
     }
+
+    // MAP [map_id] — 随机传送到地图（或当前地图的随机位置）
     if (command_name == "MAP") {
       const auto target_map = tokens.empty() ? config_.id : tokens[0];
       auto target = random_item_scroll_target(dispatch, player, current_tick, now_ms);
@@ -1014,6 +1297,8 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("map", true, 0, action_line);
       return std::nullopt;
     }
+
+    // GOQUEST <target> — 跳转到另一个任务对话段
     if (command_name == "GOQUEST") {
       const auto target = tokens.empty() ? std::string{} : tokens[0];
       if (!target.empty()) {
@@ -1023,6 +1308,13 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("goquest_reject", false, 0, action_line);
       return std::nullopt;
     }
+
+    /// @}
+
+    /// @name 骰子系统
+    /// @{
+
+    // PLAYDICE <count> [target_label] — 投掷骰子并跳转
     if (command_name == "PLAYDICE") {
       const auto dice_count = std::max(int_token(0, 0), 0);
       const auto target = tokens.size() > 1 ? tokens[1] : std::string{};
@@ -1034,6 +1326,14 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("playdice", true, dice_count, target.empty() ? action_line : target);
       return std::nullopt;
     }
+
+    /// @}
+
+    /// @name 怪物生成/清除
+    /// @{
+
+    // MONGEN <怪物名称> [数量=1] [散布范围=0]
+    // 使用 PARAM1=map_id, PARAM2=base_x, PARAM3=base_y
     if (command_name == "MONGEN") {
       if (tokens.empty()) {
         trace("mongen_reject", false, 0, action_line);
@@ -1088,6 +1388,8 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("mongen", true, spawned, action_line);
       return std::nullopt;
     }
+
+    // MONCLEAR [map_id] — 清除指定地图上的所有怪物
     if (command_name == "MONCLEAR") {
       const auto map_id = tokens.empty() ? config_.id : util::trim(tokens[0]);
       const auto removed = legacy_script_map_hooks_.clear_monsters
@@ -1099,6 +1401,13 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("monclear", true, removed, action_line);
       return std::nullopt;
     }
+
+    /// @}
+
+    /// @name 时间召回系统
+    /// @{
+
+    // TIMERECALL <minutes> — 定时将玩家召回当前位置
     if (command_name == "TIMERECALL") {
       const auto minutes = int_token(0, 0);
       const auto tick_ms =
@@ -1116,6 +1425,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("time_recall", true, minutes, action_line);
       return std::nullopt;
     }
+    // BREAKTIMERECALL — 取消时间召回
     if (command_name == "BREAKTIMERECALL") {
       dispatch.legacy_time_recall_requests.push_back(
           LegacyTimeRecallRequest{LegacyTimeRecallRequestKind::cancel,
@@ -1124,6 +1434,13 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("time_recall_cancel", true, 0, action_line);
       return std::nullopt;
     }
+
+    /// @}
+
+    /// @name 批量移动（行会战/活动）
+    /// @{
+
+    // EXCHANGEMAP <map_id> — 将玩家交换到另一地图
     if (command_name == "EXCHANGEMAP") {
       if (tokens.empty()) {
         trace("deferred_action_reject", false, 0, action_line);
@@ -1135,6 +1452,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("deferred_action", true, 1, action_line);
       return std::nullopt;
     }
+    // RECALLMAP <map_id> — 将其他地图的玩家召回
     if (command_name == "RECALLMAP") {
       if (tokens.empty()) {
         trace("deferred_action_reject", false, 0, action_line);
@@ -1146,12 +1464,14 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       trace("deferred_action", true, 1, action_line);
       return std::nullopt;
     }
+    // BATCHDELAY <seconds=10> — 设置批量移动的延迟秒数
     if (command_name == "BATCHDELAY") {
       const auto seconds = tokens.empty() ? 10 : std::max(int_token(0, 10), 0);
       batch_delay_ticks = legacy_seconds_to_ticks(seconds);
       trace("deferred_action", true, seconds, action_line);
       return std::nullopt;
     }
+    // ADDBATCH <map_id> — 添加一个批量移动目标
     if (command_name == "ADDBATCH") {
       if (tokens.empty()) {
         trace("deferred_action_reject", false, 0, action_line);
@@ -1164,6 +1484,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
             action_line);
       return std::nullopt;
     }
+    // BATCHMOVE [map_id] — 执行批量移动（将玩家随机传送到目标地图）
     if (command_name == "BATCHMOVE") {
       if (!tokens.empty()) {
         batch_move_requests.push_back(LegacyBatchMoveRequest{
@@ -1183,26 +1504,33 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
       return std::nullopt;
     }
 
+    /// @}
+
     trace("unsupported_action", false, 0, action_line);
     return std::nullopt;
   };
 
+  // ── 主脚本执行循环 ────────────────────────────────────────────
+  // 遍历所有过程（procs），每个 proc 包含条件、对话行和动作行
   for (std::size_t proc_index = 0; proc_index < block.procs.size(); ++proc_index) {
     const auto& proc = block.procs[proc_index];
     const auto condition_result = evaluate_conditions(proc.conditions);
     trace("condition_result", condition_result, static_cast<std::int32_t>(proc_index), action);
 
+    // 根据条件结果选择对话行（say_lines 或 else_say_lines）
     const auto& selected_say_lines =
         condition_result ? proc.say_lines : proc.else_say_lines;
     pending_say_lines.insert(pending_say_lines.end(), selected_say_lines.begin(),
                              selected_say_lines.end());
 
+    // 根据条件结果选择动作行（act_lines 或 else_act_lines）
     const auto& actions = condition_result ? proc.act_lines : proc.else_act_lines;
     for (const auto& action_line : actions) {
       const auto maybe_goto = execute_action(action_line);
       if (stop_script || player_transferred) {
         break;
       }
+      // 如果动作返回了跳转目标，递归执行
       if (maybe_goto.has_value()) {
         flush_pending_say();
         static_cast<void>(legacy_execute_npc_script(player, npc, *maybe_goto, dispatch,
@@ -1218,6 +1546,7 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
   }
   flush_pending_say();
 
+  // ── 脚本状态持久化 ────────────────────────────────────────────
   if (script_state_mutated && !player_transferred) {
     queue_save_character(dispatch, player);
   }
@@ -1225,6 +1554,17 @@ bool MapActor::legacy_execute_npc_script(Player& player, const Npc& npc, std::st
   return true;
 }
 
+/**
+ * @brief 触发启动任务（玩家登录时执行）
+ * @param player 登录的玩家
+ * @param dispatch 运行时调度输出
+ * @param current_tick 当前逻辑 tick
+ * @param now_ms 当前系统时间（毫秒）
+ * @return 是否成功执行了启动任务
+ * @details 在玩家首次登录地图时执行，使用 startup_quest_dialog_sections_ 配置
+ *          创建一个临时的 NPC 对象并执行 @main 脚本段。
+ *          用于发放首次登录奖励、展示公告等场景。
+ */
 bool MapActor::trigger_startup_quest(Player& player, RuntimeDispatch& dispatch,
                                      std::uint64_t current_tick, std::uint64_t now_ms) {
   if (startup_quest_dialog_sections_.empty()) {
@@ -1248,6 +1588,28 @@ bool MapActor::trigger_startup_quest(Player& player, RuntimeDispatch& dispatch,
   return true;
 }
 
+/**
+ * @brief 触发地图任务（怪物击杀或物品触发）
+ * @param player 触发任务的玩家
+ * @param monster_name 击杀的怪物名称
+ * @param item_name 触发的物品名称
+ * @param group_call 是否为组队触发
+ * @param source 触发来源描述
+ * @param dispatch 运行时调度输出
+ * @param current_tick 当前逻辑 tick
+ * @param now_ms 当前系统时间（毫秒）
+ * @return 是否至少触发了一个任务
+ * @details 遍历 map_quests_ 配置列表，匹配满足以下条件的任务：
+ *          1. 地图 ID 匹配当前地图
+ *          2. 玩家任务标志位匹配任务条件
+ *          3. 组队标志匹配
+ *          4. 怪物名称或物品名称匹配
+ *
+ *          匹配成功后创建临时 NPC 对象并执行脚本。
+ *          如果脚本执行了 ENDQUEST 则停止后续任务触发。
+ *
+ * @note 允许怪物名称和物品名称同时为空（全匹配），但不触发以此方式匹配的任务
+ */
 bool MapActor::trigger_map_quest(Player& player, std::string monster_name, std::string item_name,
                                  bool group_call, std::string source, RuntimeDispatch& dispatch,
                                  std::uint64_t current_tick, std::uint64_t now_ms) {
@@ -1267,11 +1629,12 @@ bool MapActor::trigger_map_quest(Player& player, std::string monster_name, std::
       continue;
     }
 
+    // 匹配规则：怪物名和物品名的组合匹配
     const auto quest_monster = util::lower_copy(util::trim(quest.monster_name));
     const auto quest_item = util::lower_copy(util::trim(quest.item_name));
     bool matches = false;
     if (quest_monster.empty() && quest_item.empty()) {
-      matches = false;
+      matches = false;  // 两者都为空不触发
     } else if (!quest_monster.empty() && !quest_item.empty()) {
       matches = quest_monster == wanted_monster && quest_item == wanted_item;
     } else if (!quest_monster.empty()) {
@@ -1294,6 +1657,7 @@ bool MapActor::trigger_map_quest(Player& player, std::string monster_name, std::
       continue;
     }
 
+    // 创建临时 NPC 执行任务脚本
     Npc quest_npc(kMapQuestNpcObjectBase + index,
                   quest.qfile.empty() ? std::string("MapQuest") : quest.qfile, config_.id,
                   player.x(), player.y(), "none", {}, quest.dialog_sections);
@@ -1316,4 +1680,3 @@ bool MapActor::trigger_map_quest(Player& player, std::string monster_name, std::
   }
   return triggered;
 }
-

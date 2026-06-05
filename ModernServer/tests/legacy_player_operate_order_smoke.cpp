@@ -94,6 +94,8 @@ void assert_player_operate_order() {
       "operate_timers",
       "health_spell",
       "status",
+      "periodic_hook",
+      "line_notice",
       "messages",
       "post_operate",
   };

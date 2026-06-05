@@ -1,3 +1,22 @@
+/**
+ * @file world_service.cpp
+ * @brief 世界服务实现
+ *
+ * @details 实现 WorldService 类的全部接口，包括游戏主循环驱动、
+ *          会话生命周期管理、消息路由、帧同步、持久化协调等核心功能。
+ *
+ *          游戏主循环采用 LegacyFrameDriver 驱动的帧同步机制，
+ *          模拟旧版 Delphi 服务器的 RunSocket.Run → DecodeIdSocket →
+ *          UserEngineExecuteRun → EventManagerRun → ServerMessageRun 流程。
+ *
+ * @note 安全保护机制：
+ *       1. 服务器权威：客户端不直接设置坐标、属性—所有修改通过 LogicRuntime
+ *       2. 序列号水位线：拒绝过期/重放消息(accept_ingress_sequence)
+ *       3. 登录状态门控：只有在 in_game 状态才接受游戏操作
+ *       4. 数据包边界检查：LegacyProtocolCodec 确保最大64KB帧
+ *       5. 总线背压：队列深度超过阈值时暂停或断开客户端
+ */
+
 #include "services/world_service.hpp"
 
 #include <algorithm>
@@ -19,41 +38,59 @@ namespace mir2 {
 
 namespace {
 
-// ── Security & anomaly protection ───────────────────────────────────
+// ── 安全与异常保护 ──────────────────────────────────────────────────
 //
-//  The following legacy-compatible protections are enforced:
-//  1. Server authority: client never directly sets coordinates, stats,
-//     gold, or item ownership — all mutations go through LogicRuntime.
-//  2. Session_seq watermark: stale/replayed messages are rejected
-//     (accept_ingress_sequence enforces monotonic per-session sequence).
-//  3. Login-state gate: gameplay commands are only accepted when
-//     in_game() returns true; pre-login packets are dropped.
-//  4. Packet bounds: LegacyProtocolCodec enforces 64KB max frame,
-//     decode_6bit_buf validates character range, decode_legacy_game_packet
-//     checks minimum payload length.
-//  5. Bus backpressure: gateway pauses or disconnects sessions when
-//     the world_service queue exceeds the configured threshold.
+//  实施以下遗留协议兼容的保护措施：
+//  1. 服务器权威：客户端从不直接设置坐标、属性、金币或物品所有权
+//     所有变更通过 LogicRuntime 处理
+//  2. Session_seq 水位线：拒绝过期/重放消息
+//     (accept_ingress_sequence 执行单调递增的按会话序列检查)
+//  3. 登录状态门控：仅在 in_game() 返回 true 时接受游戏操作指令
+//     登录前的数据包被丢弃
+//  4. 数据包边界：LegacyProtocolCodec 强制执行最大64KB帧
+//     decode_6bit_buf 验证字符范围，decode_legacy_game_packet 检查最小负载长度
+//  5. 总线背压：当 world_service 队列超过配置阈值时网关暂停或断开连接
 //
-//  Remaining gaps tracked for PR-9 completion:
-//  - Per-session send rate limit (matching Delphi RUNGate CheckSendLength)
-//  - Packet fuzz harness in CI
-//  - Login brute-force detection
+//  PR-9 待完成的剩余差距：
+//  - 每会话发送速率限制(匹配 Delphi RUNGate CheckSendLength)
+//  - CI 中的数据包模糊测试
+//  - 登录暴力破解检测
 // ──────────────────────────────────────────────────────────────────────
+
+/// @brief 遗留协议踢出关闭延迟(毫秒)
 constexpr std::int32_t kLegacyKickCloseDelayMs = 50;
 
+/**
+ * @struct RunLoginPayload
+ * @brief 解码后的运行登录负载
+ *
+ * @details 从客户端发送的 ** 前缀的特殊登录数据包中解析出的信息，
+ *         包含账号、角色、认证凭据、客户端版本号等。
+ */
 struct RunLoginPayload {
-  std::string account_id{};
-  std::string character_name{};
-  std::int32_t certification{0};
-  std::int32_t client_version{0};
-  std::int32_t client_checksum{0};
-  bool start_new{false};
+  std::string account_id{};         ///< 账号ID
+  std::string character_name{};     ///< 角色名
+  std::int32_t certification{0};    ///< 认证凭据
+  std::int32_t client_version{0};   ///< 客户端版本号
+  std::int32_t client_checksum{0};  ///< 客户端校验和
+  bool start_new{false};            ///< 是否新开始游戏
 };
 
+/**
+ * @brief 生成账号:角色格式的键
+ * @param account 账号ID
+ * @param character 角色名
+ * @return "账号:角色" 格式的字符串
+ */
 std::string make_key(const std::string& account, const std::string& character) {
   return account + ":" + character;
 }
 
+/**
+ * @brief 将源 RuntimeDispatch 追加到目标中
+ * @param target 目标分发
+ * @param source 源分发(会被移动)
+ */
 void append_dispatch(RuntimeDispatch& target, RuntimeDispatch source) {
   target.session_events.insert(target.session_events.end(),
                                std::make_move_iterator(source.session_events.begin()),
@@ -72,10 +109,20 @@ void append_dispatch(RuntimeDispatch& target, RuntimeDispatch source) {
                               std::make_move_iterator(source.legacy_traces.end()));
 }
 
+/**
+ * @brief 将数据包体转换为字符串
+ * @param packet 遗留数据包
+ * @return 包体内容的字符串表示
+ */
 std::string body_to_string(const LegacyPacket& packet) {
   return std::string(packet.body.begin(), packet.body.end());
 }
 
+/**
+ * @brief 将字符串解析为 int32_t
+ * @param text 待解析的字符串
+ * @return 如果解析成功则返回 int32_t 值，否则返回 std::nullopt
+ */
 std::optional<std::int32_t> parse_i32(std::string_view text) {
   std::int32_t value = 0;
   const auto* begin = text.data();
@@ -87,6 +134,17 @@ std::optional<std::int32_t> parse_i32(std::string_view text) {
   return value;
 }
 
+/**
+ * @brief 解码运行登录数据包
+ *
+ * @details 旧版客户端发送的密钥格式：
+ *          "**<账号>/<角色>/<凭据>/<版本>/<异或1>/<校验和>/<异或2>/<新开始>"
+ *          异或值用于验证凭据的合法性：
+ *          凭据 == xor1 ^ 0xF2E44FFF 且 凭据 == xor2 ^ 0xA4A5B277
+ *
+ * @param packet 遗留数据包
+ * @return 如果解码成功则返回 RunLoginPayload，否则返回 std::nullopt
+ */
 std::optional<RunLoginPayload> decode_run_login(const LegacyPacket& packet) {
   const auto decoded = legacy_decode_text(body_to_string(packet));
   if (!util::starts_with(decoded, "**")) {
@@ -127,6 +185,11 @@ std::optional<RunLoginPayload> decode_run_login(const LegacyPacket& packet) {
   return payload;
 }
 
+/**
+ * @brief 应用运行时配置的城堡对话框默认值
+ * @param runtime_config 运行时配置
+ * @param castle_dialog_context 城堡对话框上下文(会被修改)
+ */
 void apply_runtime_castle_defaults(const RuntimeConfig& runtime_config,
                                    CastleDialogContext& castle_dialog_context) {
   if (castle_dialog_context.castle_name.empty()) {
@@ -362,17 +425,32 @@ void apply_runtime_castle_defaults(const RuntimeConfig& runtime_config,
   }
 }
 
+/**
+ * @brief 应用运行时配置的城堡默认值(基于快照的重载)
+ * @param runtime_config 运行时配置
+ * @param guild_castle_snapshot 公会城堡快照
+ */
 void apply_runtime_castle_defaults(const RuntimeConfig& runtime_config,
                                    GuildCastleSnapshot& guild_castle_snapshot) {
   apply_runtime_castle_defaults(runtime_config, guild_castle_snapshot.castle_dialog);
 }
 
+/**
+ * @brief 获取城堡拥有者的显示名称
+ * @param castle_dialog_context 城堡对话框上下文
+ * @return 如果无拥有者则返回 unclaimed_owner_label，否则返回公会名
+ */
 std::string display_castle_owner(const CastleDialogContext& castle_dialog_context) {
   return util::trim(castle_dialog_context.owner_guild).empty()
              ? castle_dialog_context.unclaimed_owner_label
              : castle_dialog_context.owner_guild;
 }
 
+/**
+ * @brief 获取城堡领主的显示名称
+ * @param castle_dialog_context 城堡对话框上下文
+ * @return 如果无领主则返回 unclaimed_lord_label，否则返回领主名
+ */
 std::string display_castle_lord(const CastleDialogContext& castle_dialog_context) {
   return util::trim(castle_dialog_context.owner_guild).empty() ||
                  util::trim(castle_dialog_context.lord).empty()
@@ -380,6 +458,11 @@ std::string display_castle_lord(const CastleDialogContext& castle_dialog_context
              : castle_dialog_context.lord;
 }
 
+/**
+ * @brief 构造断开连接数据包(SM_OUTOFCONNECTION)
+ * @param session_id 会话ID
+ * @return 遗留协议数据包
+ */
 LegacyPacket make_out_of_connection_packet(std::uint64_t session_id) {
   return make_legacy_game_packet(session_id, 0, 0,
                                  make_default_message(kSmOutOfConnection, 0, 0, 0, 0));
@@ -387,6 +470,14 @@ LegacyPacket make_out_of_connection_packet(std::uint64_t session_id) {
 
 }  // namespace
 
+/**
+ * @brief 启动世界服务
+ *
+ * @details 初始化消息总线端点、LogicRuntime 游戏逻辑引擎、
+ *          加载商家状态、请求城堡对话框上下文刷新，然后启动工作线程。
+ *
+ * @param context 宿主上下文
+ */
 void WorldService::start(HostContext& context) {
   context_ = &context;
   endpoint_ = context.bus->register_endpoint(name(), context.config.runtime.default_queue_capacity);
@@ -433,6 +524,17 @@ void WorldService::seed_session_sequence_for_test(std::uint64_t session_id,
   session_sequence_watermarks_[session_id] = session_seq;
 }
 
+void WorldService::seed_pending_load_for_test(std::uint64_t session_id,
+                                              std::string account_id,
+                                              std::string character_name,
+                                              std::int32_t certification,
+                                              std::uint64_t created_ms) {
+  pending_loads_[make_key(account_id, character_name)] =
+      PendingLoad{session_id, "game_gateway", std::move(account_id),
+                  std::move(character_name), certification,
+                  CanonicalLoginStage::entering_game, created_ms};
+}
+
 std::size_t WorldService::legacy_session_inbox_size_for_test(
     std::uint64_t session_id) const {
   return runtime_ != nullptr ? runtime_->legacy_session_inbox_size(session_id) : 0;
@@ -454,6 +556,14 @@ RuntimeDispatch WorldService::run_legacy_socket_stage_for_test(std::uint64_t now
 
 RuntimeDispatch WorldService::process_ingress_batch_for_test(WorldIngressBatch& batch) {
   return process_ingress_batch(batch);
+}
+
+RuntimeDispatch WorldService::run_server_message_stage_for_test(std::uint64_t now_ms) {
+  return run_server_message_stage(now_ms);
+}
+
+RuntimeDispatch WorldService::expire_pending_loads_for_test(std::uint64_t now_ms) {
+  return expire_pending_loads(now_ms);
 }
 #endif
 
@@ -509,12 +619,14 @@ std::unordered_map<std::string, std::string> WorldService::snapshot() const {
            std::to_string(context_ != nullptr ? context_->config.runtime.castle_context_refresh_ms : 0)}};
 }
 
-// Legacy frame ordering guarantees:
-// 1. Socket receive order → Bus FIFO post → monotonic ingress_seq
-// 2. Same-session FIFO via session_seq watermark (accept_ingress_sequence)
-// 3. Same-frame batch matches Delphi RunSocket.Run drain-then-dispatch
-// 4. Per-player inbox FIFO via route_logic_command enqueue order
-// 5. Dispatch order preserved by flush_dispatch at frame end
+/**
+ * @brief 帧排序保证：
+ * 1. Socket 接收顺序 → 总线 FIFO 投递 → 单调增加的 ingress_seq
+ * 2. 同会话 FIFO 通过 session_seq 水位线保证(accept_ingress_sequence)
+ * 3. 同批次匹配 Delphi RunSocket.Run 的 drain-then-dispatch 模式
+ * 4. 每玩家 inbox FIFO 通过 route_logic_command 的入队顺序保证
+ * 5. flush_dispatch 在帧结束时保持分发顺序
+ */
 void WorldService::run() {
   auto next_tick = std::chrono::steady_clock::now();
   const auto tick_interval = std::chrono::milliseconds(context_->config.budgets.tick_ms);
@@ -553,7 +665,9 @@ void WorldService::run() {
         runtime_context.persistence_overloaded =
             context_ != nullptr && context_->bus != nullptr &&
             context_->bus->queue_depth("persistence_service") >= 1000;
-        return runtime_->tick(now_ms, runtime_context);
+        auto dispatch = expire_pending_loads(now_ms);
+        append_dispatch(dispatch, runtime_->tick(now_ms, runtime_context));
+        return dispatch;
       };
       callbacks.event_manager_run = [this, now_ms]() -> RuntimeDispatch {
         return runtime_->run_legacy_event_manager(now_ms);
@@ -586,6 +700,9 @@ void WorldService::run() {
     }
   }
 
+  /**
+   * @brief 关闭时保存所有在线角色
+   */
   if (runtime_ != nullptr) {
     RuntimeDispatch shutdown_dispatch;
     for (auto character : runtime_->snapshot_online_characters()) {
@@ -600,6 +717,12 @@ void WorldService::run() {
   }
 }
 
+/**
+ * @brief 请求刷新城堡对话框上下文
+ *
+ * @details 向持久化服务发送加载公会城堡快照的请求。
+ *          castle_context_refresh_in_flight_ 标志防止重复请求。
+ */
 void WorldService::request_castle_dialog_context_refresh() {
   if (context_ == nullptr || castle_context_refresh_in_flight_) {
     return;
@@ -617,6 +740,18 @@ void WorldService::request_castle_dialog_context_refresh() {
   }
 }
 
+/**
+ * @brief 处理消息总线的输入批次
+ *
+ * @details 遍历批次中的所有消息，根据类型分发给对应的处理函数：
+ *          - SessionEvent: 会话事件(数据包接收等)
+ *          - LogicCommand: 逻辑指令
+ *          - PersistResult: 持久化结果
+ *          - ActorMail: 演员邮件(跨地图通信)
+ *
+ * @param batch 输入批次
+ * @return 合并后的运行时分发数据
+ */
 RuntimeDispatch WorldService::process_ingress_batch(WorldIngressBatch& batch) {
   RuntimeDispatch combined;
   for (auto& ingress : batch.messages) {
@@ -630,7 +765,11 @@ RuntimeDispatch WorldService::process_ingress_batch(WorldIngressBatch& batch) {
     } else if (auto command = std::get_if<LogicCommand>(&message)) {
       append_dispatch(combined, handle_logic_command(*command));
     } else if (auto result = std::get_if<PersistResult>(&message)) {
-      append_dispatch(combined, handle_persist_result(*result));
+      if (should_defer_persist_result(*result)) {
+        enqueue_deferred_server_message(std::move(ingress));
+      } else {
+        apply_persist_result(combined, *result);
+      }
     } else if (auto mail = std::get_if<ActorMail>(&message)) {
       append_dispatch(combined, runtime_->route_actor_mail(*mail));
     }
@@ -639,10 +778,114 @@ RuntimeDispatch WorldService::process_ingress_batch(WorldIngressBatch& batch) {
   return combined;
 }
 
-RuntimeDispatch WorldService::run_server_message_stage(std::uint64_t) {
-  return {};
+RuntimeDispatch WorldService::run_server_message_stage(std::uint64_t now_ms) {
+  RuntimeDispatch combined;
+  while (!deferred_server_messages_.empty()) {
+    auto ingress = std::move(deferred_server_messages_.front());
+    deferred_server_messages_.pop_front();
+    if (const auto* result = std::get_if<PersistResult>(&ingress.message)) {
+      apply_persist_result(combined, *result);
+      continue;
+    }
+
+    const auto detail = "ingress=" + std::to_string(ingress.ingress_seq) +
+                        " frame=" + std::to_string(ingress.frame_index);
+    combined.audit_events.push_back(
+        AuditEvent{"world.server_message_unexpected", detail, name()});
+
+    LegacyRuntimeTrace trace;
+    trace.stage = "ServerMessageRun";
+    trace.action = "unexpected_deferred_message";
+    trace.now_ms = now_ms;
+    trace.cursor = static_cast<std::size_t>(ingress.ingress_seq);
+    trace.sub_cursor = static_cast<std::size_t>(ingress.frame_index);
+    trace.label = detail;
+    trace.success = false;
+    combined.legacy_traces.push_back(std::move(trace));
+  }
+  return combined;
 }
 
+bool WorldService::should_defer_persist_result(const PersistResult& result) const {
+  return result.kind == PersistResultKind::guild_castle_snapshot_loaded ||
+         result.kind == PersistResultKind::castle_dialog_context_loaded ||
+         result.kind == PersistResultKind::merchant_states_loaded ||
+         util::starts_with(result.request_id, "guild_offline");
+}
+
+void WorldService::enqueue_deferred_server_message(WorldIngressMessage message) {
+  deferred_server_messages_.push_back(std::move(message));
+}
+
+void WorldService::apply_persist_result(RuntimeDispatch& dispatch,
+                                        const PersistResult& result) {
+  append_dispatch(dispatch, handle_persist_result(result));
+}
+
+RuntimeDispatch WorldService::expire_pending_loads(std::uint64_t now_ms) {
+  constexpr std::uint64_t kPendingLoadTimeoutMs = 30ULL * 1000ULL;
+  RuntimeDispatch dispatch;
+  for (auto it = pending_loads_.begin(); it != pending_loads_.end();) {
+    auto& pending = it->second;
+    if (pending.created_ms == 0 || now_ms - pending.created_ms <= kPendingLoadTimeoutMs) {
+      ++it;
+      continue;
+    }
+
+    if (!pending.timeout_notified) {
+      SessionEvent event;
+      event.kind = SessionEventKind::force_disconnect;
+      event.gateway = pending.gateway.empty() ? "game_gateway" : pending.gateway;
+      event.session_id = pending.session_id;
+      event.reason = "pending_load_timeout";
+      dispatch.session_events.push_back(std::move(event));
+
+      dispatch.audit_events.push_back(
+          AuditEvent{"world.pending_load_timeout",
+                     pending.account_id + ":" + pending.character_name,
+                     std::to_string(pending.session_id)});
+
+      LegacyRuntimeTrace trace;
+      trace.stage = "LegacyMission";
+      trace.action = "CheckServerWaitTimeOut";
+      trace.actor_id = pending.session_id;
+      trace.now_ms = now_ms;
+      trace.cursor = static_cast<std::size_t>(now_ms - pending.created_ms);
+      trace.success = true;
+      dispatch.legacy_traces.push_back(std::move(trace));
+      pending.timeout_notified = true;
+    }
+
+    if (pending.certification > 0) {
+      LogicCommand revoke;
+      revoke.kind = LogicCommandKind::revoke_authentication;
+      revoke.account_id = pending.account_id;
+      revoke.character_name = pending.character_name;
+      revoke.certification = pending.certification;
+      if (context_ == nullptr || context_->bus == nullptr ||
+          !context_->bus->post("auth_service", std::move(revoke))) {
+        ++it;
+        continue;
+      }
+      admissions_.erase(pending.certification);
+    }
+    session_gateways_.erase(pending.session_id);
+    it = pending_loads_.erase(it);
+  }
+  return dispatch;
+}
+
+/**
+ * @brief 检查输入消息的序列号是否可接受
+ *
+ * @details 确保每个会话的消息序列号严格单调递增。
+ *          如果消息序列号小于等于已有水位线，则判定为过期/重放消息，
+ *          记录审计事件并拒绝处理。
+ *
+ * @param ingress 输入消息
+ * @param dispatch 输出分发(记录拒绝审计)
+ * @return true 如果序列号有效
+ */
 bool WorldService::accept_ingress_sequence(const WorldIngressMessage& ingress,
                                            RuntimeDispatch& dispatch) {
   std::uint64_t session_id = 0;
@@ -704,6 +947,15 @@ bool WorldService::accept_ingress_sequence(const WorldIngressMessage& ingress,
   return false;
 }
 
+/**
+ * @brief 将网关事件放入待发送队列
+ *
+ * @details 将 dispatch 中的 session_events 分类：
+ *          - send_packet / send_packet_and_close / force_disconnect: 放入待发送队列
+ *          - 其他类型: 保留在 dispatch 中由 flush_dispatch 处理
+ *
+ * @param dispatch 运行时分发数据
+ */
 void WorldService::queue_gate_events(RuntimeDispatch& dispatch) {
   if (dispatch.session_events.empty()) {
     return;
@@ -726,6 +978,15 @@ void WorldService::queue_gate_events(RuntimeDispatch& dispatch) {
   dispatch.session_events.erase(out, dispatch.session_events.end());
 }
 
+/**
+ * @brief 向网关发送事件
+ *
+ * @details 先尝试发送到 game_gateway，如果失败且事件未指定其他网关，
+ *          则尝试发送到 client_v1_game_gateway(双协议兼容)。
+ *
+ * @param event 会话事件
+ * @return true 发送成功
+ */
 bool WorldService::post_gate_event(SessionEvent& event) {
   if (context_ == nullptr || context_->bus == nullptr) {
     return false;
@@ -748,6 +1009,16 @@ bool WorldService::post_gate_event(SessionEvent& event) {
   return false;
 }
 
+/**
+ * @brief 运行遗留 Socket 阶段
+ *
+ * @details 从待发送队列中取出网关事件并发送，
+ *          在 net_flush_budget_ms 预算时间内尽力发送。
+ *          记录每次刷新的数量、剩余数量和耗时用于监控。
+ *
+ * @param now_ms 当前时间戳(毫秒)
+ * @return 跟踪数据
+ */
 RuntimeDispatch WorldService::run_legacy_socket_stage(std::uint64_t now_ms) {
   RuntimeDispatch dispatch;
   const auto started = std::chrono::steady_clock::now();
@@ -803,32 +1074,32 @@ RuntimeDispatch WorldService::run_legacy_socket_stage(std::uint64_t now_ms) {
   return dispatch;
 }
 
-// ── Session lifecycle state machine ──────────────────────────────────
-//
-//  State                  Entered by                     Exited by
-//  ─────────────────────  ─────────────────────────────  ──────────────────
-//  Disconnected           (initial)                      TCP accept
-//  Connected              SessionEvent::connected         CM_IDPASSWORD ok
-//  LoginPending           PersistRequest to DB           auth response
-//  LoggedInAccount        SM_PASSOK_SELECTSERVER          CM_SELECTSERVER
-//  SelectingCharacter     SM_SELECTSERVER_OK              CM_SELCHR
-//  EnteringWorld          admission advance               SM_STARTPLAY
-//  InGame                 character loaded + map joined    disconnect/kick
-//  Disconnecting          SessionEvent::disconnected       cleanup done
-//  Kicked                 SessionEvent::force_disconnect   close socket
-//
-//  Kick sequence (matches Delphi SendForcedClose):
-//    1. Post send_packet_and_close with kLegacyKickCloseDelayMs (50ms)
-//    2. Gateway sends SM_OUTOFCONNECTION to client, waits 50ms
-//    3. Gateway closes TCP socket
-//    4. Gateway notifies world_service with SessionEvent::disconnected
-//    5. WorldService revokes authentication, cleans up session
-//    PR-7 acceptance requires this exact send_packet_and_close path.
-//
-//  Reconnect rule: old session must be fully cleaned (actor removed,
-//  session_gateways_ erased) before a new session for the same character
-//  can enter the world.
-// ──────────────────────────────────────────────────────────────────────
+/**
+ * @brief 会话生命周期状态机
+ *
+ *  状态                    进入方式                    退出方式
+ *  ─────────────────────  ─────────────────────────  ──────────────────
+ *  Disconnected(已断开)     (初始)                     TCP accept
+ *  Connected(已连接)        SessionEvent::connected    CM_IDPASSWORD ok
+ *  LoginPending(登录中)     PersistRequest to DB       auth response
+ *  LoggedInAccount(已登录)  SM_PASSOK_SELECTSERVER     CM_SELECTSERVER
+ *  SelectingCharacter(选角色) SM_SELECTSERVER_OK       CM_SELCHR
+ *  EnteringWorld(进入世界)   admission advance          SM_STARTPLAY
+ *  InGame(游戏中)           character loaded + map join   disconnect/kick
+ *  Disconnecting(断开中)    SessionEvent::disconnected     cleanup done
+ *  Kicked(踢出)             SessionEvent::force_disconnect close socket
+ *
+ *  踢出序列(匹配 Delphi SendForcedClose):
+ *    1. 投递 send_packet_and_close，延迟 kLegacyKickCloseDelayMs (50ms)
+ *    2. 网关发送 SM_OUTOFCONNECTION 给客户端，等待50ms
+ *    3. 网关关闭 TCP socket
+ *    4. 网关通知 world_service SessionEvent::disconnected
+ *    5. WorldService 撤销认证，清理会话
+ *    PR-7 验收要求使用此确切的 send_packet_and_close 路径。
+ *
+ *  重连规则：新角色进入世界前，旧会话必须完全清理
+ *  (actor 移除、session_gateways_ 擦除)。
+ */
 RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
   if (event.kind == SessionEventKind::packet_received) {
     if (const auto run_login = decode_run_login(event.packet); run_login.has_value()) {
@@ -850,7 +1121,8 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
       pending_loads_[make_key(run_login->account_id, run_login->character_name)] =
           PendingLoad{event.session_id, event.gateway.empty() ? "game_gateway" : event.gateway,
                       run_login->account_id, run_login->character_name,
-                      run_login->certification, admission->second.stage};
+                      run_login->certification, admission->second.stage,
+                      current_frame_now_ms_};
       PersistRequest request;
       request.kind = PersistRequestKind::load_character;
       request.reply_to = name();
@@ -882,7 +1154,8 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
       session_gateways_[event.session_id] = event.gateway.empty() ? "game_gateway" : event.gateway;
       pending_loads_[make_key(account, character)] =
           PendingLoad{event.session_id, event.gateway.empty() ? "game_gateway" : event.gateway,
-                      account, character, 0};
+                      account, character, 0, CanonicalLoginStage::entering_game,
+                      current_frame_now_ms_};
       PersistRequest request;
       request.kind = PersistRequestKind::load_character;
       request.reply_to = name();
@@ -955,6 +1228,17 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
   return {};
 }
 
+/**
+ * @brief 处理逻辑指令
+ *
+ * @details 处理以下类型的指令：
+ *          - authenticate: 创建准入记录(由 AuthService 发送)
+ *          - revoke_authentication: 撤销准入/清理活跃会话(踢出重复登录)
+ *          - 其他: 路由到 LogicRuntime 执行实际逻辑
+ *
+ * @param command 逻辑指令
+ * @return 执行结果
+ */
 RuntimeDispatch WorldService::handle_logic_command(const LogicCommand& command) {
   if (command.kind == LogicCommandKind::authenticate) {
     if (command.certification < 2) {
@@ -1033,6 +1317,18 @@ RuntimeDispatch WorldService::handle_logic_command(const LogicCommand& command) 
   return dispatch;
 }
 
+/**
+ * @brief 处理持久化结果
+ *
+ * @details 根据结果类型处理：
+ *          - guild_castle_snapshot_loaded: 更新公会城堡快照
+ *          - merchant_states_loaded: 应用商家状态
+ *          - castle_dialog_context_loaded: 更新城堡对话框上下文
+ *          - character_loaded: 处理角色加载完成(进入游戏或离线操作)
+ *
+ * @param result 持久化结果
+ * @return 处理结果
+ */
 RuntimeDispatch WorldService::handle_persist_result(const PersistResult& result) {
   if (result.kind == PersistResultKind::error && util::starts_with(result.request_id, "guild_offline")) {
     ++offline_guild_error_count_;
@@ -1138,6 +1434,12 @@ RuntimeDispatch WorldService::handle_persist_result(const PersistResult& result)
   return dispatch;
 }
 
+/**
+ * @brief 分配角色保存版本号
+ *
+ * @details 遍历 dispatch 中的保存请求，为每个角色分配递增的
+ *          保存版本号，确保并发保存的正确排序。
+ */
 void WorldService::assign_character_save_versions(RuntimeDispatch& dispatch) {
   for (auto& request : dispatch.persist_requests) {
     if (request.kind != PersistRequestKind::save_character) {
@@ -1163,6 +1465,19 @@ void WorldService::assign_character_save_versions(RuntimeDispatch& dispatch) {
   }
 }
 
+/**
+ * @brief 刷新分发数据
+ *
+ * @details 按顺序执行以下操作：
+ *          1. 分配角色保存版本号
+ *          2. 将网关事件放入待发送队列
+ *          3. 发送会话事件到网关(失败的尝试备用网关)
+ *          4. 发送审计事件到日志服务
+ *          5. 发送持久化请求
+ *          6. 重新投递跨地图邮件
+ *
+ * @param dispatch 运行时分发数据
+ */
 void WorldService::flush_dispatch(RuntimeDispatch dispatch) {
   assign_character_save_versions(dispatch);
   queue_gate_events(dispatch);

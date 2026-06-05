@@ -1,3 +1,15 @@
+/**
+ * @file client_v1_gateway_service_base.cpp
+ * @brief Client v1 网关服务基类实现
+ *
+ * @details 实现 ClientV1GatewayServiceBase 类，包括 TCP 服务器生命周期、
+ *          异步连接接受、消息序列检查、会话管理和消息发送等核心功能。
+ *
+ * @note 消息序列检查机制：
+ *       每次收到新消息时，会检查其序列号是否大于上次收到的序列号，
+ *       如果不大于则判定为过期消息并丢弃。这防止了重放攻击和乱序消息。
+ */
+
 #include "services/client_v1_gateway_service_base.hpp"
 
 #include <algorithm>
@@ -12,6 +24,14 @@ ClientV1GatewayServiceBase::~ClientV1GatewayServiceBase() {
   join();
 }
 
+/**
+ * @brief 启动网关服务
+ *
+ * @details 初始化 ASIO acceptor 并绑定端口，开始异步接受连接，
+ *          然后启动 IO 线程池处理网络事件。
+ *
+ * @param context 宿主上下文
+ */
 void ClientV1GatewayServiceBase::start(HostContext& context) {
   context_ = &context;
   running_.store(true, std::memory_order_relaxed);
@@ -33,6 +53,11 @@ void ClientV1GatewayServiceBase::start(HostContext& context) {
   }
 }
 
+/**
+ * @brief 停止网关服务
+ *
+ * @details 关闭所有客户端会话，关闭 acceptor，释放 work_guard
+ */
 void ClientV1GatewayServiceBase::stop() {
   running_.store(false, std::memory_order_relaxed);
   std::vector<std::shared_ptr<ClientV1Session>> sessions;
@@ -76,6 +101,15 @@ std::unordered_map<std::string, std::string> ClientV1GatewayServiceBase::snapsho
   };
 }
 
+/**
+ * @brief 客户端连接回调
+ *
+ * @details 初始化该会话的帧序列号为0，增加连接计数器，然后调用子类的
+ *          handle_connected() 处理连接事件。
+ *
+ * @param session_id 会话ID
+ * @param peer_address 客户端地址
+ */
 void ClientV1GatewayServiceBase::on_client_v1_connected(std::uint64_t session_id,
                                                         const std::string& peer_address) {
   {
@@ -88,6 +122,16 @@ void ClientV1GatewayServiceBase::on_client_v1_connected(std::uint64_t session_id
   handle_connected(session_id, peer_address);
 }
 
+/**
+ * @brief 客户端断开连接回调
+ *
+ * @details 清除会话记录和帧序列号记录，更新断开计数器，
+ *          然后调用子类的 handle_disconnected() 处理断开事件。
+ *
+ * @param session_id 会话ID
+ * @param peer_address 客户端地址
+ * @param reason 断开原因
+ */
 void ClientV1GatewayServiceBase::on_client_v1_disconnected(std::uint64_t session_id,
                                                            const std::string& peer_address,
                                                            const std::string& reason) {
@@ -102,6 +146,18 @@ void ClientV1GatewayServiceBase::on_client_v1_disconnected(std::uint64_t session
   handle_disconnected(session_id, peer_address, reason);
 }
 
+/**
+ * @brief 客户端消息回调(带序列号检查)
+ *
+ * @details 检查消息序列号是否单调递增：
+ *          - 如果序列号不大于上次收到的序列号，丢弃消息并记录
+ *          - 否则更新序列号并调用子类的 handle_message() 处理
+ *
+ * @param session_id 会话ID
+ * @param peer_address 客户端地址
+ * @param sequence 消息序列号
+ * @param message 消息内容
+ */
 void ClientV1GatewayServiceBase::on_client_v1_message(std::uint64_t session_id,
                                                       const std::string& peer_address,
                                                       std::uint32_t sequence,
@@ -120,6 +176,11 @@ void ClientV1GatewayServiceBase::on_client_v1_message(std::uint64_t session_id,
   handle_message(session_id, peer_address, sequence, message);
 }
 
+/**
+ * @brief 向客户端发送消息
+ * @param session_id 目标会话ID
+ * @param message 要发送的消息
+ */
 void ClientV1GatewayServiceBase::send_message(std::uint64_t session_id,
                                               const client_v1::Message& message) {
   std::shared_ptr<ClientV1Session> session;
@@ -212,6 +273,13 @@ void ClientV1GatewayServiceBase::disconnect(std::uint64_t session_id, std::uint1
   }
 }
 
+/**
+ * @brief 异步连接接受循环
+ *
+ * @details 使用 ASIO async_accept 非阻塞接受新连接。
+ *        每次接受后创建 ClientV1Session 并启动会话，
+ *        然后继续等待下一个连接。
+ */
 void ClientV1GatewayServiceBase::do_accept() {
   if (!running_.load(std::memory_order_relaxed) || acceptor_ == nullptr) {
     return;

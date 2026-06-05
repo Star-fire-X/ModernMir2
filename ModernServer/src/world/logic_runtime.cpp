@@ -15,6 +15,8 @@
 #include "world/legacy_chat_parser.hpp"
 #include "world/legacy_gm_commands.hpp"
 #include "world/legacy_item_rules.hpp"
+#include "world/castle_manager.hpp"
+#include "world/guild_manager.hpp"
 
 namespace mir2 {
 
@@ -475,6 +477,106 @@ void apply_runtime_castle_defaults(const RuntimeConfig& runtime_config,
 void apply_runtime_castle_defaults(const RuntimeConfig& runtime_config,
                                    GuildCastleSnapshot& guild_castle_snapshot) {
   apply_runtime_castle_defaults(runtime_config, guild_castle_snapshot.castle_dialog);
+}
+
+std::string json_escape(std::string_view text) {
+  std::string escaped;
+  escaped.reserve(text.size());
+  for (const auto ch : text) {
+    switch (ch) {
+      case '\\':
+        escaped += "\\\\";
+        break;
+      case '"':
+        escaped += "\\\"";
+        break;
+      case '\n':
+        escaped += "\\n";
+        break;
+      case '\r':
+        escaped += "\\r";
+        break;
+      case '\t':
+        escaped += "\\t";
+        break;
+      default:
+        escaped.push_back(ch);
+        break;
+    }
+  }
+  return escaped;
+}
+
+std::string default_castle_name(const CastleDialogContext& context) {
+  return context.castle_name.empty() ? "Sabuk" : context.castle_name;
+}
+
+std::uint64_t remaining_runtime_ms(std::uint64_t started_ms, std::uint64_t duration_ms,
+                                   std::uint64_t now_ms) {
+  if (started_ms == 0) {
+    return duration_ms;
+  }
+  const auto elapsed_ms = now_ms - started_ms;
+  return elapsed_ms >= duration_ms ? 0 : duration_ms - elapsed_ms;
+}
+
+std::string build_castle_payload(const GuildCastleSnapshot& snapshot, std::uint64_t now_ms) {
+  const auto& context = snapshot.castle_dialog;
+  const auto& runtime = snapshot.castle_runtime;
+  std::string payload = "{\"owner_guild\":\"" + json_escape(context.owner_guild) +
+                        "\",\"lord\":\"" + json_escape(context.lord) +
+                        "\",\"castle_war_date\":\"" + json_escape(context.castle_war_date) +
+                        "\",\"list_of_war\":\"" + json_escape(context.list_of_war) +
+                        "\",\"guild_war_fee\":" + std::to_string(context.guild_war_fee) +
+                        ",\"upgrade_weapon_fee\":" +
+                        std::to_string(context.upgrade_weapon_fee) +
+                        ",\"guild_create_fee\":" +
+                        std::to_string(context.guild_create_fee) +
+                        ",\"under_attack\":" +
+                        std::string(runtime.under_attack ? "true" : "false") +
+                        ",\"timeout_warning_sent\":" +
+                        std::string(runtime.timeout_warning_sent ? "true" : "false");
+  if (runtime.under_attack) {
+    payload += ",\"war_remaining_ms\":" +
+               std::to_string(remaining_runtime_ms(runtime.latest_war_start_ms,
+                                                   CastleManager::kWarDurationMs, now_ms)) +
+               ",\"occupation_remaining_ms\":" +
+               std::to_string(remaining_runtime_ms(runtime.castle_attack_started_ms,
+                                                   CastleManager::kOccupationDelayMs, now_ms));
+  }
+  payload += ",\"rush_guilds\":[";
+  for (std::size_t index = 0; index < runtime.rush_guilds.size(); ++index) {
+    if (index > 0) {
+      payload += ',';
+    }
+    payload += '"' + json_escape(runtime.rush_guilds[index]) + '"';
+  }
+  payload += "],\"registrations\":[";
+  for (std::size_t index = 0; index < runtime.registrations.size(); ++index) {
+    if (index > 0) {
+      payload += ',';
+    }
+    const auto& registration = runtime.registrations[index];
+    payload += "{\"guild_name\":\"" + json_escape(registration.guild_name) +
+               "\",\"attack_day\":" + std::to_string(registration.attack_day) + '}';
+  }
+  payload += "]}";
+  return payload;
+}
+
+bool same_guild_wars(const std::vector<GuildWarState>& lhs,
+                     const std::vector<GuildWarState>& rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  for (std::size_t index = 0; index < lhs.size(); ++index) {
+    if (lhs[index].enemy_guild != rhs[index].enemy_guild ||
+        lhs[index].start_ms != rhs[index].start_ms ||
+        lhs[index].remain_ms != rhs[index].remain_ms) {
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace
@@ -952,6 +1054,9 @@ ActorMail LogicRuntime::make_player_mail(const LogicCommand& command,
       break;
     case LogicCommandKind::pickup_item:
       mail.kind = ActorMailKind::pickup_item;
+      break;
+    case LogicCommandKind::open_door:
+      mail.kind = ActorMailKind::open_door;
       break;
     case LogicCommandKind::take_on_item:
       mail.kind = ActorMailKind::take_on_item;
@@ -2044,6 +2149,7 @@ RuntimeDispatch LogicRuntime::route_logic_command(const LogicCommand& command) {
     case LogicCommandKind::query_repair_cost:
     case LogicCommandKind::drop_item:
     case LogicCommandKind::pickup_item:
+    case LogicCommandKind::open_door:
     case LogicCommandKind::take_on_item:
     case LogicCommandKind::take_off_item:
     case LogicCommandKind::eat_item:
@@ -2301,7 +2407,7 @@ std::uint64_t LogicRuntime::enqueue_legacy_event(LegacyEventRecord record) {
     if (auto map_it = maps_.find(record.map_id); map_it != maps_.end()) {
       static_cast<void>(map_it->second->legacy_add_event_object(
           event_id, record.x, record.y, last_now_ms_, record.blocks_walk, nullptr,
-          record.type));
+          record.type, record.event_param, record.damage));
     }
   }
   return event_id;
@@ -3304,6 +3410,43 @@ void LogicRuntime::process_user_engine_timers(std::uint64_t now_ms, RuntimeDispa
   constexpr std::uint64_t kDoorIntervalMs = 500;
   constexpr std::uint64_t kTimer10SecMs = 10ULL * 1000ULL;
   constexpr std::uint64_t kTimer10MinMs = 10ULL * 60ULL * 1000ULL;
+  auto queue_system_to_member = [&](std::string_view member_name, std::string message) {
+    const auto key = legacy_character_key(member_name);
+    for (const auto& [session_id, locator] : session_index_) {
+      if (legacy_character_key(locator.character_name) != key) {
+        continue;
+      }
+      ActorMail mail;
+      mail.kind = ActorMailKind::system_notice;
+      mail.map_id = locator.map_id;
+      mail.actor_id = locator.actor_id;
+      mail.session_id = session_id;
+      mail.payload = message;
+      append_dispatch(dispatch, route_actor_mail(mail));
+      return;
+    }
+  };
+  auto queue_notice_to_guild = [&](const GuildState& guild, const std::string& message) {
+    for (const auto& member : guild.members) {
+      queue_system_to_member(member, message);
+    }
+  };
+  auto queue_save_castle_snapshot = [&]() {
+    PersistRequest request;
+    request.kind = PersistRequestKind::save_castle_state;
+    request.reply_to = "world_service";
+    request.castle_name = default_castle_name(guild_castle_snapshot_.castle_dialog);
+    request.payload_json = build_castle_payload(guild_castle_snapshot_, now_ms);
+    dispatch.persist_requests.push_back(std::move(request));
+  };
+  auto sync_castle_snapshot_to_maps = [&]() {
+    castle_dialog_context_ = guild_castle_snapshot_.castle_dialog;
+    for (const auto& map_id : map_order_) {
+      if (auto map_it = maps_.find(map_id); map_it != maps_.end()) {
+        map_it->second->set_guild_castle_snapshot(guild_castle_snapshot_);
+      }
+    }
+  };
 
   if (!user_engine_timers_initialized_) {
     mission_time_ms_ = now_ms;
@@ -3316,9 +3459,16 @@ void LogicRuntime::process_user_engine_timers(std::uint64_t now_ms, RuntimeDispa
 
   if (elapsed_gt(now_ms, mission_time_ms_, kMissionIntervalMs)) {
     mission_time_ms_ = now_ms;
-    add_stage_trace(dispatch, "LegacyMission", "ProcessMissions", now_ms, 0, 0);
-    add_stage_trace(dispatch, "LegacyMission", "CheckServerWaitTimeOut", now_ms, 0, 0);
-    add_stage_trace(dispatch, "LegacyMission", "CheckHolySeizeValid", now_ms, 0, 0);
+    if (legacy_event_manager_.active_count() != 0) {
+      add_stage_trace(dispatch, "LegacyMission", "ProcessMissions", now_ms,
+                      legacy_event_manager_.active_count(), 0);
+    }
+    const auto holy_groups = legacy_event_manager_.active_holy_groups();
+    if (!holy_groups.empty()) {
+      refresh_legacy_holy_curtain_groups(dispatch, now_ms);
+      add_stage_trace(dispatch, "LegacyMission", "CheckHolySeizeValid", now_ms,
+                      holy_groups.size(), 0);
+    }
   }
 
   if (elapsed_gt(now_ms, open_door_check_ms_, kDoorIntervalMs)) {
@@ -3336,16 +3486,115 @@ void LogicRuntime::process_user_engine_timers(std::uint64_t now_ms, RuntimeDispa
   if (elapsed_gt(now_ms, timer10min_ms_, kTimer10MinMs)) {
     timer10min_ms_ = now_ms;
     add_stage_trace(dispatch, "LegacyTimer", "Timer10Min", now_ms, 0, 0);
-    add_stage_trace(dispatch, "LegacyTimer", "NoticeMan.RefreshNoticeList", now_ms, 0, 0);
+    add_stage_trace(dispatch, "LegacyTimer", "NoticeMan.RefreshNoticeList", now_ms,
+                    guild_castle_snapshot_.guilds.size(), 0);
     add_stage_trace(dispatch, "LegacyTimer", "UserCastle.SaveAll", now_ms, 0, 0);
+    queue_save_castle_snapshot();
+    for (const auto& guild : guild_castle_snapshot_.guilds) {
+      PersistRequest request;
+      request.kind = PersistRequestKind::save_guild_state;
+      request.reply_to = "world_service";
+      request.guild_name = guild.guild_name;
+      request.guild_state = guild;
+      dispatch.persist_requests.push_back(std::move(request));
+    }
   }
 
   if (elapsed_gt(now_ms, timer10sec_ms_, kTimer10SecMs)) {
     timer10sec_ms_ = now_ms;
     add_stage_trace(dispatch, "LegacyTimer", "Timer10Sec", now_ms, 0, 0);
     add_stage_trace(dispatch, "LegacyTimer", "FrmIDSoc.SendUserCount", now_ms, 0, 0);
+    dispatch.audit_events.push_back(AuditEvent{"world.user_count",
+                                               std::to_string(online_session_count()),
+                                               "logic_runtime"});
     add_stage_trace(dispatch, "LegacyTimer", "GuildMan.CheckGuildWarTimeOut", now_ms, 0, 0);
+    const auto before_guilds = guild_castle_snapshot_.guilds;
+    GuildManager guild_manager;
+    guild_manager.load_states(guild_castle_snapshot_.guilds);
+    const auto expired_wars = guild_manager.expire_guild_wars(now_ms);
+    if (!expired_wars.empty()) {
+      auto updated_guilds = guild_manager.snapshot_states();
+      for (auto& guild : updated_guilds) {
+        const auto before = std::find_if(before_guilds.begin(), before_guilds.end(),
+                                         [&](const GuildState& candidate) {
+                                           return candidate.guild_name == guild.guild_name;
+                                         });
+        if (before != before_guilds.end()) {
+          guild.applicants = before->applicants;
+        }
+      }
+      guild_castle_snapshot_.guilds = std::move(updated_guilds);
+      sync_castle_snapshot_to_maps();
+      for (const auto& pair : expired_wars) {
+        const auto slash = pair.find('/');
+        const auto first = slash == std::string::npos ? pair : pair.substr(0, slash);
+        const auto second = slash == std::string::npos ? std::string{} : pair.substr(slash + 1);
+        for (const auto& guild : guild_castle_snapshot_.guilds) {
+          if (guild.guild_name == first) {
+            queue_notice_to_guild(guild, "Guild war with " + second + " has ended.");
+          } else if (guild.guild_name == second) {
+            queue_notice_to_guild(guild, "Guild war with " + first + " has ended.");
+          }
+        }
+      }
+      for (const auto& guild : guild_castle_snapshot_.guilds) {
+        const auto before = std::find_if(before_guilds.begin(), before_guilds.end(),
+                                         [&](const GuildState& candidate) {
+                                           return candidate.guild_name == guild.guild_name;
+                                         });
+        if (before == before_guilds.end() ||
+            !same_guild_wars(before->hostile_guilds, guild.hostile_guilds)) {
+          PersistRequest request;
+          request.kind = PersistRequestKind::save_guild_state;
+          request.reply_to = "world_service";
+          request.guild_name = guild.guild_name;
+          request.guild_state = guild;
+          dispatch.persist_requests.push_back(std::move(request));
+        }
+      }
+    }
+
     add_stage_trace(dispatch, "LegacyTimer", "UserCastle.Run", now_ms, 0, 0);
+    CastleManager castle(default_castle_name(guild_castle_snapshot_.castle_dialog));
+    castle.set_owner(guild_castle_snapshot_.castle_dialog.owner_guild,
+                     guild_castle_snapshot_.castle_dialog.lord);
+    castle.load_runtime_state(guild_castle_snapshot_.castle_runtime);
+    std::vector<CastleWarEvent> castle_events;
+    castle.run(now_ms, castle_events);
+    if (!castle_events.empty()) {
+      guild_castle_snapshot_.castle_runtime = castle.runtime_state();
+      guild_castle_snapshot_.castle_dialog.owner_guild = castle.owner_guild();
+      guild_castle_snapshot_.castle_dialog.lord = castle.owner_lord();
+      sync_castle_snapshot_to_maps();
+      for (const auto& event : castle_events) {
+        std::string message;
+        switch (event.type) {
+          case CastleWarEventType::start:
+            message = "Castle war has started.";
+            break;
+          case CastleWarEventType::timeout_warning:
+            message = "Castle war will end soon.";
+            break;
+          case CastleWarEventType::owner_changed:
+            message = "Castle owner changed to " + event.guild_name + ".";
+            break;
+          case CastleWarEventType::finish:
+            message = "Castle war has ended.";
+            break;
+        }
+        for (const auto& [session_id, locator] : session_index_) {
+          ActorMail mail;
+          mail.kind = ActorMailKind::system_notice;
+          mail.map_id = locator.map_id;
+          mail.actor_id = locator.actor_id;
+          mail.session_id = session_id;
+          mail.payload = message;
+          append_dispatch(dispatch, route_actor_mail(mail));
+        }
+      }
+      queue_save_castle_snapshot();
+    }
+
     add_stage_trace(dispatch, "LegacyTimer", "ShutUpList.Cleanup", now_ms, 0, 0);
     for (auto it = legacy_shut_up_list_.begin(); it != legacy_shut_up_list_.end();) {
       if (now_ms > it->second.expire_ms) {

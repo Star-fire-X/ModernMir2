@@ -40,14 +40,24 @@ const mir2::LegacyMapObject* find_object(const mir2::LegacyMapEnvironment::Cell&
 
 int main() {
   mir2::LegacyMapEnvironment env(3, 3, make_map());
+  mir2::LegacyMapEnvironment fail_closed_env(0, 0, {}, true);
+  assert(!fail_closed_env.in_bounds(0, 0));
+  assert(!fail_closed_env.static_can_move(0, 0));
 
   assert(env.can_walk(0, 0, false));
   assert(!env.can_walk(3, 0, false));
   assert(!env.can_walk(1, 1, false));
+  env.set_runtime_can_move(0, 0, false);
+  assert(!env.static_can_move(0, 0));
+  env.clear_runtime_can_move(0, 0);
+  assert(env.static_can_move(0, 0));
 
   assert(env.add_moving_object(0, 0, 10, 100));
   assert(!env.can_walk(0, 0, false));
   assert(env.can_walk(0, 0, true));
+  assert(!env.can_get_item(0, 0));
+  assert(env.can_get_item(0, 0, 10));
+  assert(!env.can_get_item(0, 0, 20));
 
   assert(env.add_moving_object(1, 0, 20, 110));
   assert(env.move_to_moving_object(0, 0, 10, 1, 1, false, 120) == -1);
@@ -63,6 +73,9 @@ int main() {
   const auto* moved_object =
       find_object(*moved_cell, mir2::LegacyMapObjectShape::moving_object, 10);
   assert(moved_object != nullptr && moved_object->a_time_ms == 777);
+  assert(env.add_moving_object(2, 1, 30, 1));
+  assert(env.prune_stale_moving_objects(2, 2, 1, 1, 600002, 600000) == 1);
+  assert(env.cell(2, 1) == nullptr);
 
   assert(!env.add_item_object(1, 1, 100, {}, 200).ok);
   assert(!env.add_placeholder_object(
@@ -77,6 +90,16 @@ int main() {
   assert(env.add_placeholder_object(
       0, 1, mir2::LegacyMapObjectShape::event_object, 903, 200,
       mir2::LegacyMapPlacementPolicy::passable_only));
+  assert(env.add_placeholder_object(
+      2, 0, mir2::LegacyMapObjectShape::event_object, 904, 200,
+      mir2::LegacyMapPlacementPolicy::passable_only, true));
+  assert(env.can_walk(2, 0, false));
+  assert(env.can_safe_walk(2, 0));
+  assert(env.add_placeholder_object(
+      2, 1, mir2::LegacyMapObjectShape::event_object, 905, 200,
+      mir2::LegacyMapPlacementPolicy::passable_only, false, 12));
+  assert(env.can_walk(2, 1, false));
+  assert(!env.can_safe_walk(2, 1));
   assert(env.add_item_object(0, 1, 100, {}, 201).ok);
   assert(env.add_item_object(0, 1, 101, {}, 202).ok);
   assert(env.add_item_object(0, 1, 102, {}, 203).ok);
@@ -87,6 +110,9 @@ int main() {
   assert(env.first_item_object_id(0, 1) == 102);
   assert(env.delete_from_map(9, 9, mir2::LegacyMapObjectShape::item_object, 101) == 0);
   assert(env.delete_from_map(2, 2, mir2::LegacyMapObjectShape::item_object, 101) == -2);
+  assert(env.add_gate_object(2, 0, 500, {}, 210));
+  assert(!env.can_get_item(2, 0));
+  assert(env.can_get_item(2, 0, 0, true));
 
   mir2::LegacyMapEnvironment gold_env(3, 3);
   auto first_gold =
@@ -113,7 +139,7 @@ int main() {
   assert(door_env.can_walk(1, 1, false));
   assert(door_env.can_fly_line(0, 1, 2, 1));
   assert(door_env.can_fire_fly_line(0, 1, 2, 1));
-  const auto opened = door_env.open_doors_around(1, 1, 400);
+  const auto opened = door_env.open_door_at(1, 1, 400);
   assert(opened.size() == 1);
   assert(door_env.door_is_open(1, 1));
   assert(door_env.static_can_move(1, 1));

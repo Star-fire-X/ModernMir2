@@ -19,6 +19,7 @@
     {"name":"say_tab_text","ident":3030,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"73617909776974680974616273"},
     {"name":"say_gbk_like_bytes","ident":3030,"recog":0,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"b0a1c4e3"},
     {"name":"pickup_basic","ident":1001,"recog":0,"param":17,"tag":18,"series":0,"body_encoding":"none","body_hex":""},
+    {"name":"open_door","ident":1002,"recog":0,"param":19,"tag":20,"series":0,"body_encoding":"none","body_hex":""},
     {"name":"drop_item","ident":1000,"recog":10003,"param":0,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"44726f702053776f7264"},
     {"name":"take_on_item","ident":1003,"recog":10001,"param":2,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},
     {"name":"take_off_item","ident":1004,"recog":10001,"param":2,"tag":0,"series":0,"body_encoding":"legacy_string","body_hex":"506f74696f6e"},

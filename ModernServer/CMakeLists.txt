@@ -164,6 +164,12 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_legacy_frame_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_frame_smoke COMMAND mir2_legacy_frame_smoke)
 
+  add_executable(mir2_legacy_server_message_stage_smoke
+    tests/legacy_server_message_stage_smoke.cpp)
+  target_link_libraries(mir2_legacy_server_message_stage_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_server_message_stage_smoke
+    COMMAND mir2_legacy_server_message_stage_smoke)
+
   add_executable(mir2_legacy_protocol_command_golden_smoke
     tests/legacy_protocol_command_golden_smoke.cpp)
   target_link_libraries(mir2_legacy_protocol_command_golden_smoke PRIVATE mir2_hostlib)
@@ -346,6 +352,26 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_legacy_environment_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_environment_smoke COMMAND mir2_legacy_environment_smoke)
 
+  add_executable(mir2_map_load_fail_closed_smoke tests/map_load_fail_closed_smoke.cpp)
+  target_link_libraries(mir2_map_load_fail_closed_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_map_load_fail_closed_smoke COMMAND mir2_map_load_fail_closed_smoke)
+
+  add_executable(mir2_ground_item_lifetime_legacy_smoke
+    tests/ground_item_lifetime_legacy_smoke.cpp)
+  target_link_libraries(mir2_ground_item_lifetime_legacy_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_ground_item_lifetime_legacy_smoke
+    COMMAND mir2_ground_item_lifetime_legacy_smoke)
+
+  add_executable(mir2_stone_mine_legacy_smoke tests/stone_mine_legacy_smoke.cpp)
+  target_link_libraries(mir2_stone_mine_legacy_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_stone_mine_legacy_smoke COMMAND mir2_stone_mine_legacy_smoke)
+
+  add_executable(mir2_castle_door_wall_overlay_smoke
+    tests/castle_door_wall_overlay_smoke.cpp)
+  target_link_libraries(mir2_castle_door_wall_overlay_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_castle_door_wall_overlay_smoke
+    COMMAND mir2_castle_door_wall_overlay_smoke)
+
   add_executable(mir2_legacy_map_document_smoke tests/legacy_map_document_smoke.cpp)
   target_link_libraries(mir2_legacy_map_document_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_map_document_smoke COMMAND mir2_legacy_map_document_smoke)
@@ -367,6 +393,12 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_movement_blocking_legacy_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_movement_blocking_legacy_smoke
     COMMAND mir2_movement_blocking_legacy_smoke)
+
+  add_executable(mir2_movement_overlap_direction_legacy_smoke
+    tests/movement_overlap_direction_legacy_smoke.cpp)
+  target_link_libraries(mir2_movement_overlap_direction_legacy_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_movement_overlap_direction_legacy_smoke
+    COMMAND mir2_movement_overlap_direction_legacy_smoke)
 
   add_executable(mir2_visibility_delta_smoke tests/visibility_delta_smoke.cpp)
   target_link_libraries(mir2_visibility_delta_smoke PRIVATE mir2_hostlib)
@@ -439,6 +471,12 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_legacy_player_operate_order_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_player_operate_order_smoke
     COMMAND mir2_legacy_player_operate_order_smoke)
+
+  add_executable(mir2_legacy_player_periodic_order_smoke
+    tests/legacy_player_periodic_order_smoke.cpp)
+  target_link_libraries(mir2_legacy_player_periodic_order_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_player_periodic_order_smoke
+    COMMAND mir2_legacy_player_periodic_order_smoke)
 
   add_executable(mir2_legacy_player_rotation_smoke
     tests/legacy_player_rotation_smoke.cpp)
@@ -567,6 +605,12 @@ if(BUILD_TESTING)
   add_executable(mir2_legacy_npc_merchant_cursor_smoke tests/legacy_npc_merchant_cursor_smoke.cpp)
   target_link_libraries(mir2_legacy_npc_merchant_cursor_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_npc_merchant_cursor_smoke COMMAND mir2_legacy_npc_merchant_cursor_smoke)
+
+  add_executable(mir2_legacy_npc_merchant_search_smoke
+    tests/legacy_npc_merchant_search_smoke.cpp)
+  target_link_libraries(mir2_legacy_npc_merchant_search_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_npc_merchant_search_smoke
+    COMMAND mir2_legacy_npc_merchant_search_smoke)
 
   add_executable(mir2_legacy_random_smoke tests/legacy_random_smoke.cpp)
   target_link_libraries(mir2_legacy_random_smoke PRIVATE mir2_hostlib)

@@ -1,3 +1,10 @@
+/**
+ * @file legacy_play_ui.cpp
+ * @brief 旧版游戏 HUD 布局实现 —— HUD 元素坐标计算和追踪标签转换
+ * @details 实现 legacy_hud_layout()、legacy_chat_layout() 等布局计算函数。
+ *          所有布局基于 800x600 逻辑分辨率。
+ */
+
 #include "scene/legacy_play_ui.hpp"
 
 namespace mir2::client::legacy_play_ui {

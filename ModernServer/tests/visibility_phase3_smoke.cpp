@@ -176,11 +176,18 @@ int main() {
     static_cast<void>(map.legacy_spawn_player(spawn, 1, 0, true));
 
     mir2::RuntimeDispatch dispatch;
-    assert(map.legacy_add_event_object(9001, 11, 10, 0, &dispatch));
+    assert(map.legacy_add_event_object(9001, 11, 10, 0, &dispatch, 33));
     assert(!map.legacy_add_event_object(9002, 12, 10, 0, false, &dispatch,
                                         mir2::LegacyEventType::stone_mine));
     assert(map.legacy_player_tracks_event(1, 9001));
-    assert(find_packet(dispatch, 1, mir2::kSmShowEvent).has_value());
+    const auto show_event = find_packet(dispatch, 1, mir2::kSmShowEvent);
+    assert(show_event.has_value());
+    assert(show_event->message.param == static_cast<std::uint16_t>(mir2::LegacyEventType::pile_stones));
+    assert(show_event->message.tag == 11);
+    assert(show_event->message.series == 10);
+    mir2::LegacyShortMessage body;
+    assert(mir2::legacy_decode_buffer(show_event->body, &body, sizeof(body)));
+    assert(body.ident == 33);
 
     map.legacy_remove_event_object(9001, 11, 10, &dispatch);
     assert(!map.legacy_player_tracks_event(1, 9001));

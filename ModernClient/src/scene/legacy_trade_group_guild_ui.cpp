@@ -1,3 +1,11 @@
+/**
+ * @file legacy_trade_group_guild_ui.cpp
+ * @brief 旧版交易/组队/行会界面布局实现 —— 交易窗口、组队面板、行会面板的坐标计算
+ * @details 实现交易窗口（5x2 网格 + 金币）、组队面板（成员列表 + 操作按钮）、
+ *          行会面板（成员管理 + 滚动）的布局计算。
+ *          对应 Delphi 客户端的 TDlgDeal、TDlgGroup、TDlgGuild 窗口布局。
+ */
+
 #include "scene/legacy_trade_group_guild_ui.hpp"
 
 namespace mir2::client::legacy_trade_group_guild_ui {

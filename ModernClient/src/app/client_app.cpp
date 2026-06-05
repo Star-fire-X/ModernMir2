@@ -2958,6 +2958,9 @@ void ClientApp::cmd_timer_tick(const std::wstring& message) {
 
 // 每分钟定时器：预留的延时清理入口（如地面物品过期、角色动画 GC）
 void ClientApp::min_timer_tick() {
+  const auto now_ms = detail::monotonic_ms();
+  state_.refresh_grouped_actor_flags();
+  state_.prune_pending_actor_removals(now_ms);
 }
 
 // 外挂检测定时器（1 秒间隔）：速度外挂检测功能预留

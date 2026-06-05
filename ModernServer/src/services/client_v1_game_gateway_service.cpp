@@ -1,3 +1,36 @@
+/**
+ * @file client_v1_game_gateway_service.cpp
+ * @brief Client v1 游戏网关服务实现
+ *
+ * @details 实现 ClientV1GameGatewayService 类的所有方法，作为 Client v1 新协议
+ *          与遗留游戏服务器之间的双向协议转换桥梁。
+ *
+ *          核心功能包括：
+ *          1. 入站方向：将 Client v1 消息(移动、攻击、魔法、物品、NPC、交易、
+ *             组队、公会等约 30+ 类型)转换为遗留协议命令发送给 WorldService
+ *          2. 出站方向：监听来自 WorldService 的 SessionEvent，将遗留协议帧
+ *             (约 80+ 种 kSm* 消息类型)转换为 Client v1 消息推送给客户端
+ *          3. 会话状态管理：维护登录流程、背包/装备/魔法缓存、交易/组队/公会
+ *             运行时状态
+ *
+ *          协议转换的关键设计：
+ *          - translate_legacy_packet_messages() 是核心函数，包含约 80+ 种
+ *            kSm* 消息类型的 switch 分支
+ *          - 为每个会话维护 SessionState，缓存背包/装备/魔法等数据，
+ *            避免频繁查询数据库
+ *          - 组队和交易的运行时状态在网关层维护，通过文本消息匹配
+ *            (kSmHear) 检测交易完成/取消事件
+ *          - 公会信息在网关层缓存(guilds_映射表)，与 WorldService 中的
+ *            公会数据相对独立，仅用于 Client v1 公画面板显示
+ *
+ * @note 匿名命名空间中包含约 30 个辅助函数，负责遗留编码解码、
+ *       数据类型转换和消息构造。这些函数大多是纯函数，无副作用。
+ *
+ * @warning 公会状态(guilds_)是网关层的本地缓存，与 WorldService 中的
+ *          公会数据不同步。角色重新登录后缓存会通过 ensure_guild_member_locked()
+ *          重新构建。
+ */
+
 #include "services/client_v1_game_gateway_service.hpp"
 
 #include <algorithm>
@@ -19,10 +52,26 @@
 
 namespace mir2 {
 
+/**
+ * @brief 匿名命名空间，包含协议转换所需的辅助函数和常量
+ *
+ * @details 这些函数负责遗留编码解码、数据类型转换和消息构造。
+ *          大部分是纯函数，无副作用，仅进行数据转换。
+ */
+
 namespace {
 
 constexpr std::int32_t kClientV1VisibleBagFirstSlot = 6;
 
+/**
+ * @brief 解析方向值(从源坐标到目标坐标)
+ * @param sx 源 X 坐标
+ * @param sy 源 Y 坐标
+ * @param dx 目标 X 坐标
+ * @param dy 目标 Y 坐标
+ * @param fallback 当源目标坐标相同时的默认方向
+ * @return 方向值(0-7)，使用遗留协议的方向系统
+ */
 std::uint8_t resolve_direction(const int sx, const int sy, const int dx, const int dy,
                                const std::uint8_t fallback) {
   if (sx == dx && sy == dy) {
@@ -31,6 +80,11 @@ std::uint8_t resolve_direction(const int sx, const int sy, const int dx, const i
   return legacy::next_direction(sx, sy, dx, dy);
 }
 
+/**
+ * @brief 获取默认的玩家外观特征值
+ * @param character 角色记录
+ * @return 特征值，基于性别和发型计算
+ */
 std::int32_t default_player_feature(const CharacterRecord& character) {
   return make_feature(
       0, character.sex, character.sex,
@@ -39,6 +93,11 @@ std::int32_t default_player_feature(const CharacterRecord& character) {
                                            0, 255)));
 }
 
+/**
+ * @brief 规范化魔法快捷键值
+ * @param key 原始快捷键字符(1-8 或 '1'-'8')
+ * @return 规范化后的快捷键值(0-8)，0 表示未设置
+ */
 std::uint8_t normalize_magic_key(const char key) {
   const auto raw = static_cast<unsigned char>(key);
   if (raw >= 1U && raw <= 8U) {
@@ -50,10 +109,20 @@ std::uint8_t normalize_magic_key(const char key) {
   return 0;
 }
 
+/**
+ * @brief 获取客户端错误响应信息
+ * @param kind 登录错误类型
+ * @return 对应的 Client v1 错误响应结构
+ */
 CanonicalClientV1LoginErrorResponse client_error(CanonicalLoginErrorKind kind) {
   return canonical_login_error_mapping(kind).client_v1;
 }
 
+/**
+ * @brief 从角色记录构造自能力信息(精简版)
+ * @param character 角色记录
+ * @return 自能力信息，包含等级、职业、经验、负重和金币
+ */
 client_v1::SelfAbility self_ability_from_character(const CharacterRecord& character) {
   client_v1::SelfAbility ability;
   ability.level = character.ability.level;
@@ -67,6 +136,11 @@ client_v1::SelfAbility self_ability_from_character(const CharacterRecord& charac
   return ability;
 }
 
+/**
+ * @brief 从角色记录构造自能力详细信息(完整版)
+ * @param character 角色记录
+ * @return 自能力详细信息，包含所有属性、公会信息等
+ */
 client_v1::SelfAbilityDetail self_ability_detail_from_character(const CharacterRecord& character) {
   client_v1::SelfAbilityDetail detail;
   detail.level = character.ability.level;
@@ -96,6 +170,12 @@ client_v1::SelfAbilityDetail self_ability_detail_from_character(const CharacterR
   return detail;
 }
 
+/**
+ * @brief 将 Client v1 动作类型转换为遗留协议的命令标识
+ * @param kind 动作类型(转身/行走/奔跑/攻击)
+ * @param requested_ident 客户端请求的攻击标识(仅攻击类型使用)
+ * @return 遗留协议的命令标识(kCmTurn/Walk/Run/Hit)
+ */
 std::uint16_t action_legacy_ident(client_v1::WorldActionKind kind, std::uint16_t requested_ident) {
   switch (kind) {
     case client_v1::WorldActionKind::turn:
@@ -111,6 +191,12 @@ std::uint16_t action_legacy_ident(client_v1::WorldActionKind kind, std::uint16_t
   return kCmHit;
 }
 
+/**
+ * @brief 获取客户端动作对应的遗留 SM 标识
+ * @param kind 动作类型
+ * @param requested_ident 请求的攻击标识
+ * @return 遗留协议 SM 标识
+ */
 std::uint16_t client_action_legacy_ident(client_v1::WorldActionKind kind,
                                          std::uint16_t requested_ident) {
   if (kind == client_v1::WorldActionKind::attack) {
@@ -119,6 +205,11 @@ std::uint16_t client_action_legacy_ident(client_v1::WorldActionKind kind,
   return action_legacy_ident(kind, requested_ident);
 }
 
+/**
+ * @brief 根据遗留 SM 标识获取对应的 Client v1 Actor 动作类型
+ * @param ident 遗留协议消息标识(kSm* 常量)
+ * @return Client v1 ActorActionKind 枚举值
+ */
 client_v1::ActorActionKind actor_action_kind_for_sm(std::uint16_t ident) {
   switch (ident) {
     case kSmTurn:
@@ -150,6 +241,14 @@ client_v1::ActorActionKind actor_action_kind_for_sm(std::uint16_t ident) {
   }
 }
 
+/**
+ * @brief 根据遗留 SM 标识确定包束模式
+ * @param ident 遗留协议消息标识
+ * @return 包束模式(actor_queue 放入队列按帧播放, immediate 立即显示)
+ *
+ * @details 移动/动作/魔法等需要顺序播放的消息使用 actor_queue 模式，
+ *          其他状态更新消息使用 immediate 模式。
+ */
 client_v1::LegacyBundleMode legacy_bundle_mode_for_sm(std::uint16_t ident) {
   switch (ident) {
     case kSmTurn:
@@ -177,31 +276,64 @@ client_v1::LegacyBundleMode legacy_bundle_mode_for_sm(std::uint16_t ident) {
   }
 }
 
+/**
+ * @brief 提取遗留聊天颜色的前景色
+ * @param color 遗留协议颜色值(高位背景色，低位前景色)
+ * @return 前景色 ARGB 值(仅低 8 位有效)
+ */
 std::uint32_t legacy_chat_fore_color(std::uint16_t color) {
   return static_cast<std::uint32_t>(color & 0xFFU);
 }
 
+/**
+ * @brief 提取遗留聊天颜色的背景色
+ * @param color 遗留协议颜色值(高位背景色，低位前景色)
+ * @return 背景色 ARGB 值(移位到低 8 位)
+ */
 std::uint32_t legacy_chat_back_color(std::uint16_t color) {
   return static_cast<std::uint32_t>((color >> 8U) & 0xFFU);
 }
 
+/**
+ * @brief 构造聊天行消息(系统消息)
+ * @param text 聊天文本
+ * @param color 遗留协议颜色值
+ * @return Client v1 ChatLine 消息
+ */
 client_v1::ChatLine legacy_chat_line(std::string text, std::uint16_t color) {
   return client_v1::ChatLine{std::move(text), legacy_chat_fore_color(color),
                              legacy_chat_back_color(color)};
 }
 
+/**
+ * @brief 构造角色说话消息(ActorSay)
+ * @param actor_id 说话的角色 ID
+ * @param text 说话内容
+ * @param color 遗留协议颜色值
+ * @return Client v1 ActorSay 消息
+ */
 client_v1::ActorSay legacy_actor_say(std::uint64_t actor_id, std::string text,
                                      std::uint16_t color) {
   return client_v1::ActorSay{actor_id, std::move(text), legacy_chat_fore_color(color),
                              legacy_chat_back_color(color)};
 }
 
+/**
+ * @brief 获取类型 T 在遗留编码后的字节大小
+ * @tparam T 需要编码的类型
+ * @return 编码后的字节大小
+ */
 template <typename T>
 std::size_t legacy_encoded_size_for() {
   const T value{};
   return legacy_encode_buffer(&value, sizeof(value)).size();
 }
 
+/**
+ * @brief 从编码缓冲区解码角色描述前缀
+ * @param encoded 编码数据
+ * @return 解码后的 LegacyCharDesc，数据不足时返回 nullopt
+ */
 std::optional<LegacyCharDesc> decode_char_desc_prefix(std::string_view encoded) {
   const auto size = legacy_encoded_size_for<LegacyCharDesc>();
   if (encoded.size() < size) {
@@ -214,6 +346,11 @@ std::optional<LegacyCharDesc> decode_char_desc_prefix(std::string_view encoded) 
   return desc;
 }
 
+/**
+ * @brief 从编码缓冲区解码消息体前 WL(Word/Long) 前缀
+ * @param encoded 编码数据
+ * @return 解码后的 LegacyMessageBodyWL，数据不足时返回 nullopt
+ */
 std::optional<LegacyMessageBodyWL> decode_body_wl_prefix(std::string_view encoded) {
   const auto size = legacy_encoded_size_for<LegacyMessageBodyWL>();
   if (encoded.size() < size) {
@@ -226,6 +363,23 @@ std::optional<LegacyMessageBodyWL> decode_body_wl_prefix(std::string_view encode
   return body;
 }
 
+std::optional<LegacyShortMessage> decode_short_message_prefix(std::string_view encoded) {
+  const auto size = legacy_encoded_size_for<LegacyShortMessage>();
+  if (encoded.size() < size) {
+    return std::nullopt;
+  }
+  LegacyShortMessage body;
+  if (!legacy_decode_buffer(encoded.substr(0, size), &body, sizeof(body))) {
+    return std::nullopt;
+  }
+  return body;
+}
+
+/**
+ * @brief 解码能力数据
+ * @param encoded 编码的能力数据
+ * @return 解码后的 LegacyAbility
+ */
 std::optional<LegacyAbility> decode_ability(std::string_view encoded) {
   LegacyAbility ability;
   if (!legacy_decode_buffer(encoded, &ability, sizeof(ability))) {
@@ -234,6 +388,11 @@ std::optional<LegacyAbility> decode_ability(std::string_view encoded) {
   return ability;
 }
 
+/**
+ * @brief 解码客户端魔法数据
+ * @param encoded 编码的魔法数据
+ * @return 解码后的 LegacyClientMagic
+ */
 std::optional<LegacyClientMagic> decode_client_magic(std::string_view encoded) {
   LegacyClientMagic magic;
   if (!legacy_decode_buffer(encoded, &magic, sizeof(magic))) {
@@ -242,6 +401,11 @@ std::optional<LegacyClientMagic> decode_client_magic(std::string_view encoded) {
   return magic;
 }
 
+/**
+ * @brief 从遗留魔法数据构造 Client v1 魔法条目
+ * @param legacy_magic 遗留魔法数据
+ * @return Client v1 MagicEntry
+ */
 client_v1::MagicEntry magic_entry_from_legacy(const LegacyClientMagic& legacy_magic) {
   client_v1::MagicEntry entry;
   entry.magic_id = legacy_magic.def.magic_id;
@@ -260,6 +424,11 @@ client_v1::MagicEntry magic_entry_from_legacy(const LegacyClientMagic& legacy_ma
   return entry;
 }
 
+/**
+ * @brief 解码编码的魔法条目列表(以 '/' 分隔)
+ * @param encoded 编码的魔法列表数据
+ * @return Client v1 MagicEntry 列表
+ */
 std::vector<client_v1::MagicEntry> decode_client_magic_entries(std::string_view encoded) {
   std::vector<client_v1::MagicEntry> magics;
   std::size_t start = 0;
@@ -280,6 +449,13 @@ std::vector<client_v1::MagicEntry> decode_client_magic_entries(std::string_view 
   return magics;
 }
 
+/**
+ * @brief 插入或更新魔法条目
+ * @param magics 魔法列表(引用)
+ * @param entry 待插入/更新的魔法条目
+ *
+ * @details 如果列表中已存在相同 magic_id 的条目则替换，否则追加。
+ */
 void upsert_magic_entry(std::vector<client_v1::MagicEntry>& magics,
                         client_v1::MagicEntry entry) {
   if (entry.magic_id == 0) {
@@ -295,6 +471,11 @@ void upsert_magic_entry(std::vector<client_v1::MagicEntry>& magics,
   magics.push_back(std::move(entry));
 }
 
+/**
+ * @brief 移除指定 ID 的魔法条目
+ * @param magics 魔法列表(引用)
+ * @param magic_id 要移除的魔法 ID
+ */
 void remove_magic_entry(std::vector<client_v1::MagicEntry>& magics, std::int32_t magic_id) {
   magics.erase(std::remove_if(magics.begin(), magics.end(),
                               [&](const client_v1::MagicEntry& magic) {
@@ -303,6 +484,14 @@ void remove_magic_entry(std::vector<client_v1::MagicEntry>& magics, std::int32_t
                magics.end());
 }
 
+/**
+ * @brief 将 Client v1 魔法条目更新到角色记录的遗留魔法数组中
+ * @param character 角色记录(引用)
+ * @param entry Client v1 魔法条目
+ *
+ * @details 查找角色记录中相同 magic_id 的遗留魔法条目并更新，
+ *          如果未找到则填入第一个空槽位。
+ */
 void upsert_character_magic(CharacterRecord& character, const client_v1::MagicEntry& entry) {
   if (entry.magic_id == 0) {
     return;
@@ -327,6 +516,13 @@ void upsert_character_magic(CharacterRecord& character, const client_v1::MagicEn
   }
 }
 
+/**
+ * @brief 从角色记录中移除指定 ID 的魔法
+ * @param character 角色记录(引用)
+ * @param magic_id 要移除的魔法 ID
+ *
+ * @details 移除后后续魔法前移，最后一个槽位置空。
+ */
 void remove_character_magic(CharacterRecord& character, std::int32_t magic_id) {
   for (std::size_t index = 0; index < character.magics.size(); ++index) {
     if (is_empty(character.magics[index]) || character.magics[index].magic_id != magic_id) {
@@ -340,6 +536,11 @@ void remove_character_magic(CharacterRecord& character, std::int32_t magic_id) {
   }
 }
 
+/**
+ * @brief 解码客户端遗留物品数据
+ * @param encoded 编码的物品数据
+ * @return 解码后的 LegacyClientItem
+ */
 std::optional<LegacyClientItem> decode_client_item(std::string_view encoded) {
   LegacyClientItem item;
   if (!legacy_decode_buffer(encoded, &item, sizeof(item))) {
@@ -348,6 +549,11 @@ std::optional<LegacyClientItem> decode_client_item(std::string_view encoded) {
   return item;
 }
 
+/**
+ * @brief 将文本解析为 int32
+ * @param text 字符串文本
+ * @return 解析后的整数值，解析失败时返回 nullopt
+ */
 std::optional<std::int32_t> parse_i32(std::string_view text) {
   std::int32_t value = 0;
   const auto [ptr, error] = std::from_chars(text.data(), text.data() + text.size(), value);
@@ -357,6 +563,11 @@ std::optional<std::int32_t> parse_i32(std::string_view text) {
   return value;
 }
 
+/**
+ * @brief 从转身消息体中提取角色名
+ * @param encoded 编码的消息体(角色描述 + 名称)
+ * @return 角色名(去掉 '/' 及其后的内容)
+ */
 std::string name_from_turn_body(std::string_view encoded) {
   const auto desc_size = legacy_encoded_size_for<LegacyCharDesc>();
   if (encoded.size() <= desc_size) {
@@ -370,14 +581,30 @@ std::string name_from_turn_body(std::string_view encoded) {
   return decoded;
 }
 
+/**
+ * @brief 根据 actor ID 确定角色类型(玩家或怪物)
+ * @param actor_id 目标 actor ID
+ * @param self_actor_id 当前玩家自己的 actor ID
+ * @return ActorType::player(如果 ID 匹配自己) 或 ActorType::monster
+ */
 client_v1::ActorType actor_type_for(std::uint64_t actor_id, std::uint64_t self_actor_id) {
   return actor_id == self_actor_id ? client_v1::ActorType::player : client_v1::ActorType::monster;
 }
 
+/**
+ * @brief 将游戏等级值转换为 Client v1 等级值(限制在 uint16 范围内)
+ * @param level 游戏等级
+ * @return 限制在 1-65535 范围的等级值
+ */
 std::uint16_t client_v1_actor_level(const std::int32_t level) {
   return static_cast<std::uint16_t>(std::clamp(level, 1, 65535));
 }
 
+/**
+ * @brief 从遗留客户端物品数据构造 Client v1 物品状态
+ * @param item 遗留客户端物品
+ * @return Client v1 ItemState
+ */
 client_v1::ItemState item_state_from_legacy(const LegacyClientItem& item) {
   client_v1::ItemState state;
   state.name = to_string(item.item.name);
@@ -389,10 +616,21 @@ client_v1::ItemState item_state_from_legacy(const LegacyClientItem& item) {
   return state;
 }
 
+/**
+ * @brief 检查物品状态是否为空(未占用)
+ * @param item 物品状态
+ * @return true 如果 make_index 为 0 且名称为空
+ */
 bool empty_item_state(const client_v1::ItemState& item) {
   return item.make_index == 0 && item.name.empty();
 }
 
+/**
+ * @brief 获取非空物品的槽位快照列表
+ * @tparam N 数组大小
+ * @param items 物品状态数组
+ * @return 非空物品的 ItemSlotState 列表(包含槽位索引)
+ */
 template <std::size_t N>
 std::vector<client_v1::ItemSlotState> item_slot_snapshot(
     const std::array<client_v1::ItemState, N>& items) {
@@ -405,6 +643,13 @@ std::vector<client_v1::ItemSlotState> item_slot_snapshot(
   return snapshot;
 }
 
+/**
+ * @brief 在物品数组中查找指定 make_index 的槽位
+ * @tparam N 数组大小
+ * @param items 物品状态数组
+ * @param make_index 物品标识索引
+ * @return 槽位索引，未找到时返回 nullopt
+ */
 template <std::size_t N>
 std::optional<std::int32_t> find_item_slot(const std::array<client_v1::ItemState, N>& items,
                                            std::int32_t make_index) {
@@ -419,6 +664,13 @@ std::optional<std::int32_t> find_item_slot(const std::array<client_v1::ItemState
   return std::nullopt;
 }
 
+/**
+ * @brief 查找第一个空槽位
+ * @tparam N 数组大小
+ * @param items 物品状态数组
+ * @param first_slot 起始搜索槽位(默认 0)
+ * @return 空槽位索引，无空槽时返回 nullopt
+ */
 template <std::size_t N>
 std::optional<std::int32_t> first_empty_slot(const std::array<client_v1::ItemState, N>& items,
                                              std::size_t first_slot = 0) {
@@ -430,6 +682,16 @@ std::optional<std::int32_t> first_empty_slot(const std::array<client_v1::ItemSta
   return std::nullopt;
 }
 
+/**
+ * @brief 压缩物品数组，移除空槽并保持顺序
+ * @tparam N 数组大小
+ * @param items 物品状态数组(引用)
+ * @param first_slot 起始压缩槽位(默认 0)
+ * @return true 如果数组内容发生变化
+ *
+ * @details 将非空物品前移填充空槽，末尾槽位置空。
+ *          用于背包物品删除后保持紧凑排列。
+ */
 template <std::size_t N>
 bool compact_item_slots(std::array<client_v1::ItemState, N>& items, std::size_t first_slot = 0) {
   bool changed = false;
@@ -453,6 +715,11 @@ bool compact_item_slots(std::array<client_v1::ItemState, N>& items, std::size_t 
   return changed;
 }
 
+/**
+ * @brief 解码以 '/' 分隔的遗留客户端物品列表
+ * @param encoded 编码的物品列表数据
+ * @return 遗留客户端物品列表
+ */
 std::vector<LegacyClientItem> decode_client_item_list(std::string_view encoded) {
   std::vector<LegacyClientItem> items;
   std::size_t start = 0;
@@ -473,6 +740,11 @@ std::vector<LegacyClientItem> decode_client_item_list(std::string_view encoded) 
   return items;
 }
 
+/**
+ * @brief 解码以 '槽位/物品/槽位/物品/...' 格式编码的装备物品列表
+ * @param encoded 编码的装备数据
+ * @return (槽位, 物品) 对列表
+ */
 std::vector<std::pair<std::int32_t, LegacyClientItem>> decode_equipment_item_list(
     std::string_view encoded) {
   std::vector<std::pair<std::int32_t, LegacyClientItem>> items;
@@ -501,10 +773,23 @@ std::vector<std::pair<std::int32_t, LegacyClientItem>> decode_equipment_item_lis
   return items;
 }
 
+/**
+ * @brief 解码商人对话框文本
+ * @param body 编码的对话体
+ * @return 解码后的文本
+ */
 std::string merchant_dialog_text(std::string_view body) {
   return legacy_decode_text(body);
 }
 
+/**
+ * @brief 从遗留消息体解析商人商品列表
+ * @param body 编码的消息体(格式: 名称/数量/价格/...)
+ * @return Client v1 MerchantGoodsItem 列表
+ *
+ * @note 遗留协议的商品数据以 '/' 分隔，每 4 个 token 为一组：
+ *       名称/未知/价格/未知，其中 index+1 和 index+3 通常为 0 或 1。
+ */
 std::vector<client_v1::MerchantGoodsItem> merchant_goods_from_legacy_body(
     std::string_view body) {
   const auto decoded = legacy_decode_text(body);
@@ -522,6 +807,15 @@ std::vector<client_v1::MerchantGoodsItem> merchant_goods_from_legacy_body(
   return goods;
 }
 
+/**
+ * @brief 构建小地图数据
+ * @param map 地图配置
+ * @return Client v1 MiniMapData
+ *
+ * @details 解码地图文件(.map)，生成 160x120 的缩略图数据，
+ *          每个像素表示该位置是否可通行(1=可通行, 0=不可通行)。
+ *          地图解码失败时返回包含错误消息的失败结果。
+ */
 client_v1::MiniMapData build_minimap_data(const MapConfig& map) {
   constexpr std::uint16_t kMiniMapWidth = 160;
   constexpr std::uint16_t kMiniMapHeight = 120;
@@ -543,6 +837,7 @@ client_v1::MiniMapData build_minimap_data(const MapConfig& map) {
   }
 
   data.success = true;
+  // 将原始地图缩放到 160x120，采样时取对应源像素
   for (int y = 0; y < kMiniMapHeight; ++y) {
     for (int x = 0; x < kMiniMapWidth; ++x) {
       const auto source_x = std::clamp((x * document->width) / kMiniMapWidth, 0,
@@ -558,16 +853,30 @@ client_v1::MiniMapData build_minimap_data(const MapConfig& map) {
 
 }  // namespace
 
+/**
+ * @brief 构造函数
+ * @param admissions Client v1 准入注册表共享指针
+ */
 ClientV1GameGatewayService::ClientV1GameGatewayService(
     std::shared_ptr<ClientV1AdmissionRegistry> admissions)
     : ClientV1GatewayServiceBase("client_v1_game_gateway"), admissions_(std::move(admissions)) {}
 
 #ifdef MIR2_ENABLE_TEST_HOOKS
+/**
+ * @brief 测试用：为指定会话 ID 创建默认会话状态
+ * @param session_id 会话 ID
+ */
 void ClientV1GameGatewayService::seed_session_for_test(std::uint64_t session_id) {
   std::scoped_lock lock(mutex_);
   sessions_[session_id] = SessionState{};
 }
 
+/**
+ * @brief 测试用：翻译遗留协议包为 Client v1 消息列表
+ * @param session_id 会话 ID
+ * @param packet 遗留协议包
+ * @param messages 输出参数，转换后的消息列表
+ */
 void ClientV1GameGatewayService::translate_legacy_packet_for_test(
     std::uint64_t session_id, const LegacyPacket& packet,
     std::vector<client_v1::Message>& messages) {
@@ -581,12 +890,23 @@ void ClientV1GameGatewayService::translate_legacy_packet_for_test(
   }
 }
 
+/**
+ * @brief 测试用：翻译遗留协议包为 Client v1 帧列表
+ * @param session_id 会话 ID
+ * @param packet 遗留协议包
+ * @param frames 输出参数，转换后的帧列表
+ */
 void ClientV1GameGatewayService::translate_legacy_packet_frames_for_test(
     std::uint64_t session_id, const LegacyPacket& packet,
     std::vector<client_v1::Frame>& frames) {
   translate_legacy_packet(session_id, packet, frames);
 }
 
+/**
+ * @brief 测试用：获取指定会话的角色记录
+ * @param session_id 会话 ID
+ * @return 角色记录，会话不存在时返回 nullopt
+ */
 std::optional<CharacterRecord> ClientV1GameGatewayService::session_character_for_test(
     std::uint64_t session_id) const {
   std::scoped_lock lock(mutex_);
@@ -598,6 +918,14 @@ std::optional<CharacterRecord> ClientV1GameGatewayService::session_character_for
 }
 #endif
 
+/**
+ * @brief 启动服务
+ *
+ * @details 初始化数据库仓库、注册消息总线端点、启动总线处理线程，
+ *          最后调用基类的 start() 启动 ASIO TCP 服务器。
+ *
+ * @param context 宿主上下文
+ */
 void ClientV1GameGatewayService::start(HostContext& context) {
   repository_ = std::make_unique<Repository>(context.root_dir / context.config.runtime.data_dir / "mir2.sqlite");
   repository_->ensure_schema(context.root_dir / "schema" / "mir2.sql");
@@ -608,11 +936,21 @@ void ClientV1GameGatewayService::start(HostContext& context) {
   ClientV1GatewayServiceBase::start(context);
 }
 
+/**
+ * @brief 停止服务
+ *
+ * @details 先停止总线处理线程，再停止 TCP 服务器。
+ */
 void ClientV1GameGatewayService::stop() {
   bus_running_.store(false, std::memory_order_relaxed);
   ClientV1GatewayServiceBase::stop();
 }
 
+/**
+ * @brief 等待工作线程结束
+ *
+ * @details 先等待总线线程，再等待基类线程。
+ */
 void ClientV1GameGatewayService::join() {
   if (bus_thread_.joinable()) {
     bus_thread_.join();
@@ -620,10 +958,26 @@ void ClientV1GameGatewayService::join() {
   ClientV1GatewayServiceBase::join();
 }
 
+/**
+ * @brief 获取端口绑定配置
+ * @param context 宿主上下文
+ * @return Client v1 游戏网关的端口绑定信息
+ */
 PortBinding ClientV1GameGatewayService::binding(const HostContext& context) const {
   return context.config.ports.client_v1_game_gateway;
 }
 
+/**
+ * @brief 处理客户端消息
+ *
+ * @details 更新会话序列号，然后通过 std::visit 分发到对应的具体处理函数。
+ *          支持约 30+ 种 Client v1 消息类型，所有未知消息类型会触发断开连接。
+ *
+ * @param session_id 会话 ID
+ * @param peer_address 客户端地址(未使用)
+ * @param sequence 消息序列号
+ * @param message Client v1 消息(变体类型)
+ */
 void ClientV1GameGatewayService::handle_message(std::uint64_t session_id,
                                                 const std::string& /*peer_address*/,
                                                 std::uint32_t sequence,
@@ -731,6 +1085,14 @@ void ClientV1GameGatewayService::handle_message(std::uint64_t session_id,
       message);
 }
 
+/**
+ * @brief 处理客户端连接建立
+ *
+ * @details 创建初始 SessionState，通知 WorldService 有新连接建立。
+ *
+ * @param session_id 会话 ID
+ * @param peer_address 客户端地址
+ */
 void ClientV1GameGatewayService::handle_connected(std::uint64_t session_id,
                                                   const std::string& peer_address) {
   std::scoped_lock lock(mutex_);
@@ -741,6 +1103,20 @@ void ClientV1GameGatewayService::handle_connected(std::uint64_t session_id,
   }
 }
 
+/**
+ * @brief 处理客户端连接断开
+ *
+ * @details 清理该会话的组队/交易/公会状态：
+ *          1. 如果玩家在组队中，从组队移除并广播更新
+ *          2. 如果玩家在交易中，清除交易状态并通知对方
+ *          3. 更新公会成员的在线状态
+ *          4. 发送组队/交易/公会状态更新给相关会话
+ *          5. 如果已进入游戏，通知 WorldService 断开连接
+ *
+ * @param session_id 会话 ID
+ * @param peer_address 客户端地址
+ * @param reason 断开原因
+ */
 void ClientV1GameGatewayService::handle_disconnected(std::uint64_t session_id,
                                                      const std::string& peer_address,
                                                      const std::string& reason) {
@@ -814,6 +1190,15 @@ void ClientV1GameGatewayService::handle_disconnected(std::uint64_t session_id,
   }
 }
 
+/**
+ * @brief 处理客户端 Hello 消息
+ *
+ * @details 检查协议版本是否匹配，如果版本不匹配则断开连接并返回错误。
+ *          设置 greeted 标志表示握手完成。
+ *
+ * @param session_id 会话 ID
+ * @param hello 客户端 Hello 消息
+ */
 void ClientV1GameGatewayService::handle_client_hello(std::uint64_t session_id,
                                                      const client_v1::ClientHello& hello) {
   if (hello.protocol_version != client_v1::kProtocolVersion) {
@@ -825,6 +1210,17 @@ void ClientV1GameGatewayService::handle_client_hello(std::uint64_t session_id,
   sessions_[session_id].greeted = true;
 }
 
+/**
+ * @brief 处理进入游戏世界请求
+ *
+ * @details 验证客户端是否已完成 Hello 握手，检查是否重复进入，
+ *          消耗准入令牌验证用户身份，从数据库加载角色数据，
+ *          设置会话状态，如有登录公告则先发送公告再进入，否则直接发送进入世界事件。
+ *
+ * @param session_id 会话 ID
+ * @param sequence 消息序列号
+ * @param request 进入世界请求
+ */
 void ClientV1GameGatewayService::handle_enter_world_request(
     std::uint64_t session_id, std::uint32_t sequence,
     const client_v1::EnterWorldRequest& request) {
@@ -890,6 +1286,14 @@ void ClientV1GameGatewayService::handle_enter_world_request(
   post_enter_world(session_id, updated);
 }
 
+/**
+ * @brief 处理登录公告确认
+ *
+ * @details 当客户端确认阅读登录公告后，推进到下一个登录阶段
+ *          并发送进入世界事件。
+ *
+ * @param session_id 会话 ID
+ */
 void ClientV1GameGatewayService::handle_login_notice_ok(std::uint64_t session_id) {
   std::optional<SessionState> state;
   {
@@ -910,6 +1314,13 @@ void ClientV1GameGatewayService::handle_login_notice_ok(std::uint64_t session_id
   }
 }
 
+/**
+ * @brief 发送进入游戏世界的事件到 WorldService
+ * @param session_id 会话 ID
+ * @param state 当前会话状态
+ *
+ * @details 构造 LogicCommand::enter_world，包含会话信息和角色数据。
+ */
 void ClientV1GameGatewayService::post_enter_world(std::uint64_t session_id,
                                                   const SessionState& state) {
   LogicCommand command;
@@ -925,6 +1336,14 @@ void ClientV1GameGatewayService::post_enter_world(std::uint64_t session_id,
   post_logic_command(std::move(command));
 }
 
+/**
+ * @brief 处理移动意图(行走/奔跑)
+ * @param session_id 会话 ID
+ * @param intent 移动意图
+ *
+ * @details 将 MoveIntent 转换为 ActionIntent(行走或奔跑)，
+ *          计算方向后交由 handle_action_intent 处理。
+ */
 void ClientV1GameGatewayService::handle_move_intent(std::uint64_t session_id,
                                                     const client_v1::MoveIntent& intent) {
   const auto state = session(session_id);
@@ -942,6 +1361,14 @@ void ClientV1GameGatewayService::handle_move_intent(std::uint64_t session_id,
   handle_action_intent(session_id, action);
 }
 
+/**
+ * @brief 处理动作意图(转身/行走/奔跑/攻击)
+ * @param session_id 会话 ID
+ * @param intent 动作意图
+ *
+ * @details 解析方向(行走/奔跑时)，转换遗留协议动作标识，
+ *          缓存待确认的动作意图，发送命令到 WorldService。
+ */
 void ClientV1GameGatewayService::handle_action_intent(
     std::uint64_t session_id, const client_v1::ActionIntent& intent) {
   const auto state = session(session_id);
@@ -968,6 +1395,11 @@ void ClientV1GameGatewayService::handle_action_intent(
   post_canonical_command(decode_client_v1_action_command(session_id, effective));
 }
 
+/**
+ * @brief 处理施法意图
+ * @param session_id 会话 ID
+ * @param intent 施法意图
+ */
 void ClientV1GameGatewayService::handle_spell_intent(
     std::uint64_t session_id, const client_v1::SpellIntent& intent) {
   const auto state = session(session_id);
@@ -978,6 +1410,11 @@ void ClientV1GameGatewayService::handle_spell_intent(
   post_canonical_command(decode_client_v1_spell_command(session_id, intent));
 }
 
+/**
+ * @brief 处理拾取意图
+ * @param session_id 会话 ID
+ * @param intent 拾取意图
+ */
 void ClientV1GameGatewayService::handle_pickup_intent(
     std::uint64_t session_id, const client_v1::PickupIntent& intent) {
   const auto state = session(session_id);
@@ -988,6 +1425,11 @@ void ClientV1GameGatewayService::handle_pickup_intent(
   post_canonical_command(decode_client_v1_pickup_command(session_id, intent));
 }
 
+/**
+ * @brief 处理使用物品意图
+ * @param session_id 会话 ID
+ * @param intent 使用物品意图
+ */
 void ClientV1GameGatewayService::handle_use_item_intent(
     std::uint64_t session_id, const client_v1::UseItemIntent& intent) {
   const auto state = session(session_id);
@@ -998,6 +1440,11 @@ void ClientV1GameGatewayService::handle_use_item_intent(
   post_canonical_command(decode_client_v1_use_item_command(session_id, intent));
 }
 
+/**
+ * @brief 处理装备请求
+ * @param session_id 会话 ID
+ * @param request 装备请求
+ */
 void ClientV1GameGatewayService::handle_equip_item_request(
     std::uint64_t session_id, const client_v1::EquipItemRequest& request) {
   const auto state = session(session_id);
@@ -1008,6 +1455,11 @@ void ClientV1GameGatewayService::handle_equip_item_request(
   post_canonical_command(decode_client_v1_equip_item_command(session_id, request));
 }
 
+/**
+ * @brief 处理卸下装备请求
+ * @param session_id 会话 ID
+ * @param request 卸下装备请求
+ */
 void ClientV1GameGatewayService::handle_unequip_item_request(
     std::uint64_t session_id, const client_v1::UnequipItemRequest& request) {
   const auto state = session(session_id);
@@ -1018,6 +1470,11 @@ void ClientV1GameGatewayService::handle_unequip_item_request(
   post_canonical_command(decode_client_v1_unequip_item_command(session_id, request));
 }
 
+/**
+ * @brief 处理丢弃物品请求
+ * @param session_id 会话 ID
+ * @param request 丢弃物品请求
+ */
 void ClientV1GameGatewayService::handle_drop_item_request(
     std::uint64_t session_id, const client_v1::DropItemRequest& request) {
   const auto state = session(session_id);
@@ -1028,6 +1485,11 @@ void ClientV1GameGatewayService::handle_drop_item_request(
   post_canonical_command(decode_client_v1_drop_item_command(session_id, request));
 }
 
+/**
+ * @brief 处理丢弃金币请求
+ * @param session_id 会话 ID
+ * @param request 丢弃金币请求(amount <= 0 时忽略)
+ */
 void ClientV1GameGatewayService::handle_drop_gold_request(
     std::uint64_t session_id, const client_v1::DropGoldRequest& request) {
   const auto state = session(session_id);
@@ -1038,6 +1500,11 @@ void ClientV1GameGatewayService::handle_drop_gold_request(
   post_canonical_command(decode_client_v1_drop_gold_command(session_id, request));
 }
 
+/**
+ * @brief 处理复活请求
+ * @param session_id 会话 ID
+ * @param request 复活请求(未使用)
+ */
 void ClientV1GameGatewayService::handle_revive_request(
     std::uint64_t session_id, const client_v1::ReviveRequest& /*request*/) {
   const auto state = session(session_id);
@@ -1048,6 +1515,14 @@ void ClientV1GameGatewayService::handle_revive_request(
   post_canonical_command(decode_client_v1_revive_command(session_id));
 }
 
+/**
+ * @brief 处理魔法快捷键变更请求
+ * @param session_id 会话 ID
+ * @param request 魔法快捷键变更请求
+ *
+ * @details 更新魔法快捷键设置，如果新键位已被其他魔法占用则清除冲突魔法，
+ *          更新角色记录中的魔法数据，发送更新后的魔法列表给客户端。
+ */
 void ClientV1GameGatewayService::handle_magic_key_change_request(
     std::uint64_t session_id, const client_v1::MagicKeyChangeRequest& request) {
   const auto state = session(session_id);
@@ -1085,6 +1560,14 @@ void ClientV1GameGatewayService::handle_magic_key_change_request(
   send_message(session_id, std::move(list));
 }
 
+/**
+ * @brief 处理商人购买请求
+ * @param session_id 会话 ID
+ * @param request 购买请求
+ *
+ * @details 确定商人 ID(优先使用请求中的，失败时使用缓存的当前商人 ID)，
+ *          更新当前商人 ID，发送购买命令到 WorldService。
+ */
 void ClientV1GameGatewayService::handle_merchant_buy_request(
     std::uint64_t session_id, const client_v1::MerchantBuyRequest& request) {
   const auto state = session(session_id);
@@ -1109,6 +1592,13 @@ void ClientV1GameGatewayService::handle_merchant_buy_request(
                                                                request));
 }
 
+/**
+ * @brief 处理商人出售请求
+ * @param session_id 会话 ID
+ * @param request 出售请求
+ *
+ * @details 缓存待出售物品的 make_index 和名称，用于后续价格查询结果匹配。
+ */
 void ClientV1GameGatewayService::handle_merchant_sell_request(
     std::uint64_t session_id, const client_v1::MerchantSellRequest& request) {
   const auto state = session(session_id);
@@ -1135,6 +1625,11 @@ void ClientV1GameGatewayService::handle_merchant_sell_request(
                                                                 request));
 }
 
+/**
+ * @brief 处理商人出售价格查询请求
+ * @param session_id 会话 ID
+ * @param request 价格查询请求
+ */
 void ClientV1GameGatewayService::handle_merchant_sell_price_request(
     std::uint64_t session_id, const client_v1::MerchantSellPriceRequest& request) {
   const auto state = session(session_id);
@@ -1152,6 +1647,13 @@ void ClientV1GameGatewayService::handle_merchant_sell_price_request(
                                                                       request));
 }
 
+/**
+ * @brief 处理商人修理价格查询请求
+ * @param session_id 会话 ID
+ * @param request 修理价格查询请求
+ *
+ * @details 缓存待修理物品的 make_index 和名称，用于后续价格查询结果匹配。
+ */
 void ClientV1GameGatewayService::handle_merchant_repair_price_request(
     std::uint64_t session_id, const client_v1::MerchantRepairPriceRequest& request) {
   const auto state = session(session_id);
@@ -1178,6 +1680,13 @@ void ClientV1GameGatewayService::handle_merchant_repair_price_request(
       session_id, merchant_id, request));
 }
 
+/**
+ * @brief 处理商人修理请求
+ * @param session_id 会话 ID
+ * @param request 修理请求
+ *
+ * @details 缓存待修理物品信息，然后发送修理命令到 WorldService。
+ */
 void ClientV1GameGatewayService::handle_merchant_repair_request(
     std::uint64_t session_id, const client_v1::MerchantRepairRequest& request) {
   const auto state = session(session_id);
@@ -1204,6 +1713,11 @@ void ClientV1GameGatewayService::handle_merchant_repair_request(
                                                                   request));
 }
 
+/**
+ * @brief 处理仓库存入请求
+ * @param session_id 会话 ID
+ * @param request 存入请求
+ */
 void ClientV1GameGatewayService::handle_storage_deposit_request(
     std::uint64_t session_id, const client_v1::StorageDepositRequest& request) {
   const auto state = session(session_id);
@@ -1228,6 +1742,11 @@ void ClientV1GameGatewayService::handle_storage_deposit_request(
                                                                   request));
 }
 
+/**
+ * @brief 处理仓库取回请求
+ * @param session_id 会话 ID
+ * @param request 取回请求
+ */
 void ClientV1GameGatewayService::handle_storage_withdraw_request(
     std::uint64_t session_id, const client_v1::StorageWithdrawRequest& request) {
   const auto state = session(session_id);
@@ -2138,6 +2657,13 @@ void ClientV1GameGatewayService::handle_ping(std::uint64_t session_id,
   send_message(session_id, client_v1::Pong{ping.client_time_ms, static_cast<std::uint64_t>(now)});
 }
 
+/**
+ * @brief 发布规范化遗留命令到 WorldService
+ * @param command 规范化遗留命令
+ * @param assign_session_sequence 是否自动分配会话序列号(默认 true)
+ *
+ * @details 将 CanonicalLegacyCommand 转换为 LogicCommand 后发送。
+ */
 void ClientV1GameGatewayService::post_canonical_command(CanonicalLegacyCommand command,
                                                         bool assign_session_sequence) {
   auto logic = to_logic_command(command);
@@ -2145,6 +2671,14 @@ void ClientV1GameGatewayService::post_canonical_command(CanonicalLegacyCommand c
   post_logic_command(std::move(logic), assign_session_sequence);
 }
 
+/**
+ * @brief 发布逻辑命令到 WorldService
+ * @param command 逻辑命令
+ * @param assign_session_sequence 是否自动分配会话序列号(默认 true)
+ *
+ * @details 如果 assign_session_sequence 为 true，自动为命令分配递增的会话序列号，
+ *          用于消息排序和防重放。序列号从会话状态的 next_session_seq 获取并自增。
+ */
 void ClientV1GameGatewayService::post_logic_command(LogicCommand command,
                                                     bool assign_session_sequence) {
   if (command.gateway.empty()) {
@@ -2159,6 +2693,12 @@ void ClientV1GameGatewayService::post_logic_command(LogicCommand command,
   context().bus->post("world_service", std::move(command));
 }
 
+/**
+ * @brief 消息总线循环线程
+ *
+ * @details 持续从消息总线端点获取 SessionEvent 并处理。
+ *          使用 100ms 超时避免忙等待，ep 为空时退出循环。
+ */
 void ClientV1GameGatewayService::bus_loop() {
   while (bus_running_.load(std::memory_order_relaxed)) {
     if (endpoint_ == nullptr) {
@@ -2175,6 +2715,18 @@ void ClientV1GameGatewayService::bus_loop() {
   }
 }
 
+/**
+ * @brief 处理来自 WorldService 的会话事件
+ *
+ * @details 主要处理两种事件类型：
+ *          1. send_packet: 将遗留协议包转换为 Client v1 帧并发送(可带延迟)
+ *          2. send_packet_and_close: 转换并发送帧后断开连接
+ *          3. force_disconnect: 直接断开连接
+ *
+ *          通过 translate_legacy_packet() 完成协议转换。
+ *
+ * @param event 会话事件
+ */
 void ClientV1GameGatewayService::handle_session_event(const SessionEvent& event) {
   if (!event.gateway.empty() && event.gateway != name()) {
     return;
@@ -2200,6 +2752,16 @@ void ClientV1GameGatewayService::handle_session_event(const SessionEvent& event)
   }
 }
 
+/**
+ * @brief 翻译遗留协议包为 Client v1 帧
+ * @param session_id 会话 ID
+ * @param packet 遗留协议包
+ * @param frames 输出参数，转换后的 Client v1 帧列表
+ *
+ * @details 先转换为消息列表，然后根据 LegacyBundleMeta 打包成帧。
+ *          每个帧包含束 ID、消息索引、总消息数、原始 SM 标识和束模式。
+ *          束模式(actor_queue/immediate)决定客户端如何播放这些帧。
+ */
 void ClientV1GameGatewayService::translate_legacy_packet(
     std::uint64_t session_id, const LegacyPacket& packet,
     std::vector<client_v1::Frame>& frames) {
@@ -2214,6 +2776,7 @@ void ClientV1GameGatewayService::translate_legacy_packet(
     decoded = decode_legacy_game_packet(packet);
   }
   if (!decoded.has_value()) {
+    // 无法解码时直接发送消息，不附加束元数据
     for (const auto& message : messages) {
       frames.push_back(client_v1::encode_any(message, 0));
     }
@@ -2239,6 +2802,43 @@ void ClientV1GameGatewayService::translate_legacy_packet(
   }
 }
 
+/**
+ * @brief 翻译遗留协议包为 Client v1 消息列表(核心协议转换函数)
+ * @param session_id 会话 ID
+ * @param packet 遗留协议包
+ * @param messages 输出参数，转换后的 Client v1 消息列表
+ *
+ * @details 这是系统中协议转换最核心的函数，包含约 80+ 种 kSm* 消息类型的
+ *          switch 分支。每个分支负责将遗留服务器帧的各字段(ident, recog,
+ *          param, tag, series, body)映射到对应的 client_v1::Message 子类型。
+ *
+ *          协议转换流程：
+ *          1. 解码遗留游戏包，获取消息体各字段
+ *          2. 根据消息标识(ident)进入对应的 switch 分支
+ *          3. 在每个分支中从 body 解码具体数据(物品、魔法、能力等)
+ *          4. 更新会话状态的缓存数据(位置、背包、装备、金币、魔法等)
+ *          5. 构造对应的 Client v1 消息加入输出列表
+ *
+ *          主要消息类别：
+ *          - 世界状态：kSmClearObjects, kSmChangeMap, kSmNewMap, kSmMapDescription
+ *          - 角色登录/出生：kSmLogon, kSmAlive
+ *          - 角色动作：kSmTurn/Walk/Run/Hit/Spell/Struck/Death
+ *          - 物品系统：kSmBagItems, kSmSendUseItems, kSmAddItem/DelItem/UpdateItem
+ *          - 装备耐久：kSmDuraChange
+ *          - NPC 对话：kSmMerchantSay, kSmMerchantDlgClose
+ *          - 商人系统：kSmSendGoodsList, kSmSendBuyPrice, kSmSendUserRepair
+ *          - 交易系统：kSmDealMenu, kSmDealCancel/Success, kSmDealTryFail
+ *          - 仓库系统：kSmSendUserStorageItem, kSmSaveItemList
+ *          - UI 属性：kSmAbility, kSmHealthSpellChanged, kSmLevelUp, kSmWinExp
+ *          - 聊天消息：kSmHear, kSmSysMessage, kSmWhisper, kSmCry
+ *          - 魔法系统：kSmSendMyMagic, kSmAddMagic, kSmDelMagic, kSmMagicLvExp
+ *          - 身份更新：kSmUsername, kSmFeatureChanged, kSmCharStatusChanged
+ *          - 地面物品：kSmItemShow, kSmItemHide
+ *
+ *          @note 交易系统的完成/取消检测依赖于对 kSmHear 文本消息的匹配，
+ *                当检测到 "Trade cancelled." 或 "Trade completed." 文本时，
+ *                自动清除交易状态。
+ */
 void ClientV1GameGatewayService::translate_legacy_packet_messages(
     std::uint64_t session_id, const LegacyPacket& packet,
     std::vector<client_v1::Message>& messages) {
@@ -2522,9 +3122,13 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
       break;
     }
     case kSmShowEvent:
+      {
+        const auto event = decode_short_message_prefix(decoded->body);
       messages.push_back(client_v1::ActorUpsert{
-          make_actor(actor_id, {}, decoded->message.param, decoded->message.tag, 0,
-                     static_cast<std::int32_t>(decoded->message.series), 0)});
+          make_actor(actor_id, {}, decoded->message.tag, decoded->message.series, 0,
+                     static_cast<std::int32_t>(decoded->message.param),
+                     event.has_value() ? static_cast<std::int32_t>(event->ident) : 0)});
+      }
       break;
     case kSmDisappear:
     case kSmHideEvent:
@@ -3337,6 +3941,11 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
   }
 }
 
+/**
+ * @brief 根据地图 ID 查找地图配置
+ * @param map_id 地图 ID
+ * @return 地图配置，未找到时返回 nullopt
+ */
 std::optional<MapConfig> ClientV1GameGatewayService::find_map(std::string_view map_id) const {
   for (const auto& map : context().config.maps) {
     if (map.id == map_id) {
@@ -3346,6 +3955,13 @@ std::optional<MapConfig> ClientV1GameGatewayService::find_map(std::string_view m
   return std::nullopt;
 }
 
+/**
+ * @brief 获取会话状态(线程安全)
+ * @param session_id 会话 ID
+ * @return 会话状态的副本，会话不存在时返回 nullopt
+ *
+ * @details 通过互斥锁保护，返回会话状态的深拷贝以避免悬空引用。
+ */
 std::optional<ClientV1GameGatewayService::SessionState> ClientV1GameGatewayService::session(
     std::uint64_t session_id) const {
   std::scoped_lock lock(mutex_);

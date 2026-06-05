@@ -1,6 +1,45 @@
+/**
+ * @file map_actor_mail.hpp
+ * @brief MapActor 的 ActorMail 消息分发处理实现细节
+ * @details 该文件是 map_actor.cpp 的实现细节部分，包含核心的 handle_mail 函数。
+ *          handle_mail 是 MapActor 的消息处理中枢，负责分发和处理所有类型的 ActorMail，
+ *          涵盖以下主要功能领域：
+ *          - 玩家/怪物/NPC 的生成与销毁
+ *          - 跨地图传输与同步
+ *          - NPC 交互（购买、出售、修理、存储、武器升级）
+ *          - 交易系统（发起、取消、添加/移除物品、设置金币、接受）
+ *          - 物品操作（丢弃、拾取、穿戴、卸下、使用）
+ *          - 战斗系统（攻击、施法）
+ *          - 行会与城堡管理
+ *          - 聊天消息分发
+ *          - 状态效果（中毒、透明、治疗、护盾）
+ *
+ *          文件通过一个巨大的 switch 语句分发消息，每个 case 对应一种
+ *          ActorMailKind 枚举值。整个系统采用 Actor 模型，消息在不同地图
+ *          实例之间通过 cross_map_mails 队列传递。
+ *
+ *          后续新增的 case 包括：法术系统（含 30+ 种传统魔法和现代 MagicConfig
+ *          系统）、复活系统、离线行会管理（批准/踢出/转让/称号）、聊天处理与
+ *          投递、技能等级经验同步、延迟法术效果（中毒/隐身/治疗/护盾等），
+ *          以及默认分支中的移动处理（行走/奔跑/转向）。
+ */
+
 #pragma once
 
-// Implementation detail for map_actor.cpp: ActorMail dispatch member.
+/**
+ * @brief MapActor 的消息分发处理函数
+ * @param mail 待处理的 ActorMail 消息
+ * @param dispatch 运行时调度输出（包含审计事件、持久化请求、跨地图邮件等）
+ * @param current_tick 当前逻辑 tick
+ * @param now_ms 当前系统时间（毫秒）
+ * @param from_legacy_operate 是否来自遗留操作队列
+ * @details 这是 MapActor 最核心的函数，通过 switch 语句分发 50+ 种消息类型。
+ *          非遗留操作且是玩家命令的消息会被加入遗留命令队列延迟处理。
+ *          内部定义了三个辅助 lambda：
+ *          - reject_trade_locked_item_change: 交易中禁止物品变更
+ *          - reject_npc_modal_item_change: NPC 模态对话框中禁止物品变更
+ *          - npc_mode_allows: 检查 NPC 模态模式是否匹配
+ */
 void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                            std::uint64_t current_tick, std::uint64_t now_ms,
                            bool from_legacy_operate) {
@@ -37,9 +76,15 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
   }
 
   switch (mail.kind) {
+    /**
+     * @name 对象生成（Spawn）
+     * @brief 处理玩家、怪物、NPC 的生成
+     */
+    /**@{*/
     case ActorMailKind::spawn_player:
     case ActorMailKind::spawn_monster:
     case ActorMailKind::spawn_npc: {
+      // 非群体的怪物生成需要保存模板，用于后续重生
       if (mail.kind == ActorMailKind::spawn_monster && !mail.legacy_spawn_group) {
         monster_spawn_templates_[mail.actor_id] = MonsterSpawnTemplate{mail};
       }
@@ -51,6 +96,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             monster->set_hp_mp(mail.current_hp > 0 ? mail.current_hp : monster->hp(),
                                mail.current_mp >= 0 ? mail.current_mp : monster->mp());
           }
+          // 随机化 AI 定时器初始偏移，避免怪物行为同步
           const auto walk_offset =
               legacy_random_ != nullptr ? static_cast<std::uint64_t>(legacy_random_->random(3000))
                                         : 0ULL;
@@ -66,6 +112,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           }
         }
       }
+      // 将对象添加到地图的移动对象层
       if (!environment_.add_moving_object(object->x(), object->y(), object->id(), now_ms,
                                           moving_state_for(*object))) {
         if (mail.kind == ActorMailKind::spawn_monster && !mail.legacy_spawn_group) {
@@ -86,6 +133,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           restore_saved_slaves(*player, dispatch, current_tick, now_ms);
         }
       } else if (mail.kind == ActorMailKind::spawn_monster) {
+        if (auto* monster = as_monster(objects_.at(mail.actor_id).get());
+            monster != nullptr &&
+            legacy_monster_race_behavior(monster->race_server()) ==
+                LegacyMonsterRaceBehavior::structure) {
+          set_castle_door_wall_state(monster->x(), monster->y(), false);
+        }
         if (mail.master_actor_id != 0 && mail.monster_is_slave) {
           if (auto* master = find_player(mail.master_actor_id); master != nullptr) {
             master->add_slave_actor_id(mail.actor_id);
@@ -95,17 +148,32 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 系统通知（System Notice）
+     * @brief 向玩家发送系统消息
+     */
+    /**@{*/
     case ActorMailKind::system_notice: {
       if (auto* player = find_player(mail.actor_id); player != nullptr && !mail.payload.empty()) {
         queue_system_notice(dispatch, *player, mail.payload);
       } else if (player == nullptr && mail.retry_count < kCrossMapSyncRetryLimit &&
                  !mail.payload.empty()) {
+        // 玩家不在当前地图时重试（跨地图场景）
         auto retry_mail = mail;
         ++retry_mail.retry_count;
         delayed_mail_wheel_.schedule(current_tick, 1, std::move(retry_mail));
       }
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 行会成员同步（Guild Membership Sync）
+     * @brief 处理行会成员信息的跨地图同步
+     */
+    /**@{*/
     case ActorMailKind::guild_membership_sync: {
       if (auto* player = find_player(mail.actor_id); player != nullptr) {
         if (mail.character.guild_name.empty()) {
@@ -122,10 +190,18 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         ++retry_mail.retry_count;
         delayed_mail_wheel_.schedule(current_tick, 1, std::move(retry_mail));
       } else if (player == nullptr && !mail.character.account_id.empty()) {
+        // 玩家离线时直接保存角色数据
         queue_save_character(dispatch, mail.character);
       }
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 队伍成员同步（Group Membership Sync）
+     * @brief 处理队伍成员信息的跨地图同步
+     */
+    /**@{*/
     case ActorMailKind::group_membership_sync: {
       if (auto* player = find_player(mail.actor_id); player != nullptr) {
         player->set_legacy_group_id(mail.legacy_group_id);
@@ -136,9 +212,22 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 对象销毁（Despawn / Transfer）
+     * @brief 处理对象从地图中移除和跨地图传输
+     */
+    /**@{*/
     case ActorMailKind::despawn: {
       auto it = objects_.find(mail.actor_id);
       if (it != objects_.end()) {
+        if (const auto* monster = as_monster(it->second.get());
+            monster != nullptr &&
+            legacy_monster_race_behavior(monster->race_server()) ==
+                LegacyMonsterRaceBehavior::structure) {
+          clear_castle_door_wall_state(monster->x(), monster->y());
+        }
         if (auto* player = as_player(it->second.get()); player != nullptr) {
           cancel_trade_for(mail.actor_id, dispatch, true);
           PersistRequest request;
@@ -167,9 +256,17 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         remove_actor_from_visibility(mail.actor_id, dispatch);
         objects_.erase(it);
       }
+      // 将消息转发到目标地图
       dispatch.cross_map_mails.push_back(mail);
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 信息查询（Query）
+     * @brief 处理各种信息查询请求
+     */
+    /**@{*/
     case ActorMailKind::query_username: {
       auto requester_it = objects_.find(mail.actor_id);
       auto target_it = objects_.find(mail.target_actor_id);
@@ -182,6 +279,13 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       break;
     }
+    /**@}*/
+
+    /**
+     * @name NPC 交互（NPC Interaction）
+     * @brief 处理点击 NPC、NPC 对话选择、购买、出售、修理、存储等操作
+     */
+    /**@{*/
     case ActorMailKind::click_npc: {
       auto requester_it = objects_.find(mail.actor_id);
       auto target_it = objects_.find(mail.target_actor_id);
@@ -198,6 +302,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (trade_session_for(requester->id()) != nullptr) {
         break;
       }
+      // 优先执行 NPC 脚本，脚本未处理则根据 NPC 功能类型打开对应界面
       if (legacy_execute_npc_script(*requester, *merchant, "@main", dispatch, current_tick,
                                     now_ms)) {
         break;
@@ -230,6 +335,20 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       break;
     }
+    /**@}*/
+
+    /**
+     * @brief 处理 NPC 对话选择事件
+     * @details 这是 handle_mail 中最复杂的分支之一。处理以下业务：
+     *          - 行会相关：创建、浏览、加入、批准、拒绝、踢出、转让头衔、离开、战争
+     *          - 城堡相关：认领、查看、战争
+     *          - 常规 NPC 功能：购买、出售、修理（普通/特殊）、武器升级、存取仓库
+     *          - 执行 NPC 脚本
+     *
+     *          行会/城堡操作通过 merchant_select 对话框的 payload 指令分发，
+     *          每个操作有对应的 dialog 前缀（如 @guild_menu、@castle_menu 等）。
+     *          操作执行后通过 build_guild_action_result_dialog_text 返回结果。
+     */
     case ActorMailKind::merchant_select: {
       auto requester_it = objects_.find(mail.actor_id);
       auto target_it = objects_.find(mail.target_actor_id);
@@ -255,6 +374,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (script_handled && !uses_existing_business) {
         break;
       }
+
+      // === 行会菜单 ===
       if (mail.payload == "@guild_menu" && merchant->supports_guild()) {
         queue_packet(dispatch, requester->session_id(),
                      make_merchant_say_packet(
@@ -559,6 +680,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                 item_configs_)));
         break;
       }
+      // === 行会操作执行 ===
       if ((lowered_payload == "@guild_approve_exec" ||
            util::starts_with(lowered_payload, "@guild_approve_exec ")) &&
           merchant->supports_guild()) {
@@ -723,6 +845,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                              item_configs_)));
         break;
       }
+      // === 城堡菜单 ===
       if (mail.payload == "@castle_menu" && merchant->supports_castle()) {
         queue_packet(dispatch, requester->session_id(),
                      make_merchant_say_packet(
@@ -840,6 +963,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
+      // 处理行会/城堡管理命令
       if (handle_guild_castle_business_command(*requester, objects_, mail.payload,
                                                guild_castle_snapshot_, dispatch)) {
         castle_dialog_context_ = guild_castle_snapshot_.castle_dialog;
@@ -851,6 +975,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
+      // 非行会/城堡的常规 NPC 对话响应
       if (!script_handled) {
         if (const auto* dialog = find_npc_dialog_text(*merchant, mail.payload); dialog != nullptr) {
           queue_packet(dispatch, requester->session_id(),
@@ -873,6 +998,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
       }
 
+      // 常规 NPC 功能入口
       if (lowered_payload == "@buy" && merchant->supports_buy()) {
         requester->set_legacy_npc_item_mode(LegacyNpcItemMode::buy, target_it->second->id());
         queue_packet(dispatch, requester->session_id(),
@@ -916,12 +1042,33 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 物品查询（Bag / Storage / Detail / Repair / Sell）
+     * @brief 处理各种物品相关的查询请求
+     */
+    /**@{*/
     case ActorMailKind::query_bag_items: {
       auto* requester = find_player(mail.actor_id);
       if (requester != nullptr) {
         requester->refresh_derived_state(item_configs_);
         queue_packet(dispatch, requester->session_id(),
                      make_bag_items_packet(requester->session_id(), *requester, item_configs_));
+      }
+      break;
+    }
+    case ActorMailKind::open_door: {
+      auto* player = find_player(mail.actor_id);
+      if (player == nullptr || player->is_dead()) {
+        break;
+      }
+      if (std::abs(player->x() - mail.x) > 1 || std::abs(player->y() - mail.y) > 1) {
+        break;
+      }
+      const auto opened = environment_.open_door_at(mail.x, mail.y, now_ms);
+      if (!opened.empty()) {
+        broadcast_open_doors(opened, dispatch);
       }
       break;
     }
@@ -1013,6 +1160,13 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                    make_send_buy_price_packet(requester->session_id(), price));
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 物品操作（Drop / Gold / Repair / Sell / Buy）
+     * @brief 处理物品丢弃、金币丢弃、修理、出售、购买
+     */
+    /**@{*/
     case ActorMailKind::drop_item: {
       auto* player = find_player(mail.actor_id);
       if (player == nullptr || player->is_dead()) {
@@ -1051,6 +1205,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       auto dropped_item = *bag_item;
       if (const auto* config = find_item_config(item_configs_, bag_item->index); config != nullptr) {
+        // std_mode 51 是任务物品，不可丢弃
         if (config->std_mode == 51) {
           add_legacy_trace(dispatch, "LegacyItem", "stdmode51_reject", mail, current_tick,
                            now_ms, false, mail.item_make_index, 0, "drop_item");
@@ -1059,6 +1214,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                mail.payload));
           break;
         }
+        // std_mode 40 的蜡烛类物品丢弃时扣除 2000 耐久
         if (config->std_mode == 40) {
           dropped_item.dura =
               clamp_dura_value(static_cast<std::int32_t>(dropped_item.dura) - 2000);
@@ -1097,6 +1253,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       const auto removed =
           player->remove_bag_item(mail.item_make_index, mail.payload, item_configs_);
       if (!removed.has_value()) {
+        // 回滚：从地图上移除已添加的地面物品
         add_legacy_trace(dispatch, "LegacyItem", "state_rollback", mail, current_tick, now_ms,
                          false, 0, 0, "drop_item");
         static_cast<void>(environment_.delete_from_map(
@@ -1168,9 +1325,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
+      // 如果与现有金币堆重叠则合并
       if (add_result.merged) {
         auto existing = ground_items_.find(add_result.object_id);
         if (existing == ground_items_.end()) {
+          // 如果现有金币堆状态丢失则从 zero 重建
           GroundItem recovered_item = ground_item;
           recovered_item.id = add_result.object_id;
           recovered_item.gold_amount = add_result.merged_gold_amount;
@@ -1197,6 +1356,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         existing->second.count = existing->second.gold_amount;
         existing->second.looks = gold_looks(existing->second.gold_amount);
         existing->second.expire_time_ms = now_ms + kLegacyGroundItemExpireMs;
+        // 不同所有者合并时不保留所有权
         if (!same_owner) {
           existing->second.owner_actor_id = 0;
           existing->second.ownership_expire_ms = 0;
@@ -1261,6 +1421,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       requester->spend_gold(cost);
+      // 普通修理模式下，每次修理会缩减最大耐久（耐久上限的 1/30）
       if (repair_mode == LegacyRepairMode::normal) {
         const auto dura_gap =
             static_cast<std::int32_t>(item->dura_max) - static_cast<std::int32_t>(item->dura);
@@ -1324,6 +1485,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
       requester->add_gold(price);
+      // 出售的物品加入 NPC 商品列表供其他玩家购买
       add_merchant_goods(*merchant, *item, item_configs_);
       requester->refresh_derived_state(item_configs_);
       queue_packet(dispatch, requester->session_id(),
@@ -1386,6 +1548,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       requester->spend_gold(price);
       if (!requester->add_bag_item(*removed_item)) {
+        // 背包满时回滚：退还金币，物品放回商家
         requester->add_gold(price);
         auto& goods = merchant->merchant_items_mutable();
         const auto insert_at = std::min(*merchant_item_index, goods.size());
@@ -1406,6 +1569,16 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       dispatch.persist_requests.push_back(make_save_merchant_state_request(*merchant));
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 交易系统（Trade）
+     * @brief 处理玩家间的交易操作
+     * @details 交易系统使用 TradeSession 管理交易状态。
+     *          双方通过 trade_try 发起，之后可以添加/移除物品、设置金币、
+     *          接受交易。当双方都接受且稳定期（1秒）后执行 commit_trade 完成交易。
+     */
+    /**@{*/
     case ActorMailKind::trade_try: {
       auto* requester = find_player(mail.actor_id);
       Player* target = nullptr;
@@ -1429,6 +1602,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
         break;
       }
+      // 双方须面对面，且无进行中的交易
       if (!mutually_facing(*requester, *target) ||
           trade_session_for(requester->id()) != nullptr ||
           trade_session_for(target->id()) != nullptr) {
@@ -1630,6 +1804,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (offer == nullptr || peer_offer == nullptr) {
         break;
       }
+      // 1 秒稳定期：最后变更时间后需要等待 1 秒才能接受交易
       constexpr std::uint64_t kLegacyTradeStableMs = 1000;
       const auto offer_stable = offer->last_change_time_ms == 0 ||
                                 now_ms >= offer->last_change_time_ms + kLegacyTradeStableMs;
@@ -1647,6 +1822,13 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 仓库操作（Storage）
+     * @brief 处理 NPC 仓库的存取操作
+     */
+    /**@{*/
     case ActorMailKind::storage_item: {
       auto requester_it = objects_.find(mail.actor_id);
       auto target_it = objects_.find(mail.target_actor_id);
@@ -1832,6 +2014,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
 
       add_legacy_trace(dispatch, "LegacyItem", "validate", mail, current_tick, now_ms, true, 0, 0,
                        "pickup_item");
+      if (!environment_.can_get_item(player->x(), player->y(), player->id(), true)) {
+        add_legacy_trace(dispatch, "LegacyItem", "tile_reject", mail, current_tick, now_ms,
+                         false, 0, 0, "pickup_item");
+        break;
+      }
       auto ground_it = ground_items_.end();
       while (true) {
         const auto first_item_id = environment_.first_item_object_id(player->x(), player->y());
@@ -2439,7 +2626,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         player->refresh_derived_state(item_configs_);
         const auto character_after_use = player->character();
         if (!try_item_map_move(*player, target_map, target_x, target_y, dispatch, current_tick,
-                               now_ms)) {
+                               now_ms, true)) {
           add_legacy_trace(dispatch, "LegacyItem", "scroll_transfer_reject", mail,
                            current_tick, now_ms, false, target_item.index, 0, kind);
           if (auto* rollback_player = find_player(actor_id); rollback_player != nullptr) {
@@ -2523,6 +2710,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       cancel_trade_for(attacker->id(), dispatch, true);
 
+      // 解析攻击标识符和剑术技能
       ActorMail effective_mail = mail;
       auto effective_ident = mail.game_message.ident;
       auto sword_magic_id = legacy_sword_skill_for_attack_ident(effective_ident);
@@ -2535,6 +2723,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                legacy_p14_sword_skill(7) &&
                attacker->learned_magic(7) != nullptr;
       };
+      // 处理预准备的剑术技能（如烈火、刺杀等需要预先施法激活）
       const auto pending_magic_id = attacker->pending_legacy_sword_skill(current_tick);
       const auto pending_ident = legacy_attack_ident_for_sword_skill(pending_magic_id);
       if (pending_magic_id == 26 &&
@@ -2555,6 +2744,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       effective_mail.game_message.ident = effective_ident;
 
+      // 验证剑术技能状态
       if (sword_magic_id != 0) {
         const auto magic_it = magic_configs_.find(sword_magic_id);
         auto* user_magic = attacker->learned_magic_mutable(sword_magic_id);
@@ -2619,6 +2809,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       const auto attack_range = resolve_attack_range(effective_ident);
       GameObject* target = nullptr;
       std::vector<GameObject*> direct_attack_targets;
+      // 根据攻击类型选择目标
       if (effective_ident == kCmLongHit) {
         const auto [dx, dy] = direction_delta(actor_dir(*attacker));
         if (auto* long_target = find_attack_target_by_position(
@@ -2665,12 +2856,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             std::remove(direct_attack_targets.begin(), direct_attack_targets.end(), target),
             direct_attack_targets.end());
       }
+      // 如果准备了剑术但没有目标，降级为普通攻击
       if (target == nullptr && prepared_sword_magic_id != 0) {
         effective_ident = kCmHit;
         effective_mail.game_message.ident = effective_ident;
         sword_magic_id = attacker->learned_magic(3) != nullptr ? 3 : 0;
         prepared_sword_magic_id = 0;
       }
+      // PK 阻挡检查：玩家攻击和奴隶攻击
       if (auto* player_target = as_player(target); player_target != nullptr) {
         const auto block_reason = resolve_pk_block_reason(config_, *attacker, *player_target, now_ms);
         if (!block_reason.empty()) {
@@ -2703,6 +2896,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
       }
 
+      // 消耗预准备的剑术技能
       if (prepared_sword_magic_id != 0) {
         const auto consumed = attacker->consume_legacy_sword_skill(current_tick);
         if (consumed != prepared_sword_magic_id) {
@@ -2719,6 +2913,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       add_legacy_trace(dispatch, "LegacyCombat", "ack", effective_mail, current_tick, now_ms, true, 0, 0,
                        "attack");
 
+      // 广播攻击动画
       for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
         if (watcher.id() != attacker->id() && !is_legacy_visible_to(watcher, *attacker)) {
           return;
@@ -2729,6 +2924,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       add_legacy_trace(dispatch, "LegacyCombat", "attack_broadcast", effective_mail, current_tick, now_ms,
                        true, 0, 0, "SM_HIT");
 
+      // 攻杀剑术蓄力进度处理
       auto advance_power_hit_proc = [&]() {
         if (!has_power_hit_magic()) {
           return;
@@ -2772,6 +2968,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       static_cast<void>(apply_pending_weapon_upgrade_result(*attacker, dispatch,
                                                             current_tick, now_ms));
 
+      // 伤害计算
       const auto attack_roll_ident =
           sword_magic_id == 4 || sword_magic_id == 7 || sword_magic_id == 12 ||
                   sword_magic_id == 25 || sword_magic_id == 26 || sword_magic_id == 34
@@ -2781,6 +2978,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           roll_legacy_player_attack_power(*attacker, *target, attack_roll_ident, dispatch,
                                           "LegacyCombat", "attack", current_tick, now_ms);
       auto direct_attack_power = attack_power;
+
+      // 攻杀剑术伤害加成
       if (sword_magic_id == 7 && power_hit_active) {
         const auto* power_magic = attacker->learned_magic(7);
         const auto power_level =
@@ -2791,6 +2990,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                          current_tick, now_ms, true, power_bonus, attack_power,
                          "HitPowerPlus");
       }
+      // 刺杀剑术伤害递减
       if (sword_magic_id == 12) {
         const auto* long_magic = attacker->learned_magic(12);
         const auto long_level =
@@ -2809,6 +3009,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           attack_power = direct_attack_power;
         }
       }
+      // 半月弯刀伤害衰减
       if (sword_magic_id == 25) {
         const auto* wide_magic = attacker->learned_magic(25);
         const auto wide_level =
@@ -2828,6 +3029,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
       }
       auto cross_attack_power = 0;
+      // 横扫千军伤害计算
       if (sword_magic_id == 34) {
         const auto* cross_magic = attacker->learned_magic(34);
         const auto cross_level =
@@ -2843,11 +3045,13 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         direct_attack_power = cross_attack_power;
         if (direct_only_primary) {
           attack_power = cross_attack_power;
+          // 横扫对玩家的伤害降低 20%
           if (as_player(target) != nullptr) {
             attack_power = delphi_round(static_cast<double>(attack_power) * 0.8);
           }
         }
       }
+      // 烈火剑法伤害加成
       if (sword_magic_id == 26) {
         const auto* fire_magic = attacker->learned_magic(26);
         const auto fire_level = fire_magic != nullptr ? static_cast<std::int32_t>(fire_magic->level) : 0;
@@ -2860,6 +3064,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                          current_tick, now_ms, true, fire_bonus, attack_power, "HitDouble");
       }
       bool monster_damaged = false;
+      // 辅助目标伤害应用 lambda
       auto apply_direct_attack_target = [&](GameObject& direct_target,
                                             std::int32_t direct_damage,
                                             std::string_view miss_label) {
@@ -2890,6 +3095,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
           }
         }
+        // 命中判定（准确 vs 敏捷）
         const auto direct_hit_roll =
             legacy_random_value(dispatch, "LegacyCombat", "hit_check",
                                 legacy_speed_point(direct_target), attacker->id(),
@@ -2944,6 +3150,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         if (direct_applied_damage <= 0) {
           return;
         }
+        // 广播伤害结果
         auto pending_direct_death_packets =
             direct_target_died && direct_slain_monster != nullptr
                 ? collect_legacy_death_packets(objects_, direct_target)
@@ -2975,6 +3182,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                          current_tick, now_ms, true, sword_magic_id, direct_applied_damage,
                          direct_target_died ? "SM_DEATH" : "SM_STRUCK");
       };
+      // 刺杀/半月/横扫的额外目标处理
       if (effective_ident == kCmLongHit) {
         for (auto* direct_target : direct_attack_targets) {
           if (direct_target != nullptr && direct_target != target) {
@@ -3007,6 +3215,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         direct_attack_targets.clear();
         cross_targets.clear();
       }
+
+      // 主目标命中判定
       const auto undead_power = legacy_player_undead_power(*attacker, item_configs_);
       const auto hit_roll =
           legacy_random_value(dispatch, "LegacyCombat", "hit_check",
@@ -3020,6 +3230,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
 
       const auto direct_primary_hit = direct_only_primary;
       auto damage = std::max(0, attack_power);
+      // 非直接命中时计算防御减免
       if (!direct_primary_hit) {
         const auto [ac_min, ac_max] = actor_physical_defense_range(*target);
         const auto armor_roll =
@@ -3039,6 +3250,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       Monster* slain_monster = nullptr;
       std::int32_t weapon_durability_loss = 0;
 
+      // 对主目标施加伤害
       if (auto* player_target = as_player(target); player_target != nullptr) {
         if (!config_.fight_zone && !config_.fight3_zone && player_target->pk_level() < 2) {
           player_target->record_pk_hiter(attacker->id(), now_ms);
@@ -3057,6 +3269,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         if (target_died && try_legacy_revival(*player_target, dispatch, current_tick, now_ms)) {
           target_died = false;
         }
+        // 主目标伤害触发装备特效
         if (damage > 0 && !direct_primary_hit) {
           weapon_durability_loss = roll_legacy_weapon_durability_loss(
               *attacker, *target, dispatch, current_tick, now_ms);
@@ -3095,6 +3308,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       static_cast<void>(
           apply_legacy_weapon_durability_loss(*attacker, weapon_durability_loss, dispatch));
 
+      // 伤害吸收/免疫处理
       if (applied_damage <= 0) {
         add_legacy_trace(dispatch, "LegacyCombat", "absorbed", effective_mail, current_tick, now_ms,
                          absorbed_damage > 0, absorbed_damage, 0, "StruckDamage");
@@ -3119,6 +3333,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                       *player_target));
       }
 
+      // 广播死亡/受伤结果
       auto pending_death_packets =
           target_died && slain_monster != nullptr
               ? collect_legacy_death_packets(objects_, *target)
@@ -3151,6 +3366,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       add_legacy_trace(dispatch, "LegacyCombat", target_died ? "death" : "struck", effective_mail,
                        current_tick, now_ms, true, 0, applied_damage,
                        target_died ? "SM_DEATH" : "SM_STRUCK");
+
+      // 半月弯刀额外目标伤害
       if (effective_ident == kCmWideHit) {
         for (auto* extra_target : wide_targets) {
           if (extra_target == nullptr || extra_target == target ||
@@ -3243,6 +3460,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                            extra_target_died ? "SM_DEATH" : "SM_STRUCK");
         }
       }
+      // 横扫千军额外目标伤害
       if (effective_ident == kCmCrossHit) {
         for (auto* extra_target : cross_targets) {
           if (extra_target == nullptr || extra_target == target ||
@@ -3339,6 +3557,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                            extra_target_died ? "SM_DEATH" : "SM_STRUCK");
         }
       }
+
+      // 攻击怪物后剑术技能熟练度增长
       if (sword_magic_id != 0 && monster_damaged) {
         if (auto* user_magic = attacker->learned_magic_mutable(sword_magic_id);
             user_magic != nullptr) {
@@ -3367,6 +3587,38 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       break;
     }
+    /**@}*/
+    /**
+     * @name 法术系统（Spell）
+     * @brief 处理所有魔法/法术释放请求
+     * @details 法术系统是 handle_mail 中最庞大的分支，处理 30+ 种魔法 ID，
+     *          涵盖攻击魔法、辅助魔法、召唤、治疗、状态效果等。
+     *          整体分为两大类：遗留法术系统（legacy_spell_supported）和
+     *          现代法术系统（基于 MagicConfig）。
+     *
+     *          遗留法术分支包含剑术技能和魔法技能：
+     *          - 剑术技能：rush(27), 基础剑术(3)/攻杀(7)被动,
+     *            刺杀(12)/半月(25)/烈火(26)/横扫(34)状态切换, 其他技能准备
+     *          - 魔法: 火球术(1)/雷电术(5), 治愈术(2), 施毒术(6),
+     *            抗拒火环(8)/气功波(37), 灵魂火符(11)/噬血术(35),
+     *            火墙(22)/冰咆哮(23)/爆裂火焰(33), 彻地钉(24),
+     *            灭天火(13), 召唤骷髅(17)/召唤神兽(30),
+     *            魔法盾(31), 幽灵盾(14)/神圣战甲术(15),
+     *            隐身术(18)/群体隐身术(19), 诱惑之光(20),
+     *            瞬息移动(21), 困魔咒(28), 群体治愈术(29),
+     *            地狱雷光(9)/玄冰刃(10), 擒龙手(16),
+     *            狮子吼(32), 怒斩天下(36)
+     *
+     *          现代法术分支：
+     *          - 使用 MagicConfig 系统配置的魔法
+     *          - 支持范围攻击、DoT、治疗、护盾、减速等
+     *          - 基于 stable_actor_id_order 的稳定伤害计算
+     *
+     * @note 遗留法术兼容 Delphi 版的服务端魔法逻辑，
+     *       随机数使用 legacy_random_value 确保可重现
+     * @warning 法术释放受 throttling 控制，加速会被断开连接
+     */
+    /**@{*/
     case ActorMailKind::spell: {
       auto attacker_it = objects_.find(mail.actor_id);
       if (attacker_it == objects_.end()) {
@@ -3394,6 +3646,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       cancel_trade_for(attacker->id(), dispatch, true);
 
+      // 剑术技能分支：处理所有 legacy 剑术技能
       if (magic_it->second.legacy.legacy_present && magic_it->second.legacy.is_sword_skill) {
         if (!legacy_p14_sword_skill(magic_id)) {
           add_legacy_trace(dispatch, "LegacySkill", "sword_unsupported", mail, current_tick,
@@ -3412,6 +3665,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           break;
         }
 
+        // Rush 技能（27号）：瞬移突进，单独处理冷却和效果
         if (magic_id == 27) {
           if (!attacker->legacy_rush_ready(now_ms)) {
             add_legacy_trace(dispatch, "LegacySkill", "sword_cooldown_reject", mail,
@@ -3460,6 +3714,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           break;
         }
 
+        // 通用剑术技能节流阀（冷却检查）
         const auto throttle =
             attacker->begin_spell_attempt(now_ms, magic_it->second.legacy.delay_time, true);
         if (!throttle.allowed) {
@@ -3471,6 +3726,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           break;
         }
 
+        // 被动剑术（基础剑术/攻杀），不产生实际技能效果
         if (magic_id == 3 || magic_id == 7) {
           add_legacy_trace(dispatch, "LegacySkill", "sword_passive", mail,
                            current_tick, now_ms, false, magic_id, 0, "CM_SPELL");
@@ -3479,6 +3735,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           break;
         }
 
+        // 烈火剑法冷却检查
         if (magic_id == 26 && !attacker->legacy_fire_hit_ready(now_ms)) {
           add_legacy_trace(dispatch, "LegacySkill", "sword_cooldown_reject", mail,
                            current_tick, now_ms, false, magic_id, 0, "SetAllowFireHit");
@@ -3487,6 +3744,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           break;
         }
 
+        // 刺杀剑术开关
         if (magic_id == 12) {
           const auto enabled = !attacker->legacy_long_hit_enabled();
           attacker->set_legacy_long_hit_enabled(enabled);
@@ -3500,6 +3758,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           break;
         }
 
+        // 半月弯刀开关
         if (magic_id == 25) {
           const auto enabled = !attacker->legacy_wide_hit_enabled();
           attacker->set_legacy_wide_hit_enabled(enabled);
@@ -3513,6 +3772,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           break;
         }
 
+        // 横扫千军开关
         if (magic_id == 34) {
           const auto enabled = !attacker->legacy_cross_hit_enabled();
           attacker->set_legacy_cross_hit_enabled(enabled);
@@ -3526,6 +3786,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           break;
         }
 
+        // 其他剑术技能准备（扣蓝、消除隐身、设置技能过期时间）
         const auto spell_point =
             legacy_spell_point(magic_it->second.legacy, static_cast<std::int32_t>(user_magic->level));
         if (spell_point > 0 && !attacker->spend_mp(spell_point)) {
@@ -3565,6 +3826,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
+      // 遗留法术分支：处理 legacy 魔法系统
       if (legacy_spell_supported(magic_id, magic_it->second)) {
         auto* user_magic = attacker->learned_magic_mutable(magic_id);
         if (user_magic == nullptr) {
@@ -3577,6 +3839,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           break;
         }
 
+        // 节流阀检查（法术冷却）
         const auto throttle =
             attacker->begin_spell_attempt(now_ms, magic_it->second.legacy.delay_time, false);
         if (!throttle.allowed) {
@@ -3593,6 +3856,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         LegacyRandom fallback_random;
         auto& random = legacy_random_ != nullptr ? *legacy_random_ : fallback_random;
 
+        // 法术失败处理 lambda：记录失败并广播失败动画
         auto fail_magic_after_spell = [&](std::string label) {
           add_legacy_trace(dispatch, "LegacySpell", "spell_fail", mail, current_tick, now_ms,
                            false, magic_id, 0, std::move(label));
@@ -3602,6 +3866,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           });
         };
 
+        // 伤害目标验证 lambda：检查目标是否可攻击
         auto harmful_target_ok = [&](GameObject* candidate, std::string& reason) {
           if (candidate == nullptr || candidate->id() == attacker->id() ||
               !is_attackable_target(*candidate)) {
@@ -3618,6 +3883,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           return true;
         };
 
+        // 从邮件或位置解析目标对象
         GameObject* target = nullptr;
         if (mail.target_actor_id != 0) {
           const auto target_it = objects_.find(mail.target_actor_id);
@@ -3635,6 +3901,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           target = attacker;
         }
 
+        // 法术瞄准坐标解析
         auto fire_x = target != nullptr ? target->x() : mail.x;
         auto fire_y = target != nullptr ? target->y() : mail.y;
         if (mail.x != 0 || mail.y != 0) {
@@ -3650,6 +3917,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           fire_y = attacker->y();
         }
 
+        // 扣蓝并刷新状态
         const auto spell_point =
             legacy_spell_point(magic_it->second.legacy, static_cast<std::int32_t>(user_magic->level));
         if (spell_point > 0 && !attacker->spend_mp(spell_point)) {
@@ -3676,6 +3944,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         add_legacy_trace(dispatch, "LegacySpell", "ack", mail, current_tick, now_ms, true,
                          magic_id, 0, "DoSpell");
 
+        // 广播施法动画
         queue_actor_origin_packet(
             objects_, dispatch, *attacker, false, [&](const Player& watcher) {
           queue_packet(dispatch, watcher.session_id(),
@@ -3684,6 +3953,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         add_legacy_trace(dispatch, "LegacySpell", "spell_broadcast", mail, current_tick, now_ms,
                          true, magic_id, 0, "RM_SPELL");
 
+        // 延迟邮件构造器 lambda
         auto make_delayed = [&]() {
           ActorMail delayed;
           delayed.kind = ActorMailKind::legacy_delayed_effect;
@@ -3695,6 +3965,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           return delayed;
         };
 
+        // 延迟命中调度 lambda
         auto queue_delayed_hit = [&](GameObject& hit_target, std::int32_t power,
                                      std::uint32_t delay_ms, std::int32_t range,
                                      LegacyDelayedEffectKind kind) {
@@ -3715,6 +3986,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                            std::to_string(delay_ms) + "ms");
         };
 
+        // 延迟中毒调度 lambda
         auto queue_delayed_poison = [&](GameObject& poison_target, std::int32_t poison_kind,
                                         std::int32_t poison_seconds,
                                         std::int32_t poison_level) {
@@ -3732,6 +4004,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                            now_ms, true, poison_kind, poison_seconds, "RM_MAKEPOISON");
         };
 
+        // 延迟隐身调度 lambda
         auto queue_delayed_transparent = [&](Player& transparent_target,
                                              std::int32_t transparent_seconds) {
           auto delayed = make_delayed();
@@ -3748,6 +4021,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                            "RM_TRANSPARENT");
         };
 
+        // 直接魔法伤害应用 lambda
         auto apply_direct_magic = [&](GameObject& hit_target, std::int32_t raw_power,
                                       std::string_view label) {
           const auto damage = legacy_magic_defense_damage(hit_target, raw_power, random,
@@ -3796,6 +4070,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         bool send_magic_fire = true;
         bool spell_branch_aborted = false;
         std::uint64_t fire_target_id = target != nullptr ? target->id() : 0;
+        // 魔法火焰广播 lambda
         auto send_magic_fire_now = [&]() {
           queue_actor_origin_packet(objects_, dispatch, *attacker, true, [&](const Player& watcher) {
             queue_packet(dispatch, watcher.session_id(),
@@ -3806,6 +4081,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                            true, magic_id, 0, "SM_MAGICFIRE");
         };
         switch (magic_id) {
+          // 火球术(1) / 雷电术(5)：单体魔法，需要目标验证和魔法防御检测
           case 1:
           case 5: {
             std::string reason;
@@ -3839,6 +4115,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
             break;
           }
+          // 治愈术(2)：玩家回血
           case 2: {
             if (auto* player_target = as_player(target); player_target != nullptr) {
               const auto power =
@@ -3857,6 +4134,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
             break;
           }
+          // 施毒术(6)：需要毒药粉，根据不同毒药形状触发不同效果
           case 6: {
             send_magic_fire = false;
             std::string reason;
@@ -3910,14 +4188,20 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             send_magic_fire = true;
             break;
           }
+          // 抗拒火环(8) / 气功波(37)：推开周围等级较低的目标
           case 8:
           case 37: {
             auto pushed = 0;
             const auto push_level = static_cast<std::int32_t>(user_magic->level);
             auto targets = collect_legacy_area_targets(objects_, *attacker, config_,
-                                                       attacker->x(), attacker->y(), 1, false);
+                                                       attacker->x(), attacker->y(), 1, false,
+                                                       false);
             for (auto* push_target : targets) {
               if (actor_level(*attacker) <= actor_level(*push_target)) {
+                continue;
+              }
+              if (const auto* monster_target = as_monster(push_target);
+                  monster_target != nullptr && monster_target->stick_mode()) {
                 continue;
               }
               const auto level_gap = actor_level(*attacker) - actor_level(*push_target);
@@ -3926,6 +4210,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                now_ms, gate_roll < 6 + push_level * 3 + level_gap,
                                gate_roll, 0, "Random(20)");
               if (gate_roll >= 6 + push_level * 3 + level_gap) {
+                continue;
+              }
+              if (!legacy_player_is_proper_target(objects_, config_, *attacker,
+                                                  *push_target, now_ms)) {
                 continue;
               }
               const auto push_count = 1 + std::max(0, push_level - 1) + random.random(2);
@@ -3961,20 +4249,19 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                     return;
                   }
                   queue_packet(dispatch, watcher.session_id(),
-                               make_turn_like_packet(watcher.session_id(), kSmWalk,
+                               make_turn_like_packet(watcher.session_id(), kSmBackStep,
                                                      *push_target, false));
                 });
                 ++moved;
               }
-              if (moved > 0) {
-                ++pushed;
-                add_legacy_trace(dispatch, "LegacySpell", "push", mail, current_tick,
-                                 now_ms, true, moved, 0, "RM_PUSH");
-              }
+              ++pushed;
+              add_legacy_trace(dispatch, "LegacySpell", "push", mail, current_tick,
+                               now_ms, true, moved, 0, "RM_PUSH");
             }
             train = pushed > 0;
             break;
           }
+          // 地狱雷光(9) / 玄冰刃(10)：直线穿透魔法
           case 9:
           case 10: {
             const auto dir = next_direction(attacker->x(), attacker->y(), fire_x, fire_y);
@@ -4019,6 +4306,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             train = hit_count > 0;
             break;
           }
+          // 灵魂火符(11) / 噬血术(35)：单体高伤害，对特定怪物有加成
           case 11:
           case 35: {
             std::string reason;
@@ -4051,6 +4339,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
             break;
           }
+          // 召唤系(13/17/30)、辅助系(14/15/16/18/19/36)：需要护身符
           case 13:
           case 17:
           case 14:
@@ -4084,6 +4373,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                              bujuk_slot->item != nullptr ? bujuk_slot->item->dura : 0,
                              bujuk_slot->slot == kEquipBujuk ? "U_BUJUK" : "U_ARMRINGL");
 
+            // 擒龙手(16)：圣言结界
             if (magic_id == 16) {
               if (!environment_.can_walk(fire_x, fire_y, true)) {
                 add_legacy_trace(dispatch, "LegacySpell", "holy_curtain_center_reject",
@@ -4136,14 +4426,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                     (attacker->id() << 32U) ^ static_cast<std::uint64_t>(now_ms) ^
                     current_tick;
                 constexpr std::array<std::pair<std::int32_t, std::int32_t>, 8> kOffsets{{
-                    {-1, -2},
-                    {1, -2},
-                    {-2, -1},
-                    {2, -1},
-                    {-2, 1},
-                    {2, 1},
-                    {-1, 2},
-                    {1, 2},
+                    {-1, -2}, {1, -2}, {-2, -1}, {2, -1},
+                    {-2, 1},  {2, 1},  {-1, 2},  {1, 2},
                 }};
                 for (const auto& [dx, dy] : kOffsets) {
                   LegacyEventRecord event;
@@ -4157,7 +4441,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                   event.run_tick_ms = 500;
                   event.owner_actor_id = attacker->id();
                   event.holy_group_id = group_id;
-                  event.blocks_walk = true;
+                  event.blocks_walk = false;
                   dispatch.legacy_event_creates.push_back(event);
                 }
                 LegacyHolyCurtainGroup group;
@@ -4361,6 +4645,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                              "MagMakeGroupTransparent");
             break;
           }
+          // 诱惑之光(20)：驯服/混乱/石化怪物
           case 20: {
             auto* monster_target = as_monster(target);
             std::string reason;
@@ -4487,6 +4772,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             train = true;
             break;
           }
+          // 瞬息移动(21)：随机传送
           case 21: {
             send_magic_fire_now();
             send_magic_fire = false;
@@ -4505,17 +4791,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
             break;
           }
+          // 火墙(22)：地面持续燃烧区域
           case 22: {
             const auto power = legacy_fireball_power(*attacker, magic_it->second.legacy,
                                                      user_magic->level, random);
             const auto seconds = legacy_fire_wall_seconds(*attacker, magic_it->second.legacy,
                                                           user_magic->level, random);
             constexpr std::array<std::pair<std::int32_t, std::int32_t>, 5> kOffsets{{
-                {0, -1},
-                {-1, 0},
-                {0, 0},
-                {1, 0},
-                {0, 1},
+                {0, -1}, {-1, 0}, {0, 0}, {1, 0}, {0, 1},
             }};
             for (const auto& [dx, dy] : kOffsets) {
               LegacyEventRecord event;
@@ -4540,6 +4823,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                              "MagMakeFireCross");
             break;
           }
+          // 冰咆哮(23) / 爆裂火焰(33)：范围直接伤害
           case 23:
           case 33: {
             const auto power = legacy_fireball_power(*attacker, magic_it->second.legacy,
@@ -4555,6 +4839,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
             break;
           }
+          // 彻地钉(24)：范围魔法，对非不死系伤害减 10 倍
           case 24: {
             const auto power = legacy_fireball_power(*attacker, magic_it->second.legacy,
                                                      user_magic->level, random);
@@ -4570,6 +4855,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
             break;
           }
+          // 困魔咒(28)：显示目标 HP
           case 28: {
             const auto already_open =
                 (as_player(target) != nullptr &&
@@ -4601,6 +4887,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
             break;
           }
+          // 群体治愈术(29)：范围内回血
           case 29: {
             const auto power =
                 legacy_heal_power(*attacker, magic_it->second.legacy, user_magic->level, random);
@@ -4627,6 +4914,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
             break;
           }
+          // 魔法盾(31)：自身魔法防御提升
           case 31: {
             const auto seconds = legacy_magic_bubble_seconds(*attacker, magic_it->second.legacy,
                                                              user_magic->level, random);
@@ -4643,6 +4931,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                              now_ms, train, seconds, 0, "MagBubbleDefenceUp");
             break;
           }
+          // 狮子吼(32)：超度不死系
           case 32: {
             std::string reason;
             auto* monster_target =
@@ -4718,10 +5007,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
+      // 现代法术系统分支：基于 MagicConfig 的通用法术处理
       const auto harmful_spell = magic_is_harmful(magic_it->second);
       const auto beneficial_spell = magic_is_beneficial(magic_it->second);
       const auto allow_self = beneficial_spell && magic_it->second.affect_players;
 
+      // 解析目标对象
       GameObject* target = nullptr;
       if (mail.target_actor_id != 0) {
         if (allow_self && mail.target_actor_id == attacker->id()) {
@@ -4741,6 +5032,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         target = attacker;
       }
 
+      // PK 保护检查
       if (magic_it->second.radius <= 0 && harmful_spell) {
         if (auto* player_target = as_player(target); player_target != nullptr) {
           const auto block_reason = resolve_pk_block_reason(config_, *attacker, *player_target, now_ms);
@@ -4756,6 +5048,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
       }
 
+      // 扣蓝检查
       if (!attacker->spend_mp(std::max(magic_it->second.mp_cost, 0))) {
         add_legacy_trace(dispatch, "LegacySpell", "mp_reject", mail, current_tick, now_ms,
                          false, magic_it->second.mp_cost, 0, "spell");
@@ -4774,6 +5067,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       add_legacy_trace(dispatch, "LegacySpell", "spell_broadcast", mail, current_tick, now_ms,
                        true, magic_id, 0, "RM_SPELL");
 
+      // 收集受影响的目标 ID 列表
       const auto has_center = target != nullptr || mail.x != 0 || mail.y != 0;
       const auto center_x = target != nullptr ? target->x() : mail.x;
       const auto center_y = target != nullptr ? target->y() : mail.y;
@@ -4790,6 +5084,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         break;
       }
 
+      // 逐个目标进行伤害/治疗计算
       struct SlainMonsterDeath {
         std::uint64_t monster_id{0};
         std::int32_t applied_damage{0};
@@ -4828,6 +5123,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         Monster* slain_monster = nullptr;
         bool applied_player_effect = false;
 
+        // 玩家目标处理
         if (auto* player_target = as_player(&resolved_target); player_target != nullptr) {
           if (harmful_spell) {
             if (!config_.fight_zone && !config_.fight3_zone && player_target->pk_level() < 2) {
@@ -4854,6 +5150,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
               }
             }
           }
+          // 持续效果（DoT / HoT / 护盾 / 减速）
           if ((magic_it->second.dot_damage > 0 || magic_it->second.heal_per_tick > 0 ||
                magic_it->second.slow_percent > 0 || magic_it->second.shield_amount > 0) &&
               magic_it->second.effect_duration_ms > 0) {
@@ -4974,6 +5271,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
       }
 
+      // 统一处理所有死亡的怪物
       std::sort(slain_monster_deaths.begin(), slain_monster_deaths.end(),
                 [](const auto& left, const auto& right) {
                   return left.monster_id < right.monster_id;
@@ -4993,6 +5291,18 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                        magic_id, 0, "SM_HEALTHSPELLCHANGED");
       break;
     }
+    /**@}*/
+
+
+    /**
+     * @name 复活系统（Revive）
+     * @brief 处理玩家复活请求
+     * @details 将死亡玩家复活到地图的复活点（home_x/home_y）。
+     *          复活时恢复 50% HP 和 50% MP（至少 1 点），
+     *          刷新所有可见性并通知客户端。
+     * @note 如果复活点被其他对象阻挡，则拒绝移动并提示玩家
+     */
+    /**@{*/
     case ActorMailKind::revive: {
       auto* player = find_player(mail.actor_id);
       if (player == nullptr) {
@@ -5045,6 +5355,26 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                        true, target_x, target_y, "SM_ALIVE");
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 离线行会管理（Offline Guild Operations）
+     * @brief 处理通过持久化加载完成的离线行会管理操作
+     * @details 需要已加载玩家完整数据才能执行的行会管理操作。
+     *          支持四种操作：
+     *          - approve：批准申请，将申请人加入行会
+     *          - kick：踢出成员
+     *          - transfer：转让会长
+     *          - title：设置成员称号
+     *
+     *          对于目标玩家：
+     *          - 在当前地图：直接修改对象状态
+     *          - 在跨地图在线：发送跨地图同步邮件
+     *          - 离线：保存角色数据
+     * @note 行会长执行操作时会验证行会数据一致性，
+     *       如果在持久化加载完成前行会数据发生了变化则拒绝操作
+     */
+    /**@{*/
     case ActorMailKind::persistence_loaded: {
       const auto operation = decode_offline_guild_character_op(mail.payload);
       if (!operation.has_value()) {
@@ -5094,6 +5424,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           !operation->target_map_id.empty() && operation->target_map_id != config_.id;
 
       switch (operation->kind) {
+        // 批准申请：将申请人加入行会
         case OfflineGuildCharacterOpKind::approve: {
           if (!guild_has_applicant(*guild_state, operation->target_name)) {
             queue_system_notice(dispatch, *speaker, "That character has no pending application.");
@@ -5159,6 +5490,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                   guild_state->guild_name, operation->target_name));
           break;
         }
+        // 踢出成员
         case OfflineGuildCharacterOpKind::kick: {
           if (equals_ignore_case(operation->target_name, speaker->character().character_name)) {
             queue_system_notice(dispatch, *speaker,
@@ -5202,6 +5534,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                   guild_state->guild_name, operation->target_name));
           break;
         }
+        // 转让会长
         case OfflineGuildCharacterOpKind::transfer: {
           if (equals_ignore_case(operation->target_name, speaker->character().character_name)) {
             queue_system_notice(dispatch, *speaker, "You already lead this guild.");
@@ -5251,6 +5584,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                   guild_state->guild_name, operation->target_name));
           break;
         }
+        // 设置称号
         case OfflineGuildCharacterOpKind::title: {
           if (operation->title_name.empty()) {
             queue_system_notice(dispatch, *speaker,
@@ -5305,6 +5639,18 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 聊天处理（Say）
+     * @brief 处理玩家的普通聊天输入
+     * @details 接收玩家输入的聊天文本，先检查是否为行会/城堡管理命令
+     *          （以 @ 开头），如果是则执行对应逻辑并更新城堡对话上下文。
+     *          否则广播普通聊天消息给视野内的所有玩家。
+     * @note 特殊命令（@guild, @castle 等）由 handle_guild_castle_business_command
+     *       和 handle_castle_admin_command 分别处理
+     */
+    /**@{*/
     case ActorMailKind::say: {
       auto requester_it = objects_.find(mail.actor_id);
       if (requester_it == objects_.end()) {
@@ -5335,6 +5681,22 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       });
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 聊天投递（Legacy Chat Delivery）
+     * @brief 处理各种聊天类型的分发投递
+     * @details 支持六种聊天分发方式：
+     *          - normal：普通聊天，广播给视野内玩家
+     *          - whisper：私聊
+     *          - guild：行会聊天
+     *          - group：组队聊天
+     *          - shout_direct：不经过路由的直接喊话
+     *          - system：系统消息
+     *          - shout：喊话，50 格半径广播
+     * @note shout 类型会在消息前加 "(!)" 前缀
+     */
+    /**@{*/
     case ActorMailKind::legacy_chat_delivery: {
       switch (mail.legacy_chat_kind) {
         case LegacyChatDeliveryKind::normal: {
@@ -5387,6 +5749,17 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       }
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 技能等级经验同步（Magic Level Experience）
+     * @brief 向客户端推送技能熟练度变化
+     * @details 当技能熟练度增加或等级提升时，生成 magic_lvexp 包
+     *          发送给玩家，用于客户端的技能等级和进度条显示。
+     *          使用 generation 机制防止过期的延迟消息更新界面。
+     * @see schedule_legacy_magic_lvexp
+     */
+    /**@{*/
     case ActorMailKind::legacy_magic_lvexp: {
       auto* player = find_player(mail.actor_id);
       if (player == nullptr) {
@@ -5407,6 +5780,27 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                        true, mail.magic_id, mail.magic_train, "SM_MAGIC_LVEXP");
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 延迟法术效果（Delayed Effects）
+     * @brief 处理法术的延迟命中/效果应用
+     * @details 通过 delayed_mail_wheel_ 调度执行的延迟效果，支持：
+     *
+     *          - monster_struck：怪物特殊效果（如诱惑之光电击）
+     *          - make_poison：施毒术（灰色/黄色毒药）
+     *          - transparent：隐身术/群体隐身术
+     *          - open_health：困魔咒（显示 HP）
+     *          - mag_healing：治愈术/群体治愈术
+     *          - delay_magic：法术延迟命中（火球术、雷电术等）
+     *          - mag_struck：法术即时命中
+     *
+     *          对于伤害类型，计算魔法防御减免后应用伤害。
+     *          支持 PK 记录、死亡处理、装备耐久、经验分配等。
+     * @note 延迟机制模拟 Delphi 版服务端的 Timer 效果，
+     *       时间单位基于 budgets_.tick_ms 换算
+     */
+    /**@{*/
     case ActorMailKind::legacy_delayed_effect: {
       auto caster_it = objects_.find(mail.actor_id);
       auto target_it = objects_.find(mail.target_actor_id);
@@ -5635,38 +6029,74 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                        target_died ? "SM_DEATH" : "SM_STRUCK");
       break;
     }
+    /**@}*/
+
+    /**
+     * @name 移动处理（Move / Run / Turn）
+     * @brief 默认分支：处理玩家的行走、奔跑和转向操作
+     * @details 这是 handle_mail 的默认分支，处理三种基本移动：
+     *
+     *          turn（转向）：改变玩家朝向，无移动
+     *          move（行走）：向指定方向移动一格
+     *          run（奔跑）：向指定方向连续移动两格
+     *
+     *          移动流程：
+     *          1. 死亡/冷却检查：死亡或不可移动时拒绝
+     *          2. 节流阀（throttle）：防加速，超阈值断开连接
+     *          3. 位置验证：requested_walk_target/requested_run_target
+     *          4. 奔跑中间格验证：中间格必须可行走
+     *          5. 地图碰撞：目标格必须可行走
+     *          6. 地图对象移动：更新对象位置
+     *          7. 移动后处理：取消交易、清除 NPC 模式、
+     *             广播移动包、检测传送门、刷新可见性
+     *
+     * @note 转向不经过节流阀，但验证 dir 是否合法（< 8）
+     * @warning 奔跑需要至少 10 HP，否则降级为不移动
+     */
     default: {
       auto it = objects_.find(mail.actor_id);
       if (it != objects_.end()) {
         if (auto* player = as_player(it->second.get()); player != nullptr) {
           ActorMail effective_mail = mail;
-          auto reject_move = [&](bool disconnect) {
+          auto reject_action = [&](bool disconnect, bool send_move_fail) {
             queue_packet(dispatch, player->session_id(), make_ack_packet(player->session_id(), false));
-            queue_packet(dispatch, player->session_id(),
-                         make_move_fail_packet(player->session_id(), *player));
+            if (send_move_fail) {
+              queue_packet(dispatch, player->session_id(),
+                           make_move_fail_packet(player->session_id(), *player));
+            }
             if (disconnect) {
               queue_force_disconnect(dispatch, player->session_id(), "speed_hack_movement");
             }
           };
-
           auto old_x = player->x();
           auto old_y = player->y();
           auto moved_player = false;
           if (mail.kind == ActorMailKind::move || mail.kind == ActorMailKind::run) {
+            const auto requested_dir = static_cast<std::uint8_t>(
+                legacy::next_direction(player->x(), player->y(), mail.x, mail.y));
+            auto apply_failed_move_direction = [&] {
+              ActorMail turn_mail;
+              turn_mail.kind = ActorMailKind::turn;
+              turn_mail.dir = requested_dir;
+              player->on_mail(turn_mail, context);
+            };
             if (player->is_dead() || !player->can_move_at(current_tick)) {
-              reject_move(false);
+              apply_failed_move_direction();
+              reject_action(false, true);
               break;
             }
 
             const auto throttle = player->begin_move_attempt(current_tick, budgets_.tick_ms);
             if (!throttle.allowed) {
-              reject_move(throttle.disconnect);
+              apply_failed_move_direction();
+              reject_action(throttle.disconnect, true);
               break;
             }
 
             if (mail.kind == ActorMailKind::run && player->character().ability.hp < 10) {
               player->reset_move_throttle();
-              reject_move(false);
+              apply_failed_move_direction();
+              reject_action(false, true);
               break;
             }
 
@@ -5679,7 +6109,8 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                                       player->y(), mail.x, mail.y);
             if (!expected.has_value() || expected->x != mail.x || expected->y != mail.y) {
               player->reset_move_throttle();
-              reject_move(false);
+              apply_failed_move_direction();
+              reject_action(false, true);
               break;
             }
 
@@ -5688,20 +6119,23 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                       expected->dir, 1);
               if (!middle.has_value() || !environment_.can_walk(middle->x, middle->y, false)) {
                 player->reset_move_throttle();
-                reject_move(false);
+                apply_failed_move_direction();
+                reject_action(false, true);
                 break;
               }
             }
             if (!environment_.can_walk(expected->x, expected->y, false)) {
               player->reset_move_throttle();
-              reject_move(false);
+              apply_failed_move_direction();
+              reject_action(false, true);
               break;
             }
             if (environment_.move_to_moving_object(
                     player->x(), player->y(), player->id(), expected->x, expected->y, false,
                     now_ms, moving_state_for(*player)) != 1) {
               player->reset_move_throttle();
-              reject_move(false);
+              apply_failed_move_direction();
+              reject_action(false, true);
               break;
             }
 
@@ -5711,8 +6145,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             moved_player = true;
             cancel_trade_for(player->id(), dispatch, true);
             player->clear_legacy_npc_item_mode();
-          } else if (mail.kind == ActorMailKind::turn && effective_mail.dir >= 8) {
-            reject_move(false);
+          } else if (mail.kind == ActorMailKind::turn &&
+                     (effective_mail.dir >= 8 || effective_mail.x != player->x() ||
+                      effective_mail.y != player->y())) {
+            reject_action(false, false);
             break;
           }
 
@@ -5732,6 +6168,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
           }
 
+          // 向视野内的其他玩家广播移动/转向包
           for (const auto watcher_id : legacy_ref_target_player_ids(*player, now_ms)) {
             if (watcher_id == player->id()) {
               continue;
@@ -5769,4 +6206,3 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
     }
   }
 }
-
