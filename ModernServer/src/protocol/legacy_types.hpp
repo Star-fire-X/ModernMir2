@@ -152,6 +152,7 @@ constexpr std::uint16_t kCmQueryUsername = 80;
 constexpr std::uint16_t kCmQueryBagItems = 81;
 constexpr std::uint16_t kCmDropItem = 1000;
 constexpr std::uint16_t kCmPickup = 1001;
+constexpr std::uint16_t kCmOpenDoor = 1002;
 constexpr std::uint16_t kCmTakeOnItem = 1003;
 constexpr std::uint16_t kCmTakeOffItem = 1004;
 constexpr std::uint16_t kCmExchgTakeOnItem = 1005;
@@ -254,6 +255,11 @@ struct LegacyMessageBodyWL {
 struct LegacyCharDesc {
   std::int32_t feature{0};
   std::int32_t status{0};
+};
+
+struct LegacyShortMessage {
+  std::uint16_t ident{0};
+  std::uint16_t msg{0};
 };
 
 struct LegacyUserItem {

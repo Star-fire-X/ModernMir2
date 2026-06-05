@@ -306,11 +306,16 @@ int main() {
   assert(show_upsert->actor.status == 0x5678);
 
   messages.clear();
+  const auto event_body = [] {
+    mir2::LegacyShortMessage message{27, 0};
+    return mir2::legacy_encode_buffer(&message, sizeof(message));
+  }();
   service.translate_legacy_packet_for_test(
       kSessionId,
       mir2::make_legacy_game_packet(
           kSessionId, 0, 0,
-          mir2::make_default_message(mir2::kSmShowEvent, 88, 14, 15, 3)),
+          mir2::make_default_message(mir2::kSmShowEvent, 88, 3, 14, 15),
+          event_body),
       messages);
   assert(messages.size() == 1);
   show_upsert = std::get_if<mir2::client_v1::ActorUpsert>(&messages.front());
@@ -318,6 +323,7 @@ int main() {
   assert(show_upsert->actor.actor_id == 88);
   assert(show_upsert->actor.x == 14 && show_upsert->actor.y == 15);
   assert(show_upsert->actor.feature == 3);
+  assert(show_upsert->actor.status == 27);
 
   messages.clear();
   service.translate_legacy_packet_for_test(

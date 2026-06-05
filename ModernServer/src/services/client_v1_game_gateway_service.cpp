@@ -225,6 +225,18 @@ std::optional<LegacyMessageBodyWL> decode_body_wl_prefix(std::string_view encode
   return body;
 }
 
+std::optional<LegacyShortMessage> decode_short_message_prefix(std::string_view encoded) {
+  const auto size = legacy_encoded_size_for<LegacyShortMessage>();
+  if (encoded.size() < size) {
+    return std::nullopt;
+  }
+  LegacyShortMessage body;
+  if (!legacy_decode_buffer(encoded.substr(0, size), &body, sizeof(body))) {
+    return std::nullopt;
+  }
+  return body;
+}
+
 std::optional<LegacyAbility> decode_ability(std::string_view encoded) {
   LegacyAbility ability;
   if (!legacy_decode_buffer(encoded, &ability, sizeof(ability))) {
@@ -2493,9 +2505,13 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
       break;
     }
     case kSmShowEvent:
+      {
+        const auto event = decode_short_message_prefix(decoded->body);
       messages.push_back(client_v1::ActorUpsert{
-          make_actor(actor_id, {}, decoded->message.param, decoded->message.tag, 0,
-                     static_cast<std::int32_t>(decoded->message.series), 0)});
+          make_actor(actor_id, {}, decoded->message.tag, decoded->message.series, 0,
+                     static_cast<std::int32_t>(decoded->message.param),
+                     event.has_value() ? static_cast<std::int32_t>(event->ident) : 0)});
+      }
       break;
     case kSmDisappear:
     case kSmHideEvent:

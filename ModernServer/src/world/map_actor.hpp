@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -47,6 +48,13 @@ class MapActor {
     std::uint64_t dropper_actor_id{0};
     std::string dropper_name{};
     bool death_drop{false};
+  };
+
+  struct StoneMineSnapshot {
+    std::int32_t mine_count{0};
+    std::int32_t mine_fill_count{0};
+    std::uint64_t refill_time_ms{0};
+    std::int32_t type{0};
   };
 
   struct LegacyGmCommandResult {
@@ -128,10 +136,12 @@ class MapActor {
                                              bool blocks_walk = false,
                                              RuntimeDispatch* dispatch = nullptr,
                                              LegacyEventType type = LegacyEventType::pile_stones,
+                                             std::int32_t event_param = 0,
                                              std::int32_t event_damage = 0);
   [[nodiscard]] bool legacy_add_event_object(std::uint64_t event_id, std::int32_t x,
                                              std::int32_t y, std::uint64_t now_ms,
-                                             RuntimeDispatch* dispatch);
+                                             RuntimeDispatch* dispatch,
+                                             std::int32_t event_param = 0);
   void legacy_remove_event_object(std::uint64_t event_id, std::int32_t x, std::int32_t y,
                                   RuntimeDispatch* dispatch = nullptr);
   [[nodiscard]] RuntimeDispatch legacy_apply_fire_burn_event(const LegacyEventRecord& event,
@@ -168,10 +178,32 @@ class MapActor {
                                                 std::uint64_t event_id) const;
   [[nodiscard]] const std::string& id() const { return config_.id; }
   [[nodiscard]] std::size_t object_count() const { return objects_.size(); }
+  [[nodiscard]] std::size_t legacy_stone_mine_count() const { return stone_mines_.size(); }
+  [[nodiscard]] std::optional<StoneMineSnapshot> legacy_stone_mine_snapshot(
+      std::int32_t x, std::int32_t y) const;
+  [[nodiscard]] bool legacy_try_mine(std::int32_t x, std::int32_t y);
+  void refill_legacy_stone_mines(std::uint64_t now_ms);
 
  private:
   struct MonsterSpawnTemplate {
     ActorMail mail{};
+  };
+
+  using CellKey = std::pair<std::int32_t, std::int32_t>;
+
+  struct EventObjectState {
+    std::int32_t x{0};
+    std::int32_t y{0};
+    LegacyEventType type{LegacyEventType::pile_stones};
+    std::int32_t event_param{0};
+    bool blocks_walk{false};
+  };
+
+  struct StoneMineState {
+    std::int32_t mine_count{0};
+    std::int32_t mine_fill_count{0};
+    std::uint64_t refill_time_ms{0};
+    std::int32_t type{0};
   };
 
   struct PlayerVisibility {
@@ -410,6 +442,9 @@ class MapActor {
                             RuntimeDispatch& dispatch);
   void broadcast_close_doors(const std::vector<std::pair<std::int32_t, std::int32_t>>& tiles,
                              RuntimeDispatch& dispatch);
+  void set_castle_door_wall_state(std::int32_t x, std::int32_t y, bool open);
+  void clear_castle_door_wall_state(std::int32_t x, std::int32_t y);
+  void initialize_legacy_stone_mines();
   [[nodiscard]] std::uint64_t budget_for(GameObjectKind kind) const;
   [[nodiscard]] Player* find_player(std::uint64_t actor_id);
   [[nodiscard]] const Player* find_player(std::uint64_t actor_id) const;
@@ -532,12 +567,14 @@ class MapActor {
   std::unordered_map<std::uint64_t, GroundItem> ground_items_{};
   std::unordered_map<std::uint64_t, TradeSession> trade_sessions_{};
   std::unordered_map<std::uint64_t, std::uint64_t> trade_session_by_actor_{};
-  std::unordered_map<std::uint64_t, std::pair<std::int32_t, std::int32_t>> event_objects_{};
-  std::unordered_map<std::uint64_t, LegacyEventType> event_object_types_{};
+  std::unordered_map<std::uint64_t, EventObjectState> event_objects_{};
   std::unordered_map<std::uint64_t, PlayerVisibility> visibility_{};
   std::unordered_map<std::uint64_t, LegacyRefTargetCache> legacy_ref_target_cache_{};
   std::shared_ptr<std::array<std::int32_t, 10>> script_global_params_{};
   std::shared_ptr<LegacyNameListRepository> script_name_lists_{};
+  std::map<CellKey, StoneMineState> stone_mines_{};
+  std::map<CellKey, std::int32_t> castle_door_wall_block_counts_{};
+  bool stone_mines_initialized_{false};
   std::uint64_t next_ground_item_id_{1};
   std::uint64_t next_trade_session_id_{1};
   std::uint64_t next_script_monster_id_{0x6000000000000000ULL};
