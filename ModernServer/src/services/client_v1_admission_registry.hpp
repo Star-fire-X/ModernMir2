@@ -106,10 +106,10 @@ class ClientV1AdmissionRegistry {
     }
   }
 
-  std::mutex mutex_{};                                              ///< 保护内部数据结构的互斥锁
-  std::unordered_map<std::string, ClientV1Admission> admissions_{}; ///< 准入记录表，键为令牌字符串
-  std::mt19937_64 random_{std::random_device{}()};                  ///< 随机数生成器
-  std::uint64_t counter_{1};                                        ///< 单调递增计数器
+  std::mutex mutex_{};
+  std::unordered_map<std::string, ClientV1Admission> admissions_{};
+  std::mt19937_64 random_{std::random_device{}()};
+  std::uint64_t counter_{1};
 };
 
 }  // namespace mir2

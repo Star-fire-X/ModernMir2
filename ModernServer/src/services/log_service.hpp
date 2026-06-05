@@ -80,12 +80,12 @@ class LogService : public Module {
    */
   void run();
 
-  HostContext* context_{nullptr};                    ///< 宿主上下文指针
-  std::shared_ptr<LocalBus::Endpoint> endpoint_{};   ///< 消息总线端点
-  std::thread worker_{};                             ///< 工作线程
-  std::ofstream audit_log_{};                        ///< 审计日志文件输出流
-  std::atomic_bool running_{false};                  ///< 运行状态标志
-  std::size_t written_lines_{0};                     ///< 已写入的行数计数
+  HostContext* context_{nullptr};
+  std::shared_ptr<LocalBus::Endpoint> endpoint_{};
+  std::thread worker_{};
+  std::ofstream audit_log_{};
+  std::atomic_bool running_{false};
+  std::size_t written_lines_{0};
 };
 
 }  // namespace mir2

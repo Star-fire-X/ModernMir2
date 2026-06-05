@@ -172,16 +172,16 @@ class AuthService : public Module {
    */
   [[nodiscard]] std::string make_request_id();
 
-  HostContext* context_{nullptr};                                    ///< 宿主上下文指针
-  std::shared_ptr<LocalBus::Endpoint> endpoint_{};                   ///< 消息总线端点
-  std::thread worker_{};                                             ///< 工作线程
-  std::atomic_bool running_{false};                                  ///< 运行状态标志
-  std::unordered_map<std::string, PendingAuthRequest> pending_requests_{}; ///< 待处理的请求表，键为请求ID
-  std::unordered_map<std::uint64_t, SessionState> session_states_{}; ///< 会话状态表，键为会话ID
-  std::unordered_map<std::int32_t, LoginAdmission> admissions_{};    ///< 准入记录表，键为认证凭据值
-  std::unordered_map<std::string, std::string> last_selected_character_{}; ///< 最后选择的角色记录
-  std::atomic_int32_t next_certification_{1000};                     ///< 下一个认证凭据值，从1000开始递增
-  std::uint64_t next_request_id_{1};                                 ///< 下一个请求ID序号
+  HostContext* context_{nullptr};
+  std::shared_ptr<LocalBus::Endpoint> endpoint_{};
+  std::thread worker_{};
+  std::atomic_bool running_{false};
+  std::unordered_map<std::string, PendingAuthRequest> pending_requests_{};
+  std::unordered_map<std::uint64_t, SessionState> session_states_{};
+  std::unordered_map<std::int32_t, LoginAdmission> admissions_{};
+  std::unordered_map<std::string, std::string> last_selected_character_{};
+  std::atomic_int32_t next_certification_{1000};
+  std::uint64_t next_request_id_{1};
 };
 
 }  // namespace mir2

@@ -148,20 +148,20 @@ class GatewayServiceBase : public Module {
    */
   void bus_loop();
 
-  std::string module_name_{};                                                       ///< 模块名称
-  HostContext* context_{nullptr};                                                   ///< 宿主上下文指针
-  SessionRouter router_{};                                                          ///< 会话路由器
-  asio::io_context io_context_{};                                                   ///< ASIO IO 上下文
-  std::unique_ptr<asio::executor_work_guard<asio::io_context::executor_type>> work_guard_{}; ///< 防止 io_context 在没有工作时退出
-  std::unique_ptr<asio::ip::tcp::acceptor> acceptor_{};                            ///< TCP 连接接收器
-  std::vector<std::thread> io_threads_{};                                          ///< IO 工作线程池
-  std::thread bus_thread_{};                                                        ///< 消息总线线程
-  std::shared_ptr<LocalBus::Endpoint> endpoint_{};                                 ///< 消息总线端点
-  mutable std::mutex mutex_{};                                                     ///< 保护会话表的互斥锁
-  std::unordered_map<std::uint64_t, std::shared_ptr<GameSession>> sessions_{};     ///< 会话表，键为会话ID
-  std::unordered_map<std::uint64_t, std::uint64_t> session_sequences_{};           ///< 会话序列号，用于消息排序
-  std::atomic_bool running_{false};                                                ///< 运行状态标志
-  std::atomic_uint64_t next_session_id_{1};                                        ///< 下一个会话ID
+  std::string module_name_{};
+  HostContext* context_{nullptr};
+  SessionRouter router_{};
+  asio::io_context io_context_{};
+  std::unique_ptr<asio::executor_work_guard<asio::io_context::executor_type>> work_guard_{};
+  std::unique_ptr<asio::ip::tcp::acceptor> acceptor_{};
+  std::vector<std::thread> io_threads_{};
+  std::thread bus_thread_{};
+  std::shared_ptr<LocalBus::Endpoint> endpoint_{};
+  mutable std::mutex mutex_{};
+  std::unordered_map<std::uint64_t, std::shared_ptr<GameSession>> sessions_{};
+  std::unordered_map<std::uint64_t, std::uint64_t> session_sequences_{};
+  std::atomic_bool running_{false};
+  std::atomic_uint64_t next_session_id_{1};
 };
 
 }  // namespace mir2

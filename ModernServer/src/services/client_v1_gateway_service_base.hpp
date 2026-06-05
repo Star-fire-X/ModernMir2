@@ -208,17 +208,17 @@ class ClientV1GatewayServiceBase : public Module, public ClientV1SessionOwner {
    */
   void do_accept();
 
-  std::string module_name_{};                                                       ///< 模块名称
-  HostContext* context_{nullptr};                                                   ///< 宿主上下文指针
-  asio::io_context io_context_{};                                                   ///< ASIO IO 上下文
-  std::unique_ptr<asio::executor_work_guard<asio::io_context::executor_type>> work_guard_{}; ///< 防止 io_context 空闲退出
-  std::unique_ptr<asio::ip::tcp::acceptor> acceptor_{};                            ///< TCP 连接接收器
-  std::vector<std::thread> io_threads_{};                                          ///< IO 工作线程池
-  mutable std::mutex mutex_{};                                                     ///< 保护会话表的互斥锁
-  std::unordered_map<std::uint64_t, std::shared_ptr<ClientV1Session>> sessions_{}; ///< 会话表
-  std::unordered_map<std::uint64_t, std::uint32_t> client_frame_sequences_{};      ///< 客户端帧序列号表
-  std::atomic_bool running_{false};                                                ///< 运行状态标志
-  std::atomic_uint64_t next_session_id_{1};                                        ///< 下一个会话ID
+  std::string module_name_{};
+  HostContext* context_{nullptr};
+  asio::io_context io_context_{};
+  std::unique_ptr<asio::executor_work_guard<asio::io_context::executor_type>> work_guard_{};
+  std::unique_ptr<asio::ip::tcp::acceptor> acceptor_{};
+  std::vector<std::thread> io_threads_{};
+  mutable std::mutex mutex_{};
+  std::unordered_map<std::uint64_t, std::shared_ptr<ClientV1Session>> sessions_{};
+  std::unordered_map<std::uint64_t, std::uint32_t> client_frame_sequences_{};
+  std::atomic_bool running_{false};
+  std::atomic_uint64_t next_session_id_{1};
 };
 
 }  // namespace mir2

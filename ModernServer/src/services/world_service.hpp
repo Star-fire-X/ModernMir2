@@ -207,37 +207,37 @@ class WorldService : public Module {
    */
   void flush_dispatch(RuntimeDispatch dispatch);
 
-  HostContext* context_{nullptr};                              ///< 宿主上下文指针
-  std::shared_ptr<LocalBus::Endpoint> endpoint_{};             ///< 消息总线端点
-  std::thread worker_{};                                       ///< 工作线程
-  std::atomic_bool running_{false};                            ///< 运行状态标志
-  std::unique_ptr<LogicRuntime> runtime_{};                    ///< 游戏逻辑运行时
-  LegacyFrameDriver legacy_frame_driver_{};                    ///< 遗留帧驱动
-  mutable std::mutex legacy_frame_mutex_{};                    ///< 帧跟踪数据的互斥锁
-  LegacyFrameTrace legacy_frame_trace_{};                      ///< 帧跟踪数据
-  bool legacy_frame_seen_{false};                              ///< 是否已记录帧跟踪数据
-  std::unordered_map<std::string, PendingLoad> pending_loads_{}; ///< 待加载的角色表
-  std::unordered_map<std::int32_t, Admission> admissions_{};   ///< 准入表，键为认证凭据
-  std::unordered_map<std::uint64_t, Admission> active_sessions_{}; ///< 活跃会话表
-  std::unordered_map<std::string, std::uint64_t> active_accounts_{}; ///< 活跃账号表
-  std::unordered_map<std::string, std::uint64_t> character_save_versions_{}; ///< 角色保存版本号表
-  std::unordered_map<std::uint64_t, std::string> session_gateways_{}; ///< 会话对应的网关名
-  std::unordered_map<std::uint64_t, std::uint64_t> session_sequence_watermarks_{}; ///< 会话序列号水位线
-  std::uint64_t next_ingress_seq_{0};                          ///< 下一个输入序列号
-  std::uint64_t current_frame_now_ms_{0};                      ///< 当前帧的时间戳(毫秒)
-  mutable std::mutex gate_events_mutex_{};                     ///< 网关事件队列互斥锁
-  std::deque<SessionEvent> pending_gate_events_{};             ///< 待发送的网关事件队列
-  std::uint64_t run_socket_last_flushed_{0};                   ///< 上次刷新的数量
-  std::uint64_t run_socket_last_remaining_{0};                 ///< 上次剩余的待发送事件数
-  std::uint64_t run_socket_last_ms_{0};                        ///< 上次刷新耗时(毫秒)
-  CastleDialogContext castle_dialog_context_{};                 ///< 城堡对话框上下文
-  GuildCastleSnapshot guild_castle_snapshot_{};                 ///< 公会城堡快照
-  std::chrono::steady_clock::time_point next_castle_context_refresh_{}; ///< 下次城堡上下文刷新时间点
-  std::uint64_t castle_context_refresh_count_{0};              ///< 城堡上下文刷新次数
-  std::uint64_t offline_guild_result_count_{0};                ///< 离线公会操作结果计数
-  std::uint64_t offline_guild_route_count_{0};                 ///< 离线公会路由计数
-  std::uint64_t offline_guild_error_count_{0};                 ///< 离线公会错误计数
-  bool castle_context_refresh_in_flight_{false};               ///< 城堡上下文刷新是否进行中
+  HostContext* context_{nullptr};
+  std::shared_ptr<LocalBus::Endpoint> endpoint_{};
+  std::thread worker_{};
+  std::atomic_bool running_{false};
+  std::unique_ptr<LogicRuntime> runtime_{};
+  LegacyFrameDriver legacy_frame_driver_{};
+  mutable std::mutex legacy_frame_mutex_{};
+  LegacyFrameTrace legacy_frame_trace_{};
+  bool legacy_frame_seen_{false};
+  std::unordered_map<std::string, PendingLoad> pending_loads_{};
+  std::unordered_map<std::int32_t, Admission> admissions_{};
+  std::unordered_map<std::uint64_t, Admission> active_sessions_{};
+  std::unordered_map<std::string, std::uint64_t> active_accounts_{};
+  std::unordered_map<std::string, std::uint64_t> character_save_versions_{};
+  std::unordered_map<std::uint64_t, std::string> session_gateways_{};
+  std::unordered_map<std::uint64_t, std::uint64_t> session_sequence_watermarks_{};
+  std::uint64_t next_ingress_seq_{0};
+  std::uint64_t current_frame_now_ms_{0};
+  mutable std::mutex gate_events_mutex_{};
+  std::deque<SessionEvent> pending_gate_events_{};
+  std::uint64_t run_socket_last_flushed_{0};
+  std::uint64_t run_socket_last_remaining_{0};
+  std::uint64_t run_socket_last_ms_{0};
+  CastleDialogContext castle_dialog_context_{};
+  GuildCastleSnapshot guild_castle_snapshot_{};
+  std::chrono::steady_clock::time_point next_castle_context_refresh_{};
+  std::uint64_t castle_context_refresh_count_{0};
+  std::uint64_t offline_guild_result_count_{0};
+  std::uint64_t offline_guild_route_count_{0};
+  std::uint64_t offline_guild_error_count_{0};
+  bool castle_context_refresh_in_flight_{false};
 };
 
 }  // namespace mir2

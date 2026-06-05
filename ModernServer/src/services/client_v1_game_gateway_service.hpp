@@ -499,16 +499,16 @@ class ClientV1GameGatewayService : public ClientV1GatewayServiceBase {
    */
   [[nodiscard]] std::optional<SessionState> session(std::uint64_t session_id) const;
 
-  std::shared_ptr<ClientV1AdmissionRegistry> admissions_{};  ///< Client v1 准入注册表
-  std::unique_ptr<Repository> repository_{};                 ///< 数据仓库(SQLite 数据库访问)
-  std::shared_ptr<LocalBus::Endpoint> endpoint_{};           ///< 消息总线端点
-  std::thread bus_thread_{};                                 ///< 消息总线处理线程
-  std::atomic_bool bus_running_{false};                      ///< 总线线程运行标志
-  mutable std::mutex mutex_{};                               ///< 会话/组队/公会数据互斥锁
-  std::unordered_map<std::uint64_t, SessionState> sessions_{}; ///< 会话 ID -> 会话状态映射表
-  std::uint64_t next_group_id_{1};                           ///< 下一个组队 ID(自增)
-  std::unordered_map<std::uint64_t, GroupRuntimeState> groups_{}; ///< 组队 ID -> 组队状态映射表
-  std::unordered_map<std::string, GuildRuntimeState> guilds_{};  ///< 公会名 -> 公会状态映射表
+  std::shared_ptr<ClientV1AdmissionRegistry> admissions_{};
+  std::unique_ptr<Repository> repository_{};
+  std::shared_ptr<LocalBus::Endpoint> endpoint_{};
+  std::thread bus_thread_{};
+  std::atomic_bool bus_running_{false};
+  mutable std::mutex mutex_{};
+  std::unordered_map<std::uint64_t, SessionState> sessions_{};
+  std::uint64_t next_group_id_{1};
+  std::unordered_map<std::uint64_t, GroupRuntimeState> groups_{};
+  std::unordered_map<std::string, GuildRuntimeState> guilds_{};
 };
 
 }  // namespace mir2

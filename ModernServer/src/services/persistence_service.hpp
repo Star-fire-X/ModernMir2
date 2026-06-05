@@ -89,15 +89,15 @@ class PersistenceService : public Module {
    */
   void handle_request(const PersistRequest& request);
 
-  HostContext* context_{nullptr};                    ///< 宿主上下文指针
-  std::shared_ptr<LocalBus::Endpoint> endpoint_{};   ///< 消息总线端点
-  std::unique_ptr<Repository> repository_{};         ///< 数据仓库(SQLite 数据库访问对象)
-  std::thread worker_{};                             ///< 工作线程
-  std::atomic_bool running_{false};                  ///< 运行状态标志
-  std::size_t handled_requests_{0};                  ///< 已处理的请求计数
-  PersistRequestKind last_request_kind_{PersistRequestKind::ensure_schema}; ///< 最后处理的请求类型
-  std::string last_request_reply_to_{};              ///< 最后处理的请求的回复目标
-  std::string last_request_id_{};                    ///< 最后处理的请求的ID
+  HostContext* context_{nullptr};
+  std::shared_ptr<LocalBus::Endpoint> endpoint_{};
+  std::unique_ptr<Repository> repository_{};
+  std::thread worker_{};
+  std::atomic_bool running_{false};
+  std::size_t handled_requests_{0};
+  PersistRequestKind last_request_kind_{PersistRequestKind::ensure_schema};
+  std::string last_request_reply_to_{};
+  std::string last_request_id_{};
 };
 
 }  // namespace mir2
