@@ -16,6 +16,8 @@
 #include <string_view>
 #include <vector>
 
+#include "config/models.hpp"
+
 namespace mir2 {
 
 /** @brief 会长等级常量 */
@@ -56,17 +58,6 @@ struct GuildRankGroup {
   std::uint8_t rank{kGuildDefaultRank}; ///< 等级编号
   std::string rank_name{};              ///< 等级名称
   std::vector<GuildMember> members{};   ///< 该等级下的成员列表
-};
-
-/**
- * @struct GuildWarState
- * @brief 公会战状态数据结构
- * @details 记录与某个敌对公会的战争状态，包括开始时间、持续时间等。
- */
-struct GuildWarState {
-  std::string enemy_guild{};       ///< 敌对公会名称
-  std::uint64_t start_ms{0};       ///< 开战时间戳（毫秒）
-  std::uint64_t remain_ms{3 * 60 * 60 * 1000}; ///< 战争持续时间（默认3小时）
 };
 
 /**
@@ -309,6 +300,8 @@ class GuildManager {
  public:
   // @{ 访问器与查询方法
   [[nodiscard]] const std::vector<Guild>& guilds() const { return guilds_; }  ///< 获取所有公会列表
+  void load_states(const std::vector<GuildState>& states);
+  [[nodiscard]] std::vector<GuildState> snapshot_states() const;
   [[nodiscard]] Guild* find_guild(std::string_view name);                     ///< 按名称查找公会（可变）
   [[nodiscard]] const Guild* find_guild(std::string_view name) const;         ///< 按名称查找公会（const）
   [[nodiscard]] Guild* find_guild_by_member(std::string_view member_name);    ///< 按成员名称查找所属公会（可变）

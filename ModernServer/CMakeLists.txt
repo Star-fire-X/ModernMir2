@@ -164,6 +164,12 @@ if(BUILD_TESTING)
   target_link_libraries(mir2_legacy_frame_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_frame_smoke COMMAND mir2_legacy_frame_smoke)
 
+  add_executable(mir2_legacy_server_message_stage_smoke
+    tests/legacy_server_message_stage_smoke.cpp)
+  target_link_libraries(mir2_legacy_server_message_stage_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_server_message_stage_smoke
+    COMMAND mir2_legacy_server_message_stage_smoke)
+
   add_executable(mir2_legacy_protocol_command_golden_smoke
     tests/legacy_protocol_command_golden_smoke.cpp)
   target_link_libraries(mir2_legacy_protocol_command_golden_smoke PRIVATE mir2_hostlib)
@@ -466,6 +472,12 @@ if(BUILD_TESTING)
   add_test(NAME mir2_legacy_player_operate_order_smoke
     COMMAND mir2_legacy_player_operate_order_smoke)
 
+  add_executable(mir2_legacy_player_periodic_order_smoke
+    tests/legacy_player_periodic_order_smoke.cpp)
+  target_link_libraries(mir2_legacy_player_periodic_order_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_player_periodic_order_smoke
+    COMMAND mir2_legacy_player_periodic_order_smoke)
+
   add_executable(mir2_legacy_player_rotation_smoke
     tests/legacy_player_rotation_smoke.cpp)
   target_link_libraries(mir2_legacy_player_rotation_smoke PRIVATE mir2_hostlib)
@@ -593,6 +605,12 @@ if(BUILD_TESTING)
   add_executable(mir2_legacy_npc_merchant_cursor_smoke tests/legacy_npc_merchant_cursor_smoke.cpp)
   target_link_libraries(mir2_legacy_npc_merchant_cursor_smoke PRIVATE mir2_hostlib)
   add_test(NAME mir2_legacy_npc_merchant_cursor_smoke COMMAND mir2_legacy_npc_merchant_cursor_smoke)
+
+  add_executable(mir2_legacy_npc_merchant_search_smoke
+    tests/legacy_npc_merchant_search_smoke.cpp)
+  target_link_libraries(mir2_legacy_npc_merchant_search_smoke PRIVATE mir2_hostlib)
+  add_test(NAME mir2_legacy_npc_merchant_search_smoke
+    COMMAND mir2_legacy_npc_merchant_search_smoke)
 
   add_executable(mir2_legacy_random_smoke tests/legacy_random_smoke.cpp)
   target_link_libraries(mir2_legacy_random_smoke PRIVATE mir2_hostlib)

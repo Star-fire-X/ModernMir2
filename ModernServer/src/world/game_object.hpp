@@ -949,10 +949,15 @@ class Player : public GameObject {
   /// @name 生命周期管理
   //@{
   [[nodiscard]] bool legacy_due(std::uint64_t now_ms) const;
+  [[nodiscard]] bool legacy_player_search_due(std::uint64_t now_ms) const;
+  [[nodiscard]] bool legacy_line_notice_due(std::uint64_t now_ms) const;
+  [[nodiscard]] std::size_t legacy_line_notice_index() const { return line_notice_index_; }
   void set_legacy_state(LegacyPlayerState state);
   void mark_legacy_notice_done(std::uint64_t now_ms);
   void mark_legacy_initialize_done(std::uint64_t now_ms);
   void mark_legacy_running_time(std::uint64_t now_ms);
+  void mark_legacy_player_search_time(std::uint64_t now_ms);
+  void mark_legacy_line_notice_time(std::uint64_t now_ms);
   void mark_legacy_autosaved(std::uint64_t now_ms);
   void mark_legacy_ghost(std::uint64_t now_ms);
   void mark_legacy_closed();
@@ -1042,6 +1047,10 @@ class Player : public GameObject {
   std::uint64_t legacy_health_spell_tick_interval_{1};     ///< HP/MP 恢复间隔
   std::int64_t run_time_ms_{0};                            ///< 运行时间累计（毫秒，可回拨）
   std::uint64_t run_next_tick_ms_{250};                    ///< 下次运行 tick
+  std::uint64_t search_time_ms_{0};
+  std::uint64_t search_rate_ms_{1000};
+  std::uint64_t line_notice_time_ms_{0};
+  std::size_t line_notice_index_{0};
   std::uint64_t last_save_time_ms_{0};                     ///< 上次保存时间
   std::uint64_t ghost_time_ms_{0};                         ///< 进入鬼魂状态时间
   std::uint64_t legacy_command_sequence_{0};               ///< 命令序列号计数器

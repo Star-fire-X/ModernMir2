@@ -98,12 +98,18 @@ class WorldService : public Module {
   void initialize_runtime_for_test(const HostConfig& config);
   void enqueue_gate_event_for_test(SessionEvent event);
   void seed_session_sequence_for_test(std::uint64_t session_id, std::uint64_t session_seq);
-  [[nodiscard]] std::size_t legacy_session_inbox_size_for_test(std::uint64_t session_id) const;
+  void seed_pending_load_for_test(std::uint64_t session_id, std::string account_id,
+                                  std::string character_name, std::int32_t certification,
+                                  std::uint64_t created_ms);
+  [[nodiscard]] std::size_t legacy_session_inbox_size_for_test(
+      std::uint64_t session_id) const;
   [[nodiscard]] std::vector<std::uint64_t> legacy_session_inbox_sequences_for_test(
       std::uint64_t session_id) const;
   [[nodiscard]] RuntimeDispatch tick_runtime_for_test(std::uint64_t now_ms);
   [[nodiscard]] RuntimeDispatch run_legacy_socket_stage_for_test(std::uint64_t now_ms);
   [[nodiscard]] RuntimeDispatch process_ingress_batch_for_test(WorldIngressBatch& batch);
+  [[nodiscard]] RuntimeDispatch run_server_message_stage_for_test(std::uint64_t now_ms);
+  [[nodiscard]] RuntimeDispatch expire_pending_loads_for_test(std::uint64_t now_ms);
   /// @}
 #endif
 
@@ -116,12 +122,14 @@ class WorldService : public Module {
    *          在此过程中暂存会话和角色信息。
    */
   struct PendingLoad {
-    std::uint64_t session_id{0};            ///< 会话ID
-    std::string gateway{"game_gateway"};    ///< 网关名称
-    std::string account_id{};               ///< 账号ID
-    std::string character_name{};           ///< 角色名
-    std::int32_t certification{0};          ///< 认证凭据
-    CanonicalLoginStage stage{CanonicalLoginStage::entering_game}; ///< 当前阶段
+    std::uint64_t session_id{0};
+    std::string gateway{"game_gateway"};
+    std::string account_id{};
+    std::string character_name{};
+    std::int32_t certification{0};
+    CanonicalLoginStage stage{CanonicalLoginStage::entering_game};
+    std::uint64_t created_ms{0};
+    bool timeout_notified{false};
   };
 
   /**
@@ -166,12 +174,11 @@ class WorldService : public Module {
   [[nodiscard]] RuntimeDispatch handle_session_event(const SessionEvent& event);
   [[nodiscard]] RuntimeDispatch handle_logic_command(const LogicCommand& command);
   [[nodiscard]] RuntimeDispatch handle_persist_result(const PersistResult& result);
+  [[nodiscard]] bool should_defer_persist_result(const PersistResult& result) const;
+  void enqueue_deferred_server_message(WorldIngressMessage message);
+  void apply_persist_result(RuntimeDispatch& dispatch, const PersistResult& result);
+  [[nodiscard]] RuntimeDispatch expire_pending_loads(std::uint64_t now_ms);
   /// @}
-
-  /**
-   * @brief 将网关事件放入待发送队列
-   * @param dispatch 运行时分发数据
-   */
   void queue_gate_events(RuntimeDispatch& dispatch);
 
   /**
@@ -225,6 +232,7 @@ class WorldService : public Module {
   std::unordered_map<std::uint64_t, std::uint64_t> session_sequence_watermarks_{};
   std::uint64_t next_ingress_seq_{0};
   std::uint64_t current_frame_now_ms_{0};
+  std::deque<WorldIngressMessage> deferred_server_messages_{};
   mutable std::mutex gate_events_mutex_{};
   std::deque<SessionEvent> pending_gate_events_{};
   std::uint64_t run_socket_last_flushed_{0};

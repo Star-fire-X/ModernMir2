@@ -13,18 +13,9 @@
 #include <string_view>
 #include <vector>
 
-namespace mir2 {
+#include "config/models.hpp"
 
-/**
- * @struct CastleWarRegistration
- * @brief 攻城战报名记录
- * @details 记录报名攻城战的公会名称及其计划攻击日期。
- *          报名后由系统在指定日期自动触发攻城战。
- */
-struct CastleWarRegistration {
-  std::string guild_name{};   ///< 报名公会名称
-  std::int32_t attack_day{0}; ///< 计划攻击日期（游戏天数）
-};
+namespace mir2 {
 
 /**
  * @struct CastleCoreOccupant
@@ -121,6 +112,7 @@ class CastleManager {
   [[nodiscard]] std::uint64_t castle_attack_started_ms() const {
     return castle_attack_started_ms_;                                                        ///< 获取攻城战开始时间戳
   }
+  [[nodiscard]] CastleRuntimeState runtime_state() const;
   // @}
 
   /**
@@ -129,6 +121,7 @@ class CastleManager {
    * @param lord_name 城主角色名称
    */
   void set_owner(std::string guild_name, std::string lord_name);
+  void load_runtime_state(const CastleRuntimeState& state);
 
   /**
    * @brief 发起攻城战报名

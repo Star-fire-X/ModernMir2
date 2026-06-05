@@ -309,6 +309,21 @@ void MapActor::legacy_operate_player_running(std::uint64_t actor_id, Player& pla
   trace_player_operate(dispatch, player, "status", current_tick, now_ms);
   handle_player_status_effects(player, dispatch, current_tick);
 
+  if (player.legacy_player_search_due(now_ms)) {
+    player.mark_legacy_player_search_time(now_ms);
+    trace_player_operate(dispatch, player, "periodic_hook", current_tick, now_ms);
+    sync_area_state(dispatch, config_, player);
+    sync_player_visibility(player, dispatch, false, now_ms);
+  }
+
+  if (player.legacy_line_notice_due(now_ms)) {
+    player.mark_legacy_line_notice_time(now_ms);
+    trace_player_operate(dispatch, player, "line_notice", current_tick, now_ms,
+                         false,
+                         static_cast<std::int32_t>(player.legacy_line_notice_index()),
+                         "no_source");
+  }
+
   trace_player_operate(dispatch, player, "messages", current_tick, now_ms,
                        player.legacy_has_commands(),
                        static_cast<std::int32_t>(player.legacy_inbox_size()));

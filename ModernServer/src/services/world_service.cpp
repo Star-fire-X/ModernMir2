@@ -524,6 +524,17 @@ void WorldService::seed_session_sequence_for_test(std::uint64_t session_id,
   session_sequence_watermarks_[session_id] = session_seq;
 }
 
+void WorldService::seed_pending_load_for_test(std::uint64_t session_id,
+                                              std::string account_id,
+                                              std::string character_name,
+                                              std::int32_t certification,
+                                              std::uint64_t created_ms) {
+  pending_loads_[make_key(account_id, character_name)] =
+      PendingLoad{session_id, "game_gateway", std::move(account_id),
+                  std::move(character_name), certification,
+                  CanonicalLoginStage::entering_game, created_ms};
+}
+
 std::size_t WorldService::legacy_session_inbox_size_for_test(
     std::uint64_t session_id) const {
   return runtime_ != nullptr ? runtime_->legacy_session_inbox_size(session_id) : 0;
@@ -545,6 +556,14 @@ RuntimeDispatch WorldService::run_legacy_socket_stage_for_test(std::uint64_t now
 
 RuntimeDispatch WorldService::process_ingress_batch_for_test(WorldIngressBatch& batch) {
   return process_ingress_batch(batch);
+}
+
+RuntimeDispatch WorldService::run_server_message_stage_for_test(std::uint64_t now_ms) {
+  return run_server_message_stage(now_ms);
+}
+
+RuntimeDispatch WorldService::expire_pending_loads_for_test(std::uint64_t now_ms) {
+  return expire_pending_loads(now_ms);
 }
 #endif
 
@@ -646,7 +665,9 @@ void WorldService::run() {
         runtime_context.persistence_overloaded =
             context_ != nullptr && context_->bus != nullptr &&
             context_->bus->queue_depth("persistence_service") >= 1000;
-        return runtime_->tick(now_ms, runtime_context);
+        auto dispatch = expire_pending_loads(now_ms);
+        append_dispatch(dispatch, runtime_->tick(now_ms, runtime_context));
+        return dispatch;
       };
       callbacks.event_manager_run = [this, now_ms]() -> RuntimeDispatch {
         return runtime_->run_legacy_event_manager(now_ms);
@@ -744,7 +765,11 @@ RuntimeDispatch WorldService::process_ingress_batch(WorldIngressBatch& batch) {
     } else if (auto command = std::get_if<LogicCommand>(&message)) {
       append_dispatch(combined, handle_logic_command(*command));
     } else if (auto result = std::get_if<PersistResult>(&message)) {
-      append_dispatch(combined, handle_persist_result(*result));
+      if (should_defer_persist_result(*result)) {
+        enqueue_deferred_server_message(std::move(ingress));
+      } else {
+        apply_persist_result(combined, *result);
+      }
     } else if (auto mail = std::get_if<ActorMail>(&message)) {
       append_dispatch(combined, runtime_->route_actor_mail(*mail));
     }
@@ -753,8 +778,101 @@ RuntimeDispatch WorldService::process_ingress_batch(WorldIngressBatch& batch) {
   return combined;
 }
 
-RuntimeDispatch WorldService::run_server_message_stage(std::uint64_t) {
-  return {};
+RuntimeDispatch WorldService::run_server_message_stage(std::uint64_t now_ms) {
+  RuntimeDispatch combined;
+  while (!deferred_server_messages_.empty()) {
+    auto ingress = std::move(deferred_server_messages_.front());
+    deferred_server_messages_.pop_front();
+    if (const auto* result = std::get_if<PersistResult>(&ingress.message)) {
+      apply_persist_result(combined, *result);
+      continue;
+    }
+
+    const auto detail = "ingress=" + std::to_string(ingress.ingress_seq) +
+                        " frame=" + std::to_string(ingress.frame_index);
+    combined.audit_events.push_back(
+        AuditEvent{"world.server_message_unexpected", detail, name()});
+
+    LegacyRuntimeTrace trace;
+    trace.stage = "ServerMessageRun";
+    trace.action = "unexpected_deferred_message";
+    trace.now_ms = now_ms;
+    trace.cursor = static_cast<std::size_t>(ingress.ingress_seq);
+    trace.sub_cursor = static_cast<std::size_t>(ingress.frame_index);
+    trace.label = detail;
+    trace.success = false;
+    combined.legacy_traces.push_back(std::move(trace));
+  }
+  return combined;
+}
+
+bool WorldService::should_defer_persist_result(const PersistResult& result) const {
+  return result.kind == PersistResultKind::guild_castle_snapshot_loaded ||
+         result.kind == PersistResultKind::castle_dialog_context_loaded ||
+         result.kind == PersistResultKind::merchant_states_loaded ||
+         util::starts_with(result.request_id, "guild_offline");
+}
+
+void WorldService::enqueue_deferred_server_message(WorldIngressMessage message) {
+  deferred_server_messages_.push_back(std::move(message));
+}
+
+void WorldService::apply_persist_result(RuntimeDispatch& dispatch,
+                                        const PersistResult& result) {
+  append_dispatch(dispatch, handle_persist_result(result));
+}
+
+RuntimeDispatch WorldService::expire_pending_loads(std::uint64_t now_ms) {
+  constexpr std::uint64_t kPendingLoadTimeoutMs = 30ULL * 1000ULL;
+  RuntimeDispatch dispatch;
+  for (auto it = pending_loads_.begin(); it != pending_loads_.end();) {
+    auto& pending = it->second;
+    if (pending.created_ms == 0 || now_ms - pending.created_ms <= kPendingLoadTimeoutMs) {
+      ++it;
+      continue;
+    }
+
+    if (!pending.timeout_notified) {
+      SessionEvent event;
+      event.kind = SessionEventKind::force_disconnect;
+      event.gateway = pending.gateway.empty() ? "game_gateway" : pending.gateway;
+      event.session_id = pending.session_id;
+      event.reason = "pending_load_timeout";
+      dispatch.session_events.push_back(std::move(event));
+
+      dispatch.audit_events.push_back(
+          AuditEvent{"world.pending_load_timeout",
+                     pending.account_id + ":" + pending.character_name,
+                     std::to_string(pending.session_id)});
+
+      LegacyRuntimeTrace trace;
+      trace.stage = "LegacyMission";
+      trace.action = "CheckServerWaitTimeOut";
+      trace.actor_id = pending.session_id;
+      trace.now_ms = now_ms;
+      trace.cursor = static_cast<std::size_t>(now_ms - pending.created_ms);
+      trace.success = true;
+      dispatch.legacy_traces.push_back(std::move(trace));
+      pending.timeout_notified = true;
+    }
+
+    if (pending.certification > 0) {
+      LogicCommand revoke;
+      revoke.kind = LogicCommandKind::revoke_authentication;
+      revoke.account_id = pending.account_id;
+      revoke.character_name = pending.character_name;
+      revoke.certification = pending.certification;
+      if (context_ == nullptr || context_->bus == nullptr ||
+          !context_->bus->post("auth_service", std::move(revoke))) {
+        ++it;
+        continue;
+      }
+      admissions_.erase(pending.certification);
+    }
+    session_gateways_.erase(pending.session_id);
+    it = pending_loads_.erase(it);
+  }
+  return dispatch;
 }
 
 /**
@@ -1003,7 +1121,8 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
       pending_loads_[make_key(run_login->account_id, run_login->character_name)] =
           PendingLoad{event.session_id, event.gateway.empty() ? "game_gateway" : event.gateway,
                       run_login->account_id, run_login->character_name,
-                      run_login->certification, admission->second.stage};
+                      run_login->certification, admission->second.stage,
+                      current_frame_now_ms_};
       PersistRequest request;
       request.kind = PersistRequestKind::load_character;
       request.reply_to = name();
@@ -1035,7 +1154,8 @@ RuntimeDispatch WorldService::handle_session_event(const SessionEvent& event) {
       session_gateways_[event.session_id] = event.gateway.empty() ? "game_gateway" : event.gateway;
       pending_loads_[make_key(account, character)] =
           PendingLoad{event.session_id, event.gateway.empty() ? "game_gateway" : event.gateway,
-                      account, character, 0};
+                      account, character, 0, CanonicalLoginStage::entering_game,
+                      current_frame_now_ms_};
       PersistRequest request;
       request.kind = PersistRequestKind::load_character;
       request.reply_to = name();

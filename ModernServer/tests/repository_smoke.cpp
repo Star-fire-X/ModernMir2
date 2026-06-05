@@ -1,7 +1,10 @@
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <string>
 
 #include "storage/repository.hpp"
+#include "world/castle_manager.hpp"
 
 namespace {
 
@@ -27,6 +30,20 @@ mir2::CharacterRecord make_character(const std::string& account_id, const std::s
   record.ability.max_wear_weight = 100;
   record.ability.max_hand_weight = 100;
   return record;
+}
+
+std::uint64_t wall_now_ms() {
+  return static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count());
+}
+
+std::uint64_t steady_now_ms() {
+  return static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
 }
 
 }  // namespace
@@ -151,6 +168,7 @@ int main() {
   guild_state.lord = "Mage";
   guild_state.members = {"Mage", "Knight"};
   guild_state.applicants = {"Visitor"};
+  guild_state.hostile_guilds = {mir2::GuildWarState{"Rivals", 0, 12345}};
   repository.save_guild_state(guild_state);
   const auto guild_snapshot = repository.load_guild_castle_snapshot();
   const auto guild_it =
@@ -160,7 +178,64 @@ int main() {
                    });
   if (guild_it == guild_snapshot.guilds.end() || guild_it->lord != "Mage" ||
       guild_it->members.size() != 2 || guild_it->applicants.size() != 1 ||
-      guild_it->applicants.front() != "Visitor") {
+      guild_it->applicants.front() != "Visitor" || guild_it->hostile_guilds.size() != 1 ||
+      guild_it->hostile_guilds.front().start_ms == 0 ||
+      guild_it->hostile_guilds.front().remain_ms == 0 ||
+      guild_it->hostile_guilds.front().remain_ms > 12345) {
+    return 1;
+  }
+
+  const auto castle_wall_now = wall_now_ms();
+  repository.save_castle_state(
+      "Sabuk",
+      "{\"owner_guild\":\"DragonSlayers\",\"under_attack\":true,"
+      "\"timeout_warning_sent\":false,\"war_end_time_ms\":" +
+          std::to_string(castle_wall_now + 600000) +
+          ",\"occupation_ready_time_ms\":" + std::to_string(castle_wall_now + 300000) +
+          ",\"rush_guilds\":[\"Rivals\"],\"registrations\":[]}");
+  repository.save_castle_state("Sabuk",
+                               "{\"owner_guild\":\"DragonSlayers\",\"lord\":\"Mage\"}");
+  const auto castle_runtime_snapshot = repository.load_guild_castle_snapshot();
+  if (!castle_runtime_snapshot.castle_runtime.under_attack ||
+      castle_runtime_snapshot.castle_runtime.rush_guilds.size() != 1 ||
+      castle_runtime_snapshot.castle_runtime.rush_guilds.front() != "Rivals" ||
+      castle_runtime_snapshot.castle_dialog.owner_guild != "DragonSlayers" ||
+      castle_runtime_snapshot.castle_dialog.lord != "Mage") {
+    return 1;
+  }
+
+  const auto legacy_castle_start =
+      steady_now_ms() + 600000 - mir2::CastleManager::kWarDurationMs;
+  repository.save_castle_state(
+      "Sabuk",
+      "{\"owner_guild\":\"DragonSlayers\",\"under_attack\":true,"
+      "\"timeout_warning_sent\":false,\"latest_war_start_ms\":" +
+          std::to_string(legacy_castle_start) +
+          ",\"castle_attack_started_ms\":" + std::to_string(legacy_castle_start) +
+          ",\"rush_guilds\":[\"Rivals\"],\"registrations\":[]}");
+  const auto legacy_runtime_snapshot = repository.load_guild_castle_snapshot();
+  const auto legacy_elapsed =
+      steady_now_ms() - legacy_runtime_snapshot.castle_runtime.latest_war_start_ms;
+  if (!legacy_runtime_snapshot.castle_runtime.under_attack ||
+      legacy_elapsed < mir2::CastleManager::kWarDurationMs - 700000) {
+    return 1;
+  }
+
+  const auto future_legacy_castle_start = steady_now_ms() + 600000;
+  repository.save_castle_state(
+      "Sabuk",
+      "{\"owner_guild\":\"DragonSlayers\",\"under_attack\":true,"
+      "\"timeout_warning_sent\":false,\"latest_war_start_ms\":" +
+          std::to_string(future_legacy_castle_start) +
+          ",\"castle_attack_started_ms\":" +
+          std::to_string(future_legacy_castle_start) +
+          ",\"rush_guilds\":[\"Rivals\"],\"registrations\":[]}");
+  const auto future_legacy_runtime_snapshot = repository.load_guild_castle_snapshot();
+  const auto future_legacy_elapsed =
+      steady_now_ms() -
+      future_legacy_runtime_snapshot.castle_runtime.latest_war_start_ms;
+  if (!future_legacy_runtime_snapshot.castle_runtime.under_attack ||
+      future_legacy_elapsed > 5000) {
     return 1;
   }
 

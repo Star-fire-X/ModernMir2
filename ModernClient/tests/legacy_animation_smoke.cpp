@@ -461,6 +461,124 @@ int main() {
   assert(queued_hit_pose->overlay_count == 1);
   assert(queued_hit_pose->overlays[0].frame_index == 820);
 
+  WorldViewState hit_interrupt_world;
+  hit_interrupt_world.self_actor_id = 2;
+  auto hit_interrupt_actor = actor;
+  hit_interrupt_actor.current_action = mir2::client_v1::ActorActionKind::hit;
+  hit_interrupt_actor.legacy_action_ident = mir2::legacy::kSmHit;
+  hit_interrupt_actor.action_started_ms = 9100;
+  hit_interrupt_world.actors[1] = hit_interrupt_actor;
+  AnimationManager hit_interrupt_animations;
+  hit_interrupt_animations.reset(9000);
+  hit_interrupt_animations.update(hit_interrupt_world, 9100);
+  auto hit_interrupt_pose = hit_interrupt_animations.pose_for(1);
+  assert(hit_interrupt_pose.has_value());
+  assert(hit_interrupt_pose->body_index ==
+         appearance.body_offset +
+             legacy_frame_index(legacy_human_action_info(LegacyHumanAction::hit), 2, 0));
+
+  hit_interrupt_actor.current_action = mir2::client_v1::ActorActionKind::struck;
+  hit_interrupt_actor.legacy_action_ident = 31;
+  hit_interrupt_actor.action_started_ms = 9150;
+  hit_interrupt_actor.legacy_struck_frame_ms = 80;
+  hit_interrupt_actor.last_damage = 9;
+  hit_interrupt_world.actors[1] = hit_interrupt_actor;
+  hit_interrupt_animations.update(hit_interrupt_world, 9150);
+  hit_interrupt_pose = hit_interrupt_animations.pose_for(1);
+  assert(hit_interrupt_pose.has_value());
+  assert(hit_interrupt_pose->body_index ==
+         appearance.body_offset +
+             legacy_frame_index(legacy_human_action_info(LegacyHumanAction::struck), 2, 0));
+  assert(hit_interrupt_pose->overlay_count == 1);
+  assert(hit_interrupt_pose->overlays[0].frame_index == 820);
+
+  WorldViewState self_hit_interrupt_world;
+  self_hit_interrupt_world.self_actor_id = 1;
+  auto self_hit_interrupt_actor = actor;
+  self_hit_interrupt_actor.current_action = mir2::client_v1::ActorActionKind::hit;
+  self_hit_interrupt_actor.legacy_action_ident = mir2::legacy::kSmHit;
+  self_hit_interrupt_actor.action_started_ms = 9200;
+  self_hit_interrupt_world.actors[1] = self_hit_interrupt_actor;
+  AnimationManager self_hit_interrupt_animations;
+  self_hit_interrupt_animations.reset(9190);
+  self_hit_interrupt_animations.update(self_hit_interrupt_world, 9200);
+  self_hit_interrupt_actor.current_action = mir2::client_v1::ActorActionKind::struck;
+  self_hit_interrupt_actor.legacy_action_ident = 31;
+  self_hit_interrupt_actor.action_started_ms = 9250;
+  self_hit_interrupt_actor.legacy_struck_frame_ms = 80;
+  self_hit_interrupt_world.actors[1] = self_hit_interrupt_actor;
+  self_hit_interrupt_animations.update(self_hit_interrupt_world, 9250);
+  const auto self_hit_interrupt_pose = self_hit_interrupt_animations.pose_for(1);
+  assert(self_hit_interrupt_pose.has_value());
+  assert(self_hit_interrupt_pose->body_index ==
+         appearance.body_offset +
+             legacy_frame_index(legacy_human_action_info(LegacyHumanAction::hit), 2, 0));
+
+  WorldViewState queued_hit_interrupt_world;
+  queued_hit_interrupt_world.self_actor_id = 2;
+  auto queued_hit_interrupt_actor = actor;
+  queued_hit_interrupt_actor.current_action = mir2::client_v1::ActorActionKind::hit;
+  queued_hit_interrupt_actor.legacy_action_ident = mir2::legacy::kSmHeavyHit;
+  queued_hit_interrupt_actor.action_started_ms = 9300;
+  queued_hit_interrupt_world.actors[1] = queued_hit_interrupt_actor;
+  AnimationManager queued_hit_interrupt_animations;
+  queued_hit_interrupt_animations.reset(9290);
+  queued_hit_interrupt_animations.update(queued_hit_interrupt_world, 9300);
+
+  queued_hit_interrupt_actor.legacy_action_ident = mir2::legacy::kSmHit;
+  queued_hit_interrupt_actor.action_started_ms = 9310;
+  queued_hit_interrupt_world.actors[1] = queued_hit_interrupt_actor;
+  queued_hit_interrupt_animations.update(queued_hit_interrupt_world, 9310);
+
+  queued_hit_interrupt_actor.current_action = mir2::client_v1::ActorActionKind::struck;
+  queued_hit_interrupt_actor.legacy_action_ident = 31;
+  queued_hit_interrupt_actor.action_started_ms = 9320;
+  queued_hit_interrupt_world.actors[1] = queued_hit_interrupt_actor;
+  queued_hit_interrupt_animations.update(queued_hit_interrupt_world, 9320);
+  const auto queued_hit_interrupt_pose = queued_hit_interrupt_animations.pose_for(1);
+  assert(queued_hit_interrupt_pose.has_value());
+  assert(queued_hit_interrupt_pose->body_index ==
+         appearance.body_offset +
+             legacy_frame_index(legacy_human_action_info(LegacyHumanAction::heavy_hit), 2, 0));
+
+  const auto* effect_hit_table = legacy_monster_action_table(49, 0);
+  assert(effect_hit_table != nullptr);
+  const auto effect_hit_attack =
+      (*effect_hit_table)[static_cast<std::size_t>(LegacyMonsterAction::attack)];
+  WorldViewState effect_hit_interrupt_world;
+  effect_hit_interrupt_world.self_actor_id = 1;
+  ActorState effect_hit_actor;
+  effect_hit_actor.actor_id = 49;
+  effect_hit_actor.actor_type = mir2::client_v1::ActorType::monster;
+  effect_hit_actor.x = 10;
+  effect_hit_actor.y = 10;
+  effect_hit_actor.from_x = 10;
+  effect_hit_actor.from_y = 10;
+  effect_hit_actor.dir = 2;
+  effect_hit_actor.feature = 49;
+  effect_hit_actor.current_action = mir2::client_v1::ActorActionKind::hit;
+  effect_hit_actor.legacy_action_ident = mir2::legacy::kSmHit;
+  effect_hit_actor.action_started_ms = 9400;
+  effect_hit_interrupt_world.actors[49] = effect_hit_actor;
+  AnimationManager effect_hit_interrupt_animations;
+  effect_hit_interrupt_animations.reset(9390);
+  effect_hit_interrupt_animations.update(effect_hit_interrupt_world, 9400);
+  auto effect_hit_interrupt_pose = effect_hit_interrupt_animations.pose_for(49);
+  assert(effect_hit_interrupt_pose.has_value());
+  assert(effect_hit_interrupt_pose->body_index ==
+         legacy_monster_offset(0) + legacy_frame_index(effect_hit_attack, 2, 0));
+
+  effect_hit_actor.current_action = mir2::client_v1::ActorActionKind::struck;
+  effect_hit_actor.legacy_action_ident = 31;
+  effect_hit_actor.action_started_ms = 9450;
+  effect_hit_actor.legacy_struck_frame_ms = 80;
+  effect_hit_interrupt_world.actors[49] = effect_hit_actor;
+  effect_hit_interrupt_animations.update(effect_hit_interrupt_world, 9450);
+  effect_hit_interrupt_pose = effect_hit_interrupt_animations.pose_for(49);
+  assert(effect_hit_interrupt_pose.has_value());
+  assert(effect_hit_interrupt_pose->body_index ==
+         legacy_monster_offset(0) + legacy_frame_index(effect_hit_attack, 2, 0));
+
   WorldViewState struck_world;
   struck_world.self_actor_id = 1;
   auto struck_actor = actor;

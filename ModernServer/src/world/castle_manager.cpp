@@ -60,6 +60,26 @@ void CastleManager::set_owner(std::string guild_name, std::string lord_name) {
   owner_lord_ = normalize_name(std::move(lord_name));
 }
 
+CastleRuntimeState CastleManager::runtime_state() const {
+  CastleRuntimeState state;
+  state.under_attack = under_attack_;
+  state.timeout_warning_sent = timeout_warning_sent_;
+  state.latest_war_start_ms = latest_war_start_ms_;
+  state.castle_attack_started_ms = castle_attack_started_ms_;
+  state.rush_guilds = rush_guilds_;
+  state.registrations = registrations_;
+  return state;
+}
+
+void CastleManager::load_runtime_state(const CastleRuntimeState& state) {
+  under_attack_ = state.under_attack;
+  timeout_warning_sent_ = state.timeout_warning_sent;
+  latest_war_start_ms_ = state.latest_war_start_ms;
+  castle_attack_started_ms_ = state.castle_attack_started_ms;
+  rush_guilds_ = state.rush_guilds;
+  registrations_ = state.registrations;
+}
+
 /**
  * @brief 发起攻城战报名
  * @details 验证顺序（任一条件不满足即返回对应错误码）：
