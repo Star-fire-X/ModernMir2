@@ -955,7 +955,8 @@ void ClientApp::request_action(const client_v1::ActionIntent& intent) {
     actor.action_magic = false;
     actor.action_started_ms = now_ms;
     actor.action_duration_ms =
-        GameStateStore::action_duration_ms(actor.current_action, actor.legacy_action_ident);
+        GameStateStore::action_duration_ms(actor.current_action, actor.legacy_action_ident,
+                                           actor.level);
     // 移动类动作：立即更新坐标以实现无延迟行走
     if (intent.kind == client_v1::WorldActionKind::walk ||
         intent.kind == client_v1::WorldActionKind::run) {
@@ -1033,7 +1034,8 @@ void ClientApp::request_spell(const client_v1::SpellIntent& intent,
       actor.action_magic_failed = false;
       state_.apply_magic_metadata(actor, intent.magic_id);
       actor.action_started_ms = now_ms;
-      actor.action_duration_ms = GameStateStore::action_duration_ms(actor.current_action, 0);
+      actor.action_duration_ms =
+          GameStateStore::action_duration_ms(actor.current_action, 0, actor.level);
     }
   }
   protocol_.send(intent);

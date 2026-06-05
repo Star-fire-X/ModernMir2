@@ -218,7 +218,8 @@ void append_character_summary(Bytes& bytes, std::string_view name, std::uint16_t
 
 void append_world_actor(Bytes& bytes, std::uint64_t actor_id, std::string_view name,
                         std::int32_t x, std::int32_t y, std::uint8_t dir,
-                        std::int32_t feature, std::int32_t status, std::uint8_t actor_type) {
+                        std::int32_t feature, std::int32_t status, std::uint8_t actor_type,
+                        const std::uint16_t level = 1) {
   append_u64(bytes, actor_id);
   append_string(bytes, name);
   append_i32(bytes, x);
@@ -227,6 +228,7 @@ void append_world_actor(Bytes& bytes, std::uint64_t actor_id, std::string_view n
   append_i32(bytes, feature);
   append_i32(bytes, status);
   append_u8(bytes, actor_type);
+  append_u16(bytes, level);
 }
 
 void append_item_state(Bytes& bytes, std::string_view name, std::int32_t make_index,
@@ -256,6 +258,7 @@ void append_guild_member(Bytes& bytes, std::string_view name, std::string_view r
 
 void assert_p0_protocol_goldens() {
   using namespace mir2::client_v1;
+  static_assert(kProtocolVersion == 5);
 
   Bytes payload;
   append_u32(payload, kProtocolVersion);

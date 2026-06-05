@@ -58,6 +58,7 @@ struct EffectGolden {
   int target_x;
   int target_y;
   bool fixed_effect;
+  int fire_node_count;
 };
 
 std::int32_t monster_feature(const int race, const int appearance = 0) {
@@ -118,6 +119,30 @@ WorldViewState human_spell_world(const std::uint64_t start_ms, const std::uint16
   return world;
 }
 
+WorldViewState human_action_world(const std::uint64_t start_ms, const std::uint16_t ident,
+                                  const ActorActionKind kind,
+                                  const std::int32_t status = 0) {
+  WorldViewState world;
+  world.width = 80;
+  world.height = 80;
+  world.self_actor_id = 1;
+  ActorState actor;
+  actor.actor_id = 1;
+  actor.actor_type = ActorType::player;
+  actor.x = 10;
+  actor.y = 10;
+  actor.from_x = 10;
+  actor.from_y = 10;
+  actor.dir = 2;
+  actor.feature = mir2::client::make_legacy_feature(0, 1, 2, 3);
+  actor.current_action = kind;
+  actor.legacy_action_ident = ident;
+  actor.action_started_ms = start_ms;
+  actor.status = status;
+  world.actors[1] = actor;
+  return world;
+}
+
 PoseGolden sample_pose(const std::uint64_t tick, const ActorRenderPose& pose) {
   PoseGolden out{};
   out.tick = tick;
@@ -170,6 +195,7 @@ EffectGolden sample_effects(const std::uint64_t tick, const LegacyEffectManager&
   out.target_x = effect->target_x;
   out.target_y = effect->target_y;
   out.fixed_effect = effect->fixed_effect;
+  out.fire_node_count = effect->fire_node_count();
   return out;
 }
 
@@ -225,7 +251,8 @@ bool same_effect(const EffectGolden& a, const EffectGolden& b) {
          a.explosion_base == b.explosion_base && a.current_frame == b.current_frame &&
          a.draw_frame == b.draw_frame && a.magic_type == b.magic_type && a.dir16 == b.dir16 &&
          a.owner_actor_id == b.owner_actor_id && a.target_x == b.target_x &&
-         a.target_y == b.target_y && a.fixed_effect == b.fixed_effect;
+         a.target_y == b.target_y && a.fixed_effect == b.fixed_effect &&
+         a.fire_node_count == b.fire_node_count;
 }
 
 template <std::size_t N>
@@ -364,6 +391,28 @@ void test_special_monster_replay() {
   expect_pose_sequence(sculpture_king, kSculptureKing);
 }
 
+void test_human_status_and_hit_replay() {
+  const std::vector<std::uint64_t> hit_ticks{12000, 12086, 12172};
+  const auto power_hit = run_pose_replay(
+      human_action_world(12000, mir2::legacy::kSmPowerHit, ActorActionKind::hit), 1, hit_ticks);
+  constexpr std::array<PoseGolden, 3> kPowerHit{{
+      {12000, ArchiveId::hum, 816, 216, 10, 10, 0, 0, 2, true, false, 1, ArchiveId::magic, 820},
+      {12086, ArchiveId::hum, 817, 217, 10, 10, 0, 0, 2, true, false, 1, ArchiveId::magic, 821},
+      {12172, ArchiveId::hum, 818, 218, 10, 10, 0, 0, 2, true, false, 1, ArchiveId::magic, 822},
+  }};
+  expect_pose_sequence(power_hit, kPowerHit);
+
+  const std::vector<std::uint64_t> status_ticks{10000};
+  const auto status_pose = run_pose_replay(
+      human_action_world(10000, 10, ActorActionKind::turn,
+                         static_cast<std::int32_t>(0x80900000U)),
+      1, status_ticks);
+  constexpr std::array<PoseGolden, 1> kStatus{{
+      {10000, ArchiveId::hum, 616, 16, 10, 10, 0, 0, 2, true, false, 1, ArchiveId::magic, 3892},
+  }};
+  expect_pose_sequence(status_pose, kStatus);
+}
+
 void test_projectile_and_skill_replay() {
   const std::vector<std::uint64_t> projectile_ticks{21000, 21250, 21500, 21750, 22000};
   const auto dual_axe = run_effect_replay(
@@ -387,6 +436,7 @@ void test_projectile_and_skill_replay() {
   const auto explosion = run_magic_matrix_replay(matrix_magic(2, 3, 3), matrix_ticks);
   const auto explo_bujauk = run_magic_matrix_replay(matrix_magic(8, 10, 13), matrix_ticks);
   const auto fire_thunder = run_magic_matrix_replay(matrix_magic(14, 33, 33), matrix_ticks);
+  const auto fire_gun = run_magic_matrix_replay(matrix_magic(5, 9, 9), matrix_ticks);
 
   constexpr std::array<EffectGolden, 5> kDualAxe{{
       {21000, 0, 0, archive(19), -1, -1, -1, -1, magic_type(1), -1, 0, -1, -1, false},
@@ -469,6 +519,12 @@ void test_projectile_and_skill_replay() {
       {8211, 0, 1, archive(15), 140, 140, 3, 143, magic_type(14), 4, 0, 13, 10, true},
       {8291, 0, 1, archive(15), 140, 140, 4, 144, magic_type(14), 4, 0, 13, 10, true},
   }};
+  constexpr std::array<EffectGolden, 4> kFireGun{{
+      {8051, 0, 1, archive(14), 930, 930, 0, 930, magic_type(5), 4, 0, 13, 10, false, 1},
+      {8131, 0, 1, archive(14), 930, 930, 0, 930, magic_type(5), 4, 0, 13, 10, false, 2},
+      {8211, 0, 1, archive(14), 930, 930, 0, 930, magic_type(5), 4, 0, 13, 10, false, 3},
+      {8291, 0, 1, archive(14), 930, 930, 0, 930, magic_type(5), 4, 0, 13, 10, false, 4},
+  }};
 
   expect_effect_sequence(dual_axe, kDualAxe);
   expect_effect_sequence(archer, kArcher);
@@ -479,12 +535,14 @@ void test_projectile_and_skill_replay() {
   expect_effect_sequence(explosion, kExplosion);
   expect_effect_sequence(explo_bujauk, kExploBujauk);
   expect_effect_sequence(fire_thunder, kFireThunder);
+  expect_effect_sequence(fire_gun, kFireGun);
 }
 
 }  // namespace
 
 int main() {
   test_special_monster_replay();
+  test_human_status_and_hit_replay();
   test_projectile_and_skill_replay();
   return 0;
 }

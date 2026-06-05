@@ -478,6 +478,7 @@ constexpr int kMagicFlyBase = 10;       ///< 魔法飞行帧基址偏移（effec
 constexpr int kMagicExplosionBase = 170; ///< 魔法爆炸帧基址偏移（effect_base + 170 开始爆炸帧）
 constexpr std::uint64_t kMagicTimeoutMs = 10000;  ///< 魔法特效超时时间（10秒，防止永久残留）
 constexpr int kDefaultSpellFrame = 10;
+constexpr std::uint8_t kTransparentAlpha = 168;
 
 constexpr int kDeathEffectBase = 340;
 constexpr int kDeathFireEffectBase = 2860;
@@ -512,6 +513,17 @@ constexpr int kDeadCowKingFlyBase = 3580;
 constexpr int kDoorDeathEffectBase = 120;
 constexpr int kWallLeftBrokenEffectBase = 224;
 constexpr int kWallRightBrokenEffectBase = 240;
+constexpr int kMagicBubbleBase = 3890;
+constexpr int kMagicBubbleStruckBase = 3900;
+
+constexpr std::uint32_t kLegacyStatusTransparent = 0x00800000U;
+constexpr std::uint32_t kLegacyStatusBubbleDefenceUp = 0x00100000U;
+constexpr std::uint32_t kLegacyStatusGreen = 0x80000000U;
+constexpr std::uint32_t kLegacyStatusRed = 0x40000000U;
+constexpr std::uint32_t kLegacyStatusBlue = 0x20000000U;
+constexpr std::uint32_t kLegacyStatusYellow = 0x10000000U;
+constexpr std::uint32_t kLegacyStatusFuchsia = 0x08000000U;
+constexpr std::uint32_t kLegacyStatusGrayscale = 0x04000000U;
 
 /// 魔法效果帧基址表：索引 = MagicDB.Effect - 1
 /// 值为 0 的项表示该特效无独立精灵区（复用其他特效的帧）
@@ -699,6 +711,58 @@ LegacyMagicType magic_type_from_effect_type(const int effect_type,
   return fallback;
 }
 
+std::uint32_t actor_status_bits(const ActorState& actor) {
+  return static_cast<std::uint32_t>(actor.status);
+}
+
+bool actor_status_has(const ActorState& actor, const std::uint32_t mask) {
+  return (actor_status_bits(actor) & mask) != 0U;
+}
+
+LegacyActorColorEffect actor_color_effect_from_status(const ActorState& actor) {
+  if (actor_status_has(actor, kLegacyStatusGreen)) {
+    return LegacyActorColorEffect::green;
+  }
+  if (actor_status_has(actor, kLegacyStatusRed)) {
+    return LegacyActorColorEffect::red;
+  }
+  if (actor_status_has(actor, kLegacyStatusBlue)) {
+    return LegacyActorColorEffect::blue;
+  }
+  if (actor_status_has(actor, kLegacyStatusYellow)) {
+    return LegacyActorColorEffect::yellow;
+  }
+  if (actor_status_has(actor, kLegacyStatusFuchsia)) {
+    return LegacyActorColorEffect::fuchsia;
+  }
+  if (actor_status_has(actor, kLegacyStatusGrayscale)) {
+    return LegacyActorColorEffect::grayscale;
+  }
+  return LegacyActorColorEffect::none;
+}
+
+std::optional<int> human_hit_effect_base_for_ident(const std::uint16_t ident) {
+  switch (ident) {
+    case legacy::kSmPowerHit:
+      return kHitEffectBase[0];
+    case legacy::kSmLongHit:
+      return kHitEffectBase[1];
+    case legacy::kSmWideHit:
+      return kHitEffectBase[2];
+    case legacy::kSmFireHit:
+      return kHitEffectBase[3];
+    case legacy::kSmCrossHit:
+      return kHitEffectBase[5];
+    default:
+      return std::nullopt;
+  }
+}
+
+std::optional<int> struck_effect_base_for_actor(const ActorState& actor) {
+  return actor.last_damage_magic ? std::optional<int>{kHitEffectBase[5]}
+                                 : std::optional<int>{kHitEffectBase[0]};
+}
+
 /// 从怪物动作表中取出指定动作
 const LegacyActionInfo& monster_action(const LegacyMonsterActionTable& table,
                                        const LegacyMonsterAction action) {
@@ -870,6 +934,27 @@ void draw_effect_frame(AssetManager& assets, SoftwareRenderer& renderer,
   renderer.surface().blit_rgba(draw_x, draw_y, frame->width, frame->height, frame->pixels.data());
 }
 
+bool fire_gun_matches_row(const LegacyEffectManager::Effect& effect, const int row) {
+  return std::any_of(effect.fire_nodes.begin(), effect.fire_nodes.end(),
+                     [row](const LegacyEffectManager::Effect::FireNode& node) {
+                       return node.age > 0 && node.age <= 6 && node.y / kLegacyUnitY == row;
+                     });
+}
+
+void draw_fire_gun_nodes(AssetManager& assets, SoftwareRenderer& renderer,
+                         const LegacyEffectManager::Effect& effect,
+                         const legacy::LegacyMapViewport& viewport, const int row) {
+  for (const auto& node : effect.fire_nodes) {
+    if (node.age <= 0 || node.age > 6 || node.y / kLegacyUnitY != row) {
+      continue;
+    }
+    const auto frame_index = effect.effect_base + node.age - 1;
+    const auto screen_x = world_to_screen_x(node.x, viewport);
+    const auto screen_y = world_to_screen_y(node.y, viewport);
+    draw_effect_frame(assets, renderer, effect, screen_x, screen_y, frame_index);
+  }
+}
+
 /// 推进特效帧（返回 false 表示特效结束应被移除）
 ///
 /// 帧推进策略：
@@ -939,6 +1024,21 @@ void begin_magic_explosion(LegacyEffectManager::Effect& effect,
 void lock_effect_to_target_pose(
     LegacyEffectManager::Effect& effect,
     const std::unordered_map<std::uint64_t, ActorRenderPose>& actor_poses) {
+  if (effect.magic_type == LegacyMagicType::lighting_thunder) {
+    const auto owner = actor_poses.find(effect.owner_actor_id);
+    if (owner == actor_poses.end()) {
+      effect.rx = effect.x;
+      effect.ry = effect.y;
+      effect.fly_x = map_to_world_x(effect.x);
+      effect.fly_y = map_to_world_y(effect.y);
+      return;
+    }
+    effect.rx = owner->second.rx;
+    effect.ry = owner->second.ry;
+    effect.fly_x = map_to_world_x(owner->second.rx) + owner->second.shift_x;
+    effect.fly_y = map_to_world_y(owner->second.ry) + owner->second.shift_y;
+    return;
+  }
   if (effect.target_actor_id == 0) {
     effect.rx = effect.target_x;
     effect.ry = effect.target_y;
@@ -962,6 +1062,26 @@ void lock_effect_to_target_pose(
   effect.fly_y = map_to_world_y(target->second.ry) + target->second.shift_y;
 }
 
+void age_fire_gun_nodes(LegacyEffectManager::Effect& effect, const bool add_head) {
+  std::array<LegacyEffectManager::Effect::FireNode, 6> next_nodes{};
+  auto has_any = false;
+  for (std::size_t index = 0; index + 1 < effect.fire_nodes.size(); ++index) {
+    const auto& node = effect.fire_nodes[index];
+    if (node.age <= 0 || node.age >= 6) {
+      continue;
+    }
+    next_nodes[index + 1] = LegacyEffectManager::Effect::FireNode{node.age + 1, node.x, node.y};
+    has_any = true;
+  }
+  if (add_head) {
+    next_nodes[0] = LegacyEffectManager::Effect::FireNode{1, effect.fly_x, effect.fly_y};
+    has_any = true;
+  }
+  effect.fire_nodes = next_nodes;
+  effect.current_frame = effect.fire_nodes[0].age > 0 ? effect.fire_nodes[0].age - 1 : 0;
+  effect.active = has_any;
+}
+
 /// 运行魔法飞行特效：更新飞行位置，到达目标时触发爆炸
 ///
 /// 飞行弹道的工作原理：
@@ -979,6 +1099,69 @@ bool run_magic_effect(LegacyEffectManager::Effect& effect, const std::uint64_t n
     return false;  // 超时移除（防止卡住的飞行弹道永久残留）
   }
 
+  auto target_world_x = map_to_world_x(effect.target_x);
+  auto target_world_y = map_to_world_y(effect.target_y);
+  const auto target_pose = effect.target_actor_id != 0
+      ? actor_poses.find(effect.target_actor_id)
+      : actor_poses.end();
+  const auto has_target_actor = target_pose != actor_poses.end();
+  const auto ready_without_target =
+      effect.magic_type == LegacyMagicType::ready && !has_target_actor;
+
+  auto advance_flight = [&](const bool track_target) {
+    if (track_target) {
+      const auto ms = elapsed_ms(now_ms, effect.move_step_ms);
+      effect.move_step_ms = now_ms;
+      const auto [target_firedis_x, target_firedis_y] =
+          firedis_toward(effect.fly_x, effect.fly_y, target_world_x, target_world_y);
+      effect.firedis_x = approach_firedis(effect.firedis_x, target_firedis_x);
+      effect.firedis_y = approach_firedis(effect.firedis_y, target_firedis_y);
+      effect.fly_xf += (static_cast<double>(effect.firedis_x) / 700.0) *
+                       static_cast<double>(ms);
+      effect.fly_yf += (static_cast<double>(effect.firedis_y) / 700.0) *
+                       static_cast<double>(ms);
+      effect.fly_x = delphi_round(effect.fly_xf);
+      effect.fly_y = delphi_round(effect.fly_yf);
+      return;
+    }
+
+    const auto elapsed = static_cast<double>(elapsed_ms(now_ms, effect.spawned_ms));
+    effect.fly_x = effect.fire_x +
+        delphi_round((static_cast<double>(effect.firedis_x) / 900.0) * elapsed);
+    effect.fly_y = effect.fire_y +
+        delphi_round((static_cast<double>(effect.firedis_y) / 900.0) * elapsed);
+  };
+
+  if (effect.magic_type == LegacyMagicType::fire_gun) {
+    if (has_target_actor) {
+      target_world_x = map_to_world_x(target_pose->second.rx) + target_pose->second.shift_x;
+      target_world_y = map_to_world_y(target_pose->second.ry) + target_pose->second.shift_y;
+      effect.target_x = target_pose->second.rx;
+      effect.target_y = target_pose->second.ry;
+    }
+
+    advance_flight(effect.target_actor_id != 0 && has_target_actor);
+    effect.rx = effect.fly_x / kLegacyUnitX;
+    effect.ry = effect.fly_y / kLegacyUnitY;
+
+    if (elapsed_ms(now_ms, effect.frame_step_ms) > effect.next_frame_ms) {
+      effect.frame_step_ms = now_ms;
+      auto owner_rx = effect.x;
+      auto owner_ry = effect.y;
+      if (const auto owner = actor_poses.find(effect.owner_actor_id); owner != actor_poses.end()) {
+        owner_rx = owner->second.rx;
+        owner_ry = owner->second.ry;
+      }
+      if (!effect.out_of_oil &&
+          ((std::abs(effect.rx - owner_rx) >= 5) || (std::abs(effect.ry - owner_ry) >= 5) ||
+           elapsed_ms(now_ms, effect.spawned_ms) > 800U)) {
+        effect.out_of_oil = true;
+      }
+      age_fire_gun_nodes(effect, !effect.out_of_oil);
+    }
+    return effect.active || effect.fire_node_count() > 0;
+  }
+
   const auto ready_zero_frame =
       effect.magic_type == LegacyMagicType::ready && effect.frame_count <= 0;
   if (!ready_zero_frame && !advance_effect_frame(effect, now_ms)) {
@@ -992,14 +1175,6 @@ bool run_magic_effect(LegacyEffectManager::Effect& effect, const std::uint64_t n
   }
 
   auto crash = false;
-  auto target_world_x = map_to_world_x(effect.target_x);
-  auto target_world_y = map_to_world_y(effect.target_y);
-  const auto target_pose = effect.target_actor_id != 0
-      ? actor_poses.find(effect.target_actor_id)
-      : actor_poses.end();
-  const auto has_target_actor = target_pose != actor_poses.end();
-  const auto ready_without_target =
-      effect.magic_type == LegacyMagicType::ready && !has_target_actor;
   if (effect.target_actor_id != 0 && !ready_without_target) {
     if (has_target_actor) {
       target_world_x = map_to_world_x(target_pose->second.rx) + target_pose->second.shift_x;
@@ -1007,18 +1182,7 @@ bool run_magic_effect(LegacyEffectManager::Effect& effect, const std::uint64_t n
       effect.target_x = target_pose->second.rx;
       effect.target_y = target_pose->second.ry;
     }
-    const auto ms = elapsed_ms(now_ms, effect.move_step_ms);
-    effect.move_step_ms = now_ms;
-    const auto [target_firedis_x, target_firedis_y] =
-        firedis_toward(effect.fly_x, effect.fly_y, target_world_x, target_world_y);
-    effect.firedis_x = approach_firedis(effect.firedis_x, target_firedis_x);
-    effect.firedis_y = approach_firedis(effect.firedis_y, target_firedis_y);
-    effect.fly_xf += (static_cast<double>(effect.firedis_x) / 700.0) *
-                     static_cast<double>(ms);
-    effect.fly_yf += (static_cast<double>(effect.firedis_y) / 700.0) *
-                     static_cast<double>(ms);
-    effect.fly_x = delphi_round(effect.fly_xf);
-    effect.fly_y = delphi_round(effect.fly_yf);
+    advance_flight(true);
 
     const auto pass_dir16 = legacy_fly_direction16(effect.fly_x, effect.fly_y,
                                                    target_world_x, target_world_y);
@@ -1032,11 +1196,7 @@ bool run_magic_effect(LegacyEffectManager::Effect& effect, const std::uint64_t n
     effect.old_dir16 = static_cast<std::uint8_t>(pass_dir16);
   } else {
     // 飞行弹道：固定目标使用 Delphi 的 /900 时间基准。
-    const auto elapsed = static_cast<double>(elapsed_ms(now_ms, effect.spawned_ms));
-    effect.fly_x = effect.fire_x +
-        delphi_round((static_cast<double>(effect.firedis_x) / 900.0) * elapsed);
-    effect.fly_y = effect.fire_y +
-        delphi_round((static_cast<double>(effect.firedis_y) / 900.0) * elapsed);
+    advance_flight(false);
   }
   effect.rx = effect.fly_x / kLegacyUnitX;
   effect.ry = effect.fly_y / kLegacyUnitY;
@@ -1954,6 +2114,7 @@ void LegacyActorAnimation::initialize(const ActorState& actor, const std::uint64
   motion_started_ms_ = now_ms;
   default_frame_time_ms_ = now_ms;
   smooth_move_time_ms_ = now_ms;
+  last_update_ms_ = now_ms;
   last_move_started_ms_ = actor.move_started_ms;
   last_action_started_ms_ = actor.action_started_ms;
   last_legacy_event_sequence_ = 0;
@@ -1971,8 +2132,10 @@ void LegacyActorAnimation::initialize(const ActorState& actor, const std::uint64
   spell_effect_spawned_started_ms_ = 0;
   special_effect_events_.clear();
   last_special_event_action_started_ms_ = 0;
+  last_special_event_sequence_ = 0;
   last_special_event_local_frame_ = -1;
   last_state_change_frame_ = 0;
+  active_motion_actor_ = actor;
 }
 
 /// 与服务端角色状态同步：检测新移动、新动作、新死亡
@@ -2194,6 +2357,7 @@ void LegacyActorAnimation::begin_queued_or_idle(const ActorState& fallback_actor
   motion_started_ms_ = now_ms;
   smooth_move_time_ms_ = now_ms;
   reset_default_frame(fallback_actor, now_ms);
+  active_motion_actor_ = fallback_actor;
 }
 
 void LegacyActorAnimation::finish_motion(const ActorState& actor, const std::uint64_t now_ms,
@@ -2290,6 +2454,7 @@ void LegacyActorAnimation::begin_motion(const ActorState& actor, const ResolvedA
   default_frame_count_ = std::max(1, stand_action_for(actor).frame);
   dead_ = actor.dead;
   active_action_started_ms_ = actor.action_started_ms;
+  active_motion_actor_ = actor;
   lock_end_frame_ = false;
 }
 
@@ -2367,6 +2532,7 @@ void LegacyActorAnimation::update(const ActorState& actor, const LegacyAnimation
   if (!initialized_) {
     initialize(actor, now_ms);
   }
+  last_update_ms_ = now_ms;
   if (war_mode_ && elapsed_ms(now_ms, war_mode_time_ms_) > 4000U) {
     war_mode_ = false;  // 战斗模式 4 秒后自动退出
   }
@@ -2433,6 +2599,9 @@ void LegacyActorAnimation::update(const ActorState& actor, const LegacyAnimation
 
   if (motion_kind_ == MotionKind::action) {
     const auto hold_for_ack = should_hold_for_server_ack(actor, wait_server_accept);
+    const auto action_actor = active_motion_actor_.actor_id == actor.actor_id
+        ? active_motion_actor_
+        : actor;
     // 动作动画：按 frame_time_ms 间隔推进帧
     if (current_frame_ < start_frame_ || current_frame_ > end_frame_) {
       current_frame_ = action_reverse_ ? end_frame_ : start_frame_;
@@ -2466,14 +2635,14 @@ void LegacyActorAnimation::update(const ActorState& actor, const LegacyAnimation
       if (current_frame_ >= end_frame_ && cur_eff_frame_ >= spell_frame_) {
         if (hold_for_ack) {
           frame_started_ms_ = now_ms;
-          maybe_emit_special_frame_event(actor);
+          maybe_emit_special_frame_event(action_actor);
           trace_anim("spell_hold_server_ack");
           return;
         }
         finish_motion(actor, now_ms, trace_frame_index);
         spell_finished = true;
       }
-      maybe_emit_special_frame_event(actor);
+      maybe_emit_special_frame_event(action_actor);
       trace_anim(spell_finished ? "spell_finish" : "spell_step", spell_finished);
       return;
     }
@@ -2486,7 +2655,7 @@ void LegacyActorAnimation::update(const ActorState& actor, const LegacyAnimation
         finish_motion(actor, now_ms, trace_frame_index);
         reverse_finished = true;
       }
-      maybe_emit_special_frame_event(actor);
+      maybe_emit_special_frame_event(action_actor);
       trace_anim(reverse_finished ? "action_reverse_finish" : "action_reverse_step",
                  reverse_finished);
       return;
@@ -2498,14 +2667,14 @@ void LegacyActorAnimation::update(const ActorState& actor, const LegacyAnimation
     } else {
       if (hold_for_ack) {
         frame_started_ms_ = now_ms;
-        maybe_emit_special_frame_event(actor);
+        maybe_emit_special_frame_event(action_actor);
         trace_anim("action_hold_server_ack");
         return;
       }
       finish_motion(actor, now_ms, trace_frame_index);
       action_finished = true;
     }
-    maybe_emit_special_frame_event(actor);
+    maybe_emit_special_frame_event(action_actor);
     trace_anim(action_finished ? "action_finish" : "action_step", action_finished);
     return;
   }
@@ -2620,8 +2789,14 @@ LegacyActionInfo LegacyActorAnimation::action_info_for(const ActorState& actor,
       case client_v1::ActorActionKind::spell:
         return legacy_human_action_info(LegacyHumanAction::spell);
       case client_v1::ActorActionKind::struck:
-        return actor.dead ? legacy_human_action_info(LegacyHumanAction::die)
-                          : legacy_human_action_info(LegacyHumanAction::struck);
+        if (actor.dead) {
+          return legacy_human_action_info(LegacyHumanAction::die);
+        }
+        {
+          auto struck = legacy_human_action_info(LegacyHumanAction::struck);
+          struck.frame_time_ms = legacy_struck_frame_time_ms(actor.level);
+          return struck;
+        }
       case client_v1::ActorActionKind::turn:
       default:
         return legacy_human_action_info(LegacyHumanAction::stand);
@@ -2643,8 +2818,14 @@ LegacyActionInfo LegacyActorAnimation::action_info_for(const ActorState& actor,
     case client_v1::ActorActionKind::spell:
       return monster_action(*table, LegacyMonsterAction::attack);
     case client_v1::ActorActionKind::struck:
-      return actor.dead ? monster_action(*table, LegacyMonsterAction::die)
-                        : monster_action(*table, LegacyMonsterAction::struck);
+      if (actor.dead) {
+        return monster_action(*table, LegacyMonsterAction::die);
+      }
+      {
+        auto struck = monster_action(*table, LegacyMonsterAction::struck);
+        struck.frame_time_ms = legacy_struck_frame_time_ms(actor.level);
+        return struck;
+      }
     case client_v1::ActorActionKind::turn:
     default:
       return monster_action(*table, LegacyMonsterAction::stand);
@@ -2809,8 +2990,10 @@ void LegacyActorAnimation::maybe_emit_special_frame_event(const ActorState& acto
     return;
   }
   const auto local_frame = current_frame_ - start_frame_;
-  if (local_frame < 0 || actor.action_started_ms == last_special_event_action_started_ms_ &&
-                             local_frame == last_special_event_local_frame_) {
+  if (local_frame < 0 ||
+      (actor.action_started_ms == last_special_event_action_started_ms_ &&
+       actor.legacy_event_sequence == last_special_event_sequence_ &&
+       local_frame == last_special_event_local_frame_)) {
     return;
   }
 
@@ -2820,6 +3003,7 @@ void LegacyActorAnimation::maybe_emit_special_frame_event(const ActorState& acto
   LegacySpecialEffectEvent event;
   event.actor_id = actor.actor_id;
   event.action_started_ms = actor.action_started_ms;
+  event.legacy_event_sequence = actor.legacy_event_sequence;
   event.target_actor_id = actor.action_target_actor_id;
   event.source_x = actor.x;
   event.source_y = actor.y;
@@ -2843,6 +3027,7 @@ void LegacyActorAnimation::maybe_emit_special_frame_event(const ActorState& acto
     event.next_frame_ms = next_frame_ms;
     special_effect_events_.push_back(event);
     last_special_event_action_started_ms_ = actor.action_started_ms;
+    last_special_event_sequence_ = actor.legacy_event_sequence;
     last_special_event_local_frame_ = local_frame;
   };
 
@@ -2890,6 +3075,7 @@ void LegacyActorAnimation::maybe_emit_special_frame_event(const ActorState& acto
     }
     special_effect_events_.push_back(event);
     last_special_event_action_started_ms_ = actor.action_started_ms;
+    last_special_event_sequence_ = actor.legacy_event_sequence;
     last_special_event_local_frame_ = local_frame;
   }
 }
@@ -2961,10 +3147,19 @@ std::optional<ActorRenderPose> LegacyActorAnimation::pose_for(const ActorState& 
   pose.dead = actor.dead || dead_;
   pose.alpha = 255;
   pose.visible = true;
+  pose.color_effect_kind = actor_color_effect_from_status(actor);
+  pose.color_effect = pose.color_effect_kind != LegacyActorColorEffect::none;
+  if (actor_status_has(actor, kLegacyStatusTransparent)) {
+    pose.alpha = kTransparentAlpha;
+  }
   const auto render_frame =
       motion_kind_ == MotionKind::move && current_frame_ < start_frame_ ? start_frame_
                                                                         : current_frame_;
   pose.current_frame = render_frame;
+  const auto& action_actor =
+      motion_kind_ == MotionKind::action && active_motion_actor_.actor_id == actor.actor_id
+          ? active_motion_actor_
+          : actor;
 
   if (actor_is_human(actor)) {
     const auto appearance = decode_legacy_human_feature(actor.feature);
@@ -2975,11 +3170,33 @@ std::optional<ActorRenderPose> LegacyActorAnimation::pose_for(const ActorState& 
         appearance.weapon >= 2 ? appearance.weapon_offset + render_frame : -1;
     pose.weapon_before_body = pose.weapon_index >= 0 &&
                               legacy_weapon_before_body(appearance.sex, render_frame);
+
+    if (actor_status_has(actor, kLegacyStatusBubbleDefenceUp)) {
+      const auto bubble_frame = action_actor.current_action == client_v1::ActorActionKind::struck &&
+                                        elapsed_ms(last_update_ms_, motion_started_ms_) < 360U
+                                    ? kMagicBubbleStruckBase +
+                                          static_cast<int>(
+                                              std::min<std::uint64_t>(
+                                                  2U, elapsed_ms(last_update_ms_, motion_started_ms_) /
+                                                          120U))
+                                    : kMagicBubbleBase +
+                                          static_cast<int>((last_update_ms_ / 120U) % 3U);
+      add_pose_overlay(pose, ArchiveId::magic, bubble_frame);
+    }
+
     if (motion_kind_ == MotionKind::action) {
       const auto local_frame = std::max(0, render_frame - start_frame_);
-      if (actor.current_action == client_v1::ActorActionKind::spell &&
-          actor.action_magic_effect > 0 && spell_active_) {
-        const auto effect_index = actor.action_magic_effect - 1;
+      if (action_actor.current_action == client_v1::ActorActionKind::hit) {
+        if (const auto hit_effect_base =
+                human_hit_effect_base_for_ident(action_actor.legacy_action_ident);
+            hit_effect_base.has_value()) {
+          add_pose_overlay(pose, ArchiveId::magic,
+                           *hit_effect_base + static_cast<int>(pose.dir) * 10 + local_frame);
+        }
+      }
+      if (action_actor.current_action == client_v1::ActorActionKind::spell &&
+          action_actor.action_magic_effect > 0 && spell_active_) {
+        const auto effect_index = action_actor.action_magic_effect - 1;
         if (effect_index >= 0) {
           const auto effect = legacy_magic_effect_base(effect_index, 0);
           if (effect.frame_base > 0 && spell_frame_ > 0) {
@@ -2989,11 +3206,13 @@ std::optional<ActorRenderPose> LegacyActorAnimation::pose_for(const ActorState& 
           }
         }
       }
-      if (actor.current_action == client_v1::ActorActionKind::struck) {
-        const auto hit_effect_index = actor.last_damage_magic ? 5 : 0;
-        const auto hit_effect = legacy_magic_effect_base(hit_effect_index, 1);
-        if (hit_effect.frame_base > 0) {
-          add_pose_overlay(pose, hit_effect.archive, hit_effect.frame_base + local_frame);
+      if (action_actor.current_action == client_v1::ActorActionKind::struck) {
+        if (const auto struck_effect_base = struck_effect_base_for_actor(action_actor);
+            struck_effect_base.has_value()) {
+          const auto archive =
+              action_actor.last_damage_magic ? ArchiveId::magic2 : ArchiveId::magic;
+          add_pose_overlay(pose, archive,
+                           *struck_effect_base + static_cast<int>(pose.dir) * 10 + local_frame);
         }
       }
     }
@@ -3022,7 +3241,7 @@ std::optional<ActorRenderPose> LegacyActorAnimation::pose_for(const ActorState& 
   const auto actor_archive = pose.body_archive;
 
   if (motion_kind_ == MotionKind::action && local_frame >= 0) {
-    if (actor.legacy_action_ident == legacy::kSmNowDeath) {
+    if (action_actor.legacy_action_ident == legacy::kSmNowDeath) {
       if (profile == LegacySpecialActorProfile::skeleton_oma ||
           profile == LegacySpecialActorProfile::dual_axe_oma ||
           profile == LegacySpecialActorProfile::cat_mon ||
@@ -3050,7 +3269,7 @@ std::optional<ActorRenderPose> LegacyActorAnimation::pose_for(const ActorState& 
       }
     }
 
-    if (actor.legacy_action_ident == legacy::kSmDigUp &&
+    if (action_actor.legacy_action_ident == legacy::kSmDigUp &&
         profile == LegacySpecialActorProfile::wall_structure) {
       const auto base = appearance == 901 ? kWallLeftBrokenEffectBase
                                           : kWallRightBrokenEffectBase;
@@ -3058,9 +3277,9 @@ std::optional<ActorRenderPose> LegacyActorAnimation::pose_for(const ActorState& 
       add_pose_overlay(pose, actor_archive, base + local_frame);
     }
 
-    if (actor.legacy_action_ident == legacy::kSmLighting ||
-        actor.legacy_action_ident == legacy::kSmHit ||
-        actor.legacy_action_ident == legacy::kSmFlyAxe) {
+    if (action_actor.legacy_action_ident == legacy::kSmLighting ||
+        action_actor.legacy_action_ident == legacy::kSmHit ||
+        action_actor.legacy_action_ident == legacy::kSmFlyAxe) {
       switch (race) {
         case 16:
           add_pose_overlay(pose, ArchiveId::mon3, kKuDeGiGasBase - 1 + dir * 10 + local_frame);
@@ -3095,15 +3314,15 @@ std::optional<ActorRenderPose> LegacyActorAnimation::pose_for(const ActorState& 
           break;
         case 62:
           add_pose_overlay(pose, ArchiveId::mon5,
-                           (actor.legacy_action_ident == legacy::kSmLighting
+                           (action_actor.legacy_action_ident == legacy::kSmLighting
                                 ? kKingOfSculpureKingEffectBase
                                 : kKingOfSculpureKingAttackEffectBase) +
                                local_frame);
           break;
         case 63:
-          if (actor.legacy_action_ident == legacy::kSmFlyAxe) {
+          if (action_actor.legacy_action_ident == legacy::kSmFlyAxe) {
             add_pose_overlay(pose, ArchiveId::mon5, kSkeletonKingEffect5Base + local_frame);
-          } else if (actor.legacy_action_ident == legacy::kSmLighting) {
+          } else if (action_actor.legacy_action_ident == legacy::kSmLighting) {
             add_pose_overlay(pose, ArchiveId::mon5, kSkeletonKingEffect4Base + local_frame);
           } else {
             add_pose_overlay(pose, ArchiveId::mon5, kSkeletonKingEffect3Base + local_frame);
@@ -3130,13 +3349,33 @@ std::optional<ActorRenderPose> LegacyActorAnimation::pose_for(const ActorState& 
 /// 其他类型：effect_base + current_frame
 int LegacyEffectManager::Effect::draw_frame_index() const {
   if (kind == EffectKind::magic) {
+    if (magic_type == LegacyMagicType::fire_gun) {
+      for (const auto& node : fire_nodes) {
+        if (node.age > 0 && node.age <= 6) {
+          return effect_base + node.age - 1;
+        }
+      }
+      return effect_base;
+    }
     if (!fixed_effect) {
       return effect_base + fly_frame_offset + static_cast<int>(dir16) * fly_frame_stride +
              current_frame;
     }
+    if (magic_type == LegacyMagicType::lighting_thunder) {
+      return effect_base + static_cast<int>(dir16) * 10 + current_frame;
+    }
+    if (magic_type == LegacyMagicType::bujauk_ground_effect) {
+      return effect_base + (effect_number == 11 ? 160 : 180) + current_frame;
+    }
     return explosion_base + current_frame;
   }
   return effect_base + current_frame;
+}
+
+int LegacyEffectManager::Effect::fire_node_count() const {
+  return static_cast<int>(std::count_if(
+      fire_nodes.begin(), fire_nodes.end(),
+      [](const FireNode& node) { return node.age > 0 && node.age <= 6; }));
 }
 
 void LegacyEffectManager::clear() {
@@ -3293,6 +3532,7 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
   effect.magic_type = magic_type;
   effect.effect_base = explicit_effect_base ? create.effect_base : base.frame_base;
   effect.explosion_base = effect.effect_base + kMagicExplosionBase;
+  effect.effect_number = create.effect;
   effect.magic_id = create.magic_id;
   effect.server_magic_id = create.server_magic_id;
   effect.owner_actor_id = create.owner_actor_id;
@@ -3387,7 +3627,10 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
       force_fixed_base(ArchiveId::magic, 970, 10, 10, effect.next_frame_ms);
       break;
     case LegacyMagicType::fire_gun:
-      force_fixed_base(ArchiveId::magic, 930, 6, 6, effect.next_frame_ms);
+      force_fixed_base(ArchiveId::magic, 930, 6, 0, effect.next_frame_ms);
+      effect.fixed_effect = false;
+      effect.repetition = true;
+      effect.out_of_oil = false;
       break;
     case LegacyMagicType::explosion:
       effect.frame_count = 10;
@@ -3401,7 +3644,7 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
         effect.effect_base = 1160;
         effect.explosion_base = create.effect == 17 ? 1540 : 1360;
       }
-      effect.frame_count = 6;
+      effect.frame_count = 3;
       effect.fixed_effect = false;
       effect.repetition = create.repetition;
       effect.explosion_frame_count = 10;
@@ -3411,7 +3654,7 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
         effect.effect_base = 1160;
         effect.explosion_base = effect.effect_base + kMagicExplosionBase;
       }
-      effect.frame_count = 6;
+      effect.frame_count = 3;
       effect.fixed_effect = false;
       effect.repetition = create.repetition;
       effect.explosion_frame_count = (create.effect == 11 || create.effect == 12) ? 16 : 10;
@@ -3460,7 +3703,8 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
     effect.target_actor_id = 0;
   }
   if (magic_type == LegacyMagicType::thunder || magic_type == LegacyMagicType::fire_thunder ||
-      magic_type == LegacyMagicType::fire_gun) {
+      magic_type == LegacyMagicType::fire_gun ||
+      magic_type == LegacyMagicType::lighting_thunder) {
     effect.target_actor_id = 0;
   }
 
@@ -3712,7 +3956,10 @@ void LegacyEffectManager::render_fly(AssetManager& assets, SoftwareRenderer& ren
                                      const std::uint64_t now_ms) const {
   const auto trace_enabled = legacy_anim_trace_enabled();
   for (const auto& effect : fly_effects_) {
-    if (effect_row(effect) != row) {
+    const auto matches_row = effect.magic_type == LegacyMagicType::fire_gun
+                                 ? fire_gun_matches_row(effect, row)
+                                 : effect_row(effect) == row;
+    if (!matches_row) {
       continue;
     }
     // 跳过刚发射的飞行弹道（避免在发射点闪烁）
@@ -3738,6 +3985,10 @@ void LegacyEffectManager::render_fly(AssetManager& assets, SoftwareRenderer& ren
       trace.render_layer = "fly_effect";
       trace.same_frame_visible = effect.trace_create_frame == trace_frame_index;
       legacy_anim_trace_record(trace);
+    }
+    if (effect.magic_type == LegacyMagicType::fire_gun) {
+      draw_fire_gun_nodes(assets, renderer, effect, viewport, row);
+      continue;
     }
     const auto screen_x = world_to_screen_x(effect.fly_x, viewport);
     const auto screen_y = world_to_screen_y(effect.fly_y, viewport);
@@ -3992,6 +4243,7 @@ void AnimationManager::spawn_special_effect_events(const WorldViewState& world,
     auto events = animation.drain_special_effect_events();
     for (const auto& event : events) {
       const auto key = (event.action_started_ms << 8U) ^
+                       (event.legacy_event_sequence << 1U) ^
                        static_cast<std::uint64_t>(event.effect_base + event.magic_id);
       if (special_effect_started_ms_[actor_id] == key) {
         continue;

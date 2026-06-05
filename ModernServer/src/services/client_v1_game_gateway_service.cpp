@@ -4,6 +4,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstring>
+#include <unordered_map>
 #include <utility>
 
 #include "protocol/canonical_login_error.hpp"
@@ -371,6 +372,10 @@ std::string name_from_turn_body(std::string_view encoded) {
 
 client_v1::ActorType actor_type_for(std::uint64_t actor_id, std::uint64_t self_actor_id) {
   return actor_id == self_actor_id ? client_v1::ActorType::player : client_v1::ActorType::monster;
+}
+
+std::uint16_t client_v1_actor_level(const std::int32_t level) {
+  return static_cast<std::uint16_t>(std::clamp(level, 1, 65535));
 }
 
 client_v1::ItemState item_state_from_legacy(const LegacyClientItem& item) {
@@ -2262,14 +2267,37 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
   }
 
   auto state = session(session_id).value_or(SessionState{});
+  std::unordered_map<std::uint64_t, std::uint16_t> known_actor_levels;
+  {
+    std::scoped_lock lock(mutex_);
+    for (const auto& [known_session_id, known] : sessions_) {
+      if (known_session_id == session_id || known.actor_id == 0) {
+        continue;
+      }
+      known_actor_levels[known.actor_id] = client_v1_actor_level(known.character.ability.level);
+    }
+  }
   const auto actor_id = static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
+  auto level_for_actor = [&](const std::uint64_t id) {
+    if (id == state.actor_id) {
+      return client_v1_actor_level(state.character.ability.level);
+    }
+    if (const auto known = known_actor_levels.find(id); known != known_actor_levels.end()) {
+      return known->second;
+    }
+    return std::uint16_t{0};
+  };
   auto make_actor = [&](std::uint64_t id, std::string name, std::int32_t x, std::int32_t y,
                         std::uint8_t dir, std::int32_t feature, std::int32_t status) {
     if (name.empty() && id == state.actor_id) {
       name = state.character_name;
     }
+    auto level = level_for_actor(id);
+    if (level == 0) {
+      level = 1;
+    }
     return client_v1::WorldActor{id, std::move(name), x, y, dir, feature, status,
-                                 actor_type_for(id, state.actor_id)};
+                                 actor_type_for(id, state.actor_id), level};
   };
   bool request_bag_items = false;
   bool request_storage_items = false;
@@ -2460,7 +2488,8 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
       const auto magic = body.has_value() && body->ltag2 != 0;
       messages.push_back(client_v1::ActorVitals{
           actor_id, decoded->message.param, decoded->message.tag, -1, -1,
-          decoded->message.series, source, magic, decoded->message.ident});
+          decoded->message.series, source, magic, decoded->message.ident,
+          level_for_actor(actor_id)});
       messages.push_back(client_v1::ActorAction{
           actor_id, client_v1::ActorActionKind::struck, 0, 0, 0, source,
           decoded->message.series, decoded->message.ident, 0, magic});

@@ -194,6 +194,16 @@ struct ActorOverlaySprite {
   bool blend{true};
 };
 
+enum class LegacyActorColorEffect : std::uint8_t {
+  none,
+  green,
+  red,
+  blue,
+  yellow,
+  fuchsia,
+  grayscale,
+};
+
 /// 角色渲染姿态：由 LegacyActorAnimation 计算得出的当前渲染参数
 /// 包含精灵帧索引、坐标偏移、透明度等信息
 struct ActorRenderPose {
@@ -208,12 +218,13 @@ struct ActorRenderPose {
   int weapon_index{-1};  ///< 武器帧索引（-1=无武器）
   bool weapon_before_body{false};  ///< 武器是否绘制在身体之前（根据武器顺序位掩码判断）
   bool color_effect{false};       ///< 是否应用颜色特效（如隐身/中毒变色）
+  LegacyActorColorEffect color_effect_kind{LegacyActorColorEffect::none};
   bool dead{false};               ///< 是否死亡
   bool visible{true};             ///< 是否可见（隐身或死亡后不可见）
   std::uint8_t alpha{255};        ///< 透明度（0-255，用于隐身/渐隐效果）
   std::uint8_t dir{0};            ///< 面向方向（0-7）
   int current_frame{0};           ///< 当前帧序号（动作内的帧序号，非绝对索引）
-  std::array<ActorOverlaySprite, 2> overlays{};
+  std::array<ActorOverlaySprite, 4> overlays{};
   std::uint8_t overlay_count{0};
 };
 
@@ -293,6 +304,7 @@ struct LegacySpecialEffectEvent {
   Kind kind{Kind::projectile};
   std::uint64_t actor_id{0};
   std::uint64_t action_started_ms{0};
+  std::uint64_t legacy_event_sequence{0};
   std::uint64_t target_actor_id{0};
   int source_x{0};
   int source_y{0};
@@ -508,6 +520,7 @@ class LegacyActorAnimation {
   std::uint64_t default_frame_time_ms_{0}; ///< 待机帧切换时间
   std::uint64_t smooth_move_time_ms_{0};  ///< 移动结束时间（用于从移动平滑过渡到待机）
   std::uint64_t war_mode_time_ms_{0};     ///< 战斗模式开始时间
+  std::uint64_t last_update_ms_{0};
   bool war_mode_{false};  ///< 是否处于战斗模式（攻击/施法后保持持武器姿态一段时间）
   bool dead_{false};      ///< 是否死亡
   bool lock_end_frame_{false};
@@ -515,6 +528,7 @@ class LegacyActorAnimation {
 
   std::vector<ActorState> pending_actions_{};
   std::uint64_t active_action_started_ms_{0};
+  ActorState active_motion_actor_{};
   bool spell_active_{false};
   int cur_eff_frame_{0};
   int spell_frame_{10};
@@ -523,6 +537,7 @@ class LegacyActorAnimation {
   std::uint64_t spell_effect_spawned_started_ms_{0};
   std::vector<LegacySpecialEffectEvent> special_effect_events_{};
   std::uint64_t last_special_event_action_started_ms_{0};
+  std::uint64_t last_special_event_sequence_{0};
   int last_special_event_local_frame_{-1};
   std::uint64_t last_state_change_frame_{0};
 
@@ -546,6 +561,12 @@ class LegacyEffectManager {
 
   /// 单个特效实例
   struct Effect {
+    struct FireNode {
+      int age{0};
+      int x{0};
+      int y{0};
+    };
+
     ArchiveId archive{ArchiveId::effect};  ///< 精灵归档
     EffectKind kind{EffectKind::map};      ///< 特效类型
     LegacyMagicType magic_type{LegacyMagicType::explosion};  ///< 魔法类型
@@ -572,6 +593,7 @@ class LegacyEffectManager {
     int prev_distance_y{99999};  ///< 上次距目标的 Y 距离
     int explosion_frame_count{10};  ///< 爆炸效果帧数
     int repeat_count{0};    ///< 重复次数（循环播放的地面特效）
+    int effect_number{0};   ///< MagicDB Effect，保留 Delphi 子类分支判断
     int magic_id{0};        ///< 魔法 ID（用于爆炸音效回调）
     int server_magic_id{0}; ///< 服务端魔法 ID（用于与服务端同步删除特效）
     std::uint64_t owner_actor_id{0};  ///< 施法者角色 ID
@@ -590,11 +612,14 @@ class LegacyEffectManager {
     int ready_distance{15};
     int fly_frame_offset{10};
     int fly_frame_stride{10};
+    std::array<FireNode, 6> fire_nodes{};
+    bool out_of_oil{false};
     std::uint64_t trace_effect_id{0};
     std::uint64_t trace_create_frame{0};
 
     /// 计算当前帧在精灵表中的实际绝对索引
     [[nodiscard]] int draw_frame_index() const;
+    [[nodiscard]] int fire_node_count() const;
   };
 
   /// 魔法创建参数：用于 spawn_magic_effect 的入参聚合
