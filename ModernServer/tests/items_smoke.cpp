@@ -360,6 +360,65 @@ int main() {
   }
 
   {
+    mir2::HostConfig gate_config;
+    mir2::MapConfig gate_map{"0", "GateItemMap", {}, 20, 20, 10, 10};
+    gate_map.gates.push_back(mir2::MapGateConfig{10, 10, "0", 10, 10, false});
+    gate_config.maps.push_back(std::move(gate_map));
+    gate_config.items.push_back(mir2::ItemConfig{1, "Gate Sword", 3, 100, 5, 1, 1, 1000, 1, 0, 0});
+
+    mir2::LogicRuntime gate_runtime(gate_config);
+    gate_runtime.initialize();
+
+    mir2::CharacterRecord gate_hero;
+    gate_hero.account_id = "gate";
+    gate_hero.character_name = "GateHero";
+    gate_hero.map_id = "0";
+    gate_hero.x = 10;
+    gate_hero.y = 10;
+    gate_hero.ability.hp = 15;
+    gate_hero.ability.max_hp = 15;
+    gate_hero.ability.max_weight = 30;
+    gate_hero.ability.max_wear_weight = 100;
+    gate_hero.ability.max_hand_weight = 100;
+    gate_hero.bag_items[0].index = 1;
+    gate_hero.bag_items[0].make_index = 9001;
+    gate_hero.bag_items[0].dura = 600;
+    gate_hero.bag_items[0].dura_max = 1000;
+
+    mir2::LogicCommand gate_enter;
+    gate_enter.kind = mir2::LogicCommandKind::enter_world;
+    gate_enter.session_id = 27;
+    gate_enter.account_id = gate_hero.account_id;
+    gate_enter.character_name = gate_hero.character_name;
+    gate_enter.map_id = gate_hero.map_id;
+    gate_enter.x = gate_hero.x;
+    gate_enter.y = gate_hero.y;
+    gate_enter.character = gate_hero;
+    static_cast<void>(gate_runtime.route_logic_command(gate_enter));
+    std::uint64_t gate_now_ms = 20;
+    static_cast<void>(gate_runtime.tick(gate_now_ms));
+
+    static_cast<void>(gate_runtime.route_logic_command(
+        make_item_command(mir2::LogicCommandKind::drop_item, 27, 9001, "Gate Sword")));
+    const auto gate_drop = tick_player_due(gate_runtime, gate_now_ms);
+    if (!has_packet(gate_drop, mir2::kSmItemShow)) {
+      return 1;
+    }
+
+    mir2::LogicCommand gate_pickup;
+    gate_pickup.kind = mir2::LogicCommandKind::pickup_item;
+    gate_pickup.session_id = 27;
+    gate_pickup.x = 10;
+    gate_pickup.y = 10;
+    static_cast<void>(gate_runtime.route_logic_command(gate_pickup));
+    const auto gate_pickup_dispatch = tick_player_due(gate_runtime, gate_now_ms);
+    if (!has_packet(gate_pickup_dispatch, mir2::kSmItemHide) ||
+        !has_packet(gate_pickup_dispatch, mir2::kSmAddItem)) {
+      return 1;
+    }
+  }
+
+  {
     mir2::HostConfig env_config;
     env_config.maps.push_back(mir2::MapConfig{"0", "ItemEnvMap", {}, 20, 20, 10, 10});
     env_config.items.push_back(mir2::ItemConfig{1, "Token", 1, 1, 1, 0, 2, 1, -1, 0, 0});

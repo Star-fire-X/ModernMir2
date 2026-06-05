@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -103,6 +104,13 @@ class MapActor {
     std::uint64_t dropper_actor_id{0};  ///< 掉落者角色 ID
     std::string dropper_name{};         ///< 掉落者名称
     bool death_drop{false};             ///< 是否为死亡掉落（PK 保护相关）
+  };
+
+  struct StoneMineSnapshot {
+    std::int32_t mine_count{0};
+    std::int32_t mine_fill_count{0};
+    std::uint64_t refill_time_ms{0};
+    std::int32_t type{0};
   };
 
   /**
@@ -412,6 +420,7 @@ class MapActor {
                                              bool blocks_walk = false,
                                              RuntimeDispatch* dispatch = nullptr,
                                              LegacyEventType type = LegacyEventType::pile_stones,
+                                             std::int32_t event_param = 0,
                                              std::int32_t event_damage = 0);
 
   /**
@@ -426,7 +435,8 @@ class MapActor {
    */
   [[nodiscard]] bool legacy_add_event_object(std::uint64_t event_id, std::int32_t x,
                                              std::int32_t y, std::uint64_t now_ms,
-                                             RuntimeDispatch* dispatch);
+                                             RuntimeDispatch* dispatch,
+                                             std::int32_t event_param = 0);
 
   /**
    * @brief 移除地图上的事件对象
@@ -611,6 +621,11 @@ class MapActor {
 
   /// @brief 获取当前地图上的对象总数
   [[nodiscard]] std::size_t object_count() const { return objects_.size(); }
+  [[nodiscard]] std::size_t legacy_stone_mine_count() const { return stone_mines_.size(); }
+  [[nodiscard]] std::optional<StoneMineSnapshot> legacy_stone_mine_snapshot(
+      std::int32_t x, std::int32_t y) const;
+  [[nodiscard]] bool legacy_try_mine(std::int32_t x, std::int32_t y);
+  void refill_legacy_stone_mines(std::uint64_t now_ms);
 
  private:
   // ─── 内嵌私有类型 ────────────────────────────────────────────
@@ -623,6 +638,23 @@ class MapActor {
    */
   struct MonsterSpawnTemplate {
     ActorMail mail{};  ///< 怪物生成邮件模板
+  };
+
+  using CellKey = std::pair<std::int32_t, std::int32_t>;
+
+  struct EventObjectState {
+    std::int32_t x{0};
+    std::int32_t y{0};
+    LegacyEventType type{LegacyEventType::pile_stones};
+    std::int32_t event_param{0};
+    bool blocks_walk{false};
+  };
+
+  struct StoneMineState {
+    std::int32_t mine_count{0};
+    std::int32_t mine_fill_count{0};
+    std::uint64_t refill_time_ms{0};
+    std::int32_t type{0};
   };
 
   /**
@@ -989,6 +1021,9 @@ class MapActor {
                             RuntimeDispatch& dispatch);
   void broadcast_close_doors(const std::vector<std::pair<std::int32_t, std::int32_t>>& tiles,
                              RuntimeDispatch& dispatch);
+  void set_castle_door_wall_state(std::int32_t x, std::int32_t y, bool open);
+  void clear_castle_door_wall_state(std::int32_t x, std::int32_t y);
+  void initialize_legacy_stone_mines();
 
   /// @}
 
@@ -1188,12 +1223,14 @@ class MapActor {
   std::unordered_map<std::uint64_t, GroundItem> ground_items_{};             ///< 地面物品表
   std::unordered_map<std::uint64_t, TradeSession> trade_sessions_{};         ///< 交易会话表
   std::unordered_map<std::uint64_t, std::uint64_t> trade_session_by_actor_{};///< 演员到交易会话的映射
-  std::unordered_map<std::uint64_t, std::pair<std::int32_t, std::int32_t>> event_objects_{}; ///< 事件对象位置表
-  std::unordered_map<std::uint64_t, LegacyEventType> event_object_types_{};  ///< 事件对象类型表
+  std::unordered_map<std::uint64_t, EventObjectState> event_objects_{};     ///< 事件对象状态表
   std::unordered_map<std::uint64_t, PlayerVisibility> visibility_{};         ///< 玩家可见性状态表
   std::unordered_map<std::uint64_t, LegacyRefTargetCache> legacy_ref_target_cache_{}; ///< 引用目标缓存
   std::shared_ptr<std::array<std::int32_t, 10>> script_global_params_{};    ///< 脚本全局参数
   std::shared_ptr<LegacyNameListRepository> script_name_lists_{};           ///< 脚本名称列表仓库
+  std::map<CellKey, StoneMineState> stone_mines_{};
+  std::map<CellKey, std::int32_t> castle_door_wall_block_counts_{};
+  bool stone_mines_initialized_{false};
   std::uint64_t next_ground_item_id_{1};                                     ///< 下一个地面物品 ID
   std::uint64_t next_trade_session_id_{1};                                   ///< 下一个交易会话 ID
   std::uint64_t next_script_monster_id_{0x6000000000000000ULL};              ///< 下一个脚本怪物 ID

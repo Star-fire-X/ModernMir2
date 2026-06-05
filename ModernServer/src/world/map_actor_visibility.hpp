@@ -148,8 +148,8 @@ std::vector<std::uint64_t> MapActor::ordered_visible_event_ids(
         }
         if (const auto position_it = event_objects_.find(entry.object_id);
             position_it != event_objects_.end() &&
-            in_legacy_view_range(player.x(), player.y(), position_it->second.first,
-                                 position_it->second.second)) {
+            in_legacy_view_range(player.x(), player.y(), position_it->second.x,
+                                 position_it->second.y)) {
           event_ids.push_back(entry.object_id);
         }
       }
@@ -271,6 +271,11 @@ std::vector<std::uint64_t> MapActor::legacy_ref_target_player_ids(const GameObje
  */
 void MapActor::sync_player_visibility(Player& player, RuntimeDispatch& dispatch, bool force,
                                       std::uint64_t now_ms) {
+  constexpr std::uint64_t kLegacyMapObjectStaleMs = 10ULL * 60ULL * 1000ULL;
+  static_cast<void>(environment_.prune_stale_moving_objects(
+      player.x() - kLegacyViewRange, player.x() + kLegacyViewRange,
+      player.y() - kLegacyViewRange, player.y() + kLegacyViewRange, now_ms,
+      kLegacyMapObjectStaleMs));
   auto& visibility = visibility_[player.id()];
   const auto current_actor_order = ordered_visible_actor_ids(player);
   std::unordered_set<std::uint64_t> current_actors{current_actor_order.begin(),
@@ -347,8 +352,8 @@ void MapActor::sync_player_visibility(Player& player, RuntimeDispatch& dispatch,
     std::int32_t event_y = 0;
     if (const auto position_it = event_objects_.find(event_id);
         position_it != event_objects_.end()) {
-      event_x = position_it->second.first;
-      event_y = position_it->second.second;
+      event_x = position_it->second.x;
+      event_y = position_it->second.y;
     }
     queue_packet(dispatch, player.session_id(),
                  make_hide_event_packet(player.session_id(), event_id, event_x, event_y));
@@ -361,13 +366,10 @@ void MapActor::sync_player_visibility(Player& player, RuntimeDispatch& dispatch,
     if (position_it == event_objects_.end()) {
       continue;
     }
-    auto type = LegacyEventType::pile_stones;
-    if (const auto type_it = event_object_types_.find(event_id); type_it != event_object_types_.end()) {
-      type = type_it->second;
-    }
     queue_packet(dispatch, player.session_id(),
                  make_show_event_packet(player.session_id(), event_id,
-                                        position_it->second.first, position_it->second.second, type));
+                                        position_it->second.x, position_it->second.y,
+                                        position_it->second.type, position_it->second.event_param));
   }
   visibility.events = std::move(current_events);
   visibility.event_order = current_event_order;

@@ -60,6 +60,65 @@ void MapActor::broadcast_close_doors(
   }
 }
 
+void MapActor::set_castle_door_wall_state(std::int32_t x, std::int32_t y, bool open) {
+  constexpr std::array<std::pair<std::int32_t, std::int32_t>, 9> kDoorWallTiles{{
+      {0, 0},
+      {0, -1},
+      {0, -2},
+      {1, -1},
+      {1, -2},
+      {-1, 0},
+      {-2, 0},
+      {-1, -1},
+      {-1, 1},
+  }};
+  constexpr std::array<std::pair<std::int32_t, std::int32_t>, 3> kOpenCarveBlockedTiles{{
+      {0, -2},
+      {1, -1},
+      {1, -2},
+  }};
+
+  for (const auto& [dx, dy] : kDoorWallTiles) {
+    const CellKey key{x + dx, y + dy};
+    if (!open) {
+      ++castle_door_wall_block_counts_[key];
+    }
+    environment_.set_runtime_can_move(key.first, key.second, open);
+  }
+  if (!open) {
+    return;
+  }
+  for (const auto& [dx, dy] : kOpenCarveBlockedTiles) {
+    environment_.set_runtime_can_move(x + dx, y + dy, false);
+  }
+}
+
+void MapActor::clear_castle_door_wall_state(std::int32_t x, std::int32_t y) {
+  constexpr std::array<std::pair<std::int32_t, std::int32_t>, 9> kDoorWallTiles{{
+      {0, 0},
+      {0, -1},
+      {0, -2},
+      {1, -1},
+      {1, -2},
+      {-1, 0},
+      {-2, 0},
+      {-1, -1},
+      {-1, 1},
+  }};
+  for (const auto& [dx, dy] : kDoorWallTiles) {
+    const CellKey key{x + dx, y + dy};
+    auto count_it = castle_door_wall_block_counts_.find(key);
+    if (count_it != castle_door_wall_block_counts_.end()) {
+      --count_it->second;
+      if (count_it->second > 0) {
+        continue;
+      }
+      castle_door_wall_block_counts_.erase(count_it);
+    }
+    environment_.clear_runtime_can_move(key.first, key.second);
+  }
+}
+
 /**
  * @brief 检查指定位置是否存在特定类型的事件对象
  * @param x 目标 X 坐标
@@ -70,12 +129,11 @@ void MapActor::broadcast_close_doors(
  *          且类型与传入类型匹配。用于传送门进入条件检查（need_hole）。
  */
 bool MapActor::has_event_at(std::int32_t x, std::int32_t y, LegacyEventType type) const {
-  for (const auto& [event_id, xy] : event_objects_) {
-    if (xy.first != x || xy.second != y) {
+  for (const auto& [_, event] : event_objects_) {
+    if (event.x != x || event.y != y) {
       continue;
     }
-    const auto type_it = event_object_types_.find(event_id);
-    if (type_it != event_object_types_.end() && type_it->second == type) {
+    if (event.type == type) {
       return true;
     }
   }
@@ -104,6 +162,7 @@ bool MapActor::target_map_can_enter(const MapEntryRuleConfig& rule,
       LegacyMapEnvironment target_environment(rule.width, rule.height, target_map);
       return target_environment.can_walk(gate.target_x, gate.target_y, true);
     }
+    return false;
   }
   if (rule.width > 0 && rule.height > 0) {
     return gate.target_x >= 0 && gate.target_y >= 0 &&
@@ -212,8 +271,6 @@ bool MapActor::try_gate_transfer(Player& player, RuntimeDispatch& dispatch,
 
   if (gate->gate.require_doors_open &&
       !environment_.around_door_opened(player.x(), player.y())) {
-    const auto opened = environment_.open_doors_around(player.x(), player.y(), now_ms);
-    broadcast_open_doors(opened, dispatch);
     return false;
   }
 

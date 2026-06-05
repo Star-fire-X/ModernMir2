@@ -9,7 +9,6 @@
 #include "world/legacy_map_environment.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <utility>
 
 namespace mir2 {
@@ -22,8 +21,9 @@ namespace mir2 {
  */
 LegacyMapEnvironment::LegacyMapEnvironment(
     std::int32_t width, std::int32_t height,
-    std::shared_ptr<const legacy::MapDocument> movement_map) {
-  reset(width, height, std::move(movement_map));
+    std::shared_ptr<const legacy::MapDocument> movement_map,
+    bool fail_closed) {
+  reset(width, height, std::move(movement_map), fail_closed);
 }
 
 /**
@@ -34,11 +34,14 @@ LegacyMapEnvironment::LegacyMapEnvironment(
  * @param movement_map 静态通行地图数据
  */
 void LegacyMapEnvironment::reset(std::int32_t width, std::int32_t height,
-                                 std::shared_ptr<const legacy::MapDocument> movement_map) {
+                                 std::shared_ptr<const legacy::MapDocument> movement_map,
+                                 bool fail_closed) {
   width_ = width;
   height_ = height;
+  fail_closed_ = fail_closed;
   movement_map_ = std::move(movement_map);
   cells_.clear();
+  runtime_can_move_overrides_.clear();
   door_cores_.clear();
   door_tiles_.clear();
   load_doors_from_map();
@@ -56,6 +59,9 @@ void LegacyMapEnvironment::reset(std::int32_t width, std::int32_t height,
 bool LegacyMapEnvironment::in_bounds(std::int32_t x, std::int32_t y) const {
   if (movement_map_ != nullptr) {
     return movement_map_->cell(x, y) != nullptr;
+  }
+  if (fail_closed_) {
+    return false;
   }
   if (width_ <= 0 || height_ <= 0) {
     return true;
@@ -75,6 +81,10 @@ bool LegacyMapEnvironment::static_can_move(std::int32_t x, std::int32_t y) const
   if (!in_bounds(x, y)) {
     return false;
   }
+  if (const auto override_it = runtime_can_move_overrides_.find(CellKey{x, y});
+      override_it != runtime_can_move_overrides_.end()) {
+    return override_it->second;
+  }
   if (movement_map_ != nullptr) {
     const auto* target = movement_map_->cell(x, y);
     return target != nullptr && !legacy::MapDocument::terrain_blocks_move(*target);
@@ -92,6 +102,10 @@ bool LegacyMapEnvironment::static_can_move(std::int32_t x, std::int32_t y) const
 bool LegacyMapEnvironment::static_can_fly(std::int32_t x, std::int32_t y) const {
   if (!in_bounds(x, y)) {
     return false;
+  }
+  if (const auto override_it = runtime_can_move_overrides_.find(CellKey{x, y});
+      override_it != runtime_can_move_overrides_.end()) {
+    return override_it->second;
   }
   if (movement_map_ != nullptr) {
     const auto* target = movement_map_->cell(x, y);
@@ -113,6 +127,17 @@ bool LegacyMapEnvironment::static_can_fly(std::int32_t x, std::int32_t y) const 
  * @param allow_dup 是否允许多人在同一格（重叠）
  * @return true 可走到，false 不可走到
  */
+void LegacyMapEnvironment::set_runtime_can_move(std::int32_t x, std::int32_t y, bool can_move) {
+  if (!in_bounds(x, y)) {
+    return;
+  }
+  runtime_can_move_overrides_[CellKey{x, y}] = can_move;
+}
+
+void LegacyMapEnvironment::clear_runtime_can_move(std::int32_t x, std::int32_t y) {
+  runtime_can_move_overrides_.erase(CellKey{x, y});
+}
+
 bool LegacyMapEnvironment::can_walk(std::int32_t x, std::int32_t y, bool allow_dup) const {
   if (!static_can_move(x, y)) {
     return false;
@@ -123,7 +148,13 @@ bool LegacyMapEnvironment::can_walk(std::int32_t x, std::int32_t y, bool allow_d
   }
   // 检查动态对象的阻挡情况
   for (const auto& object : target->obj_list) {
-    if (!allow_dup && object.shape == LegacyMapObjectShape::moving_object) {
+    if (object.shape == LegacyMapObjectShape::event_object && object.blocks_walk) {
+      return false;
+    }
+    if (allow_dup) {
+      continue;
+    }
+    if (object.shape == LegacyMapObjectShape::moving_object) {
       if (!object.moving.ghost && object.moving.hold_place && !object.moving.death &&
           !object.moving.hide_mode && !object.moving.supervisor_mode) {
         return false;
@@ -195,6 +226,28 @@ bool LegacyMapEnvironment::can_fly_line(std::int32_t from_x, std::int32_t from_y
  * @param to_y 终点Y
  * @return true 可直线攻击，false 中途有阻挡
  */
+bool LegacyMapEnvironment::can_get_item(std::int32_t x, std::int32_t y,
+                                        std::uint64_t ignore_moving_object_id,
+                                        bool allow_gate_object) const {
+  if (!static_can_move(x, y)) {
+    return false;
+  }
+  const auto* target = cell(x, y);
+  if (target == nullptr) {
+    return true;
+  }
+  for (const auto& object : target->obj_list) {
+    if (object.shape == LegacyMapObjectShape::gate_object && !allow_gate_object) {
+      return false;
+    }
+    if (object.shape == LegacyMapObjectShape::moving_object && !object.moving.death &&
+        object.object_id != ignore_moving_object_id) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool LegacyMapEnvironment::can_fire_fly_line(std::int32_t from_x, std::int32_t from_y,
                                              std::int32_t to_x, std::int32_t to_y) const {
   if (!in_bounds(from_x, from_y) || !in_bounds(to_x, to_y)) {
@@ -560,6 +613,15 @@ bool LegacyMapEnvironment::around_door_opened(std::int32_t x, std::int32_t y) co
  * @param now_ms 当前时间戳
  * @return 被打开的门瓦片坐标列表
  */
+std::vector<std::pair<std::int32_t, std::int32_t>> LegacyMapEnvironment::open_door_at(
+    std::int32_t x, std::int32_t y, std::uint64_t now_ms) {
+  const auto it = door_tiles_.find(CellKey{x, y});
+  if (it == door_tiles_.end()) {
+    return {};
+  }
+  return open_door_core(it->second.core_index, now_ms);
+}
+
 std::vector<std::pair<std::int32_t, std::int32_t>> LegacyMapEnvironment::open_doors_around(
     std::int32_t x, std::int32_t y, std::uint64_t now_ms) {
   std::vector<CellKey> opened;
@@ -575,18 +637,12 @@ std::vector<std::pair<std::int32_t, std::int32_t>> LegacyMapEnvironment::open_do
       if (std::find(opened_cores.begin(), opened_cores.end(), core_index) != opened_cores.end()) {
         continue;
       }
-      if (core_index >= door_cores_.size()) {
+      const auto core_tiles = open_door_core(core_index, now_ms);
+      if (core_tiles.empty()) {
         continue;
       }
-      auto& core = door_cores_[core_index];
-      if (core.locked || core.open) {
-        continue;
-      }
-      // 打开门
-      core.open = true;
-      core.open_time_ms = now_ms;
       opened_cores.push_back(core_index);
-      opened.insert(opened.end(), core.tiles.begin(), core.tiles.end());
+      opened.insert(opened.end(), core_tiles.begin(), core_tiles.end());
     }
   }
   return opened;
@@ -631,6 +687,42 @@ bool LegacyMapEnvironment::door_is_open(std::int32_t x, std::int32_t y) const {
  * @param y Y坐标
  * @return 物品ID的optional值
  */
+std::size_t LegacyMapEnvironment::prune_stale_moving_objects(std::int32_t min_x,
+                                                             std::int32_t max_x,
+                                                             std::int32_t min_y,
+                                                             std::int32_t max_y,
+                                                             std::uint64_t now_ms,
+                                                             std::uint64_t ttl_ms) {
+  std::size_t removed = 0;
+  for (auto cell_it = cells_.begin(); cell_it != cells_.end();) {
+    const auto x = cell_it->first.first;
+    const auto y = cell_it->first.second;
+    if (x < min_x || x > max_x || y < min_y || y > max_y) {
+      ++cell_it;
+      continue;
+    }
+
+    auto& list = cell_it->second.obj_list;
+    list.erase(std::remove_if(list.begin(), list.end(),
+                              [&](const LegacyMapObject& object) {
+                                if (object.shape != LegacyMapObjectShape::moving_object ||
+                                    object.a_time_ms == 0 ||
+                                    now_ms <= object.a_time_ms + ttl_ms) {
+                                  return false;
+                                }
+                                ++removed;
+                                return true;
+                              }),
+               list.end());
+    if (list.empty()) {
+      cell_it = cells_.erase(cell_it);
+      continue;
+    }
+    ++cell_it;
+  }
+  return removed;
+}
+
 std::optional<std::uint64_t> LegacyMapEnvironment::first_item_object_id(std::int32_t x,
                                                                         std::int32_t y) const {
   const auto* target = cell(x, y);
@@ -790,6 +882,20 @@ void LegacyMapEnvironment::load_doors_from_map() {
  * @param y Y坐标
  * @return 门核心指针，该位置没有门或核心索引无效时返回 nullptr
  */
+std::vector<std::pair<std::int32_t, std::int32_t>> LegacyMapEnvironment::open_door_core(
+    std::size_t core_index, std::uint64_t now_ms) {
+  if (core_index >= door_cores_.size()) {
+    return {};
+  }
+  auto& core = door_cores_[core_index];
+  if (core.locked || core.open) {
+    return {};
+  }
+  core.open = true;
+  core.open_time_ms = now_ms;
+  return core.tiles;
+}
+
 LegacyMapEnvironment::DoorCore* LegacyMapEnvironment::door_core_at(std::int32_t x,
                                                                    std::int32_t y) {
   const auto it = door_tiles_.find(CellKey{x, y});

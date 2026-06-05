@@ -133,6 +133,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           restore_saved_slaves(*player, dispatch, current_tick, now_ms);
         }
       } else if (mail.kind == ActorMailKind::spawn_monster) {
+        if (auto* monster = as_monster(objects_.at(mail.actor_id).get());
+            monster != nullptr &&
+            legacy_monster_race_behavior(monster->race_server()) ==
+                LegacyMonsterRaceBehavior::structure) {
+          set_castle_door_wall_state(monster->x(), monster->y(), false);
+        }
         if (mail.master_actor_id != 0 && mail.monster_is_slave) {
           if (auto* master = find_player(mail.master_actor_id); master != nullptr) {
             master->add_slave_actor_id(mail.actor_id);
@@ -216,6 +222,12 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
     case ActorMailKind::despawn: {
       auto it = objects_.find(mail.actor_id);
       if (it != objects_.end()) {
+        if (const auto* monster = as_monster(it->second.get());
+            monster != nullptr &&
+            legacy_monster_race_behavior(monster->race_server()) ==
+                LegacyMonsterRaceBehavior::structure) {
+          clear_castle_door_wall_state(monster->x(), monster->y());
+        }
         if (auto* player = as_player(it->second.get()); player != nullptr) {
           cancel_trade_for(mail.actor_id, dispatch, true);
           PersistRequest request;
@@ -1043,6 +1055,20 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         requester->refresh_derived_state(item_configs_);
         queue_packet(dispatch, requester->session_id(),
                      make_bag_items_packet(requester->session_id(), *requester, item_configs_));
+      }
+      break;
+    }
+    case ActorMailKind::open_door: {
+      auto* player = find_player(mail.actor_id);
+      if (player == nullptr || player->is_dead()) {
+        break;
+      }
+      if (std::abs(player->x() - mail.x) > 1 || std::abs(player->y() - mail.y) > 1) {
+        break;
+      }
+      const auto opened = environment_.open_door_at(mail.x, mail.y, now_ms);
+      if (!opened.empty()) {
+        broadcast_open_doors(opened, dispatch);
       }
       break;
     }
@@ -1988,6 +2014,11 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
 
       add_legacy_trace(dispatch, "LegacyItem", "validate", mail, current_tick, now_ms, true, 0, 0,
                        "pickup_item");
+      if (!environment_.can_get_item(player->x(), player->y(), player->id(), true)) {
+        add_legacy_trace(dispatch, "LegacyItem", "tile_reject", mail, current_tick, now_ms,
+                         false, 0, 0, "pickup_item");
+        break;
+      }
       auto ground_it = ground_items_.end();
       while (true) {
         const auto first_item_id = environment_.first_item_object_id(player->x(), player->y());
@@ -4410,7 +4441,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                   event.run_tick_ms = 500;
                   event.owner_actor_id = attacker->id();
                   event.holy_group_id = group_id;
-                  event.blocks_walk = true;
+                  event.blocks_walk = false;
                   dispatch.legacy_event_creates.push_back(event);
                 }
                 LegacyHolyCurtainGroup group;
@@ -6041,19 +6072,30 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           auto old_y = player->y();
           auto moved_player = false;
           if (mail.kind == ActorMailKind::move || mail.kind == ActorMailKind::run) {
+            const auto requested_dir = static_cast<std::uint8_t>(
+                legacy::next_direction(player->x(), player->y(), mail.x, mail.y));
+            auto apply_failed_move_direction = [&] {
+              ActorMail turn_mail;
+              turn_mail.kind = ActorMailKind::turn;
+              turn_mail.dir = requested_dir;
+              player->on_mail(turn_mail, context);
+            };
             if (player->is_dead() || !player->can_move_at(current_tick)) {
+              apply_failed_move_direction();
               reject_action(false, true);
               break;
             }
 
             const auto throttle = player->begin_move_attempt(current_tick, budgets_.tick_ms);
             if (!throttle.allowed) {
+              apply_failed_move_direction();
               reject_action(throttle.disconnect, true);
               break;
             }
 
             if (mail.kind == ActorMailKind::run && player->character().ability.hp < 10) {
               player->reset_move_throttle();
+              apply_failed_move_direction();
               reject_action(false, true);
               break;
             }
@@ -6067,6 +6109,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                                       player->y(), mail.x, mail.y);
             if (!expected.has_value() || expected->x != mail.x || expected->y != mail.y) {
               player->reset_move_throttle();
+              apply_failed_move_direction();
               reject_action(false, true);
               break;
             }
@@ -6076,12 +6119,14 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                       expected->dir, 1);
               if (!middle.has_value() || !environment_.can_walk(middle->x, middle->y, false)) {
                 player->reset_move_throttle();
+                apply_failed_move_direction();
                 reject_action(false, true);
                 break;
               }
             }
             if (!environment_.can_walk(expected->x, expected->y, false)) {
               player->reset_move_throttle();
+              apply_failed_move_direction();
               reject_action(false, true);
               break;
             }
@@ -6089,6 +6134,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                     player->x(), player->y(), player->id(), expected->x, expected->y, false,
                     now_ms, moving_state_for(*player)) != 1) {
               player->reset_move_throttle();
+              apply_failed_move_direction();
               reject_action(false, true);
               break;
             }

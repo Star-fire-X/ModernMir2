@@ -145,7 +145,8 @@ class LegacyMapEnvironment {
    * @param movement_map 静态通行地图数据（共享指针）
    */
   LegacyMapEnvironment(std::int32_t width, std::int32_t height,
-                       std::shared_ptr<const legacy::MapDocument> movement_map = {});
+                       std::shared_ptr<const legacy::MapDocument> movement_map = {},
+                       bool fail_closed = false);
 
   /**
    * @brief 重置地图环境
@@ -155,14 +156,20 @@ class LegacyMapEnvironment {
    * @param movement_map 静态通行地图数据
    */
   void reset(std::int32_t width, std::int32_t height,
-             std::shared_ptr<const legacy::MapDocument> movement_map = {});
+             std::shared_ptr<const legacy::MapDocument> movement_map = {},
+             bool fail_closed = false);
 
   // @{ 边界和通行检测
   [[nodiscard]] bool in_bounds(std::int32_t x, std::int32_t y) const;                     ///< 坐标是否在地图范围内
   [[nodiscard]] bool static_can_move(std::int32_t x, std::int32_t y) const;               ///< 静态地形是否可通行
   [[nodiscard]] bool static_can_fly(std::int32_t x, std::int32_t y) const;                ///< 静态地形是否可飞行
+  void set_runtime_can_move(std::int32_t x, std::int32_t y, bool can_move);
+  void clear_runtime_can_move(std::int32_t x, std::int32_t y);
   [[nodiscard]] bool can_walk(std::int32_t x, std::int32_t y, bool allow_dup) const;     ///< 是否可以走到该格
   [[nodiscard]] bool can_safe_walk(std::int32_t x, std::int32_t y) const;                ///< 是否可安全行走（避开伤害事件）
+  [[nodiscard]] bool can_get_item(std::int32_t x, std::int32_t y,
+                                  std::uint64_t ignore_moving_object_id = 0,
+                                  bool allow_gate_object = false) const;
   [[nodiscard]] bool can_fly_line(std::int32_t from_x, std::int32_t from_y,               ///< 两点间是否可直线飞行（移动用）
                                   std::int32_t to_x, std::int32_t to_y) const;
   [[nodiscard]] bool can_fire_fly_line(std::int32_t from_x, std::int32_t from_y,          ///< 两点间是否可直线飞行（远程攻击用）
@@ -200,8 +207,14 @@ class LegacyMapEnvironment {
                        std::uint64_t now_ms);
   [[nodiscard]] const LegacyMapObject* gate_at(std::int32_t x, std::int32_t y) const; ///< 获取指定位置的门
   // @}
+  [[nodiscard]] std::size_t prune_stale_moving_objects(std::int32_t min_x, std::int32_t max_x,
+                                                       std::int32_t min_y, std::int32_t max_y,
+                                                       std::uint64_t now_ms,
+                                                       std::uint64_t ttl_ms);
 
   // @{ 门系统
+  [[nodiscard]] std::vector<std::pair<std::int32_t, std::int32_t>> open_door_at(          ///< 打开指定位置的门
+      std::int32_t x, std::int32_t y, std::uint64_t now_ms);
   [[nodiscard]] bool around_door_opened(std::int32_t x, std::int32_t y) const;              ///< 周围的门是否全部打开
   [[nodiscard]] std::vector<std::pair<std::int32_t, std::int32_t>> open_doors_around(       ///< 打开周围的门
       std::int32_t x, std::int32_t y, std::uint64_t now_ms);
@@ -252,14 +265,18 @@ class LegacyMapEnvironment {
   [[nodiscard]] Cell* mutable_cell(std::int32_t x, std::int32_t y);             ///< 获取可变格子指针，不存在时创建
   void erase_cell_if_empty(CellKey key);                                        ///< 如果格子为空则删除
   void load_doors_from_map();                                                   ///< 从地图文档加载门数据
+  [[nodiscard]] std::vector<std::pair<std::int32_t, std::int32_t>> open_door_core(
+      std::size_t core_index, std::uint64_t now_ms);
   [[nodiscard]] DoorCore* door_core_at(std::int32_t x, std::int32_t y);         ///< 获取指定位置的门核心（可变）
   [[nodiscard]] const DoorCore* door_core_at(std::int32_t x, std::int32_t y) const; ///< 获取指定位置的门核心（const）
   // @}
 
   std::int32_t width_{0};                                          ///< 地图宽度
   std::int32_t height_{0};                                         ///< 地图高度
+  bool fail_closed_{false};
   std::shared_ptr<const legacy::MapDocument> movement_map_{};      ///< 静态通行地图数据
   std::map<CellKey, Cell> cells_{};                                ///< 动态对象网格（惰性分配）
+  std::map<CellKey, bool> runtime_can_move_overrides_{};
   std::vector<DoorCore> door_cores_{};                             ///< 门核心列表
   std::map<CellKey, DoorTile> door_tiles_{};                       ///< 门瓦片映射
 };

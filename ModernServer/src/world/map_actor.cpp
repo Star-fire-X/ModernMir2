@@ -2118,7 +2118,9 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
       config_.height = movement_map_->height;
     }
   }
-  environment_.reset(config_.width, config_.height, movement_map_);
+  const auto fail_closed_without_map = movement_map_ == nullptr &&
+      !config_.source_map.empty() && (config_.width <= 0 || config_.height <= 0);
+  environment_.reset(config_.width, config_.height, movement_map_, fail_closed_without_map);
   for (std::size_t index = 0; index < config_.gates.size(); ++index) {
     const auto& gate = config_.gates[index];
     static_cast<void>(environment_.add_gate_object(
@@ -2142,7 +2144,10 @@ void MapActor::enqueue_mail(ActorMail mail) { mailbox_.push_back(std::move(mail)
  *
  * @param legacy_random 随机数生成器
  */
-void MapActor::set_legacy_random(LegacyRandom* legacy_random) { legacy_random_ = legacy_random; }
+void MapActor::set_legacy_random(LegacyRandom* legacy_random) {
+  legacy_random_ = legacy_random;
+  initialize_legacy_stone_mines();
+}
 
 /**
  * @brief 设置旧版脚本地图钩子
@@ -2188,7 +2193,7 @@ bool MapActor::apply_merchant_state(const MerchantStateRecord& state) {
  * @brief 在地图上添加事件对象（完整版本）
  *
  * @details 根据事件类型选择放置策略（石矿仅在阻挡格，其他在可行走格）。
- *          记录事件到 event_objects_ 和 event_object_types_ 映射表。
+ *          记录事件到 event_objects_ 状态表。
  *
  * @param event_id     事件ID
  * @param x            X坐标
@@ -2204,6 +2209,7 @@ bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, s
                                        std::uint64_t now_ms, bool blocks_walk,
                                        RuntimeDispatch* dispatch,
                                        LegacyEventType type,
+                                       std::int32_t event_param,
                                        std::int32_t event_damage) {
   const auto placement_policy = type == LegacyEventType::stone_mine
                                     ? LegacyMapPlacementPolicy::blocked_only
@@ -2212,8 +2218,7 @@ bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, s
                                                         event_id, now_ms, placement_policy,
                                                         blocks_walk, event_damage);
   if (added) {
-    event_objects_[event_id] = {x, y};
-    event_object_types_[event_id] = type;
+    event_objects_[event_id] = EventObjectState{x, y, type, event_param, blocks_walk};
     if (dispatch != nullptr) {
       sync_visibility_after_event_change(x, y, *dispatch, now_ms);
     }
@@ -2233,9 +2238,10 @@ bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, s
  * @return false 添加失败
  */
 bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, std::int32_t y,
-                                       std::uint64_t now_ms, RuntimeDispatch* dispatch) {
+                                       std::uint64_t now_ms, RuntimeDispatch* dispatch,
+                                       std::int32_t event_param) {
   return legacy_add_event_object(event_id, x, y, now_ms, false, dispatch,
-                                 LegacyEventType::pile_stones);
+                                 LegacyEventType::pile_stones, event_param, 0);
 }
 
 /**
@@ -2259,7 +2265,6 @@ void MapActor::legacy_remove_event_object(std::uint64_t event_id, std::int32_t x
     sync_visibility_after_event_change(x, y, *dispatch, tick_count_ms());
   }
   event_objects_.erase(event_id);
-  event_object_types_.erase(event_id);
 }
 
 RuntimeDispatch MapActor::legacy_apply_fire_burn_event(const LegacyEventRecord& event,
@@ -2621,6 +2626,7 @@ RuntimeDispatch MapActor::legacy_process_player(std::uint64_t actor_id,
   if (player == nullptr) {
     return dispatch;
   }
+  static_cast<void>(environment_.verify_map_time(player->x(), player->y(), player->id(), now_ms));
 
   switch (player->legacy_state()) {
     case LegacyPlayerState::notice_pending:
@@ -2678,6 +2684,8 @@ RuntimeDispatch MapActor::legacy_process_monster(std::uint64_t actor_id,
   }
 
   trace.object_name = monster->name();
+  static_cast<void>(environment_.verify_map_time(monster->x(), monster->y(), monster->id(),
+                                                 now_ms));
   if (!monster->is_dead() && handle_slave_lifecycle(*monster, dispatch, current_tick, now_ms)) {
     if (!monster->death_settled()) {
       finalize_monster_death(monster->id(), monster->last_hitter_id(), dispatch, current_tick);
@@ -2776,6 +2784,8 @@ RuntimeDispatch MapActor::legacy_process_merchant(std::uint64_t actor_id,
   }
 
   trace.object_name = merchant->name();
+  static_cast<void>(environment_.verify_map_time(merchant->x(), merchant->y(), merchant->id(),
+                                                 now_ms));
   if (!merchant->legacy_due(now_ms)) {
     trace.action = "skip";
     dispatch.legacy_traces.push_back(std::move(trace));
@@ -2909,6 +2919,7 @@ RuntimeDispatch MapActor::legacy_process_npc(std::uint64_t actor_id,
   }
 
   trace.object_name = npc->name();
+  static_cast<void>(environment_.verify_map_time(npc->x(), npc->y(), npc->id(), now_ms));
   if (!npc->legacy_due(now_ms)) {
     trace.action = "skip";
     dispatch.legacy_traces.push_back(std::move(trace));
@@ -3116,6 +3127,7 @@ RuntimeDispatch MapActor::run_maintenance_tick(std::uint64_t current_tick,
   context.items = &item_configs_;
   context.magics = &magic_configs_;
 
+  refill_legacy_stone_mines(now_ms);
   remove_expired_ground_items(dispatch, now_ms);
 
   std::unordered_map<GameObjectKind, std::uint64_t> consumed_budget{};
@@ -3315,6 +3327,12 @@ std::int32_t MapActor::legacy_clear_monsters(RuntimeDispatch& dispatch,
   }
   for (const auto actor_id : remove_ids) {
     if (const auto it = objects_.find(actor_id); it != objects_.end()) {
+      if (const auto* monster = as_monster(it->second.get());
+          monster != nullptr &&
+          legacy_monster_race_behavior(monster->race_server()) ==
+              LegacyMonsterRaceBehavior::structure) {
+        clear_castle_door_wall_state(monster->x(), monster->y());
+      }
       static_cast<void>(environment_.delete_from_map(
           it->second->x(), it->second->y(), LegacyMapObjectShape::moving_object,
           it->second->id()));
@@ -3384,6 +3402,39 @@ bool MapActor::legacy_player_tracks_event(std::uint64_t actor_id, std::uint64_t 
  */
 bool MapActor::legacy_can_spawn_monster(std::int32_t x, std::int32_t y) const {
   return environment_.can_walk(x, y, true);
+}
+
+std::optional<MapActor::StoneMineSnapshot> MapActor::legacy_stone_mine_snapshot(
+    std::int32_t x, std::int32_t y) const {
+  const auto it = stone_mines_.find(CellKey{x, y});
+  if (it == stone_mines_.end()) {
+    return std::nullopt;
+  }
+  return StoneMineSnapshot{it->second.mine_count, it->second.mine_fill_count,
+                           it->second.refill_time_ms, it->second.type};
+}
+
+bool MapActor::legacy_try_mine(std::int32_t x, std::int32_t y) {
+  const auto it = stone_mines_.find(CellKey{x, y});
+  if (it == stone_mines_.end() || it->second.mine_count <= 0) {
+    return false;
+  }
+  --it->second.mine_count;
+  return true;
+}
+
+void MapActor::refill_legacy_stone_mines(std::uint64_t now_ms) {
+  constexpr std::uint64_t kLegacyStoneMineRefillMs = 10ULL * 60ULL * 1000ULL;
+  for (auto& [_, mine] : stone_mines_) {
+    if (mine.refill_time_ms == 0) {
+      mine.refill_time_ms = now_ms;
+      continue;
+    }
+    if (now_ms > mine.refill_time_ms + kLegacyStoneMineRefillMs) {
+      mine.mine_count = mine.mine_fill_count;
+      mine.refill_time_ms = now_ms;
+    }
+  }
 }
 
 #include "world/map_actor_visibility.hpp"
@@ -3868,6 +3919,26 @@ bool MapActor::can_walk_tile(std::int32_t x, std::int32_t y) const {
  * @param object 实体
  * @return LegacyMovingObjectState 移动状态
  */
+void MapActor::initialize_legacy_stone_mines() {
+  if (stone_mines_initialized_ || config_.mine_map <= 0 || movement_map_ == nullptr) {
+    return;
+  }
+  LegacyRandom fallback_random;
+  auto& random = legacy_random_ != nullptr ? *legacy_random_ : fallback_random;
+  for (std::int32_t y = 0; y < movement_map_->height; ++y) {
+    for (std::int32_t x = 0; x < movement_map_->width; ++x) {
+      const auto* cell = movement_map_->cell(x, y);
+      if (cell == nullptr || !legacy::MapDocument::terrain_blocks_move(*cell)) {
+        continue;
+      }
+      stone_mines_[CellKey{x, y}] = StoneMineState{
+          random.random(200), random.random(80), 0,
+          config_.mine_map};
+    }
+  }
+  stone_mines_initialized_ = true;
+}
+
 LegacyMovingObjectState MapActor::moving_state_for(const GameObject& object) const {
   LegacyMovingObjectState state;
   if (const auto* player = as_player(&object); player != nullptr) {

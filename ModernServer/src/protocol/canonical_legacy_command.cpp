@@ -72,6 +72,8 @@ LogicCommandKind to_logic_kind(CanonicalLegacyCommandKind kind) {
       return LogicCommandKind::drop_item;
     case CanonicalLegacyCommandKind::pickup_item:
       return LogicCommandKind::pickup_item;
+    case CanonicalLegacyCommandKind::open_door:
+      return LogicCommandKind::open_door;
     case CanonicalLegacyCommandKind::take_on_item:
       return LogicCommandKind::take_on_item;
     case CanonicalLegacyCommandKind::take_off_item:
@@ -326,6 +328,13 @@ CanonicalLegacyDecodeResult decode_legacy_game_command(std::uint64_t session_id,
     case kCmPickup: {
       auto command = make_command(session_id, packet, decoded->message,
                                   CanonicalLegacyCommandKind::pickup_item);
+      command.x = decoded->message.param;
+      command.y = decoded->message.tag;
+      return ok(std::move(command));
+    }
+    case kCmOpenDoor: {
+      auto command = make_command(session_id, packet, decoded->message,
+                                  CanonicalLegacyCommandKind::open_door);
       command.x = decoded->message.param;
       command.y = decoded->message.tag;
       return ok(std::move(command));

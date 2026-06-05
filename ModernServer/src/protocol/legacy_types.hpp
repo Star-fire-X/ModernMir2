@@ -175,6 +175,7 @@ constexpr std::uint16_t kCmQueryUsername = 80;     ///< 查询用户名
 constexpr std::uint16_t kCmQueryBagItems = 81;     ///< 查询背包物品
 constexpr std::uint16_t kCmDropItem = 1000;        ///< 丢弃物品
 constexpr std::uint16_t kCmPickup = 1001;          ///< 拾取物品
+constexpr std::uint16_t kCmOpenDoor = 1002;        ///< 开门
 constexpr std::uint16_t kCmTakeOnItem = 1003;      ///< 穿戴装备
 constexpr std::uint16_t kCmTakeOffItem = 1004;     ///< 脱下装备
 constexpr std::uint16_t kCmExchgTakeOnItem = 1005; ///< 交换穿戴装备
@@ -319,6 +320,11 @@ struct LegacyMessageBodyWL {
 struct LegacyCharDesc {
   std::int32_t feature{0};  ///< 外观特征码
   std::int32_t status{0};   ///< 状态标识
+};
+
+struct LegacyShortMessage {
+  std::uint16_t ident{0};
+  std::uint16_t msg{0};
 };
 
 /**

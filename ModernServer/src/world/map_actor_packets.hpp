@@ -946,13 +946,17 @@ LegacyPacket make_item_hide_packet(std::uint64_t session_id, const MapActor::Gro
  */
 LegacyPacket make_show_event_packet(std::uint64_t session_id, std::uint64_t event_id,
                                     std::int32_t x, std::int32_t y,
-                                    LegacyEventType type) {
+                                    LegacyEventType type,
+                                    std::int32_t event_param) {
+  LegacyShortMessage body;
+  body.ident = static_cast<std::uint16_t>(std::clamp(event_param, 0, 65535));
   return make_legacy_game_packet(
       session_id, 0, 0,
       make_default_message(kSmShowEvent, static_cast<std::int32_t>(event_id),
+                           static_cast<std::uint16_t>(type),
                            static_cast<std::uint16_t>(x),
-                           static_cast<std::uint16_t>(y),
-                           static_cast<std::uint16_t>(type)));
+                           static_cast<std::uint16_t>(y)),
+      legacy_encode_buffer(&body, sizeof(body)));
 }
 
 /**

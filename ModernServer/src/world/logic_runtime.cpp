@@ -953,6 +953,9 @@ ActorMail LogicRuntime::make_player_mail(const LogicCommand& command,
     case LogicCommandKind::pickup_item:
       mail.kind = ActorMailKind::pickup_item;
       break;
+    case LogicCommandKind::open_door:
+      mail.kind = ActorMailKind::open_door;
+      break;
     case LogicCommandKind::take_on_item:
       mail.kind = ActorMailKind::take_on_item;
       break;
@@ -2044,6 +2047,7 @@ RuntimeDispatch LogicRuntime::route_logic_command(const LogicCommand& command) {
     case LogicCommandKind::query_repair_cost:
     case LogicCommandKind::drop_item:
     case LogicCommandKind::pickup_item:
+    case LogicCommandKind::open_door:
     case LogicCommandKind::take_on_item:
     case LogicCommandKind::take_off_item:
     case LogicCommandKind::eat_item:
@@ -2301,7 +2305,7 @@ std::uint64_t LogicRuntime::enqueue_legacy_event(LegacyEventRecord record) {
     if (auto map_it = maps_.find(record.map_id); map_it != maps_.end()) {
       static_cast<void>(map_it->second->legacy_add_event_object(
           event_id, record.x, record.y, last_now_ms_, record.blocks_walk, nullptr,
-          record.type, record.damage));
+          record.type, record.event_param, record.damage));
     }
   }
   return event_id;

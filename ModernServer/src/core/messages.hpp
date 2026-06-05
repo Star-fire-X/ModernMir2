@@ -301,6 +301,7 @@ enum class LogicCommandKind {
   query_repair_cost,         ///< 查询修理费用
   drop_item,                 ///< 丢弃物品
   pickup_item,               ///< 拾取物品
+  open_door,                 ///< 开门
   take_on_item,              ///< 穿上装备
   take_off_item,             ///< 卸下装备
   eat_item,                  ///< 使用物品（食物/药水）
@@ -392,6 +393,7 @@ enum class ActorMailKind {
   query_repair_cost,         ///< 查询修理费用
   drop_item,                 ///< 丢弃物品
   pickup_item,               ///< 拾取物品
+  open_door,                 ///< 开门
   take_on_item,              ///< 穿上装备
   take_off_item,             ///< 卸下装备
   eat_item,                  ///< 使用物品

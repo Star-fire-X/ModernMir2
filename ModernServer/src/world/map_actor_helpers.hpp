@@ -52,8 +52,8 @@ constexpr std::uint64_t kPlayerCorpseMs = 180000;
 constexpr std::uint64_t kMonsterCorpseMs = 180000;
 /** @brief 传统掉落的归属权时间（毫秒），2分钟内只有击杀者可拾取 */
 constexpr std::uint64_t kLegacyDropOwnerMs = 120000;
-/** @brief 地面物品自动消失时间（毫秒），10分钟后刷新消失 */
-constexpr std::uint64_t kLegacyGroundItemExpireMs = 10ULL * 60ULL * 1000ULL;
+/** @brief 地面物品自动消失时间（毫秒），1小时后刷新消失 */
+constexpr std::uint64_t kLegacyGroundItemExpireMs = 60ULL * 60ULL * 1000ULL;
 /** @brief 武器升级有效期（毫秒），3天后未取回武器将被丢弃 */
 constexpr std::uint64_t kLegacyWeaponUpgradeExpireMs = 3ULL * 24ULL * 60ULL * 60ULL * 1000ULL;
 /** @brief 怪物金币掉落单堆最大数量，每堆最多2000金币 */
@@ -674,6 +674,7 @@ bool is_legacy_player_command(ActorMailKind kind) {
     case ActorMailKind::query_repair_cost:
     case ActorMailKind::drop_item:
     case ActorMailKind::pickup_item:
+    case ActorMailKind::open_door:
     case ActorMailKind::take_on_item:
     case ActorMailKind::take_off_item:
     case ActorMailKind::eat_item:
@@ -6955,15 +6956,17 @@ bool is_safe_zone(const MapConfig& map_config, std::int32_t x, std::int32_t y) {
  * @see kAreaSafe, kAreaFight, kAreaFreePk
  */
 std::int32_t area_state_mask(const MapConfig& map_config, std::int32_t x, std::int32_t y) {
+  static_cast<void>(x);
+  static_cast<void>(y);
   std::int32_t mask = 0;
-  if (map_config.law_full) {
-    mask |= kAreaSafe;
-  }
   if (map_config.fight_zone || map_config.fight3_zone) {
     mask |= kAreaFight;
   }
   if (map_config.fight3_zone) {
     mask |= kAreaFreePk;
+  }
+  if (map_config.law_full) {
+    mask |= kAreaSafe;
   }
   return mask;
 }

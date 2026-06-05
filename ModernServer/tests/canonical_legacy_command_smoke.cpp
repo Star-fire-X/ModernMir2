@@ -226,6 +226,8 @@ std::optional<ExpectedKinds> expected_kinds(std::uint16_t ident) {
       return ExpectedKinds{C::drop_item, L::drop_item};
     case mir2::kCmPickup:
       return ExpectedKinds{C::pickup_item, L::pickup_item};
+    case mir2::kCmOpenDoor:
+      return ExpectedKinds{C::open_door, L::open_door};
     case mir2::kCmTakeOnItem:
       return ExpectedKinds{C::take_on_item, L::take_on_item};
     case mir2::kCmTakeOffItem:
@@ -369,6 +371,7 @@ bool check_expected_fields(const LegacyCommandCase& test_case,
       expected_item = test_case.recog;
       break;
     case mir2::kCmPickup:
+    case mir2::kCmOpenDoor:
       expected_x = test_case.param;
       expected_y = test_case.tag;
       break;
