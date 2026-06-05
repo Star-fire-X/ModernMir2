@@ -1,6 +1,29 @@
+/**
+ * @file map_actor_visibility.hpp
+ * @brief 地图角色可见性同步的实现文件
+ * @details 该文件是 map_actor.cpp 的实现细节，实现了基于玩家视野范围的
+ *          可见性管理系统。核心功能包括：
+ *          - 获取有序的玩家/可见角色/可见物品/可见事件 ID 列表
+ *          - 同步单个玩家的可见性（角色、物品、事件）
+ *          - 同步所有玩家的可见性
+ *          - 角色/物品/事件变化后的可见性刷新
+ *          - 同地图传送后的可见性强制刷新
+ *          - 从可见性系统中移除角色/物品
+ *
+ *          视野范围基于 kLegacyViewRange 常量，采用方形视野区域。
+ */
+
 #pragma once
 
 // Implementation detail for map_actor.cpp: visibility synchronization members.
+
+/**
+ * @brief 获取地图中所有玩家的有序 ID 列表
+ * @return 排序后的玩家 Actor ID 向量
+ * @details 排序规则：按坐标 (x, y) 排序，同坐标按地图单元格中的对象列表顺序排序，
+ *          最后按 actor_id 排序。这种排序保证了玩家列表的确定性顺序，
+ *          对客户端渲染一致性很重要。
+ */
 std::vector<std::uint64_t> MapActor::ordered_player_ids() const {
   std::vector<std::uint64_t> actor_ids;
   for (const auto& [object_id, object] : objects_) {
@@ -37,6 +60,13 @@ std::vector<std::uint64_t> MapActor::ordered_player_ids() const {
   return actor_ids;
 }
 
+/**
+ * @brief 获取指定玩家视野内可见角色的有序 ID 列表
+ * @param player 观察者玩家
+ * @return 视野范围内可见的角色 Actor ID 向量
+ * @details 遍历以玩家为中心的方形视野区域（kLegacyViewRange），
+ *          收集所有 moving_object 类型的角色，并过滤掉不可见的角色。
+ */
 std::vector<std::uint64_t> MapActor::ordered_visible_actor_ids(
     const Player& player) const {
   std::vector<std::uint64_t> actor_ids;
@@ -63,6 +93,13 @@ std::vector<std::uint64_t> MapActor::ordered_visible_actor_ids(
   return actor_ids;
 }
 
+/**
+ * @brief 获取指定玩家视野内可见物品的有序 ID 列表
+ * @param player 观察者玩家
+ * @return 视野范围内可见物品的 ID 向量
+ * @details 遍历视野区域收集所有 item_object 类型的物品，
+ *          使用 in_legacy_view_range 检查物品是否在视野区域内。
+ */
 std::vector<std::uint64_t> MapActor::ordered_visible_item_ids(
     const Player& player) const {
   std::vector<std::uint64_t> item_ids;
@@ -88,6 +125,13 @@ std::vector<std::uint64_t> MapActor::ordered_visible_item_ids(
   return item_ids;
 }
 
+/**
+ * @brief 获取指定玩家视野内可见事件的有序 ID 列表
+ * @param player 观察者玩家
+ * @return 视野范围内可见事件对象的 ID 向量
+ * @details 遍历视野区域收集所有 event_object 类型的事件对象，
+ *          使用 event_objects_ 映射获取事件位置进行距离判断。
+ */
 std::vector<std::uint64_t> MapActor::ordered_visible_event_ids(
     const Player& player) const {
   std::vector<std::uint64_t> event_ids;
@@ -116,10 +160,24 @@ std::vector<std::uint64_t> MapActor::ordered_visible_event_ids(
 
 namespace {
 
+/**
+ * @brief 从有序 ID 列表中移除指定的 ID
+ * @param ordered_ids 有序 ID 列表（引用修改）
+ * @param id 要移除的 ID
+ * @details 使用 erase-remove 惯用法从向量中删除指定 ID。
+ */
 void erase_ordered_id(std::vector<std::uint64_t>& ordered_ids, std::uint64_t id) {
   ordered_ids.erase(std::remove(ordered_ids.begin(), ordered_ids.end(), id), ordered_ids.end());
 }
 
+/**
+ * @brief 为观察者排队发送角色进入视野的包
+ * @param dispatch 运行时调度输出
+ * @param watcher 观察者玩家
+ * @param target 进入视野的目标角色
+ * @details 根据目标类型（玩家/怪物）和状态（存活/死亡），
+ *          发送相应的进入包（turn/death/skeleton）。
+ */
 void queue_legacy_actor_enter_packet(RuntimeDispatch& dispatch, const Player& watcher,
                                      const GameObject& target) {
   if (const auto* player = as_player(&target); player != nullptr) {
@@ -143,6 +201,15 @@ void queue_legacy_actor_enter_packet(RuntimeDispatch& dispatch, const Player& wa
 
 }  // namespace
 
+/**
+ * @brief 获取指定角色的可见玩家（观察者）列表，使用缓存优化
+ * @param origin 源角色
+ * @param now_ms 当前系统时间（毫秒）
+ * @return 观察者玩家 ID 向量
+ * @details 缓存有效期为 500 毫秒，过期后重新从地图环境收集。
+ *          只收集 non-ghost 的玩家作为观察者。
+ *          视野范围为 12 格（比标准视野略大以覆盖边界情况）。
+ */
 std::vector<std::uint64_t> MapActor::legacy_ref_target_player_ids(const GameObject& origin,
                                                                   std::uint64_t now_ms) {
   auto& cache = legacy_ref_target_cache_[origin.id()];
@@ -191,6 +258,17 @@ std::vector<std::uint64_t> MapActor::legacy_ref_target_player_ids(const GameObje
   return watcher_ids;
 }
 
+/**
+ * @brief 同步指定玩家的视野可见性（角色、物品、事件）
+ * @param player 目标玩家
+ * @param dispatch 运行时调度输出
+ * @param force 是否强制刷新所有可见对象
+ * @param now_ms 当前系统时间（毫秒）
+ * @details 核心可见性同步逻辑：
+ *          1. 角色可见性：对比当前视野和新视野，发送消失/出现包
+ *          2. 物品可见性：支持延迟消失（用于拾取后的短暂保留）
+ *          3. 事件可见性：对比当前视野和新视野，发送隐藏/显示包
+ */
 void MapActor::sync_player_visibility(Player& player, RuntimeDispatch& dispatch, bool force,
                                       std::uint64_t now_ms) {
   constexpr std::uint64_t kLegacyMapObjectStaleMs = 10ULL * 60ULL * 1000ULL;
@@ -297,6 +375,13 @@ void MapActor::sync_player_visibility(Player& player, RuntimeDispatch& dispatch,
   visibility.event_order = current_event_order;
 }
 
+/**
+ * @brief 同步地图中所有玩家的可见性
+ * @param dispatch 运行时调度输出
+ * @param now_ms 当前系统时间（毫秒）
+ * @details 遍历所有在线玩家，对每个玩家调用 sync_player_visibility。
+ *          通常在玩家进入/离开地图或全局可见性变化时调用。
+ */
 void MapActor::sync_all_player_visibility(RuntimeDispatch& dispatch, std::uint64_t now_ms) {
   for (const auto actor_id : ordered_player_ids()) {
     const auto object_it = objects_.find(actor_id);
@@ -310,6 +395,18 @@ void MapActor::sync_all_player_visibility(RuntimeDispatch& dispatch, std::uint64
   }
 }
 
+/**
+ * @brief 角色移动后同步所有可能受影响的玩家可见性
+ * @param actor 移动的角色
+ * @param old_x 移动前的 X 坐标
+ * @param old_y 移动前的 Y 坐标
+ * @param new_x 移动后的 X 坐标
+ * @param new_y 移动后的 Y 坐标
+ * @param dispatch 运行时调度输出
+ * @param now_ms 当前系统时间（毫秒）
+ * @details 当角色移动时，为所有可能看到旧位置或新位置的玩家刷新可见性。
+ *          这包括角色自身（视野中心变化）和附近的观察者（可能有角色进入/离开视野）。
+ */
 void MapActor::sync_visibility_after_actor_move(const GameObject& actor, std::int32_t old_x,
                                                 std::int32_t old_y, std::int32_t new_x,
                                                 std::int32_t new_y,
@@ -332,6 +429,16 @@ void MapActor::sync_visibility_after_actor_move(const GameObject& actor, std::in
   }
 }
 
+/**
+ * @brief 物品变化后同步所有可能受影响的玩家可见性
+ * @param item_x 物品 X 坐标
+ * @param item_y 物品 Y 坐标
+ * @param dispatch 运行时调度输出
+ * @param now_ms 当前系统时间（毫秒）
+ * @param refresh_item_id 需要强制刷新的物品 ID（可选）
+ * @details 当物品被添加、移除或修改时，为所有能看见该位置的玩家刷新可见性。
+ *          如果提供了 refresh_item_id，会在刷新后重新发送该物品的显示包。
+ */
 void MapActor::sync_visibility_after_item_change(std::int32_t item_x, std::int32_t item_y,
                                                  RuntimeDispatch& dispatch,
                                                  std::uint64_t now_ms,
@@ -366,6 +473,13 @@ void MapActor::sync_visibility_after_item_change(std::int32_t item_x, std::int32
   }
 }
 
+/**
+ * @brief 事件对象变化后同步所有可能受影响的玩家可见性
+ * @param event_x 事件 X 坐标
+ * @param event_y 事件 Y 坐标
+ * @param dispatch 运行时调度输出
+ * @param now_ms 当前系统时间（毫秒）
+ */
 void MapActor::sync_visibility_after_event_change(std::int32_t event_x, std::int32_t event_y,
                                                   RuntimeDispatch& dispatch,
                                                   std::uint64_t now_ms) {
@@ -382,6 +496,22 @@ void MapActor::sync_visibility_after_event_change(std::int32_t event_x, std::int
   }
 }
 
+/**
+ * @brief 同地图传送后强制刷新可见性
+ * @param player 传送的玩家
+ * @param old_x 传送前 X 坐标
+ * @param old_y 传送前 Y 坐标
+ * @param dispatch 运行时调度输出
+ * @param now_ms 当前系统时间（毫秒）
+ * @param space_move_hide_ident 传送潜行消失包标识
+ * @param space_move_show_ident 传送潜行显示包标识
+ * @details 处理同地图传送后的可见性刷新：
+ *          1. 向旧位置附近的观察者发送消失包
+ *          2. 清空传送玩家自身的对象列表
+ *          3. 发送地图切换包
+ *          4. 向新观察者发送显示包
+ *          5. 刷新传送玩家的完整可见性
+ */
 void MapActor::force_refresh_after_same_map_transfer(Player& player, std::int32_t old_x,
                                                      std::int32_t old_y,
                                                      RuntimeDispatch& dispatch,
@@ -449,6 +579,13 @@ void MapActor::force_refresh_after_same_map_transfer(Player& player, std::int32_
   static_cast<void>(now_ms);
 }
 
+/**
+ * @brief 从所有玩家的可见性中移除指定角色
+ * @param actor_id 要移除的角色 ID
+ * @param dispatch 运行时调度输出
+ * @details 向所有在线玩家发送消失包，并从可见性映射中删除该角色。
+ *          同时清除该角色的参考目标缓存。
+ */
 void MapActor::remove_actor_from_visibility(std::uint64_t actor_id, RuntimeDispatch& dispatch) {
   for (const auto watcher_id : ordered_player_ids()) {
     if (watcher_id == actor_id) {
@@ -472,6 +609,18 @@ void MapActor::remove_actor_from_visibility(std::uint64_t actor_id, RuntimeDispa
   legacy_ref_target_cache_.erase(actor_id);
 }
 
+/**
+ * @brief 从所有玩家的可见性中移除指定物品
+ * @param item_id 要移除的物品 ID
+ * @param dispatch 运行时调度输出
+ * @param now_ms 当前系统时间（毫秒）
+ * @param mode 物品可见性移除模式
+ * @param immediate_session_id 立即移除模式的会话 ID
+ * @details 支持三种移除模式：
+ *          - immediate_all: 对所有观察者立即隐藏
+ *          - delayed_all: 对所有观察者延迟隐藏
+ *          - immediate_single_session: 对指定会话立即隐藏，其他观察者延迟隐藏
+ */
 void MapActor::remove_item_from_visibility(std::uint64_t item_id, RuntimeDispatch& dispatch,
                                           std::uint64_t now_ms,
                                           ItemVisibilityRemovalMode mode,
@@ -515,4 +664,3 @@ void MapActor::remove_item_from_visibility(std::uint64_t item_id, RuntimeDispatc
     }
   }
 }
-

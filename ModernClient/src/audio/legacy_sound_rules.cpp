@@ -1,3 +1,11 @@
+/**
+ * @file legacy_sound_rules.cpp
+ * @brief 旧版音效规则实现 —— 根据游戏事件确定应播放的音效 ID
+ * @details 实现所有音效选择规则：UI 点击、物品操作、脚步声、
+ *          武器挥动、攻击、受击、死亡、怪物叫声、魔法音效。
+ *          所有规则与 Delphi 客户端的音效选择逻辑完全一致。
+ */
+
 #include "audio/legacy_sound_rules.hpp"
 
 #include <algorithm>

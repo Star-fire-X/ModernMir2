@@ -23,7 +23,7 @@
 
 namespace mir2::client_v1 {
 
-constexpr std::uint32_t kProtocolVersion = 3;
+constexpr std::uint32_t kProtocolVersion = 4;
 
 constexpr std::uint16_t kFrameFlagLegacyBundle = 0x0001U;
 
@@ -405,6 +405,7 @@ struct WorldActor {
   std::int32_t feature{0};
   std::int32_t status{0};
   ActorType actor_type{ActorType::player};
+  std::uint16_t level{1};
 };
 
 /// 世界快照：进入世界后服务端发送的完整场景状态
@@ -1473,17 +1474,20 @@ inline void encode(ByteWriter& writer, const WorldActor& value) {
   writer.write_i32(value.feature);
   writer.write_i32(value.status);
   writer.write_u8(static_cast<std::uint8_t>(value.actor_type));
+  writer.write_u16(value.level);
 }
 
 inline bool decode(ByteReader& reader, WorldActor& value) {
   std::uint8_t actor_type = 0;
+  std::uint16_t level = 1;
   if (!(reader.read_u64(value.actor_id) && reader.read_string(value.name) &&
         reader.read_i32(value.x) && reader.read_i32(value.y) && reader.read_u8(value.dir) &&
         reader.read_i32(value.feature) && reader.read_i32(value.status) &&
-        reader.read_u8(actor_type))) {
+        reader.read_u8(actor_type) && reader.read_u16(level))) {
     return false;
   }
   value.actor_type = static_cast<ActorType>(actor_type);
+  value.level = level;
   return true;
 }
 

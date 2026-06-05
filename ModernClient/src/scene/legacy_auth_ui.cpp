@@ -1,3 +1,10 @@
+/**
+ * @file legacy_auth_ui.cpp
+ * @brief 旧版登录/认证界面布局实现 —— 登录、注册、选服、选角界面的坐标计算
+ * @details 实现各认证界面的布局计算函数。所有界面元素基于精灵帧模板居中定位。
+ *          对应 Delphi 客户端的 TLoginForm、TSelServerForm、TNewChrForm 等窗口布局。
+ */
+
 #include "scene/legacy_auth_ui.hpp"
 
 namespace mir2::client::legacy_auth_ui {

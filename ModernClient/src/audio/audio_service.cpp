@@ -1,3 +1,10 @@
+/**
+ * @file audio_service.cpp
+ * @brief 音频服务实现 —— 音效/BGM 播放、设置管理和事件追踪
+ * @details 实现 AudioService 的核心逻辑：后端管理、音效 ID 映射、
+ *          音效排队去重、音量控制和追踪事件记录。
+ */
+
 #include "audio/audio_service.hpp"
 
 #include <algorithm>

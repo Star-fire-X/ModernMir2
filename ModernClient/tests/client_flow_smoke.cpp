@@ -157,9 +157,10 @@ int main() {
   assert(state.auth_phase == AuthFlowPhase::InGame);
 
   state.apply(ActorUpsert{
-      WorldActor{2000, "Hen", 332, 271, 4, 0, 0, ActorType::monster}});
+      WorldActor{2000, "Hen", 332, 271, 4, 0, 0, ActorType::monster, 23}});
   assert(state.world.actors.size() == 2);
   assert(state.world.actors[2000].name == "Hen");
+  assert(state.world.actors[2000].level == 23);
   state.world.focus_actor_id = 2000;
   state.world.target_actor_id = 2000;
   state.world.actors[1000].action_target_actor_id = 2000;

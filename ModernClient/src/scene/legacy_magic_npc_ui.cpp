@@ -1,3 +1,10 @@
+/**
+ * @file legacy_magic_npc_ui.cpp
+ * @brief 旧版魔法/NPC/商店界面布局实现 —— 魔法页、快捷键绑定、NPC 对话、商店买卖的坐标计算
+ * @details 实现魔法页面（5 行）、快捷键对话框、NPC 对话、商店菜单（5 行物品列表）
+ *          的布局计算。对应 Delphi 客户端的相应的窗口布局。
+ */
+
 #include "scene/legacy_magic_npc_ui.hpp"
 
 namespace mir2::client::legacy_magic_npc_ui {

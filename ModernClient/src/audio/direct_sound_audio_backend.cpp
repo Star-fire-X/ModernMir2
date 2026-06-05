@@ -1,3 +1,11 @@
+/**
+ * @file direct_sound_audio_backend.cpp
+ * @brief DirectSound 音频后端实现 —— 基于 Windows DirectSound API 的音频播放
+ * @details 实现 DirectSound 设备的创建、WAV 缓冲区管理、音量控制和播放控制。
+ *          使用 PIMPL 模式隐藏 DirectSound COM 接口细节。
+ *          与传奇客户端原版使用的 DirectSound API 行为一致。
+ */
+
 #include "audio/direct_sound_audio_backend.hpp"
 
 #ifndef NOMINMAX

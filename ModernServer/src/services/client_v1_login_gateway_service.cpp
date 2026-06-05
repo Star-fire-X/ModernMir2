@@ -1,3 +1,17 @@
+/**
+ * @file client_v1_login_gateway_service.cpp
+ * @brief Client v1 登录网关服务实现
+ *
+ * @details 实现 ClientV1LoginGatewayService 的全部消息处理逻辑，
+ *          包括账号认证、注册、修改密码、更新资料、角色管理等功能。
+ *          所有认证操作直接通过 Repository 访问 SQLite 数据库，
+ *          无需经过消息总线的异步持久化服务。
+ *
+ * @note 与旧版 AuthService 不同，Client v1 的登录认证采用同步数据库操作，
+ *       直接在网关服务内完成，简化了架构。但账号和角色的核心数据格式
+ *       保持与旧版兼容，确保数据互通。
+ */
+
 #include "services/client_v1_login_gateway_service.hpp"
 
 #include <algorithm>
@@ -11,8 +25,19 @@ namespace mir2 {
 
 namespace {
 
+/// @brief 最大角色槽位数(与旧版保持一致)
 constexpr std::size_t kMaxCharacterSlots = 2;
 
+/**
+ * @brief 从创建角色请求创建角色记录
+ *
+ * @details 设置默认出生地为 0 号地图(比奇省)，默认等级为1，
+ *          属性与旧版 make_new_character() 保持一致。
+ *
+ * @param account_id 账号ID
+ * @param request 客户端创建角色请求
+ * @return 初始化后的角色记录
+ */
 CharacterRecord make_character(const std::string& account_id,
                                const client_v1::CreateCharacterRequest& request) {
   CharacterRecord character;
@@ -48,6 +73,11 @@ CharacterRecord make_character(const std::string& account_id,
   return character;
 }
 
+/**
+ * @brief 将 AccountRecord 转换为客户端需要的 AccountProfile
+ * @param account 账号记录
+ * @return 账号资料
+ */
 client_v1::AccountProfile to_profile(const AccountRecord& account) {
   client_v1::AccountProfile profile;
   profile.display_name = account.display_name.empty() ? account.account_id : account.display_name;
@@ -66,6 +96,11 @@ client_v1::AccountProfile to_profile(const AccountRecord& account) {
   return profile;
 }
 
+/**
+ * @brief 将客户端提交的 AccountProfile 应用到 AccountRecord
+ * @param account [in,out] 要更新的账号记录
+ * @param profile 客户端提交的账号资料
+ */
 void apply_profile(AccountRecord& account, const client_v1::AccountProfile& profile) {
   account.display_name = profile.display_name.empty() ? account.account_id : profile.display_name;
   account.user_name = profile.user_name.empty() ? account.display_name : profile.user_name;
@@ -82,15 +117,31 @@ void apply_profile(AccountRecord& account, const client_v1::AccountProfile& prof
   account.memo2 = profile.memo2;
 }
 
+/**
+ * @brief 判断账号是否需要补充资料
+ * @param account 账号记录
+ * @return true 如果缺少用户名、生日、密保问题等关键信息
+ */
 bool needs_account_update(const AccountRecord& account) {
   return account.user_name.empty() || account.birthday.empty() || account.quiz.empty() ||
          account.answer.empty() || account.quiz2.empty() || account.answer2.empty();
 }
 
+/**
+ * @brief 获取 Client v1 协议的错误映射
+ * @param kind 登录错误类型
+ * @return 映射后的 Client v1 错误响应
+ */
 CanonicalClientV1LoginErrorResponse client_error(CanonicalLoginErrorKind kind) {
   return canonical_login_error_mapping(kind).client_v1;
 }
 
+/**
+ * @brief 将标准错误类型应用到结果(带错误码)
+ * @tparam Result 结果类型，需有 success、code、error_message 字段
+ * @param result [out] 应用错误信息后的结果
+ * @param kind 登录错误类型
+ */
 template <typename Result>
 void apply_coded_error(Result& result, CanonicalLoginErrorKind kind) {
   const auto error = client_error(kind);
@@ -99,6 +150,12 @@ void apply_coded_error(Result& result, CanonicalLoginErrorKind kind) {
   result.error_message = std::string(error.text);
 }
 
+/**
+ * @brief 将标准错误类型应用到结果(仅文本)
+ * @tparam Result 结果类型，需有 success、error_message 字段
+ * @param result [out] 应用错误信息后的结果
+ * @param kind 登录错误类型
+ */
 template <typename Result>
 void apply_text_error(Result& result, CanonicalLoginErrorKind kind) {
   const auto error = client_error(kind);
@@ -112,6 +169,14 @@ ClientV1LoginGatewayService::ClientV1LoginGatewayService(
     std::shared_ptr<ClientV1AdmissionRegistry> admissions)
     : ClientV1GatewayServiceBase("client_v1_login_gateway"), admissions_(std::move(admissions)) {}
 
+/**
+ * @brief 启动服务
+ *
+ * @details 初始化 SQLite 数据仓库、确保数据库表结构存在、填充运行时数据，
+ *          然后调用基类的 start() 启动 TCP 服务器。
+ *
+ * @param context 宿主上下文
+ */
 void ClientV1LoginGatewayService::start(HostContext& context) {
   repository_ = std::make_unique<Repository>(context.root_dir / context.config.runtime.data_dir / "mir2.sqlite");
   repository_->ensure_schema(context.root_dir / "schema" / "mir2.sql");
@@ -123,6 +188,17 @@ PortBinding ClientV1LoginGatewayService::binding(const HostContext& context) con
   return context.config.ports.client_v1_login_gateway;
 }
 
+/**
+ * @brief 消息路由中心
+ *
+ * @details 根据消息类型将处理分发给对应的 handle_* 函数。
+ *          使用 std::visit 和 constexpr if 在编译期确定消息类型。
+ *
+ * @param session_id 会话ID
+ * @param peer_address 客户端地址
+ * @param sequence 序列号
+ * @param message 消息体
+ */
 void ClientV1LoginGatewayService::handle_message(std::uint64_t session_id,
                                                  const std::string& /*peer_address*/,
                                                  std::uint32_t /*sequence*/,
@@ -171,6 +247,15 @@ void ClientV1LoginGatewayService::handle_disconnected(std::uint64_t session_id,
   sessions_.erase(session_id);
 }
 
+/**
+ * @brief 处理客户端握手
+ *
+ * @details 检查协议版本是否匹配，如果不匹配则断开连接。
+ *          握手成功后设置 greeted 标志，允许后续操作。
+ *
+ * @param session_id 会话ID
+ * @param hello 客户端握手消息
+ */
 void ClientV1LoginGatewayService::handle_client_hello(std::uint64_t session_id,
                                                       const client_v1::ClientHello& hello) {
   if (hello.protocol_version != client_v1::kProtocolVersion) {
@@ -182,6 +267,16 @@ void ClientV1LoginGatewayService::handle_client_hello(std::uint64_t session_id,
   sessions_[session_id].greeted = true;
 }
 
+/**
+ * @brief 处理登录请求
+ *
+ * @details 验证账号密码，如果成功则推进登录阶段，
+ *          如果账号需要补充资料则发送 NeedUpdateAccount，
+ *          否则直接发送服务器列表。
+ *
+ * @param session_id 会话ID
+ * @param request 登录请求
+ */
 void ClientV1LoginGatewayService::handle_login_request(std::uint64_t session_id,
                                                        const client_v1::LoginRequest& request) {
   if (!session_ready(session_id)) {
@@ -235,6 +330,11 @@ void ClientV1LoginGatewayService::handle_login_request(std::uint64_t session_id,
   send_server_list(session_id);
 }
 
+/**
+ * @brief 处理创建账号请求
+ * @param session_id 会话ID
+ * @param request 创建账号请求
+ */
 void ClientV1LoginGatewayService::handle_create_account_request(
     std::uint64_t session_id, const client_v1::CreateAccountRequest& request) {
   if (!session_ready(session_id)) {
@@ -262,6 +362,11 @@ void ClientV1LoginGatewayService::handle_create_account_request(
   send_message(session_id, result);
 }
 
+/**
+ * @brief 处理更新账号请求
+ * @param session_id 会话ID
+ * @param request 更新账号请求
+ */
 void ClientV1LoginGatewayService::handle_update_account_request(
     std::uint64_t session_id, const client_v1::UpdateAccountRequest& request) {
   const auto state = session(session_id);
@@ -308,6 +413,11 @@ void ClientV1LoginGatewayService::handle_update_account_request(
   send_server_list(session_id);
 }
 
+/**
+ * @brief 处理修改密码请求
+ * @param session_id 会话ID
+ * @param request 修改密码请求
+ */
 void ClientV1LoginGatewayService::handle_change_password_request(
     std::uint64_t session_id, const client_v1::ChangePasswordRequest& request) {
   if (!session_ready(session_id)) {
@@ -331,6 +441,15 @@ void ClientV1LoginGatewayService::handle_change_password_request(
   send_message(session_id, result);
 }
 
+/**
+ * @brief 处理选择服务器请求
+ *
+ * @details 检查是否已认证且在正确的阶段，然后生成 Lobby 令牌
+ *          并返回服务器地址和端口信息。
+ *
+ * @param session_id 会话ID
+ * @param request 选择服务器请求
+ */
 void ClientV1LoginGatewayService::handle_select_server_request(
     std::uint64_t session_id, const client_v1::SelectServerRequest& request) {
   const auto state = session(session_id);
@@ -364,6 +483,15 @@ void ClientV1LoginGatewayService::handle_select_server_request(
   send_message(session_id, result);
 }
 
+/**
+ * @brief 处理角色列表请求
+ *
+ * @details 如果已认证直接返回角色列表，否则尝试使用 lobby_token
+ *          进行免认证访问(从服务器选择页面跳转回来的情况)。
+ *
+ * @param session_id 会话ID
+ * @param request 角色列表请求
+ */
 void ClientV1LoginGatewayService::handle_character_list_request(
     std::uint64_t session_id, const client_v1::CharacterListRequest& request) {
   auto state = session(session_id);
@@ -388,6 +516,15 @@ void ClientV1LoginGatewayService::handle_character_list_request(
   send_message(session_id, response);
 }
 
+/**
+ * @brief 处理创建角色请求
+ *
+ * @details 检查角色名是否合规、是否已存在、角色槽位是否已满，
+ *          然后创建角色记录。
+ *
+ * @param session_id 会话ID
+ * @param request 创建角色请求
+ */
 void ClientV1LoginGatewayService::handle_create_character_request(
     std::uint64_t session_id, const client_v1::CreateCharacterRequest& request) {
   const auto state = session(session_id);
@@ -431,6 +568,11 @@ void ClientV1LoginGatewayService::handle_create_character_request(
   send_message(session_id, result);
 }
 
+/**
+ * @brief 处理删除角色请求
+ * @param session_id 会话ID
+ * @param request 删除角色请求
+ */
 void ClientV1LoginGatewayService::handle_delete_character_request(
     std::uint64_t session_id, const client_v1::DeleteCharacterRequest& request) {
   const auto state = session(session_id);
@@ -452,6 +594,15 @@ void ClientV1LoginGatewayService::handle_delete_character_request(
   send_message(session_id, result);
 }
 
+/**
+ * @brief 处理选择角色请求
+ *
+ * @details 验证角色存在后，从准入注册表签发进入游戏世界的令牌，
+ *          返回游戏网关的地址和端口给客户端。
+ *
+ * @param session_id 会话ID
+ * @param request 选择角色请求
+ */
 void ClientV1LoginGatewayService::handle_select_character_request(
     std::uint64_t session_id, const client_v1::SelectCharacterRequest& request) {
   const auto state = session(session_id);
@@ -484,11 +635,21 @@ void ClientV1LoginGatewayService::handle_select_character_request(
   send_message(session_id, result);
 }
 
+/**
+ * @brief 检查会话是否就绪(已握手)
+ * @param session_id 会话ID
+ * @return true 如果会话已收到 ClientHello 且 greeted 为 true
+ */
 bool ClientV1LoginGatewayService::session_ready(std::uint64_t session_id) const {
   const auto state = session(session_id);
   return state.has_value() && state->greeted;
 }
 
+/**
+ * @brief 获取会话状态(线程安全)
+ * @param session_id 会话ID
+ * @return 会话状态的副本，如果不存在则返回 std::nullopt
+ */
 std::optional<ClientV1LoginGatewayService::SessionState> ClientV1LoginGatewayService::session(
     std::uint64_t session_id) const {
   std::scoped_lock lock(mutex_);
@@ -499,6 +660,11 @@ std::optional<ClientV1LoginGatewayService::SessionState> ClientV1LoginGatewaySer
   return it->second;
 }
 
+/**
+ * @brief 将 CharacterRecord 转换为客户端的 CharacterSummary
+ * @param character 角色记录
+ * @return 角色摘要信息
+ */
 client_v1::CharacterSummary ClientV1LoginGatewayService::to_summary(
     const CharacterRecord& character) {
   client_v1::CharacterSummary summary;
@@ -511,6 +677,12 @@ client_v1::CharacterSummary ClientV1LoginGatewayService::to_summary(
   return summary;
 }
 
+/**
+ * @brief 签发 Lobby 令牌(从服务器选择页面免认证返回)
+ * @param state 会话状态
+ * @param server_name 服务器名
+ * @return Lobby 令牌字符串
+ */
 std::string ClientV1LoginGatewayService::issue_lobby_token(const SessionState& state,
                                                            const std::string& server_name) {
   std::scoped_lock lock(mutex_);
@@ -520,6 +692,12 @@ std::string ClientV1LoginGatewayService::issue_lobby_token(const SessionState& s
   return token;
 }
 
+/**
+ * @brief 使用 Lobby 令牌认证会话
+ * @param session_id 会话ID
+ * @param lobby_token Lobby 令牌
+ * @return 如果令牌有效则返回更新后的会话状态
+ */
 std::optional<ClientV1LoginGatewayService::SessionState>
 ClientV1LoginGatewayService::authenticate_lobby_session(std::uint64_t session_id,
                                                         const std::string& lobby_token) {
@@ -543,6 +721,10 @@ ClientV1LoginGatewayService::authenticate_lobby_session(std::uint64_t session_id
   return state;
 }
 
+/**
+ * @brief 发送服务器列表给客户端
+ * @param session_id 会话ID
+ */
 void ClientV1LoginGatewayService::send_server_list(std::uint64_t session_id) {
   client_v1::ServerList servers;
   servers.servers.push_back(client_v1::ServerEntry{

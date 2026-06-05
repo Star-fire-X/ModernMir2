@@ -1,3 +1,11 @@
+/**
+ * @file legacy_audio_cue_tracker.cpp
+ * @brief 旧版音效提示追踪器实现 —— 检测角色动画变化并触发对应音效
+ * @details 实现角色动作音效的检测和触发逻辑：脚步声（左右脚交替）、
+ *          武器挥动声、死亡音效、怪物叫声。
+ *          与 Delphi 客户端的音效触发时机完全一致。
+ */
+
 #include "audio/legacy_audio_cue_tracker.hpp"
 
 #include <algorithm>

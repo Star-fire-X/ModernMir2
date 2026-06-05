@@ -1,3 +1,10 @@
+/**
+ * @file wav_reader.cpp
+ * @brief WAV 文件读取器实现 —— 解析 RIFF WAV 格式的 PCM 音频数据
+ * @details 实现标准 WAV 文件的二进制解析：验证 RIFF/WAVE 头部、
+ *          读取 fmt 块获取音频格式参数、读取 data 块提取 PCM 采样数据。
+ */
+
 #include "audio/wav_reader.hpp"
 
 #include <array>

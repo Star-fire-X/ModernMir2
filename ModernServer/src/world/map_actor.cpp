@@ -1,3 +1,26 @@
+/**
+ * @file map_actor.cpp
+ * @brief 地图Actor核心实现 - Mir2游戏服务器实体行为协调器
+ *
+ * @details 本文件是地图Actor系统的核心实现，负责协调地图上所有游戏实体（玩家、怪物、
+ *          NPC、商人等）的行为。主要功能包括：
+ *          - 通过ActorMail消息分发系统处理所有实体间的通信
+ *          - 玩家、怪物、NPC的创建、生命周期管理和销毁
+ *          - 战斗系统：物理攻击、魔法攻击、伤害计算、死亡处理
+ *          - 交易系统：玩家间交易、NPC商店买卖
+ *          - 武器升级系统：黑铁矿石强化、幸运诅咒
+ *          - 装备耐久度管理
+ *          - PK惩罚系统
+ *          - 地面物品管理
+ *          - 空间移动、传送
+ *          - 地图事件对象管理（火墙、召唤物等）
+ *
+ * @note 本文件采用匿名命名空间封装内部辅助函数，通过 RuntimeDispatch 收集所有的
+ *       包分发、持久化请求和审计事件，在 tick 循环末尾统一处理。
+ *
+ * @see map_actor.hpp, map_actor_mail.hpp, map_actor_player.hpp, map_actor_monster.hpp
+ */
+
 #include "world/map_actor.hpp"
 
 #include <algorithm>
@@ -32,7 +55,21 @@ namespace mir2 {
 #include "world/map_actor_helpers.hpp"
 #include "world/map_actor_packets.hpp"
 
+// =============================================================================
+// 匿名命名空间：内部辅助函数与工具函数
+// =============================================================================
 namespace {
+
+/**
+ * @brief 合并两个 RuntimeDispatch 对象，将源分发的所有事件追加到目标分发中
+ *
+ * @details 将 source 中的所有事件类别（会话事件、审计事件、持久化请求、跨地图邮件、
+ *          旧版事件、神圣屏障组、随机空间移动、时间召回请求、批量移动请求、运行时追踪）
+ *          通过移动语义合并到 target 中。
+ *
+ * @param[out] target  目标 RuntimeDispatch 对象
+ * @param[in]  source  源 RuntimeDispatch 对象（会被移动）
+ */
 void append_runtime_dispatch(RuntimeDispatch& target, RuntimeDispatch source) {
   target.session_events.insert(target.session_events.end(),
                                std::make_move_iterator(source.session_events.begin()),
@@ -71,6 +108,21 @@ void append_runtime_dispatch(RuntimeDispatch& target, RuntimeDispatch source) {
                               std::make_move_iterator(source.legacy_traces.end()));
 }
 
+// =============================================================================
+// 物品价格计算相关函数
+// =============================================================================
+
+/**
+ * @brief 计算物品的商品价值（出售给NPC时的基础价格）
+ *
+ * @details 根据物品的基础价格和耐久度计算实际价值。耐久度越低的物品价值越低，
+ *          但某些超耐久物品可以获得价格加成。若物品没有有效价格则返回 -1。
+ *
+ * @param item          目标物品
+ * @param item_configs  物品配置表
+ * @param dynamic_price 可选动态价格，覆盖配置表中的基础价格
+ * @return std::int32_t 计算后的价格，无效返回 -1
+ */
 std::int32_t compute_goods_price(const LegacyUserItem& item,
                                  const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
                                  std::optional<std::int32_t> dynamic_price = std::nullopt) {
@@ -97,6 +149,14 @@ std::int32_t compute_goods_price(const LegacyUserItem& item,
   return price;
 }
 
+/**
+ * @brief 计算NPC向玩家收购物品的价格（通常为商品价值的一半）
+ *
+ * @param item          目标物品
+ * @param item_configs  物品配置表
+ * @param dynamic_price 可选动态价格
+ * @return std::int32_t 收购价格，无效返回 -1
+ */
 std::int32_t compute_buy_price(const LegacyUserItem& item,
                                const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
                                std::optional<std::int32_t> dynamic_price = std::nullopt) {
@@ -104,6 +164,18 @@ std::int32_t compute_buy_price(const LegacyUserItem& item,
   return goods_price >= 0 ? static_cast<std::int32_t>(std::lround(static_cast<double>(goods_price) / 2.0)) : -1;
 }
 
+/**
+ * @brief 判断NPC是否允许收购该物品
+ *
+ * @details 检查NPC的业务范围（std_mode）是否覆盖物品类型，同时排除特殊物品
+ *          （std_mode 51）和耐久度过低的药剂（std_mode 25/30）。
+ *
+ * @param merchant      NPC对象
+ * @param item          待售物品
+ * @param item_configs  物品配置表
+ * @return true 允许收购
+ * @return false 拒绝收购
+ */
 bool can_sell_item(const Npc& merchant, const LegacyUserItem& item,
                    const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
   const auto* config = find_item_config(item_configs, item.index);
@@ -122,6 +194,16 @@ bool can_sell_item(const Npc& merchant, const LegacyUserItem& item,
   return compute_buy_price(item, item_configs, merchant.merchant_price(item.index)) >= 0;
 }
 
+/**
+ * @brief 计算NPC对玩家的售价（使用外部指定的价格倍率）
+ *
+ * @details 在商品价值基础上乘以给定的百分比倍率。用于武器修复等场景中的成本计算。
+ *
+ * @param item              物品
+ * @param item_configs      物品配置表
+ * @param price_rate_percent 价格倍率百分比
+ * @return std::int32_t 售价
+ */
 std::int32_t compute_merchant_sell_price(
     const LegacyUserItem& item, const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
     std::int32_t price_rate_percent) {
@@ -134,6 +216,17 @@ std::int32_t compute_merchant_sell_price(
                          static_cast<double>(std::max(price_rate_percent, 0)) / 100.0)));
 }
 
+/**
+ * @brief 计算NPC对玩家的售价（使用NPC自身配置的价格倍率）
+ *
+ * @details 使用NPC对象中存储的价格倍率（price_rate_percent）计算售价，
+ *          并优先使用NPC对特定物品的动态定价（merchant_price）。
+ *
+ * @param merchant      NPC商人
+ * @param item          物品
+ * @param item_configs  物品配置表
+ * @return std::int32_t 售价
+ */
 std::int32_t compute_merchant_sell_price(
     const Npc& merchant, const LegacyUserItem& item,
     const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
@@ -147,6 +240,19 @@ std::int32_t compute_merchant_sell_price(
                          static_cast<double>(std::max(merchant.price_rate_percent(), 0)) / 100.0)));
 }
 
+/**
+ * @brief 计算维修物品的费用
+ *
+ * @details 根据物品当前耐久度与最大耐久度的比例计算维修成本。
+ *          普通维修按1/3价格比例计算，特殊维修（如特修）费用为3倍。
+ *          std_mode 43 类型的物品不可维修。
+ *
+ * @param item          待维修物品
+ * @param item_configs  物品配置表
+ * @param merchant      提供维修服务的NPC
+ * @param repair_mode   维修模式（普通/特殊）
+ * @return std::int32_t 维修费用，-1 表示不可维修
+ */
 std::int32_t compute_repair_cost(const LegacyUserItem& item,
                                  const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
                                  const Npc& merchant,
@@ -177,6 +283,12 @@ std::int32_t compute_repair_cost(const LegacyUserItem& item,
   return repair_mode == LegacyRepairMode::special ? cost * 3 : cost;
 }
 
+/**
+ * @brief 创建保存NPC商人状态的持久化请求
+ *
+ * @param merchant NPC商人对象
+ * @return PersistRequest 持久化请求对象
+ */
 PersistRequest make_save_merchant_state_request(const Npc& merchant) {
   PersistRequest request;
   request.kind = PersistRequestKind::save_merchant_state;
@@ -184,19 +296,47 @@ PersistRequest make_save_merchant_state_request(const Npc& merchant) {
   return request;
 }
 
+/**
+ * @brief 将整数安全钳位到 uint8_t 范围 [0, 255]
+ *
+ * @param value 原始整数值
+ * @return std::uint8_t 钳位后的值
+ */
 std::uint8_t clamp_desc_value(std::int32_t value) {
   return static_cast<std::uint8_t>(std::clamp(value, 0, 255));
 }
 
+/**
+ * @brief 将整数安全钳位到 uint16_t 耐久度范围 [0, 65000]
+ *
+ * @param value 原始整数值
+ * @return std::uint16_t 钳位后的耐久度值
+ */
 std::uint16_t clamp_dura_value(std::int32_t value) {
   return static_cast<std::uint16_t>(std::clamp(value, 0, 65000));
 }
 
+/**
+ * @brief 不区分大小写且忽略首尾空格的物品名称比较
+ *
+ * @param left  左侧名称
+ * @param right 右侧名称
+ * @return true 名称（标准化后）相等
+ * @return false 名称不等
+ */
 bool item_name_equals(std::string_view left, std::string_view right) {
   return util::lower_copy(util::trim(std::string(left))) ==
          util::lower_copy(util::trim(std::string(right)));
 }
 
+// =============================================================================
+// 武器升级准备与物品辅助函数
+// =============================================================================
+
+/**
+ * @struct LegacyWeaponUpgradePreparation
+ * @brief 武器升级预处理结果，包含各项属性加成值和待消耗的物品槽位
+ */
 struct LegacyWeaponUpgradePreparation {
   std::uint8_t updc{0};
   std::uint8_t upsc{0};
@@ -206,6 +346,19 @@ struct LegacyWeaponUpgradePreparation {
   std::vector<std::size_t> consume_slots{};
 };
 
+/**
+ * @brief 准备武器升级材料，计算黑铁矿石品质和首饰属性加成
+ *
+ * @details 遍历玩家背包，收集：
+ *          - 黑铁矿石（black_stone）：按纯度排序取前5颗，综合计算 durapoint
+ *          - 首饰材料：统计每种属性（DC/SC/MC）的前两名，按特定公式加成
+ *          最终排序并去重消耗槽位。
+ *
+ * @param player          玩家对象
+ * @param item_configs    物品配置表
+ * @param black_stone_name 黑铁矿石的名称关键字
+ * @return LegacyWeaponUpgradePreparation 升级准备结果
+ */
 LegacyWeaponUpgradePreparation prepare_weapon_upgrade(
     const Player& player, const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
     std::string_view black_stone_name) {
@@ -296,6 +449,16 @@ LegacyWeaponUpgradePreparation prepare_weapon_upgrade(
   return result;
 }
 
+/**
+ * @brief 根据物品配置创建一个运行时商人物品
+ *
+ * @details 从 ItemConfig 创建 LegacyUserItem，初始化索引、制造索引和耐久度。
+ *          如果物品有最大耐久度则使用该值，否则默认 1000。
+ *
+ * @param item_config 物品配置
+ * @param make_index  制造索引（用于唯一标识）
+ * @return LegacyUserItem 创建的运行时物品
+ */
 LegacyUserItem make_runtime_merchant_item(const ItemConfig& item_config, std::int32_t make_index) {
   LegacyUserItem item;
   item.index = static_cast<std::uint16_t>(std::clamp(item_config.id, 0, 65535));
@@ -307,6 +470,16 @@ LegacyUserItem make_runtime_merchant_item(const ItemConfig& item_config, std::in
   return item;
 }
 
+/**
+ * @brief 判断物品出售给NPC时是否恢复满耐久度
+ *
+ * @details 特定类型（std_mode 0/25/30/31）和特定形状（shape 1/2/3/5/9）的药水类物品
+ *          在出售时耐久度会被补满。
+ *
+ * @param config 物品配置
+ * @return true 出售时恢复耐久
+ * @return false 保持原耐久
+ */
 bool is_dura_restored_when_sold(const ItemConfig& config) {
   if (config.std_mode == 0 || config.std_mode == 25 || config.std_mode == 30 ||
       config.std_mode == 31) {
@@ -317,6 +490,16 @@ bool is_dura_restored_when_sold(const ItemConfig& config) {
           config.shape == 9);
 }
 
+/**
+ * @brief 将物品添加到NPC商人的库存中
+ *
+ * @details 耐久度为0的物品会被忽略。如果物品类型在出售时应恢复耐久度，
+ *          则将其耐久度设为最大值。同类型的物品会插入到已有同类物品附近。
+ *
+ * @param merchant      NPC商人对象
+ * @param item          要添加的物品
+ * @param item_configs  物品配置表
+ */
 void add_merchant_goods(Npc& merchant, LegacyUserItem item,
                         const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
   if (item.dura == 0) {
@@ -333,12 +516,28 @@ void add_merchant_goods(Npc& merchant, LegacyUserItem item,
   goods.insert(insert_at, item);
 }
 
+/**
+ * @brief 统计NPC库存中指定物品的数量
+ *
+ * @param merchant NPC商人
+ * @param item_id  物品ID
+ * @return std::int32_t 库存数量
+ */
 std::int32_t merchant_stock_count(const Npc& merchant, std::int32_t item_id) {
   return static_cast<std::int32_t>(std::count_if(
       merchant.merchant_items().begin(), merchant.merchant_items().end(),
       [&](const LegacyUserItem& item) { return !is_empty(item) && item.index == item_id; }));
 }
 
+/**
+ * @brief 从NPC库存末尾移除指定数量的物品
+ *
+ * @details 从库存末尾向前搜索匹配的物品并移除。
+ *
+ * @param merchant     NPC商人
+ * @param item_id      物品ID
+ * @param remove_count 要移除的数量
+ */
 void trim_merchant_item_tail(Npc& merchant, std::int32_t item_id, std::int32_t remove_count) {
   auto& goods = merchant.merchant_items_mutable();
   while (remove_count > 0) {
@@ -353,6 +552,15 @@ void trim_merchant_item_tail(Npc& merchant, std::int32_t item_id, std::int32_t r
   }
 }
 
+/**
+ * @brief 提高NPC对指定物品的收购价格（上涨10%）
+ *
+ * @param merchant     NPC商人
+ * @param item_id      物品ID
+ * @param item_configs 物品配置表
+ * @return true 价格上涨
+ * @return false 价格无效
+ */
 bool price_up(Npc& merchant, std::int32_t item_id,
               const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
   const auto* config = find_item_config(item_configs, item_id);
@@ -368,6 +576,15 @@ bool price_up(Npc& merchant, std::int32_t item_id,
   return true;
 }
 
+/**
+ * @brief 降低NPC对指定物品的收购价格（下降10%）
+ *
+ * @param merchant     NPC商人
+ * @param item_id      物品ID
+ * @param item_configs 物品配置表
+ * @return true 价格下降
+ * @return false 价格无效
+ */
 [[maybe_unused]] bool price_down(Npc& merchant, std::int32_t item_id,
                                  const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
   const auto* config = find_item_config(item_configs, item_id);
@@ -383,6 +600,15 @@ bool price_up(Npc& merchant, std::int32_t item_id,
   return true;
 }
 
+/**
+ * @brief 收集NPC库存中指定名称的物品列表（分页，每页10个）
+ *
+ * @param merchant      NPC商人
+ * @param expected_name 期望物品名称
+ * @param top_line      起始行号
+ * @param item_configs  物品配置表
+ * @return std::vector<LegacyUserItem> 匹配的物品列表
+ */
 std::vector<LegacyUserItem> collect_detail_goods(
     const Npc& merchant, std::string_view expected_name, std::int32_t top_line,
     const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
@@ -405,6 +631,15 @@ std::vector<LegacyUserItem> collect_detail_goods(
   return std::vector<LegacyUserItem>(matches.begin() + start, matches.begin() + end);
 }
 
+/**
+ * @brief 在NPC库存中查找指定物品的索引
+ *
+ * @param merchant       NPC商人
+ * @param expected_name  物品名称
+ * @param item_make_index 制造索引
+ * @param item_configs   物品配置表
+ * @return std::optional<std::size_t> 物品索引
+ */
 std::optional<std::size_t> find_merchant_item_index(
     const Npc& merchant, std::string_view expected_name, std::int32_t item_make_index,
     const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
@@ -425,6 +660,15 @@ std::optional<std::size_t> find_merchant_item_index(
   return std::nullopt;
 }
 
+/**
+ * @brief 从NPC库存中取出指定物品
+ *
+ * @param merchant       NPC商人
+ * @param expected_name  物品名称
+ * @param item_make_index 制造索引
+ * @param item_configs   物品配置表
+ * @return std::optional<LegacyUserItem> 取出的物品
+ */
 std::optional<LegacyUserItem> take_merchant_item(
     Npc& merchant, std::string_view expected_name, std::int32_t item_make_index,
     const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
@@ -442,6 +686,17 @@ std::optional<LegacyUserItem> take_merchant_item(
   return item;
 }
 
+/**
+ * @brief 通过Actor ID查找可攻击目标
+ *
+ * @details 验证目标存在、可攻击且在指定范围内。
+ *
+ * @param objects         地图对象表
+ * @param attacker        攻击者
+ * @param target_actor_id 目标ID
+ * @param range           攻击距离
+ * @return GameObject* 目标指针
+ */
 GameObject* find_attack_target_by_actor_id(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects, const GameObject& attacker,
     std::uint64_t target_actor_id, std::int32_t range) {
@@ -460,6 +715,14 @@ GameObject* find_attack_target_by_actor_id(
   return it->second.get();
 }
 
+/**
+ * @brief 查找攻击者前方直线上的可攻击目标
+ *
+ * @param objects  地图对象表
+ * @param attacker 攻击者
+ * @param range    扫描距离
+ * @return GameObject* 目标指针
+ */
 GameObject* find_attack_target_in_front(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects, const GameObject& attacker,
     std::int32_t range) {
@@ -479,6 +742,16 @@ GameObject* find_attack_target_in_front(
   return nullptr;
 }
 
+/**
+ * @brief 查找指定坐标上的可攻击目标
+ *
+ * @param objects  地图对象表
+ * @param attacker 攻击者
+ * @param x        目标X
+ * @param y        目标Y
+ * @param range    距离限制
+ * @return GameObject* 目标指针
+ */
 GameObject* find_attack_target_by_position(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects, const GameObject& attacker,
     std::int32_t x, std::int32_t y, std::int32_t range = -1) {
@@ -497,6 +770,14 @@ GameObject* find_attack_target_by_position(
   return nullptr;
 }
 
+/**
+ * @brief 判断目标是否在攻击者的攻击直线上
+ *
+ * @param attacker 攻击者
+ * @param target   目标
+ * @param range    攻击距离
+ * @return true 在攻击线上
+ */
 bool target_in_attack_line(const GameObject& attacker, const GameObject& target,
                            std::int32_t range) {
   const auto [dx, dy] = direction_delta(actor_dir(attacker));
@@ -509,6 +790,15 @@ bool target_in_attack_line(const GameObject& attacker, const GameObject& target,
   return false;
 }
 
+/**
+ * @brief 收集攻击者面前扇形区域的可攻击目标（半月弯刀）
+ *
+ * @param objects   地图对象表
+ * @param attacker  攻击者
+ * @param map_config 地图配置
+ * @param now_ms    当前时间
+ * @return std::vector<GameObject*> 目标列表
+ */
 std::vector<GameObject*> collect_wide_hit_targets(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     const Player& attacker, const MapConfig& map_config, std::uint64_t now_ms) {
@@ -542,6 +832,15 @@ std::vector<GameObject*> collect_wide_hit_targets(
   return targets;
 }
 
+/**
+ * @brief 收集攻击者周围十字范围的可攻击目标
+ *
+ * @param objects   地图对象表
+ * @param attacker  攻击者
+ * @param map_config 地图配置
+ * @param now_ms    当前时间
+ * @return std::vector<GameObject*> 目标列表
+ */
 std::vector<GameObject*> collect_cross_hit_targets(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     const Player& attacker, const MapConfig& map_config, std::uint64_t now_ms) {
@@ -575,6 +874,13 @@ std::vector<GameObject*> collect_cross_hit_targets(
   return targets;
 }
 
+/**
+ * @brief 判断魔法是否能命中目标
+ *
+ * @param magic  魔法配置
+ * @param target 目标
+ * @return true 可以命中
+ */
 bool magic_can_hit_target(const MagicConfig& magic, const GameObject& target) {
   if (as_player(&target) != nullptr) {
     return magic.affect_players;
@@ -585,15 +891,43 @@ bool magic_can_hit_target(const MagicConfig& magic, const GameObject& target) {
   return false;
 }
 
+/**
+ * @brief 判断魔法是否为有害魔法
+ *
+ * @param magic 魔法配置
+ * @return true 有害
+ */
 bool magic_is_harmful(const MagicConfig& magic) {
   return magic.power > 0 || magic.dot_damage > 0 || magic.slow_percent > 0;
 }
 
+/**
+ * @brief 判断魔法是否为增益魔法
+ *
+ * @param magic 魔法配置
+ * @return true 增益
+ */
 bool magic_is_beneficial(const MagicConfig& magic) {
   return magic.instant_heal > 0 || magic.heal_per_tick > 0 || magic.dispel_negative ||
          magic.shield_amount > 0;
 }
 
+/**
+ * @brief 收集魔法技能影响的所有目标ID
+ *
+ * @details 根据魔法半径收集范围内目标，排除PK阻挡和不适用目标。
+ *
+ * @param objects       地图对象表
+ * @param attacker      施法者
+ * @param magic         魔法配置
+ * @param map_config    地图配置
+ * @param primary_target 主目标
+ * @param center_x      技能中心X
+ * @param center_y      技能中心Y
+ * @param has_center    是否有中心点
+ * @param allow_self    是否允许自身
+ * @return std::vector<std::uint64_t> 目标ID列表
+ */
 std::vector<std::uint64_t> collect_spell_target_ids(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects, const Player& attacker,
     const MagicConfig& magic, const MapConfig& map_config, const GameObject* primary_target,
@@ -639,6 +973,14 @@ std::vector<std::uint64_t> collect_spell_target_ids(
   return target_ids;
 }
 
+/**
+ * @brief 查找范围内最近的玩家
+ *
+ * @param objects 地图对象表
+ * @param monster 怪物
+ * @param range   搜索范围
+ * @return Player* 最近玩家
+ */
 Player* find_nearest_player(std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
                             const GameObject& monster, std::int32_t range) {
   Player* nearest = nullptr;
@@ -659,6 +1001,15 @@ Player* find_nearest_player(std::unordered_map<std::uint64_t, std::unique_ptr<Ga
   return nearest;
 }
 
+/**
+ * @brief 判断格子是否被其他存活实体占据
+ *
+ * @param objects  地图对象表
+ * @param actor_id 排除的Actor ID
+ * @param x        X坐标
+ * @param y        Y坐标
+ * @return true 已占据
+ */
 bool tile_occupied(const std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
                    std::uint64_t actor_id, std::int32_t x, std::int32_t y) {
   for (const auto& [other_id, object] : objects) {
@@ -672,6 +1023,12 @@ bool tile_occupied(const std::unordered_map<std::uint64_t, std::unique_ptr<GameO
   return false;
 }
 
+/**
+ * @brief 获取实体的物理防御范围
+ *
+ * @param object 目标实体
+ * @return std::pair {最小防御, 最大防御}
+ */
 std::pair<std::int32_t, std::int32_t> actor_physical_defense_range(const GameObject& object) {
   if (const auto* player = as_player(&object); player != nullptr) {
     return {packed_min(player->character().ability.ac), packed_max(player->character().ability.ac)};
@@ -680,12 +1037,28 @@ std::pair<std::int32_t, std::int32_t> actor_physical_defense_range(const GameObj
   return {defense, defense};
 }
 
+/**
+ * @brief 获取玩家的亡灵攻击力
+ *
+ * @param attacker     攻击者
+ * @param item_configs 物品配置
+ * @return std::int32_t 亡灵攻击力
+ */
 std::int32_t legacy_player_undead_power(
     const Player& attacker, const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
   static_cast<void>(item_configs);
   return attacker.legacy_undead_power();
 }
 
+/**
+ * @brief 计算物理打击最终伤害
+ *
+ * @param target      目标
+ * @param damage      原始伤害
+ * @param armor_roll  护甲随机
+ * @param undead_power 亡灵加成
+ * @return std::int32_t 最终伤害
+ */
 std::int32_t legacy_physical_struck_damage(const GameObject& target, std::int32_t damage,
                                            std::int32_t armor_roll,
                                            std::int32_t undead_power = 0) {
@@ -698,6 +1071,16 @@ std::int32_t legacy_physical_struck_damage(const GameObject& target, std::int32_
   return result;
 }
 
+/**
+ * @brief 计算法术伤害
+ *
+ * @param attacker     施法者
+ * @param target       目标
+ * @param magic        魔法配置
+ * @param magic_roll   魔法随机
+ * @param defense_roll 防御随机
+ * @return std::int32_t 法术伤害
+ */
 std::int32_t compute_spell_damage(const Player& attacker, const GameObject& target,
                                   const MagicConfig& magic, std::int32_t magic_roll,
                                   std::int32_t defense_roll) {
@@ -710,6 +1093,13 @@ std::int32_t compute_spell_damage(const Player& attacker, const GameObject& targ
   return std::max(0, raw - armor);
 }
 
+/**
+ * @brief 判断旧版魔法ID是否受支持
+ *
+ * @param magic_id 魔法ID
+ * @param magic    魔法配置
+ * @return true 支持
+ */
 bool legacy_spell_supported(std::int32_t magic_id, const MagicConfig& magic) {
   if (!magic.legacy.legacy_present || magic.legacy.is_sword_skill) {
     return false;
@@ -750,6 +1140,15 @@ bool legacy_spell_supported(std::int32_t magic_id, const MagicConfig& magic) {
   }
 }
 
+/**
+ * @brief 计算从起点到目标点的面向方向
+ *
+ * @param sx 起点X
+ * @param sy 起点Y
+ * @param tx 目标X
+ * @param ty 目标Y
+ * @return std::uint8_t 方向值0-7
+ */
 std::uint8_t next_direction(std::int32_t sx, std::int32_t sy, std::int32_t tx,
                             std::int32_t ty) {
   const auto dx = tx == sx ? 0 : (tx > sx ? 1 : -1);
@@ -778,6 +1177,14 @@ std::uint8_t next_direction(std::int32_t sx, std::int32_t sy, std::int32_t tx,
   return 7;
 }
 
+/**
+ * @brief 判断旧版魔法是否能沿直线命中目标
+ *
+ * @param sx     起点X
+ * @param sy     起点Y
+ * @param target 目标
+ * @return true 可以命中
+ */
 bool legacy_mag_can_hit_target(std::int32_t sx, std::int32_t sy, const GameObject* target) {
   if (target == nullptr || !is_attackable_target(*target)) {
     return false;
@@ -793,6 +1200,12 @@ bool legacy_mag_can_hit_target(std::int32_t sx, std::int32_t sy, const GameObjec
   return false;
 }
 
+/**
+ * @brief 获取实体的魔法防御范围
+ *
+ * @param object 目标实体
+ * @return std::pair {最小魔防, 最大魔防}
+ */
 std::pair<std::int32_t, std::int32_t> actor_magic_defense_range(const GameObject& object) {
   if (const auto* player = as_player(&object); player != nullptr) {
     return {packed_min(player->character().ability.mac), packed_max(player->character().ability.mac)};
@@ -801,11 +1214,29 @@ std::pair<std::int32_t, std::int32_t> actor_magic_defense_range(const GameObject
   return {defense, defense};
 }
 
+/**
+ * @brief 判断实体是否为亡灵系
+ *
+ * @param object 目标
+ * @return true 亡灵系
+ */
 bool actor_undead(const GameObject& object) {
   const auto* monster = as_monster(&object);
   return monster != nullptr && monster->legacy_undead();
 }
 
+/**
+ * @brief 计算魔法防御后的伤害（含魔法盾处理）
+ *
+ * @param target           目标
+ * @param damage           原始伤害
+ * @param random           随机数
+ * @param current_tick     当前tick
+ * @param tick_ms          tick毫秒
+ * @param damage_magic_bubble 是否消耗魔法盾
+ * @param undead_power     亡灵加成
+ * @return std::int32_t 最终伤害
+ */
 std::int32_t legacy_magic_defense_damage(GameObject& target, std::int32_t damage,
                                          LegacyRandom& random,
                                          std::uint64_t current_tick,
@@ -834,6 +1265,20 @@ struct LegacyMagicDamageResult {
   std::uint64_t slain_monster_id{0};
 };
 
+/**
+ * @brief 尝试使用复活戒指复活玩家（内部实现）
+ *
+ * @details 消耗复活戒指耐久恢复玩家，清除负面状态。
+ *
+ * @param objects     地图对象
+ * @param item_configs 物品配置
+ * @param map_id      地图ID
+ * @param player      玩家
+ * @param dispatch    运行时分发
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @return true 复活成功
+ */
 bool try_legacy_revival_impl(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
@@ -925,6 +1370,15 @@ bool try_legacy_revival_impl(
   return true;
 }
 
+/**
+ * @brief 将状态tick结果通过包发送给玩家和观察者
+ *
+ * @param objects        地图对象
+ * @param dispatch       运行时分发
+ * @param player         目标玩家
+ * @param result         状态结果
+ * @param include_health 是否包含健康值包
+ */
 void queue_player_status_tick_result(
     const std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     RuntimeDispatch& dispatch,
@@ -959,6 +1413,13 @@ struct PendingLegacyPacket {
   LegacyPacket packet{};
 };
 
+/**
+ * @brief 收集目标死亡时应发给所有可见玩家的包
+ *
+ * @param objects 地图对象
+ * @param target  死亡目标
+ * @return std::vector<PendingLegacyPacket> 待发送包列表
+ */
 std::vector<PendingLegacyPacket> collect_legacy_death_packets(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     const GameObject& target) {
@@ -974,6 +1435,12 @@ std::vector<PendingLegacyPacket> collect_legacy_death_packets(
   return packets;
 }
 
+/**
+ * @brief 将一批旧版包排入分发队列
+ *
+ * @param dispatch 运行时分发
+ * @param packets  待发包列表
+ */
 void queue_legacy_packets(RuntimeDispatch& dispatch,
                           std::vector<PendingLegacyPacket> packets) {
   for (auto& packet : packets) {
@@ -981,12 +1448,33 @@ void queue_legacy_packets(RuntimeDispatch& dispatch,
   }
 }
 
+/**
+ * @brief 快捷发送死亡包给所有可见玩家
+ *
+ * @param objects  地图对象
+ * @param dispatch 运行时分发
+ * @param target   死亡目标
+ */
 void queue_legacy_death_packet(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     RuntimeDispatch& dispatch, const GameObject& target) {
   queue_legacy_packets(dispatch, collect_legacy_death_packets(objects, target));
 }
 
+/**
+ * @brief 应用魔法伤害到目标实体
+ *
+ * @param objects     地图对象
+ * @param item_configs 物品配置
+ * @param dispatch    运行时分发
+ * @param caster      施法者
+ * @param target      目标
+ * @param map_config  地图配置
+ * @param damage      伤害值
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @return LegacyMagicDamageResult 伤害结果
+ */
 LegacyMagicDamageResult apply_legacy_magic_damage(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
@@ -1040,6 +1528,19 @@ LegacyMagicDamageResult apply_legacy_magic_damage(
   }
   return result;
 }
+
+/**
+ * @brief 收集矩形区域内的目标（友方或敌方）
+ *
+ * @param objects    地图对象
+ * @param caster     施法者
+ * @param map_config 地图配置
+ * @param center_x   中心X
+ * @param center_y   中心Y
+ * @param wide       区域宽度
+ * @param friends    是否友方
+ * @return std::vector<GameObject*> 目标列表
+ */
 
 bool legacy_player_is_proper_human_target(const MapConfig& map_config,
                                           const Player& attacker,
@@ -1158,6 +1659,15 @@ std::vector<GameObject*> collect_legacy_area_targets(
   return targets;
 }
 
+/**
+ * @brief 查找坐标上的直线技能目标
+ *
+ * @param objects 地图对象
+ * @param caster  施法者
+ * @param x       目标X
+ * @param y       目标Y
+ * @return GameObject* 目标
+ */
 GameObject* find_legacy_line_target(
     std::unordered_map<std::uint64_t, std::unique_ptr<GameObject>>& objects,
     const Player& caster, std::int32_t x, std::int32_t y) {
@@ -1174,6 +1684,13 @@ GameObject* find_legacy_line_target(
   return best;
 }
 
+/**
+ * @brief 从打包属性值中随机取数值
+ *
+ * @param value  打包属性
+ * @param random 随机数
+ * @return std::int32_t 随机值
+ */
 std::int32_t legacy_random_packed_power(std::uint16_t value, LegacyRandom& random) {
   const auto low = packed_min(value);
   const auto high = packed_max(value);
@@ -1183,6 +1700,15 @@ std::int32_t legacy_random_packed_power(std::uint16_t value, LegacyRandom& rando
   return low;
 }
 
+/**
+ * @brief 计算火球术威力
+ *
+ * @param caster 施法者
+ * @param magic  魔法定义
+ * @param level  技能等级
+ * @param random 随机数
+ * @return std::int32_t 伤害
+ */
 std::int32_t legacy_fireball_power(const Player& caster, const LegacyMagicDefinition& magic,
                                    std::uint8_t level, LegacyRandom& random) {
   const auto mc_min = packed_min(caster.character().ability.mc);
@@ -1191,6 +1717,15 @@ std::int32_t legacy_fireball_power(const Player& caster, const LegacyMagicDefini
   return legacy_attack_power(base, static_cast<std::int8_t>(mc_max - mc_min) + 1, 0, random);
 }
 
+/**
+ * @brief 计算治愈术治疗量
+ *
+ * @param caster 施法者
+ * @param magic  魔法定义
+ * @param level  技能等级
+ * @param random 随机数
+ * @return std::int32_t 治疗量
+ */
 std::int32_t legacy_heal_power(const Player& caster, const LegacyMagicDefinition& magic,
                                std::uint8_t level, LegacyRandom& random) {
   const auto sc_min = packed_min(caster.character().ability.sc);
@@ -1199,6 +1734,15 @@ std::int32_t legacy_heal_power(const Player& caster, const LegacyMagicDefinition
   return legacy_attack_power(base, static_cast<std::int8_t>(sc_max - sc_min) * 2 + 1, 0, random);
 }
 
+/**
+ * @brief 计算群体治愈术治疗量
+ *
+ * @param caster 施法者
+ * @param magic  魔法定义
+ * @param level  技能等级
+ * @param random 随机数
+ * @return std::int32_t 治疗量
+ */
 std::int32_t legacy_open_health_power(const Player& caster, const LegacyMagicDefinition& magic,
                                       std::uint8_t level, LegacyRandom& random) {
   const auto sc = legacy_random_packed_power(caster.character().ability.sc, random);
@@ -1206,6 +1750,15 @@ std::int32_t legacy_open_health_power(const Player& caster, const LegacyMagicDef
                         random.random(magic.def_max_power - magic.def_min_power));
 }
 
+/**
+ * @brief 计算魔法盾持续时间
+ *
+ * @param caster 施法者
+ * @param magic  魔法定义
+ * @param level  技能等级
+ * @param random 随机数
+ * @return std::int32_t 持续秒数
+ */
 std::int32_t legacy_magic_bubble_seconds(const Player& caster,
                                          const LegacyMagicDefinition& magic,
                                          std::uint8_t level, LegacyRandom& random) {
@@ -1222,17 +1775,40 @@ struct LegacyBujukSlot {
   const ItemConfig* config{nullptr};
 };
 
+/**
+ * @brief 判断物品是否是指定形状的护身符
+ *
+ * @param item           物品
+ * @param config         配置
+ * @param required_shape 形状
+ * @return true 匹配
+ */
 bool item_is_bujuk_shape(const LegacyUserItem& item, const ItemConfig* config,
                          std::int32_t required_shape) {
   return !is_empty(item) && config != nullptr && config->std_mode == 25 &&
          config->shape == required_shape;
 }
 
+/**
+ * @brief 判断物品是否为毒药粉
+ *
+ * @param item   物品
+ * @param config 配置
+ * @return true 毒药粉
+ */
 bool item_is_poison_powder(const LegacyUserItem& item, const ItemConfig* config) {
   return !is_empty(item) && config != nullptr && config->std_mode == 25 &&
          config->shape <= 2;
 }
 
+/**
+ * @brief 查找玩家身上的护身符槽位
+ *
+ * @param player      玩家
+ * @param item_configs 物品配置
+ * @param count        需要单位数
+ * @return std::optional<LegacyBujukSlot> 槽位
+ */
 std::optional<LegacyBujukSlot> find_legacy_bujuk_slot(
     Player& player, const std::unordered_map<std::int32_t, ItemConfig>& item_configs,
     std::int32_t count) {
@@ -1253,6 +1829,13 @@ std::optional<LegacyBujukSlot> find_legacy_bujuk_slot(
   return std::nullopt;
 }
 
+/**
+ * @brief 查找玩家身上的毒药粉槽位
+ *
+ * @param player      玩家
+ * @param item_configs 物品配置
+ * @return std::optional<LegacyBujukSlot> 槽位
+ */
 std::optional<LegacyBujukSlot> find_legacy_poison_powder_slot(
     Player& player, const std::unordered_map<std::int32_t, ItemConfig>& item_configs) {
   const std::array<std::size_t, 2> slots{kEquipBujuk, kEquipArmRingLeft};
@@ -1269,6 +1852,12 @@ std::optional<LegacyBujukSlot> find_legacy_poison_powder_slot(
   return std::nullopt;
 }
 
+/**
+ * @brief 消耗护身符耐久度
+ *
+ * @param slot  护身符槽位
+ * @param count 消耗单位数
+ */
 void consume_legacy_bujuk_slot(LegacyBujukSlot& slot, std::int32_t count) {
   const auto cost = std::max(count, 0) * 100;
   if (slot.item == nullptr || cost <= 0) {
@@ -1279,6 +1868,12 @@ void consume_legacy_bujuk_slot(LegacyBujukSlot& slot, std::int32_t count) {
                         : static_cast<std::uint16_t>(0);
 }
 
+/**
+ * @brief 护身符耐久耗尽时清除槽位
+ *
+ * @param slot 护身符槽位
+ * @return std::optional<LegacyUserItem> 移除的物品
+ */
 std::optional<LegacyUserItem> clear_legacy_bujuk_slot_if_spent(LegacyBujukSlot& slot) {
   if (slot.item == nullptr || slot.item->dura >= 100) {
     return std::nullopt;
@@ -1289,6 +1884,15 @@ std::optional<LegacyUserItem> clear_legacy_bujuk_slot_if_spent(LegacyBujukSlot& 
   return removed;
 }
 
+/**
+ * @brief 计算灵魂火符威力
+ *
+ * @param caster 施法者
+ * @param magic  魔法定义
+ * @param level  技能等级
+ * @param random 随机数
+ * @return std::int32_t 伤害
+ */
 std::int32_t legacy_soul_fire_power(const Player& caster, const LegacyMagicDefinition& magic,
                                     std::uint8_t level, LegacyRandom& random) {
   const auto sc_min = packed_min(caster.character().ability.sc);
@@ -1297,6 +1901,15 @@ std::int32_t legacy_soul_fire_power(const Player& caster, const LegacyMagicDefin
   return legacy_attack_power(base, static_cast<std::int8_t>(sc_max - sc_min) + 1, 0, random);
 }
 
+/**
+ * @brief 计算神圣战甲术/幽灵盾持续时间
+ *
+ * @param caster 施法者
+ * @param magic  魔法定义
+ * @param level  技能等级
+ * @param random 随机数
+ * @return std::int32_t 持续秒数
+ */
 std::int32_t legacy_defence_status_seconds(const Player& caster,
                                            const LegacyMagicDefinition& magic,
                                            std::uint8_t level, LegacyRandom& random) {
@@ -1308,6 +1921,16 @@ std::int32_t legacy_defence_status_seconds(const Player& caster,
                              random);
 }
 
+/**
+ * @brief 计算施毒术持续时间
+ *
+ * @param caster       施法者
+ * @param magic        魔法定义
+ * @param level        技能等级
+ * @param base_seconds 基础秒数
+ * @param random       随机数
+ * @return std::int32_t 持续秒数
+ */
 std::int32_t legacy_poison_seconds(const Player& caster, const LegacyMagicDefinition& magic,
                                    std::uint8_t level, std::int32_t base_seconds,
                                    LegacyRandom& random) {
@@ -1316,6 +1939,15 @@ std::int32_t legacy_poison_seconds(const Player& caster, const LegacyMagicDefini
   return legacy_power13(magic, level, base_seconds, random_value) + 2 * sc;
 }
 
+/**
+ * @brief 计算隐身术持续时间
+ *
+ * @param caster 施法者
+ * @param magic  魔法定义
+ * @param level  技能等级
+ * @param random 随机数
+ * @return std::int32_t 持续秒数
+ */
 std::int32_t legacy_transparent_seconds(const Player& caster,
                                         const LegacyMagicDefinition& magic,
                                         std::uint8_t level, LegacyRandom& random) {
@@ -1324,6 +1956,15 @@ std::int32_t legacy_transparent_seconds(const Player& caster,
   return legacy_power13(magic, level, 30, random_value) + 3 * sc;
 }
 
+/**
+ * @brief 计算火墙持续时间
+ *
+ * @param caster 施法者
+ * @param magic  魔法定义
+ * @param level  技能等级
+ * @param random 随机数
+ * @return std::int32_t 持续秒数
+ */
 std::int32_t legacy_fire_wall_seconds(const Player& caster,
                                       const LegacyMagicDefinition& magic,
                                       std::uint8_t level, LegacyRandom& random) {
@@ -1331,6 +1972,15 @@ std::int32_t legacy_fire_wall_seconds(const Player& caster,
   return legacy_power(magic, level, 10, random) + mc / 2;
 }
 
+/**
+ * @brief 计算神圣屏障持续时间
+ *
+ * @param caster 施法者
+ * @param magic  魔法定义
+ * @param level  技能等级
+ * @param random 随机数
+ * @return std::int32_t 持续秒数
+ */
 std::int32_t legacy_holy_curtain_seconds(const Player& caster,
                                          const LegacyMagicDefinition& magic,
                                          std::uint8_t level, LegacyRandom& random) {
@@ -1339,6 +1989,16 @@ std::int32_t legacy_holy_curtain_seconds(const Player& caster,
   return legacy_power13(magic, level, 40, random_value) + 3 * sc;
 }
 
+/**
+ * @brief 根据等级差计算击杀经验值
+ *
+ * @details 超过目标10级以上时每级减少1/15经验。
+ *
+ * @param attacker_level 攻击者等级
+ * @param target_level   目标等级
+ * @param fight_exp      基础经验
+ * @return std::int32_t 实际经验
+ */
 std::int32_t calc_get_exp(std::int32_t attacker_level, std::int32_t target_level,
                           std::int32_t fight_exp) {
   const auto base = std::max(fight_exp, 1);
@@ -1351,10 +2011,22 @@ std::int32_t calc_get_exp(std::int32_t attacker_level, std::int32_t target_level
   return std::max(reduced, 1);
 }
 
+/**
+ * @brief 获取玩家的准确度
+ *
+ * @param attacker 玩家
+ * @return std::int32_t 准确值
+ */
 std::int32_t legacy_accuracy_point(const Player& attacker) {
   return attacker.accuracy_point();
 }
 
+/**
+ * @brief 获取实体的攻击速度
+ *
+ * @param object 实体
+ * @return std::int32_t 速度值
+ */
 std::int32_t legacy_speed_point(const GameObject& object) {
   if (const auto* player = as_player(&object); player != nullptr) {
     return player->speed_point();
@@ -1365,6 +2037,13 @@ std::int32_t legacy_speed_point(const GameObject& object) {
   return 0;
 }
 
+/**
+ * @brief 毫秒转逻辑tick数（向上取整）
+ *
+ * @param value_ms 毫秒值
+ * @param tick_ms  tick毫秒
+ * @return std::uint64_t tick数
+ */
 std::uint64_t ms_to_logic_ticks(std::uint32_t value_ms, std::uint32_t tick_ms) {
   if (value_ms == 0 || tick_ms == 0) {
     return 0;
@@ -1376,6 +2055,27 @@ std::uint64_t ms_to_logic_ticks(std::uint32_t value_ms, std::uint32_t tick_ms) {
 
 }  // namespace
 
+/**
+ * @brief MapActor 构造函数
+ *
+ * @details 初始化地图的所有配置信息，解码地图文件，建立环境对象与传送门。
+ *          确保脚本全局参数和名称列表的默认值初始化。
+ *
+ * @param config                    地图配置
+ * @param budgets                   逻辑预算配置
+ * @param item_configs              物品配置表
+ * @param magic_configs             魔法配置表
+ * @param map_quests                地图任务列表
+ * @param castle_dialog_context     城堡对话上下文
+ * @param monster_defs              怪物定义表
+ * @param map_entry_rules           地图进入规则
+ * @param make_index_allocator      制造索引分配器
+ * @param black_stone_name          黑铁矿石名称
+ * @param legacy_approval_mode       旧版批准模式标志
+ * @param script_global_params      脚本全局参数
+ * @param script_name_lists         脚本名称列表
+ * @param startup_quest_dialog_sections 启动任务对话段
+ */
 MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
                    std::unordered_map<std::int32_t, ItemConfig> item_configs,
                    std::unordered_map<std::int32_t, MagicConfig> magic_configs,
@@ -1432,22 +2132,48 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
   guild_castle_snapshot_.castle_dialog = castle_dialog_context_;
 }
 
+/**
+ * @brief 将邮件加入地图邮件队列
+ *
+ * @param mail 待处理邮件
+ */
 void MapActor::enqueue_mail(ActorMail mail) { mailbox_.push_back(std::move(mail)); }
 
+/**
+ * @brief 设置旧版随机数生成器
+ *
+ * @param legacy_random 随机数生成器
+ */
 void MapActor::set_legacy_random(LegacyRandom* legacy_random) {
   legacy_random_ = legacy_random;
   initialize_legacy_stone_mines();
 }
 
+/**
+ * @brief 设置旧版脚本地图钩子
+ *
+ * @param hooks 脚本钩子
+ */
 void MapActor::set_legacy_script_map_hooks(LegacyScriptMapHooks hooks) {
   legacy_script_map_hooks_ = std::move(hooks);
 }
 
+/**
+ * @brief 分配制造索引
+ *
+ * @return std::int32_t 索引值
+ */
 std::int32_t MapActor::allocate_make_index() {
   return make_index_allocator_ != nullptr ? make_index_allocator_->allocate()
                                           : fallback_make_index_allocator_.allocate();
 }
 
+/**
+ * @brief 应用NPC商人持久化状态
+ *
+ * @param state 商人状态记录
+ * @return true 已应用
+ */
 bool MapActor::apply_merchant_state(const MerchantStateRecord& state) {
   if (!state.map_id.empty() && state.map_id != config_.id) {
     return false;
@@ -1463,6 +2189,22 @@ bool MapActor::apply_merchant_state(const MerchantStateRecord& state) {
   return false;
 }
 
+/**
+ * @brief 在地图上添加事件对象（完整版本）
+ *
+ * @details 根据事件类型选择放置策略（石矿仅在阻挡格，其他在可行走格）。
+ *          记录事件到 event_objects_ 状态表。
+ *
+ * @param event_id     事件ID
+ * @param x            X坐标
+ * @param y            Y坐标
+ * @param now_ms       当前毫秒时间
+ * @param blocks_walk  是否阻挡行走
+ * @param dispatch     运行时分发（可选，用于同步可见性）
+ * @param type         事件类型
+ * @return true 添加成功
+ * @return false 添加失败
+ */
 bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, std::int32_t y,
                                        std::uint64_t now_ms, bool blocks_walk,
                                        RuntimeDispatch* dispatch,
@@ -1484,6 +2226,17 @@ bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, s
   return added;
 }
 
+/**
+ * @brief 在地图上添加事件对象（简化版本，默认不阻挡行走，类型为堆石）
+ *
+ * @param event_id 事件ID
+ * @param x        X坐标
+ * @param y        Y坐标
+ * @param now_ms   当前毫秒时间
+ * @param dispatch 运行时分发（可选）
+ * @return true 添加成功
+ * @return false 添加失败
+ */
 bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, std::int32_t y,
                                        std::uint64_t now_ms, RuntimeDispatch* dispatch,
                                        std::int32_t event_param) {
@@ -1491,6 +2244,16 @@ bool MapActor::legacy_add_event_object(std::uint64_t event_id, std::int32_t x, s
                                  LegacyEventType::pile_stones, event_param, 0);
 }
 
+/**
+ * @brief 从地图上移除事件对象
+ *
+ * @details 从环境对象、可见性表和事件映射中清除该事件。
+ *
+ * @param event_id 事件ID
+ * @param x        X坐标
+ * @param y        Y坐标
+ * @param dispatch 运行时分发
+ */
 void MapActor::legacy_remove_event_object(std::uint64_t event_id, std::int32_t x,
                                           std::int32_t y, RuntimeDispatch* dispatch) {
   static_cast<void>(
@@ -1590,6 +2353,15 @@ std::vector<std::uint64_t> MapActor::legacy_active_holy_seize_actor_ids(
   return active;
 }
 
+/**
+ * @brief 在地图上随机选择一个可行的空间移动目标位置
+ *
+ * @details 从地图边缘向内偏移，在200次尝试内寻找可行走位置。
+ *          步长和边缘距离根据地图尺寸自适应调整。
+ *
+ * @param random 随机数生成器
+ * @return std::optional<std::pair<std::int32_t, std::int32_t>> 目标坐标 {x, y}
+ */
 std::optional<std::pair<std::int32_t, std::int32_t>>
 MapActor::legacy_random_space_move_target(LegacyRandom& random) const {
   const auto width = movement_width();
@@ -1723,16 +2495,32 @@ RuntimeDispatch MapActor::legacy_space_move_player(
   return dispatch;
 }
 
+/**
+ * @brief 设置城堡对话上下文
+ *
+ * @param castle_dialog_context 城堡对话上下文
+ */
 void MapActor::set_castle_dialog_context(CastleDialogContext castle_dialog_context) {
   castle_dialog_context_ = std::move(castle_dialog_context);
   guild_castle_snapshot_.castle_dialog = castle_dialog_context_;
 }
 
+/**
+ * @brief 设置公会城堡快照
+ *
+ * @param guild_castle_snapshot 公会城堡快照
+ */
 void MapActor::set_guild_castle_snapshot(GuildCastleSnapshot guild_castle_snapshot) {
   guild_castle_snapshot_ = std::move(guild_castle_snapshot);
   castle_dialog_context_ = guild_castle_snapshot_.castle_dialog;
 }
 
+/**
+ * @brief 获取玩家快照
+ *
+ * @param actor_id 玩家ID
+ * @return std::optional<CharacterRecord> 角色快照
+ */
 std::optional<CharacterRecord> MapActor::snapshot_player(std::uint64_t actor_id) const {
   const auto* player = find_player(actor_id);
   if (player == nullptr) {
@@ -1741,6 +2529,13 @@ std::optional<CharacterRecord> MapActor::snapshot_player(std::uint64_t actor_id)
   return player->snapshot();
 }
 
+/**
+ * @brief 获取玩家持久化快照（含宠物信息）
+ *
+ * @param actor_id 玩家ID
+ * @param now_ms   当前时间
+ * @return std::optional<CharacterRecord> 持久化快照
+ */
 std::optional<CharacterRecord> MapActor::persistent_snapshot_player(std::uint64_t actor_id,
                                                                     std::uint64_t now_ms) {
   auto* player = find_player(actor_id);
@@ -1750,6 +2545,18 @@ std::optional<CharacterRecord> MapActor::persistent_snapshot_player(std::uint64_
   return snapshot_player_with_slaves(*player, now_ms);
 }
 
+/**
+ * @brief 将玩家生成到地图上
+ *
+ * @details 处理玩家登录、空间移动后的生成逻辑，初始化可见性、触发任务等。
+ *
+ * @param mail             生成邮件
+ * @param current_tick     当前tick
+ * @param now_ms           当前时间
+ * @param fast_initialize   是否快速初始化
+ * @param run_startup_quest 是否触发启动任务
+ * @return RuntimeDispatch 运行时分发
+ */
 RuntimeDispatch MapActor::legacy_spawn_player(const ActorMail& mail,
                                               std::uint64_t current_tick,
                                               std::uint64_t now_ms,
@@ -1797,6 +2604,18 @@ RuntimeDispatch MapActor::legacy_spawn_player(const ActorMail& mail,
   return dispatch;
 }
 
+/**
+ * @brief 处理玩家的逻辑tick
+ *
+ * @details 根据玩家状态（通知待处理/初始化待处理/运行中/幽灵）执行相应逻辑。
+ *
+ * @param actor_id                  玩家ID
+ * @param current_tick              当前tick
+ * @param now_ms                    当前时间
+ * @param persistence_overloaded    是否持久化过载
+ * @param player_input_budget_per_tick 每tick输入预算
+ * @return RuntimeDispatch 运行时分发
+ */
 RuntimeDispatch MapActor::legacy_process_player(std::uint64_t actor_id,
                                                 std::uint64_t current_tick,
                                                 std::uint64_t now_ms,
@@ -1830,6 +2649,18 @@ RuntimeDispatch MapActor::legacy_process_player(std::uint64_t actor_id,
   return dispatch;
 }
 
+/**
+ * @brief 处理怪物的逻辑tick
+ *
+ * @details 处理怪物生命周期：死亡结算、幽灵化、AI运行、状态效果。
+ *
+ * @param actor_id   怪物ID
+ * @param current_tick 当前tick
+ * @param now_ms     当前时间
+ * @param cursor     游标
+ * @param sub_cursor 子游标
+ * @return RuntimeDispatch 运行时分发
+ */
 RuntimeDispatch MapActor::legacy_process_monster(std::uint64_t actor_id,
                                                  std::uint64_t current_tick,
                                                  std::uint64_t now_ms,
@@ -1920,6 +2751,17 @@ RuntimeDispatch MapActor::legacy_process_monster(std::uint64_t actor_id,
   return dispatch;
 }
 
+/**
+ * @brief 处理NPC商人的逻辑tick
+ *
+ * @details 处理商人：武器升级过期清理、商品补货/限货、价格调整、on_tick回调。
+ *
+ * @param actor_id     商人ID
+ * @param current_tick 当前tick
+ * @param now_ms       当前时间
+ * @param cursor       游标
+ * @return RuntimeDispatch 运行时分发
+ */
 RuntimeDispatch MapActor::legacy_process_merchant(std::uint64_t actor_id,
                                                   std::uint64_t current_tick,
                                                   std::uint64_t now_ms,
@@ -2044,6 +2886,17 @@ RuntimeDispatch MapActor::legacy_process_merchant(std::uint64_t actor_id,
   return dispatch;
 }
 
+/**
+ * @brief 处理普通NPC的逻辑tick
+ *
+ * @details 检查NPC是否到运行时间，执行on_tick回调。
+ *
+ * @param actor_id     NPC ID
+ * @param current_tick 当前tick
+ * @param now_ms       当前时间
+ * @param cursor       游标
+ * @return RuntimeDispatch 运行时分发
+ */
 RuntimeDispatch MapActor::legacy_process_npc(std::uint64_t actor_id,
                                              std::uint64_t current_tick,
                                              std::uint64_t now_ms,
@@ -2092,6 +2945,16 @@ RuntimeDispatch MapActor::legacy_process_npc(std::uint64_t actor_id,
   return dispatch;
 }
 
+/**
+ * @brief 将旧版玩家命令加入玩家命令队列
+ *
+ * @details 对于响应补偿命令，会提前玩家的下次运行时间以减少延迟。
+ *
+ * @param mail   命令邮件
+ * @param now_ms 当前时间
+ * @return true 已入队
+ * @return false 无法入队
+ */
 bool MapActor::enqueue_legacy_player_command(const ActorMail& mail, std::uint64_t now_ms) {
   if (!is_legacy_player_command(mail.kind)) {
     return false;
@@ -2108,6 +2971,13 @@ bool MapActor::enqueue_legacy_player_command(const ActorMail& mail, std::uint64_
   return true;
 }
 
+/**
+ * @brief 标记玩家为幽灵状态（准备断开连接）
+ *
+ * @param actor_id 玩家ID
+ * @param now_ms   当前时间
+ * @return true 标记成功
+ */
 bool MapActor::mark_legacy_player_ghost(std::uint64_t actor_id, std::uint64_t now_ms) {
   auto* player = find_player(actor_id);
   if (player == nullptr) {
@@ -2117,6 +2987,15 @@ bool MapActor::mark_legacy_player_ghost(std::uint64_t actor_id, std::uint64_t no
   return true;
 }
 
+/**
+ * @brief 处理玩家断线
+ *
+ * @details 清除buff、取消交易、分离宠物、保存角色、从地图移除。
+ *
+ * @param actor_id 玩家ID
+ * @param now_ms   当前时间
+ * @return RuntimeDispatch 运行时分发
+ */
 RuntimeDispatch MapActor::legacy_disconnect_player(std::uint64_t actor_id, std::uint64_t now_ms) {
   RuntimeDispatch dispatch;
   auto* player = find_player(actor_id);
@@ -2140,6 +3019,12 @@ RuntimeDispatch MapActor::legacy_disconnect_player(std::uint64_t actor_id, std::
   return dispatch;
 }
 
+/**
+ * @brief 获取玩家当前状态
+ *
+ * @param actor_id 玩家ID
+ * @return std::optional<LegacyPlayerState> 玩家状态
+ */
 std::optional<LegacyPlayerState> MapActor::legacy_player_state(std::uint64_t actor_id) const {
   const auto* player = find_player(actor_id);
   if (player == nullptr) {
@@ -2148,11 +3033,23 @@ std::optional<LegacyPlayerState> MapActor::legacy_player_state(std::uint64_t act
   return player->legacy_state();
 }
 
+/**
+ * @brief 获取玩家命令队列大小
+ *
+ * @param actor_id 玩家ID
+ * @return std::size_t 队列大小
+ */
 std::size_t MapActor::legacy_player_inbox_size(std::uint64_t actor_id) const {
   const auto* player = find_player(actor_id);
   return player != nullptr ? player->legacy_inbox_size() : 0;
 }
 
+/**
+ * @brief 获取玩家命令队列中的会话序列号
+ *
+ * @param actor_id 玩家ID
+ * @return std::vector<std::uint64_t> 会话序列号列表
+ */
 std::vector<std::uint64_t> MapActor::legacy_player_inbox_session_sequences(
     std::uint64_t actor_id) const {
   const auto* player = find_player(actor_id);
@@ -2160,6 +3057,12 @@ std::vector<std::uint64_t> MapActor::legacy_player_inbox_session_sequences(
                            : std::vector<std::uint64_t>{};
 }
 
+/**
+ * @brief 获取玩家运行时间毫秒
+ *
+ * @param actor_id 玩家ID
+ * @return std::int64_t 运行时间
+ */
 std::int64_t MapActor::legacy_player_run_time_ms(std::uint64_t actor_id) const {
   const auto* player = find_player(actor_id);
   return player != nullptr ? player->legacy_run_time_ms() : 0;
@@ -2170,6 +3073,15 @@ RuntimeDispatch MapActor::tick(std::uint64_t current_tick) {
   return tick(current_tick, now_ms);
 }
 
+/**
+ * @brief 处理并清空待处理的邮件队列
+ *
+ * @details 先处理延迟邮件轮中到期的邮件，再依次处理邮件队列中的所有邮件。
+ *
+ * @param current_tick 当前tick
+ * @param now_ms       当前时间
+ * @return RuntimeDispatch 运行时分发
+ */
 RuntimeDispatch MapActor::drain_pending_mail(std::uint64_t current_tick,
                                              std::uint64_t now_ms) {
   RuntimeDispatch dispatch;
@@ -2196,6 +3108,15 @@ RuntimeDispatch MapActor::drain_pending_mail(std::uint64_t current_tick,
   return dispatch;
 }
 
+/**
+ * @brief 运行地图维护tick
+ *
+ * @details 清理过期地面物品，按预算调度非玩家/怪物/NPC对象的on_tick。
+ *
+ * @param current_tick 当前tick
+ * @param now_ms       当前时间
+ * @return RuntimeDispatch 运行时分发
+ */
 RuntimeDispatch MapActor::run_maintenance_tick(std::uint64_t current_tick,
                                                std::uint64_t now_ms) {
   RuntimeDispatch dispatch;
@@ -2245,12 +3166,27 @@ RuntimeDispatch MapActor::run_maintenance_tick(std::uint64_t current_tick,
   return dispatch;
 }
 
+/**
+ * @brief tick主入口（完整版本，直接使用外部传入的now_ms）
+ *
+ * @details 按顺序执行：邮件队列处理 -> 维护tick（清理地面物品、调度对象）。
+ *
+ * @param current_tick 当前逻辑tick
+ * @param now_ms       当前毫秒时间戳
+ * @return RuntimeDispatch 运行时分发事件
+ */
 RuntimeDispatch MapActor::tick(std::uint64_t current_tick, std::uint64_t now_ms) {
   auto dispatch = drain_pending_mail(current_tick, now_ms);
   append_runtime_dispatch(dispatch, run_maintenance_tick(current_tick, now_ms));
   return dispatch;
 }
 
+/**
+ * @brief 刷新地面物品的归属权（超时后变为无主）
+ *
+ * @param item   地面物品
+ * @param now_ms 当前时间
+ */
 void MapActor::refresh_ground_item_ownership(GroundItem& item, std::uint64_t now_ms) {
   if (item.owner_actor_id == 0) {
     return;
@@ -2264,6 +3200,12 @@ void MapActor::refresh_ground_item_ownership(GroundItem& item, std::uint64_t now
   }
 }
 
+/**
+ * @brief 移除所有过期地面物品
+ *
+ * @param dispatch 运行时分发
+ * @param now_ms   当前时间
+ */
 void MapActor::remove_expired_ground_items(RuntimeDispatch& dispatch, std::uint64_t now_ms) {
   std::vector<std::uint64_t> expired_ids;
   for (auto& [item_id, item] : ground_items_) {
@@ -2287,6 +3229,12 @@ void MapActor::remove_expired_ground_items(RuntimeDispatch& dispatch, std::uint6
   }
 }
 
+/**
+ * @brief 关闭所有到期的门
+ *
+ * @param now_ms 当前时间
+ * @return RuntimeDispatch 运行时分发
+ */
 RuntimeDispatch MapActor::close_expired_doors(std::uint64_t now_ms) {
   RuntimeDispatch dispatch;
   const auto closed_doors = environment_.close_expired_doors(now_ms, kDoorAutoCloseMs);
@@ -2296,6 +3244,12 @@ RuntimeDispatch MapActor::close_expired_doors(std::uint64_t now_ms) {
   return dispatch;
 }
 
+/**
+ * @brief 判断怪物是否存活（未幽灵化）
+ *
+ * @param actor_id 怪物ID
+ * @return true 存活
+ */
 bool MapActor::legacy_monster_alive(std::uint64_t actor_id) const {
   const auto it = objects_.find(actor_id);
   if (it == objects_.end()) {
@@ -2305,6 +3259,12 @@ bool MapActor::legacy_monster_alive(std::uint64_t actor_id) const {
   return monster != nullptr && !monster->legacy_ghosted();
 }
 
+/**
+ * @brief 判断怪物是否计入刷怪计数
+ *
+ * @param actor_id 怪物ID
+ * @return true 计入
+ */
 bool MapActor::legacy_monster_counts_for_spawn(std::uint64_t actor_id) const {
   const auto it = objects_.find(actor_id);
   if (it == objects_.end()) {
@@ -2314,6 +3274,11 @@ bool MapActor::legacy_monster_counts_for_spawn(std::uint64_t actor_id) const {
   return monster != nullptr && !monster->legacy_ghosted() && !monster->is_dead();
 }
 
+/**
+ * @brief 获取当前地图存活怪物数量
+ *
+ * @return std::int32_t 数量
+ */
 std::int32_t MapActor::legacy_live_monster_count() const {
   std::int32_t count = 0;
   for (const auto& [_, object] : objects_) {
@@ -2325,6 +3290,11 @@ std::int32_t MapActor::legacy_live_monster_count() const {
   return count;
 }
 
+/**
+ * @brief 获取当前地图存活玩家数量
+ *
+ * @return std::int32_t 数量
+ */
 std::int32_t MapActor::legacy_live_player_count() const {
   std::int32_t count = 0;
   for (const auto& [_, object] : objects_) {
@@ -2336,6 +3306,14 @@ std::int32_t MapActor::legacy_live_player_count() const {
   return count;
 }
 
+/**
+ * @brief 清空地图上所有怪物
+ *
+ * @param dispatch    运行时分发
+ * @param current_tick 当前tick
+ * @param now_ms       当前时间
+ * @return std::int32_t 移除的怪物数量
+ */
 std::int32_t MapActor::legacy_clear_monsters(RuntimeDispatch& dispatch,
                                              std::uint64_t current_tick,
                                              std::uint64_t now_ms) {
@@ -2365,6 +3343,12 @@ std::int32_t MapActor::legacy_clear_monsters(RuntimeDispatch& dispatch,
   return static_cast<std::int32_t>(remove_ids.size());
 }
 
+/**
+ * @brief 获取怪物快照
+ *
+ * @param actor_id 怪物ID
+ * @return std::optional<MonsterSnapshot> 怪物快照
+ */
 std::optional<MonsterSnapshot> MapActor::legacy_monster_snapshot(std::uint64_t actor_id) const {
   const auto it = objects_.find(actor_id);
   if (it == objects_.end()) {
@@ -2377,6 +3361,13 @@ std::optional<MonsterSnapshot> MapActor::legacy_monster_snapshot(std::uint64_t a
   return monster->snapshot();
 }
 
+/**
+ * @brief 设置玩家宠物的休闲模式
+ *
+ * @param actor_id 玩家ID
+ * @param value    是否休闲
+ * @return true 设置成功
+ */
 bool MapActor::legacy_set_player_slave_relax(std::uint64_t actor_id, bool value) {
   const auto it = objects_.find(actor_id);
   if (it == objects_.end()) {
@@ -2390,11 +3381,25 @@ bool MapActor::legacy_set_player_slave_relax(std::uint64_t actor_id, bool value)
   return true;
 }
 
+/**
+ * @brief 判断玩家是否追踪了指定事件对象
+ *
+ * @param actor_id 玩家ID
+ * @param event_id 事件ID
+ * @return true 已追踪
+ */
 bool MapActor::legacy_player_tracks_event(std::uint64_t actor_id, std::uint64_t event_id) const {
   const auto visibility_it = visibility_.find(actor_id);
   return visibility_it != visibility_.end() && visibility_it->second.events.contains(event_id);
 }
 
+/**
+ * @brief 判断指定位置能否生成怪物
+ *
+ * @param x X坐标
+ * @param y Y坐标
+ * @return true 可以生成
+ */
 bool MapActor::legacy_can_spawn_monster(std::int32_t x, std::int32_t y) const {
   return environment_.can_walk(x, y, true);
 }
@@ -2434,6 +3439,14 @@ void MapActor::refill_legacy_stone_mines(std::uint64_t now_ms) {
 
 #include "world/map_actor_visibility.hpp"
 #include "world/map_actor_movement.hpp"
+/**
+ * @brief 向玩家和附近的观察者发送系统通知
+ *
+ * @param dispatch        运行时分发
+ * @param player          目标玩家
+ * @param self_message    给玩家本人的消息
+ * @param watcher_message 给观察者的消息
+ */
 void MapActor::notify_player_and_watchers(RuntimeDispatch& dispatch, const Player& player,
                                           const std::string& self_message,
                                           const std::string& watcher_message) const {
@@ -2453,6 +3466,14 @@ void MapActor::notify_player_and_watchers(RuntimeDispatch& dispatch, const Playe
   });
 }
 
+/**
+ * @brief 分发玩家的状态tick结果
+ *
+ * @param player         玩家
+ * @param result         状态结果
+ * @param dispatch       运行时分发
+ * @param include_health 是否包含健康值
+ */
 void MapActor::dispatch_player_status_tick_result(Player& player,
                                                   const StatusTickResult& result,
                                                   RuntimeDispatch& dispatch,
@@ -2460,6 +3481,12 @@ void MapActor::dispatch_player_status_tick_result(Player& player,
   queue_player_status_tick_result(objects_, dispatch, player, result, include_health);
 }
 
+/**
+ * @brief 广播角色状态变化给所有可见玩家
+ *
+ * @param dispatch 运行时分发
+ * @param player   目标玩家
+ */
 void MapActor::broadcast_legacy_char_status_changed(RuntimeDispatch& dispatch,
                                                     const Player& player) const {
   queue_packet(dispatch, player.session_id(),
@@ -2476,11 +3503,23 @@ void MapActor::broadcast_legacy_char_status_changed(RuntimeDispatch& dispatch,
 #include "world/map_actor_mail.hpp"
 #include "world/map_actor_player.hpp"
 #include "world/map_actor_monster.hpp"
+/**
+ * @brief 将Actor调度到时间轮中
+ *
+ * @param current_tick 当前tick
+ * @param object       Actor对象
+ */
 void MapActor::schedule_actor(std::uint64_t current_tick, const GameObject& object) {
   const auto due_tick = object.next_due_tick() > current_tick ? object.next_due_tick() : current_tick + 1;
   object_wheel_.schedule(current_tick, due_tick - current_tick, object.id());
 }
 
+/**
+ * @brief 获取指定类型的预算毫秒
+ *
+ * @param kind Actor类型
+ * @return std::uint64_t 预算毫秒
+ */
 std::uint64_t MapActor::budget_for(GameObjectKind kind) const {
   switch (kind) {
     case GameObjectKind::player:
@@ -2495,16 +3534,34 @@ std::uint64_t MapActor::budget_for(GameObjectKind kind) const {
   return budgets_.spawn_budget_ms;
 }
 
+/**
+ * @brief 通过Actor ID查找玩家（非常量版本）
+ *
+ * @param actor_id 玩家ID
+ * @return Player* 玩家指针，未找到返回nullptr
+ */
 Player* MapActor::find_player(std::uint64_t actor_id) {
   const auto it = objects_.find(actor_id);
   return it != objects_.end() ? as_player(it->second.get()) : nullptr;
 }
 
+/**
+ * @brief 通过Actor ID查找玩家（常量版本）
+ *
+ * @param actor_id 玩家ID
+ * @return const Player* 玩家指针
+ */
 const Player* MapActor::find_player(std::uint64_t actor_id) const {
   const auto it = objects_.find(actor_id);
   return it != objects_.end() ? as_player(it->second.get()) : nullptr;
 }
 
+/**
+ * @brief 通过角色名称查找玩家（不区分大小写）
+ *
+ * @param character_name 角色名
+ * @return Player* 玩家指针
+ */
 Player* MapActor::find_player_by_name(std::string_view character_name) {
   const auto key = util::lower_copy(std::string(character_name));
   if (key.empty()) {
@@ -2520,6 +3577,12 @@ Player* MapActor::find_player_by_name(std::string_view character_name) {
   return nullptr;
 }
 
+/**
+ * @brief 获取玩家当前的交易会话
+ *
+ * @param actor_id 玩家ID
+ * @return TradeSession* 交易会话
+ */
 MapActor::TradeSession* MapActor::trade_session_for(std::uint64_t actor_id) {
   const auto by_actor_it = trade_session_by_actor_.find(actor_id);
   if (by_actor_it == trade_session_by_actor_.end()) {
@@ -2529,6 +3592,13 @@ MapActor::TradeSession* MapActor::trade_session_for(std::uint64_t actor_id) {
   return session_it != trade_sessions_.end() ? &session_it->second : nullptr;
 }
 
+/**
+ * @brief 获取玩家在交易中的出价
+ *
+ * @param session  交易会话
+ * @param actor_id 玩家ID
+ * @return TradeOffer* 出价
+ */
 MapActor::TradeOffer* MapActor::trade_offer_for(TradeSession& session,
                                                 std::uint64_t actor_id) {
   if (session.first_actor_id == actor_id) {
@@ -2540,6 +3610,13 @@ MapActor::TradeOffer* MapActor::trade_offer_for(TradeSession& session,
   return nullptr;
 }
 
+/**
+ * @brief 获取交易对手的出价
+ *
+ * @param session  交易会话
+ * @param actor_id 玩家ID
+ * @return TradeOffer* 对手出价
+ */
 MapActor::TradeOffer* MapActor::trade_peer_offer_for(TradeSession& session,
                                                      std::uint64_t actor_id) {
   if (session.first_actor_id == actor_id) {
@@ -2551,6 +3628,15 @@ MapActor::TradeOffer* MapActor::trade_peer_offer_for(TradeSession& session,
   return nullptr;
 }
 
+/**
+ * @brief 检查玩家是否能接收交易物品
+ *
+ * @details 检查空格数、重量上限、制造索引唯一性。
+ *
+ * @param receiver 接收方
+ * @param items    待接收物品
+ * @return true 可以接收
+ */
 bool MapActor::can_receive_trade_items(const Player& receiver,
                                        const std::vector<LegacyUserItem>& items) const {
   std::size_t free_slots = 0;
@@ -2586,6 +3672,16 @@ bool MapActor::can_receive_trade_items(const Player& receiver,
   return total_weight <= std::max<std::int32_t>(receiver.character().ability.max_weight, 0);
 }
 
+/**
+ * @brief 取消玩家的交易
+ *
+ * @details 将交易中的物品返还给各方，通知双方交易取消。
+ *          如果背包满则无法返还，交易状态保持。
+ *
+ * @param actor_id 玩家ID
+ * @param dispatch 运行时分发
+ * @param notify   是否发送通知
+ */
 void MapActor::cancel_trade_for(std::uint64_t actor_id, RuntimeDispatch& dispatch, bool notify) {
   auto* session = trade_session_for(actor_id);
   if (session == nullptr) {
@@ -2656,6 +3752,16 @@ void MapActor::cancel_trade_for(std::uint64_t actor_id, RuntimeDispatch& dispatc
   trade_sessions_.erase(session_id);
 }
 
+/**
+ * @brief 提交并完成交易
+ *
+ * @details 验证双方状态、物品存在性、背包容量，交换物品和金币。
+ *          失败时回滚并取消交易。
+ *
+ * @param session  交易会话
+ * @param dispatch 运行时分发
+ * @return true 交易成功
+ */
 bool MapActor::commit_trade(TradeSession& session, RuntimeDispatch& dispatch) {
   auto* first = find_player(session.first_actor_id);
   auto* second = find_player(session.second_actor_id);
@@ -2778,18 +3884,41 @@ bool MapActor::commit_trade(TradeSession& session, RuntimeDispatch& dispatch) {
   return true;
 }
 
+/**
+ * @brief 获取地图移动宽度
+ *
+ * @return std::int32_t 宽度
+ */
 std::int32_t MapActor::movement_width() const {
   return movement_map_ != nullptr ? movement_map_->width : config_.width;
 }
 
+/**
+ * @brief 获取地图移动高度
+ *
+ * @return std::int32_t 高度
+ */
 std::int32_t MapActor::movement_height() const {
   return movement_map_ != nullptr ? movement_map_->height : config_.height;
 }
 
+/**
+ * @brief 判断指定格子是否可行走
+ *
+ * @param x X坐标
+ * @param y Y坐标
+ * @return true 可行走
+ */
 bool MapActor::can_walk_tile(std::int32_t x, std::int32_t y) const {
   return environment_.static_can_move(x, y);
 }
 
+/**
+ * @brief 获取实体的移动状态
+ *
+ * @param object 实体
+ * @return LegacyMovingObjectState 移动状态
+ */
 void MapActor::initialize_legacy_stone_mines() {
   if (stone_mines_initialized_ || config_.mine_map <= 0 || movement_map_ == nullptr) {
     return;
@@ -2821,6 +3950,11 @@ LegacyMovingObjectState MapActor::moving_state_for(const GameObject& object) con
   return state;
 }
 
+/**
+ * @brief 按环境对象顺序获取地面物品列表
+ *
+ * @return std::vector<const GroundItem*> 有序地面物品
+ */
 std::vector<const MapActor::GroundItem*> MapActor::ordered_ground_items() const {
   std::vector<const GroundItem*> ordered;
   for (const auto item_id : environment_.item_object_ids_in_order()) {
@@ -2832,6 +3966,17 @@ std::vector<const MapActor::GroundItem*> MapActor::ordered_ground_items() const 
   return ordered;
 }
 
+/**
+ * @brief 减少装备耐久度
+ *
+ * @details 处理耐久度耗尽时的装备损坏、属性刷新和角色状态变化。
+ *
+ * @param player   玩家
+ * @param slot     装备槽位
+ * @param loss     减少量
+ * @param dispatch 运行时分发
+ * @return true 耐久度有变化
+ */
 bool MapActor::apply_equipped_item_durability_loss(Player& player, std::size_t slot,
                                                    std::int32_t loss,
                                                    RuntimeDispatch& dispatch) {
@@ -2867,6 +4012,16 @@ bool MapActor::apply_equipped_item_durability_loss(Player& player, std::size_t s
   return true;
 }
 
+/**
+ * @brief 随机计算武器耐久度损失
+ *
+ * @param attacker    攻击者
+ * @param target      目标
+ * @param dispatch    运行时分发
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @return std::int32_t 耐久度损失
+ */
 std::int32_t MapActor::roll_legacy_weapon_durability_loss(const Player& attacker,
                                                           const GameObject& target,
                                                           RuntimeDispatch& dispatch,
@@ -2889,6 +4044,14 @@ std::int32_t MapActor::roll_legacy_weapon_durability_loss(const Player& attacker
          2 - weapon_strong;
 }
 
+/**
+ * @brief 应用武器耐久度损失并保存角色
+ *
+ * @param attacker 攻击者
+ * @param loss     损失量
+ * @param dispatch 运行时分发
+ * @return true 耐久度有变化
+ */
 bool MapActor::apply_legacy_weapon_durability_loss(Player& attacker,
                                                    std::int32_t loss,
                                                    RuntimeDispatch& dispatch) {
@@ -2900,6 +4063,19 @@ bool MapActor::apply_legacy_weapon_durability_loss(Player& attacker,
   return changed;
 }
 
+/**
+ * @brief 应用被击中时的装备耐久度损失
+ *
+ * @details 衣服必定损失耐久，其他装备有概率损失。毒甲状态增加损失。
+ *
+ * @param target      目标玩家
+ * @param hitter_id   攻击者ID
+ * @param dispatch    运行时分发
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @param stage       追踪阶段名
+ * @return true 耐久度有变化
+ */
 bool MapActor::apply_legacy_struck_equipment_durability(Player& target,
                                                         std::uint64_t hitter_id,
                                                         RuntimeDispatch& dispatch,
@@ -2939,6 +4115,21 @@ bool MapActor::apply_legacy_struck_equipment_durability(Player& target,
   return changed;
 }
 
+/**
+ * @brief 随机计算玩家的物理攻击力（含幸运系统）
+ *
+ * @details 幸运值影响最高攻击力出现的概率，诅咒值影响最低攻击力。
+ *
+ * @param attacker    攻击者
+ * @param target      目标
+ * @param _unused     （未使用参数）
+ * @param dispatch    运行时分发
+ * @param stage       追踪阶段
+ * @param command     追踪命令
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @return std::int32_t 攻击力
+ */
 std::int32_t MapActor::roll_legacy_player_attack_power(
     const Player& attacker, const GameObject& target, std::uint16_t,
     RuntimeDispatch& dispatch, std::string stage, std::string command,
@@ -2983,6 +4174,20 @@ std::int32_t MapActor::roll_legacy_player_attack_power(
   return std::max(0, raw);
 }
 
+/**
+ * @brief 处理野蛮冲撞技能
+ *
+ * @details 将目标推开并自身交换位置，或向前冲锋。碰撞时自身受到伤害。
+ *
+ * @param attacker    攻击者
+ * @param user_magic  用户魔法信息
+ * @param magic       魔法配置
+ * @param mail        邮件
+ * @param dispatch    运行时分发
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @return true 已移动
+ */
 bool MapActor::handle_legacy_rush_rush(Player& attacker, LegacyUseMagicInfo& user_magic,
                                        const MagicConfig& magic, const ActorMail& mail,
                                        RuntimeDispatch& dispatch, std::uint64_t current_tick,
@@ -3256,6 +4461,19 @@ bool MapActor::handle_legacy_rush_rush(Player& attacker, LegacyUseMagicInfo& use
   return moved;
 }
 
+/**
+ * @brief 应用物理攻击中的装备特殊效果（石化、吸血）
+ *
+ * @param attacker    攻击者
+ * @param target      目标
+ * @param hit_damage  命中伤害
+ * @param suck_damage 吸血量
+ * @param dispatch    运行时分发
+ * @param stage       追踪阶段
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @return true 触发了特殊效果
+ */
 bool MapActor::apply_legacy_physical_equipment_specials(Player& attacker,
                                                         GameObject& target,
                                                         std::int32_t hit_damage,
@@ -3315,6 +4533,18 @@ bool MapActor::apply_legacy_physical_equipment_specials(Player& attacker,
   return changed;
 }
 
+/**
+ * @brief 处理武器升级的开始
+ *
+ * @details 消耗材料（黑铁矿石、首饰）和金币，登记升级记录并设置1小时等待时间。
+ *
+ * @param player      玩家
+ * @param npc         NPC
+ * @param dispatch    运行时分发
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @return true 升级开始成功
+ */
 bool MapActor::handle_weapon_upgrade_start(Player& player, Npc& npc,
                                            RuntimeDispatch& dispatch,
                                            std::uint64_t current_tick,
@@ -3406,6 +4636,18 @@ bool MapActor::handle_weapon_upgrade_start(Player& player, Npc& npc,
   return true;
 }
 
+/**
+ * @brief 处理武器升级的取回
+ *
+ * @details 根据durapoint等级计算耐久度变化，根据updc/upmc/upsc随机决定属性加成或损坏。
+ *
+ * @param player      玩家
+ * @param npc         NPC
+ * @param dispatch    运行时分发
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @return true 取回成功
+ */
 bool MapActor::handle_weapon_upgrade_get_back(Player& player, Npc& npc,
                                               RuntimeDispatch& dispatch,
                                               std::uint64_t current_tick,
@@ -3522,6 +4764,17 @@ bool MapActor::handle_weapon_upgrade_get_back(Player& player, Npc& npc,
   return true;
 }
 
+/**
+ * @brief 应用待处理的武器升级结果（攻击时触发识别）
+ *
+ * @details 根据desc[10]中的升级码应用DC/SC/MC加成或标志武器损坏。
+ *
+ * @param attacker    攻击者
+ * @param dispatch    运行时分发
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @return true 有结果已应用
+ */
 bool MapActor::apply_pending_weapon_upgrade_result(Player& attacker,
                                                    RuntimeDispatch& dispatch,
                                                    std::uint64_t current_tick,
@@ -3583,6 +4836,16 @@ bool MapActor::apply_pending_weapon_upgrade_result(Player& attacker,
   return true;
 }
 
+/**
+ * @brief 应用武器诅咒（降低幸运或增加诅咒）
+ *
+ * @param player      玩家
+ * @param dispatch    运行时分发
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @param stage       追踪阶段
+ * @return true 已应用
+ */
 bool MapActor::apply_legacy_weapon_unlock(Player& player, RuntimeDispatch& dispatch,
                                           std::uint64_t current_tick,
                                           std::uint64_t now_ms,
@@ -3610,6 +4873,17 @@ bool MapActor::apply_legacy_weapon_unlock(Player& player, RuntimeDispatch& dispa
   return true;
 }
 
+/**
+ * @brief 应用武器幸运（祝福）
+ *
+ * @details 根据武器当前属性与难度判定是否成功增加幸运，有几率触发诅咒。
+ *
+ * @param player      玩家
+ * @param dispatch    运行时分发
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @return true 已应用
+ */
 bool MapActor::apply_legacy_weapon_good_luck(Player& player, RuntimeDispatch& dispatch,
                                              std::uint64_t current_tick,
                                              std::uint64_t now_ms) {
@@ -3657,6 +4931,18 @@ bool MapActor::apply_legacy_weapon_good_luck(Player& player, RuntimeDispatch& di
   return true;
 }
 
+/**
+ * @brief 应用恶意击杀惩罚
+ *
+ * @details 增加PK值、降低身体运气、有概率触发武器诅咒。
+ *
+ * @param killer      击杀者
+ * @param victim      受害者
+ * @param dispatch    运行时分发
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @param stage       追踪阶段
+ */
 void MapActor::apply_bad_kill_penalty(Player& killer, const Player& victim,
                                       RuntimeDispatch& dispatch,
                                       std::uint64_t current_tick,
@@ -3689,6 +4975,18 @@ void MapActor::apply_bad_kill_penalty(Player& killer, const Player& victim,
   queue_save_character(dispatch, killer);
 }
 
+/**
+ * @brief 处理玩家死亡掉落
+ *
+ * @details 掉落装备和背包物品，处理损坏物品。
+ *          战斗区域不掉落。根据PK值决定掉落概率。
+ *
+ * @param player      死亡玩家
+ * @param dispatch    运行时分发
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @return true 有物品变化
+ */
 bool MapActor::settle_player_death(Player& player, RuntimeDispatch& dispatch,
                                    std::uint64_t current_tick,
                                    std::uint64_t now_ms) {
@@ -3873,6 +5171,15 @@ bool MapActor::settle_player_death(Player& player, RuntimeDispatch& dispatch,
   return changed;
 }
 
+/**
+ * @brief 尝试使用复活戒指复活玩家（对外接口）
+ *
+ * @param player      玩家
+ * @param dispatch    运行时分发
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @return true 复活成功
+ */
 bool MapActor::try_legacy_revival(Player& player, RuntimeDispatch& dispatch,
                                   std::uint64_t current_tick, std::uint64_t now_ms) {
   return try_legacy_revival_impl(objects_, item_configs_, config_.id, player, dispatch,
@@ -3881,6 +5188,20 @@ bool MapActor::try_legacy_revival(Player& player, RuntimeDispatch& dispatch,
 
 #include "world/map_actor_gm.hpp"
 #include "world/map_actor_npc.hpp"
+/**
+ * @brief 添加运行时追踪记录
+ *
+ * @param dispatch    运行时分发
+ * @param stage       阶段名
+ * @param action      动作名
+ * @param mail        关联邮件
+ * @param current_tick 当前tick
+ * @param now_ms      当前时间
+ * @param success     是否成功
+ * @param value       整数值
+ * @param damage      伤害值
+ * @param label       标签
+ */
 void MapActor::add_legacy_trace(RuntimeDispatch& dispatch,
                                 std::string stage,
                                 std::string action,
@@ -3912,6 +5233,22 @@ void MapActor::add_legacy_trace(RuntimeDispatch& dispatch,
       success});
 }
 
+/**
+ * @brief 生成带追踪的旧版随机数值
+ *
+ * @details 记录随机前后的状态用于调试和可重现性。
+ *
+ * @param dispatch        运行时分发
+ * @param stage           阶段名
+ * @param action          动作名
+ * @param range           随机范围
+ * @param actor_id        Actor ID
+ * @param target_actor_id 目标Actor ID
+ * @param command         命令名
+ * @param now_ms          当前时间
+ * @param current_tick    当前tick
+ * @return std::int32_t 随机值
+ */
 std::int32_t MapActor::legacy_random_value(RuntimeDispatch& dispatch,
                                            std::string stage,
                                            std::string action,
