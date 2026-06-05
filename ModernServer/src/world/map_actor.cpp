@@ -1418,8 +1418,8 @@ MapActor::MapActor(MapConfig config, LogicBudgetConfig budgets,
       config_.height = movement_map_->height;
     }
   }
-  const auto fail_closed_without_map =
-      movement_map_ == nullptr && !config_.source_map.empty();
+  const auto fail_closed_without_map = movement_map_ == nullptr &&
+      !config_.source_map.empty() && (config_.width <= 0 || config_.height <= 0);
   environment_.reset(config_.width, config_.height, movement_map_, fail_closed_without_map);
   for (std::size_t index = 0; index < config_.gates.size(); ++index) {
     const auto& gate = config_.gates[index];

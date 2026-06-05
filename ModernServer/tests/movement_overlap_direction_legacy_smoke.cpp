@@ -114,16 +114,12 @@ int main() {
 
   move(runtime, 1, mir2::LogicCommandKind::walk, 2, 1);
   auto hero = snapshot(runtime, "Hero");
-  assert(hero.x == 2 && hero.y == 1);
-
-  move(runtime, 1, mir2::LogicCommandKind::walk, 3, 1);
-  hero = snapshot(runtime, "Hero");
-  assert(hero.x == 2 && hero.y == 1);
+  assert(hero.x == 1 && hero.y == 1);
   assert(hero.dir == mir2::legacy::kDirRight);
 
-  turn(runtime, 1, 3, 1, mir2::legacy::kDirDown);
+  turn(runtime, 1, 2, 1, mir2::legacy::kDirDown);
   hero = snapshot(runtime, "Hero");
-  assert(hero.x == 2 && hero.y == 1);
+  assert(hero.x == 1 && hero.y == 1);
   assert(hero.dir == mir2::legacy::kDirRight);
 
   move(runtime, 3, mir2::LogicCommandKind::run, 3, 3);

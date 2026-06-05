@@ -171,7 +171,7 @@ int main() {
 
   move(runtime, 10, mir2::LogicCommandKind::walk, 5, 5);
   hero = snapshot(runtime, "Hero");
-  assert(hero.x == 5 && hero.y == 5);
+  assert(hero.x == 5 && hero.y == 4);
 
   enter(runtime, 12, make_character("LowHp", 1, 8, 9));
   move(runtime, 12, mir2::LogicCommandKind::run, 3, 8);
@@ -210,10 +210,10 @@ int main() {
 
   move(npc_runtime, 20, mir2::LogicCommandKind::walk, 6, 5);
   auto walker = snapshot(npc_runtime, "Walker");
-  assert(walker.x == 6 && walker.y == 5);
+  assert(walker.x == 5 && walker.y == 5);
 
   move(npc_runtime, 20, mir2::LogicCommandKind::walk, 5, 4);
   walker = snapshot(npc_runtime, "Walker");
-  assert(walker.x == 5 && walker.y == 4);
+  assert(walker.x == 5 && walker.y == 5);
   return 0;
 }

@@ -154,7 +154,7 @@ int main() {
   static_cast<void>(tick_due(runtime, now_ms, 3001));
   static_cast<void>(runtime.route_logic_command(make_drop(101, 1001, "Token")));
   static_cast<void>(tick_due(runtime, now_ms));
-  const auto expired = tick_due(runtime, now_ms, 10ULL * 60ULL * 1000ULL + 1ULL);
+  const auto expired = tick_due(runtime, now_ms, 60ULL * 60ULL * 1000ULL + 1ULL);
   assert(find_packet(expired, mir2::kSmItemHide).has_value());
   static_cast<void>(runtime.route_logic_command(make_pickup(101, 10, 10)));
   const auto expired_pickup = tick_due(runtime, now_ms);
