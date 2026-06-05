@@ -31,6 +31,7 @@ enum class CanonicalLegacyCommandKind {
   query_repair_cost,
   drop_item,
   pickup_item,
+  open_door,
   take_on_item,
   take_off_item,
   eat_item,

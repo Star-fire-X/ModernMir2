@@ -696,6 +696,9 @@ void MapActor::finalize_monster_death(std::uint64_t monster_id, std::uint64_t ki
         for (std::int32_t dx = -k; dx <= k; ++dx) {
           const auto try_x = death_x + dx;
           const auto try_y = death_y + dy;
+          if (!environment_.can_get_item(try_x, try_y)) {
+            continue;
+          }
           const auto item_count = environment_.item_object_count(try_x, try_y);
           if (!item_count.has_value()) {
             continue;

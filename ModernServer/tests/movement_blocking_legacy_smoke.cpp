@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "shared/legacy/movement_rules.hpp"
 #include "world/legacy_map_environment.hpp"
 #include "world/logic_runtime.hpp"
 
@@ -112,6 +113,13 @@ int main() {
   assert(env.can_fly_line(2, 1, 2, 2));
   assert(env.can_fly_line(2, 1, 2, 3));
   assert(env.can_fire_fly_line(2, 1, 2, 3));
+  auto long_map = std::make_shared<mir2::legacy::MapDocument>();
+  long_map->width = 12;
+  long_map->height = 1;
+  long_map->cells.resize(12);
+  long_map->cells[5].bk_img = 0x8000U;
+  mir2::LegacyMapEnvironment long_env(12, 1, long_map);
+  assert(!long_env.can_fly_line(0, 0, 11, 0));
   const auto opened_door_tiles = env.open_doors_around(2, 2, 100);
   assert(opened_door_tiles.size() == 2);
   assert(env.static_can_fly(2, 2));
@@ -148,6 +156,7 @@ int main() {
   move(runtime, 10, mir2::LogicCommandKind::walk, 5, 3);
   hero = snapshot(runtime, "Hero");
   assert(hero.x == 4 && hero.y == 3);
+  assert(hero.dir == mir2::legacy::kDirRight);
   advance(runtime);
 
   move(runtime, 10, mir2::LogicCommandKind::run, 4, 7);
@@ -162,7 +171,7 @@ int main() {
 
   move(runtime, 10, mir2::LogicCommandKind::walk, 5, 5);
   hero = snapshot(runtime, "Hero");
-  assert(hero.x == 5 && hero.y == 4);
+  assert(hero.x == 5 && hero.y == 5);
 
   enter(runtime, 12, make_character("LowHp", 1, 8, 9));
   move(runtime, 12, mir2::LogicCommandKind::run, 3, 8);
@@ -201,10 +210,10 @@ int main() {
 
   move(npc_runtime, 20, mir2::LogicCommandKind::walk, 6, 5);
   auto walker = snapshot(npc_runtime, "Walker");
-  assert(walker.x == 5 && walker.y == 5);
+  assert(walker.x == 6 && walker.y == 5);
 
   move(npc_runtime, 20, mir2::LogicCommandKind::walk, 5, 4);
   walker = snapshot(npc_runtime, "Walker");
-  assert(walker.x == 5 && walker.y == 5);
+  assert(walker.x == 5 && walker.y == 4);
   return 0;
 }
