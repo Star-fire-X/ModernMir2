@@ -128,7 +128,7 @@ int main() {
 
   move(runtime, 3, mir2::LogicCommandKind::run, 3, 3);
   const auto runner = snapshot(runtime, "Runner");
-  assert(runner.x == 3 && runner.y == 3);
+  assert(runner.x == 1 && runner.y == 3);
   assert(runner.dir == mir2::legacy::kDirRight);
   return 0;
 }

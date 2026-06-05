@@ -3713,7 +3713,8 @@ bool MapActor::settle_player_death(Player& player, RuntimeDispatch& dispatch,
       for (std::int32_t dx = -wide; dx <= wide; ++dx) {
         const auto try_x = player.x() + dx;
         const auto try_y = player.y() + dy;
-        if (!environment_.can_get_item(try_x, try_y)) {
+        if (!environment_.in_bounds(try_x, try_y) ||
+            !environment_.static_can_move(try_x, try_y)) {
           continue;
         }
         const auto item_count = environment_.item_object_count(try_x, try_y);

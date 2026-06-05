@@ -776,10 +776,15 @@ void load_maps(const std::filesystem::path& directory, HostConfig& config,
     MapConfig map;
     map.id = value_or<std::string>(table, "id", entry.path().stem().string());
     map.title = value_or<std::string>(table, "title", map.id);
-    map.source_map = resolve_map_source_path(config_root, config.runtime.asset_root, directory,
-                                             map.id, path_or(table, "source_map", {}));
     map.width = value_or<int>(table, "width", 0);
     map.height = value_or<int>(table, "height", 0);
+    const auto configured_source_map = path_or(table, "source_map", {});
+    const auto resolved_source_map = resolve_map_source_path(
+        config_root, config.runtime.asset_root, directory, map.id, configured_source_map);
+    if (!configured_source_map.empty() || std::filesystem::exists(resolved_source_map) ||
+        map.width <= 0 || map.height <= 0) {
+      map.source_map = resolved_source_map;
+    }
     if ((map.width <= 0 || map.height <= 0) && !map.source_map.empty()) {
       if (const auto decoded = legacy::decode_map_file(map.source_map); decoded != nullptr) {
         if (map.width <= 0) {

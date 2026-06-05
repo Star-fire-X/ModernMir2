@@ -5737,21 +5737,21 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             if (mail.kind == ActorMailKind::run) {
               const auto middle = legacy::step_target(width, height, player->x(), player->y(),
                                                       expected->dir, 1);
-              if (!middle.has_value() || !environment_.can_walk(middle->x, middle->y, true)) {
+              if (!middle.has_value() || !environment_.can_walk(middle->x, middle->y, false)) {
                 player->reset_move_throttle();
                 apply_failed_move_direction();
                 reject_action(false, true);
                 break;
               }
             }
-            if (!environment_.can_walk(expected->x, expected->y, true)) {
+            if (!environment_.can_walk(expected->x, expected->y, false)) {
               player->reset_move_throttle();
               apply_failed_move_direction();
               reject_action(false, true);
               break;
             }
             if (environment_.move_to_moving_object(
-                    player->x(), player->y(), player->id(), expected->x, expected->y, true,
+                    player->x(), player->y(), player->id(), expected->x, expected->y, false,
                     now_ms, moving_state_for(*player)) != 1) {
               player->reset_move_throttle();
               apply_failed_move_direction();
