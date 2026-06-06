@@ -258,7 +258,7 @@ void append_guild_member(Bytes& bytes, std::string_view name, std::string_view r
 
 void assert_p0_protocol_goldens() {
   using namespace mir2::client_v1;
-  static_assert(kProtocolVersion == 4);
+  static_assert(kProtocolVersion == 5);
 
   Bytes payload;
   append_u32(payload, kProtocolVersion);

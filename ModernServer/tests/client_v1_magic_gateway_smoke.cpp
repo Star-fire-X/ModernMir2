@@ -495,5 +495,13 @@ int main() {
   const auto* peer_walk_upsert = std::get_if<mir2::client_v1::ActorUpsert>(&messages[0]);
   assert(peer_walk_upsert != nullptr);
   assert(peer_walk_upsert->actor.level == 37);
+
+  messages.clear();
+  level_service.translate_legacy_packet_for_test(
+      kLevelViewerSessionId, make_actor_struck_packet(kLevelViewerSessionId), messages);
+  assert(messages.size() == 2);
+  const auto* peer_struck_vitals = std::get_if<mir2::client_v1::ActorVitals>(&messages[0]);
+  assert(peer_struck_vitals != nullptr);
+  assert(peer_struck_vitals->actor_level == 37);
   return 0;
 }

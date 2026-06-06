@@ -23,7 +23,7 @@
 
 namespace mir2::client_v1 {
 
-constexpr std::uint32_t kProtocolVersion = 4;
+constexpr std::uint32_t kProtocolVersion = 5;
 
 constexpr std::uint16_t kFrameFlagLegacyBundle = 0x0001U;
 
@@ -580,6 +580,7 @@ struct ActorVitals {
   std::uint64_t source_actor_id{0};
   bool magic{false};
   std::uint16_t legacy_ident{0};
+  std::uint16_t actor_level{0};
 };
 
 /// 角色死亡事件
@@ -2112,6 +2113,7 @@ inline void encode(ByteWriter& writer, const ActorVitals& value) {
   writer.write_u64(value.source_actor_id);
   writer.write_bool(value.magic);
   writer.write_u16(value.legacy_ident);
+  writer.write_u16(value.actor_level);
 }
 
 inline bool decode(ByteReader& reader, ActorVitals& value) {
@@ -2119,7 +2121,7 @@ inline bool decode(ByteReader& reader, ActorVitals& value) {
          reader.read_i32(value.max_hp) && reader.read_i32(value.mp) &&
          reader.read_i32(value.max_mp) && reader.read_i32(value.damage) &&
          reader.read_u64(value.source_actor_id) && reader.read_bool(value.magic) &&
-         reader.read_u16(value.legacy_ident);
+         reader.read_u16(value.legacy_ident) && reader.read_u16(value.actor_level);
 }
 
 inline void encode(ByteWriter& writer, const ActorDeath& value) {

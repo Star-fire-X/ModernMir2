@@ -305,6 +305,7 @@ struct LegacySpecialEffectEvent {
   Kind kind{Kind::projectile};
   std::uint64_t actor_id{0};
   std::uint64_t action_started_ms{0};
+  std::uint64_t legacy_event_sequence{0};
   std::uint64_t target_actor_id{0};
   int source_x{0};
   int source_y{0};

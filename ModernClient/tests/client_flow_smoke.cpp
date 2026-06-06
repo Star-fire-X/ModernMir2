@@ -191,6 +191,8 @@ int main() {
   state.apply(ActorVitals{1000, 42, 55, 18, 24, 0, 0, false});
   assert(state.world.actors[1000].hp == 42);
   assert(state.world.actors[1000].mp == 18);
+  state.apply(ActorVitals{1000, -1, -1, -1, -1, 0, 0, false, 0, 17});
+  assert(state.world.actors[1000].level == 17);
 
   SelfAbility ability;
   ability.level = 12;

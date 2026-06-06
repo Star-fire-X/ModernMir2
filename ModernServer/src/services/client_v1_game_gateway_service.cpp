@@ -2878,16 +2878,23 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
     }
   }
   const auto actor_id = static_cast<std::uint64_t>(static_cast<std::uint32_t>(decoded->message.recog));
+  auto level_for_actor = [&](const std::uint64_t id) {
+    if (id == state.actor_id) {
+      return client_v1_actor_level(state.character.ability.level);
+    }
+    if (const auto known = known_actor_levels.find(id); known != known_actor_levels.end()) {
+      return known->second;
+    }
+    return std::uint16_t{0};
+  };
   auto make_actor = [&](std::uint64_t id, std::string name, std::int32_t x, std::int32_t y,
                         std::uint8_t dir, std::int32_t feature, std::int32_t status) {
     if (name.empty() && id == state.actor_id) {
       name = state.character_name;
     }
-    auto level = std::uint16_t{1};
-    if (id == state.actor_id) {
-      level = client_v1_actor_level(state.character.ability.level);
-    } else if (const auto known = known_actor_levels.find(id); known != known_actor_levels.end()) {
-      level = known->second;
+    auto level = level_for_actor(id);
+    if (level == 0) {
+      level = 1;
     }
     return client_v1::WorldActor{id, std::move(name), x, y, dir, feature, status,
                                  actor_type_for(id, state.actor_id), level};
@@ -3081,7 +3088,8 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
       const auto magic = body.has_value() && body->ltag2 != 0;
       messages.push_back(client_v1::ActorVitals{
           actor_id, decoded->message.param, decoded->message.tag, -1, -1,
-          decoded->message.series, source, magic, decoded->message.ident});
+          decoded->message.series, source, magic, decoded->message.ident,
+          level_for_actor(actor_id)});
       messages.push_back(client_v1::ActorAction{
           actor_id, client_v1::ActorActionKind::struck, 0, 0, 0, source,
           decoded->message.series, decoded->message.ident, 0, magic});

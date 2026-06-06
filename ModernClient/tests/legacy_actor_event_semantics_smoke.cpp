@@ -230,8 +230,8 @@ void test_struck_cancels_plain_hit_only() {
   state.process_legacy_actor_queues(1100);
   const auto& actor = state.world.actors[2];
   assert(actor.current_action == ActorActionKind::struck);
-  assert(actor.legacy_struck_frame_ms == 80);
-  assert(actor.action_duration_ms == 240);
+  assert(actor.legacy_struck_frame_ms == legacy_struck_frame_time_ms(actor.level));
+  assert(actor.action_duration_ms == actor.legacy_struck_frame_ms * 3U);
   assert(actor.last_damage == 7);
   assert(actor.legacy_action_queue.empty());
 }

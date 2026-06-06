@@ -583,6 +583,7 @@ int main() {
   struck_world.self_actor_id = 1;
   auto struck_actor = actor;
   struck_actor.level = 10;
+  struck_actor.legacy_struck_frame_ms = legacy_struck_frame_time_ms(struck_actor.level);
   struck_world.actors[1] = struck_actor;
   AnimationManager struck_animations;
   struck_animations.reset(8900);
@@ -600,12 +601,12 @@ int main() {
   assert(struck_pose->overlay_count == 1);
   assert(struck_pose->overlays[0].archive == ArchiveId::magic);
   assert(struck_pose->overlays[0].frame_index == 820);
-  struck_animations.update(struck_world, 9080);
+  struck_animations.update(struck_world, 9149);
   struck_pose = struck_animations.pose_for(1);
   assert(struck_pose.has_value());
   assert(struck_pose->current_frame ==
          legacy_frame_index(legacy_human_action_info(LegacyHumanAction::struck), 2, 0));
-  struck_animations.update(struck_world, 9081);
+  struck_animations.update(struck_world, 9151);
   struck_pose = struck_animations.pose_for(1);
   assert(struck_pose.has_value());
   assert(struck_pose->current_frame ==
@@ -1157,6 +1158,40 @@ int main() {
     }
   }
   assert(repeated_special_events == 2);
+
+  WorldViewState repeated_manager_world;
+  repeated_manager_world.width = 200;
+  repeated_manager_world.height = 80;
+  ActorState repeated_manager_actor;
+  repeated_manager_actor.actor_id = 465;
+  repeated_manager_actor.actor_type = mir2::client_v1::ActorType::monster;
+  repeated_manager_actor.x = 30;
+  repeated_manager_actor.y = 30;
+  repeated_manager_actor.from_x = 30;
+  repeated_manager_actor.from_y = 30;
+  repeated_manager_actor.dir = 2;
+  repeated_manager_actor.feature = 63;
+  repeated_manager_world.actors[repeated_manager_actor.actor_id] = repeated_manager_actor;
+  AnimationManager repeated_manager_animations;
+  repeated_manager_animations.reset(35000);
+  repeated_manager_animations.sync_world(repeated_manager_world, 35000);
+  auto repeated_manager_first = repeated_manager_actor;
+  repeated_manager_first.current_action = mir2::client_v1::ActorActionKind::hit;
+  repeated_manager_first.legacy_action_ident = mir2::legacy::kSmFlyAxe;
+  repeated_manager_first.action_started_ms = 35100;
+  repeated_manager_first.legacy_event_sequence = 1;
+  repeated_manager_first.action_target_x = 150;
+  repeated_manager_first.action_target_y = 30;
+  auto repeated_manager_second = repeated_manager_first;
+  repeated_manager_second.legacy_event_sequence = 2;
+  repeated_manager_actor = repeated_manager_second;
+  repeated_manager_actor.legacy_pending_actions = {repeated_manager_first, repeated_manager_second};
+  repeated_manager_world.actors[repeated_manager_actor.actor_id] = repeated_manager_actor;
+  for (int step = 0; step <= 16; ++step) {
+    repeated_manager_animations.update(
+        repeated_manager_world, 35100 + static_cast<std::uint64_t>(step) * 250U);
+  }
+  assert(repeated_manager_animations.effects().fly_count() == 2);
 
   const auto banya_overlay = overlay_pose_for(71, mir2::legacy::kSmLighting,
                                               mir2::client_v1::ActorActionKind::hit);
@@ -1827,6 +1862,22 @@ int main() {
   assert(firegun_effect.fire_node_count() == 1);
   firegun_matrix.update(8131);
   assert(firegun_effect.fire_node_count() == 2);
+
+  auto fire_wind_matrix = spawn_matrix_magic(4, 4, 4);
+  assert(fire_wind_matrix.fly_count() == 1);
+  assert(fire_wind_matrix.fly_effects().front().magic_type == LegacyMagicType::fire_wind);
+  assert(fire_wind_matrix.fly_effects().front().frame_count == 6);
+  assert(fire_wind_matrix.fly_effects().front().explosion_frame_count == 6);
+  fire_wind_matrix.update(8051);
+  assert(fire_wind_matrix.fly_count() == 1);
+
+  auto kyul_kai_matrix = spawn_matrix_magic(10, 10, 10);
+  assert(kyul_kai_matrix.fly_count() == 1);
+  assert(kyul_kai_matrix.fly_effects().front().magic_type == LegacyMagicType::kyul_kai);
+  assert(kyul_kai_matrix.fly_effects().front().frame_count == 6);
+  assert(kyul_kai_matrix.fly_effects().front().explosion_frame_count == 6);
+  kyul_kai_matrix.update(8051);
+  assert(kyul_kai_matrix.fly_count() == 1);
 
   auto thunder_matrix = spawn_matrix_magic(7, 8, 11);
   assert(thunder_matrix.fly_count() == 1);

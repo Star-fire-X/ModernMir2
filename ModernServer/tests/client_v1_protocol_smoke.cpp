@@ -35,7 +35,7 @@ int main() {
   const ClientHello hello{kProtocolVersion, 0x01020304U, 0xA0B0C0D0U, 0x0F0E0D0CU};
   const auto hello_bytes = encode_frame(make_frame(hello, 0x11223344U, 0x5566U));
   assert_bytes(hello_bytes, {0x18, 0x00, 0x00, 0x00, 0x01, 0x00, 0x66, 0x55,
-                             0x44, 0x33, 0x22, 0x11, 0x04, 0x00, 0x00, 0x00,
+                             0x44, 0x33, 0x22, 0x11, 0x05, 0x00, 0x00, 0x00,
                              0x04, 0x03, 0x02, 0x01, 0xD0, 0xC0, 0xB0, 0xA0,
                              0x0C, 0x0D, 0x0E, 0x0F});
 
@@ -386,6 +386,7 @@ int main() {
   assert(decoded_vitals.has_value());
   assert(decoded_vitals->damage == 5);
   assert(decoded_vitals->magic);
+  assert(decoded_vitals->actor_level == 0);
 
   const auto death_frame = encode_frame(make_frame(ActorDeath{42, 330, 270, 4}, 21));
   buffer = death_frame;

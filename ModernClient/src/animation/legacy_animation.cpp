@@ -3112,6 +3112,7 @@ void LegacyActorAnimation::maybe_emit_special_frame_event(const ActorState& acto
   LegacySpecialEffectEvent event;
   event.actor_id = actor.actor_id;
   event.action_started_ms = actor.action_started_ms;
+  event.legacy_event_sequence = actor.legacy_event_sequence;
   event.target_actor_id = actor.action_target_actor_id;
   event.source_x = actor.x;
   event.source_y = actor.y;
@@ -3804,6 +3805,11 @@ LegacyEffectManager::Effect& LegacyEffectManager::spawn_magic_effect(const Magic
       break;
     case LegacyMagicType::fire_wind:
     case LegacyMagicType::kyul_kai:
+      effect.frame_count = 6;
+      effect.fixed_effect = true;
+      effect.repetition = false;
+      effect.explosion_frame_count = 6;
+      break;
     default:
       effect.frame_count = 0;
       effect.fixed_effect = true;
@@ -4380,6 +4386,7 @@ void AnimationManager::spawn_special_effect_events(const WorldViewState& world,
     auto events = animation.drain_special_effect_events();
     for (const auto& event : events) {
       const auto key = (event.action_started_ms << 8U) ^
+                       (event.legacy_event_sequence << 1U) ^
                        static_cast<std::uint64_t>(event.effect_base + event.magic_id);
       if (special_effect_started_ms_[actor_id] == key) {
         continue;

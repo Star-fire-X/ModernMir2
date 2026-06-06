@@ -1158,11 +1158,11 @@ struct GameStateStore {
   }
 
   std::uint64_t legacy_struck_frame_ms_for(const ActorState& actor) const {
-    if (actor.actor_id != world.self_actor_id) {
-      return 80;
-    }
-    const auto frame_ms = 200 - static_cast<int>(world.self_ability_detail.level) * 5;
-    return static_cast<std::uint64_t>(std::max(80, frame_ms));
+    const auto level =
+        actor.actor_id == world.self_actor_id && world.self_ability_detail.level > 0
+            ? world.self_ability_detail.level
+            : actor.level;
+    return legacy_struck_frame_time_ms(level);
   }
 
   void start_legacy_actor_action(ActorState& actor, const LegacyActorMessage& message,
@@ -2245,6 +2245,9 @@ struct GameStateStore {
     }
     if (message.max_mp >= 0) {
       actor.max_mp = message.max_mp;
+    }
+    if (message.actor_level > 0) {
+      actor.level = message.actor_level;
     }
     actor.last_damage = message.damage;
     actor.last_hitter_id = message.source_actor_id;
