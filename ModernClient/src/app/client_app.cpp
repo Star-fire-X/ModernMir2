@@ -1759,6 +1759,8 @@ void ClientApp::handle_protocol_events(ClientContext& context) {
             return decode.operator()<client_v1::ActorUpsert>();
           case client_v1::MessageId::actor_action:
             return decode.operator()<client_v1::ActorAction>();
+          case client_v1::MessageId::actor_remove:
+            return decode.operator()<client_v1::ActorRemove>();
           case client_v1::MessageId::actor_identity_update:
             return decode.operator()<client_v1::ActorIdentityUpdate>();
           case client_v1::MessageId::actor_magic_fire:

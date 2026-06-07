@@ -320,7 +320,7 @@ void test_attack_attempt_updates_move_suppression() {
   scenes.change_scene(SceneId::world, context);
   reset_world(state);
   auto& world = state.world;
-  world.actors.emplace(2, ActorState{2, "Target", 51, 50, 51, 50, 6, 0, 0,
+  world.actors.emplace(2, ActorState{2, "Target", 51, 50, 51, 50, 6, 0, 0, 0,
                                      ActorType::monster});
   world.target_actor_id = 2;
   world.latest_hit_ms = detail::monotonic_ms();
@@ -344,7 +344,7 @@ void test_locked_two_cell_target_drops_stale_chase_move() {
   world.can_long_hit = true;
   world.action_locked = true;
   world.action_lock_started_ms = detail::monotonic_ms();
-  world.actors.emplace(2, ActorState{2, "Target", 52, 50, 52, 50, 6, 0, 0,
+  world.actors.emplace(2, ActorState{2, "Target", 52, 50, 52, 50, 6, 0, 0, 0,
                                      ActorType::monster});
   world.target_actor_id = 2;
 

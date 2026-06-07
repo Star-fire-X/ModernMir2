@@ -219,7 +219,7 @@ void append_character_summary(Bytes& bytes, std::string_view name, std::uint16_t
 void append_world_actor(Bytes& bytes, std::uint64_t actor_id, std::string_view name,
                         std::int32_t x, std::int32_t y, std::uint8_t dir,
                         std::int32_t feature, std::int32_t status, std::uint8_t actor_type,
-                        const std::uint16_t level = 1) {
+                        const std::uint16_t level = 1, const std::uint8_t light = 0) {
   append_u64(bytes, actor_id);
   append_string(bytes, name);
   append_i32(bytes, x);
@@ -229,6 +229,7 @@ void append_world_actor(Bytes& bytes, std::uint64_t actor_id, std::string_view n
   append_i32(bytes, status);
   append_u8(bytes, actor_type);
   append_u16(bytes, level);
+  append_u8(bytes, light);
 }
 
 void append_item_state(Bytes& bytes, std::string_view name, std::int32_t make_index,
@@ -258,7 +259,7 @@ void append_guild_member(Bytes& bytes, std::string_view name, std::string_view r
 
 void assert_p0_protocol_goldens() {
   using namespace mir2::client_v1;
-  static_assert(kProtocolVersion == 5);
+  static_assert(kProtocolVersion == 6);
 
   Bytes payload;
   append_u32(payload, kProtocolVersion);
@@ -392,6 +393,7 @@ void assert_p0_protocol_goldens() {
   append_u32(payload, 196);
   append_i32(payload, 0x01020304);
   append_i32(payload, 8);
+  append_u8(payload, 0);
   assert_golden(ActorIdentityUpdate{1000,
                                     static_cast<std::uint8_t>(
                                         kActorIdentityName | kActorIdentityNameColor |
@@ -399,7 +401,8 @@ void assert_p0_protocol_goldens() {
                                     "Hero",
                                     196,
                                     0x01020304,
-                                    8},
+                                    8,
+                                    0},
                 322, 146, payload);
 
   payload.clear();
@@ -436,6 +439,21 @@ void assert_p0_protocol_goldens() {
   append_u16(payload, 0);
   assert_golden(ActorAction{1000, ActorActionKind::walk, 331, 270, 2, 0, 0, 0, 0, false, 0},
                 307, 16, payload);
+
+  payload.clear();
+  append_u64(payload, 1000);
+  append_i32(payload, 18);
+  append_i32(payload, 30);
+  append_i32(payload, 9);
+  append_i32(payload, 12);
+  append_i32(payload, 5);
+  append_u64(payload, 2000);
+  append_bool(payload, true);
+  append_u16(payload, 11);
+  append_u16(payload, 7);
+  append_i32(payload, 1);
+  assert_golden(ActorVitals{1000, 18, 30, 9, 12, 5, 2000, true, 11, 7, 1}, 308, 148,
+                payload);
 
   payload.clear();
   append_i32(payload, 331);
@@ -939,7 +957,8 @@ int main() {
                           "Hero",
                           196,
                           0x01020304,
-                          8},
+                          8,
+                          0},
       216));
   buffer = frame_bytes;
   frames = drain_frames(buffer);

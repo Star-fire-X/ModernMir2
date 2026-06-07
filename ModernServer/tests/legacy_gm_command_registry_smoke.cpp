@@ -26,6 +26,10 @@ void append_dispatch(mir2::RuntimeDispatch& target, mir2::RuntimeDispatch source
   target.audit_events.insert(target.audit_events.end(),
                              std::make_move_iterator(source.audit_events.begin()),
                              std::make_move_iterator(source.audit_events.end()));
+  target.interserver_broadcasts.insert(
+      target.interserver_broadcasts.end(),
+      std::make_move_iterator(source.interserver_broadcasts.begin()),
+      std::make_move_iterator(source.interserver_broadcasts.end()));
 }
 
 mir2::CharacterRecord make_character(std::string account_id, std::string name) {
@@ -165,6 +169,10 @@ bool check_runtime_dispatch(const std::filesystem::path& admin_list) {
          has_audit(ok, "gm.command.ok", "cmd=Shutup") &&
          has_text(ok, 2, "Bob禁止聊天 + 5分钟") &&
          has_audit(broadcast, "gm.command.ok", "cmd=!") &&
+         broadcast.interserver_broadcasts.size() == 1 &&
+         broadcast.interserver_broadcasts.front().scope ==
+             mir2::InterserverBroadcastScope::sysop_global_interserver &&
+         broadcast.interserver_broadcasts.front().text == "(公告)notice" &&
          has_text(broadcast, 1, "(公告)notice") &&
          unknown.audit_events.empty() &&
          !has_text(unknown, 1, "Normal: @NoSuchCmd");

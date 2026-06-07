@@ -1072,6 +1072,54 @@ LegacyPacket make_char_status_changed_packet(std::uint64_t session_id, const Pla
                            low_word(actor_hit_speed(player))));
 }
 
+LegacyPacket make_change_light_packet(std::uint64_t session_id, const GameObject& object) {
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmChangeLight, static_cast<std::int32_t>(object.id()),
+                           actor_light(object), 0, 0));
+}
+
+LegacyPacket make_change_name_color_packet(std::uint64_t session_id, const GameObject& object) {
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmChangeNameColor, static_cast<std::int32_t>(object.id()),
+                           actor_name_color(object), 0, 0));
+}
+
+LegacyPacket make_open_health_packet(std::uint64_t session_id, const GameObject& object) {
+  auto hp = 0;
+  auto max_hp = 0;
+  if (const auto* player = as_player(&object); player != nullptr) {
+    hp = player->character().ability.hp;
+    max_hp = player->character().ability.max_hp;
+  } else if (const auto* monster = as_monster(&object); monster != nullptr) {
+    hp = monster->hp();
+    max_hp = monster->max_hp();
+  }
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmOpenHealth, static_cast<std::int32_t>(object.id()), hp, max_hp, 0));
+}
+
+LegacyPacket make_close_health_packet(std::uint64_t session_id, const GameObject& object) {
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmCloseHealth, static_cast<std::int32_t>(object.id()), 0, 0, 0));
+}
+
+LegacyPacket make_dig_up_packet(std::uint64_t session_id, const GameObject& object) {
+  return make_turn_like_packet(session_id, kSmDigUp, object, false);
+}
+
+LegacyPacket make_dig_down_packet(std::uint64_t session_id, const GameObject& object) {
+  return make_legacy_game_packet(
+      session_id, 0, 0,
+      make_default_message(kSmDigDown, static_cast<std::int32_t>(object.id()),
+                           static_cast<std::uint16_t>(object.x()),
+                           static_cast<std::uint16_t>(object.y()),
+                           make_word(actor_dir(object), actor_light(object))));
+}
+
 /// @}
 
 /// @name 属性/资源变更包

@@ -9202,7 +9202,8 @@ class WorldScene final : public Scene {
 
   void render_actor_health(ClientContext& context, const ActorState& actor,
                            const ActorOverlayPosition& position) const {
-    if (actor.max_hp > 0 && actor.hp >= 0 && actor.hp < actor.max_hp) {
+    if (actor.max_hp > 0 && actor.hp >= 0 &&
+        (actor.health_gauge_visible || actor.hp < actor.max_hp)) {
       const auto width = 34;
       const auto filled = std::clamp((actor.hp * width) / actor.max_hp, 0, width);
       context.renderer->fill_rect(RectI{position.say_x - width / 2, position.say_y - 10, width, 4},

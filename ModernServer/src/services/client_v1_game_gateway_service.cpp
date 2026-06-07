@@ -260,6 +260,8 @@ client_v1::LegacyBundleMode legacy_bundle_mode_for_sm(std::uint16_t ident) {
     case kSmSpell:
     case kSmStruck:
     case kSmAlive:
+    case kSmDigUp:
+    case kSmDigDown:
     case kSmMagicFire:
     case kSmMagicFireFail:
     case legacy::kSmFireHit:
@@ -2888,7 +2890,8 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
     return std::uint16_t{0};
   };
   auto make_actor = [&](std::uint64_t id, std::string name, std::int32_t x, std::int32_t y,
-                        std::uint8_t dir, std::int32_t feature, std::int32_t status) {
+                        std::uint8_t dir, std::uint8_t light, std::int32_t feature,
+                        std::int32_t status) {
     if (name.empty() && id == state.actor_id) {
       name = state.character_name;
     }
@@ -2897,7 +2900,7 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
       level = 1;
     }
     return client_v1::WorldActor{id, std::move(name), x, y, dir, feature, status,
-                                 actor_type_for(id, state.actor_id), level};
+                                 actor_type_for(id, state.actor_id), level, light};
   };
   bool request_bag_items = false;
   bool request_storage_items = false;
@@ -2979,6 +2982,8 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
         current.character.x = decoded->message.param;
         current.character.y = decoded->message.tag;
         current.character.dir = static_cast<std::uint8_t>(decoded->message.series & 0xFFU);
+        current.character.light =
+            static_cast<std::uint8_t>((decoded->message.series >> 8U) & 0xFFU);
         if (desc.has_value()) {
           current.character.feature = desc->lparam1;
           current.character.status = desc->lparam2;
@@ -3002,7 +3007,8 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
         snapshot.self_actor_id = current.actor_id;
         snapshot.actors.push_back(make_actor(current.actor_id, current.character_name,
                                              current.character.x, current.character.y,
-                                             current.character.dir, current.character.feature,
+                                             current.character.dir, current.character.light,
+                                             current.character.feature,
                                              current.character.status));
       }
       if (enter_result.success) {
@@ -3024,8 +3030,10 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
       const auto dir = static_cast<std::uint8_t>(decoded->message.series & 0xFFU);
       const auto feature = desc.has_value() ? desc->feature : 0;
       const auto status = desc.has_value() ? desc->status : 0;
-      messages.push_back(client_v1::ActorUpsert{
-          make_actor(actor_id, name, decoded->message.param, decoded->message.tag, dir, feature, status)});
+      const auto light = static_cast<std::uint8_t>((decoded->message.series >> 8U) & 0xFFU);
+      messages.push_back(client_v1::ActorUpsert{make_actor(actor_id, name, decoded->message.param,
+                                                           decoded->message.tag, dir, light,
+                                                           feature, status)});
       messages.push_back(client_v1::ActorAction{
           actor_id, actor_action_kind_for_sm(decoded->message.ident), decoded->message.param,
           decoded->message.tag, dir, 0, 0, decoded->message.ident, 0, false});
@@ -3035,6 +3043,7 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
         current.character.x = decoded->message.param;
         current.character.y = decoded->message.tag;
         current.character.dir = dir;
+        current.character.light = light;
       }
       break;
     }
@@ -3082,6 +3091,29 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
       messages.push_back(client_v1::ActorMagicFireFail{actor_id, decoded->message.ident});
       break;
     }
+    case kSmDigUp: {
+      auto desc = decode_char_desc_prefix(decoded->body);
+      const auto name = name_from_turn_body(decoded->body);
+      const auto dir = static_cast<std::uint8_t>(decoded->message.series & 0xFFU);
+      const auto light = static_cast<std::uint8_t>((decoded->message.series >> 8U) & 0xFFU);
+      const auto feature = desc.has_value() ? desc->feature : 0;
+      const auto status = desc.has_value() ? desc->status : 0;
+      messages.push_back(client_v1::ActorUpsert{
+          make_actor(actor_id, name, decoded->message.param, decoded->message.tag, dir, light,
+                     feature, status)});
+      messages.push_back(client_v1::ActorAction{
+          actor_id, client_v1::ActorActionKind::turn, decoded->message.param, decoded->message.tag,
+          dir, 0, 0, decoded->message.ident, 0, false});
+      break;
+    }
+    case kSmDigDown: {
+      const auto dir = static_cast<std::uint8_t>(decoded->message.series & 0xFFU);
+      messages.push_back(client_v1::ActorAction{
+          actor_id, client_v1::ActorActionKind::turn, decoded->message.param, decoded->message.tag,
+          dir, 0, 0, decoded->message.ident, 0, false});
+      messages.push_back(client_v1::ActorRemove{actor_id, decoded->message.ident});
+      break;
+    }
     case kSmStruck: {
       const auto body = decode_body_wl_prefix(decoded->body);
       const auto source = body.has_value() ? static_cast<std::uint64_t>(static_cast<std::uint32_t>(body->ltag1)) : 0;
@@ -3105,10 +3137,11 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
     case kSmSpaceMoveShow2: {
       const auto desc = decode_char_desc_prefix(decoded->body);
       const auto dir = static_cast<std::uint8_t>(decoded->message.series & 0xFFU);
+      const auto light = static_cast<std::uint8_t>((decoded->message.series >> 8U) & 0xFFU);
       const auto feature = desc.has_value() ? desc->feature : 0;
       const auto status = desc.has_value() ? desc->status : 0;
       messages.push_back(client_v1::ActorUpsert{
-          make_actor(actor_id, {}, decoded->message.param, decoded->message.tag, dir,
+          make_actor(actor_id, {}, decoded->message.param, decoded->message.tag, dir, light,
                      feature, status)});
       if (actor_id == state.actor_id) {
         std::scoped_lock lock(mutex_);
@@ -3116,6 +3149,7 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
         current.character.x = decoded->message.param;
         current.character.y = decoded->message.tag;
         current.character.dir = dir;
+        current.character.light = light;
         current.character.feature = feature;
         current.character.status = status;
       }
@@ -3125,7 +3159,7 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
       {
         const auto event = decode_short_message_prefix(decoded->body);
       messages.push_back(client_v1::ActorUpsert{
-          make_actor(actor_id, {}, decoded->message.tag, decoded->message.series, 0,
+          make_actor(actor_id, {}, decoded->message.tag, decoded->message.series, 0, 0,
                      static_cast<std::int32_t>(decoded->message.param),
                      event.has_value() ? static_cast<std::int32_t>(event->ident) : 0)});
       }
@@ -3152,7 +3186,8 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
         state = current;
         upsert.actor = make_actor(actor_id, current.character_name,
                                   current.character.x, current.character.y,
-                                  current.character.dir, current.character.feature,
+                                  current.character.dir, current.character.light,
+                                  current.character.feature,
                                   current.character.status);
       }
       messages.push_back(upsert);
@@ -3823,6 +3858,7 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
           legacy_decode_text(decoded->body),
           static_cast<std::uint32_t>(decoded->message.param),
           0,
+          0,
           0});
       break;
     case kSmFeatureChanged:
@@ -3832,6 +3868,7 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
           {},
           0xFFFFFFFFU,
           make_long(decoded->message.param, decoded->message.tag),
+          0,
           0});
       break;
     case kSmCharStatusChanged:
@@ -3841,7 +3878,45 @@ void ClientV1GameGatewayService::translate_legacy_packet_messages(
           {},
           0xFFFFFFFFU,
           0,
-          make_long(decoded->message.param, decoded->message.tag)});
+          make_long(decoded->message.param, decoded->message.tag),
+          0});
+      break;
+    case kSmChangeLight: {
+      const auto light =
+          static_cast<std::uint8_t>(std::clamp<std::int32_t>(decoded->message.param, 0, 255));
+      if (actor_id == state.actor_id) {
+        std::scoped_lock lock(mutex_);
+        sessions_[session_id].character.light = light;
+      }
+      messages.push_back(client_v1::ActorIdentityUpdate{
+          actor_id,
+          client_v1::kActorIdentityLight,
+          {},
+          0xFFFFFFFFU,
+          0,
+          0,
+          light});
+      break;
+    }
+    case kSmChangeNameColor:
+      messages.push_back(client_v1::ActorIdentityUpdate{
+          actor_id,
+          client_v1::kActorIdentityNameColor,
+          {},
+          static_cast<std::uint32_t>(decoded->message.param),
+          0,
+          0,
+          0});
+      break;
+    case kSmOpenHealth:
+      messages.push_back(client_v1::ActorVitals{
+          actor_id, decoded->message.param, decoded->message.tag, -1, -1, 0, 0, false,
+          decoded->message.ident, level_for_actor(actor_id), 1});
+      break;
+    case kSmCloseHealth:
+      messages.push_back(client_v1::ActorVitals{
+          actor_id, -1, -1, -1, -1, 0, 0, false, decoded->message.ident,
+          level_for_actor(actor_id), 0});
       break;
     case kSmAddMagic: {
       const auto legacy_magic = decode_client_magic(decoded->body);

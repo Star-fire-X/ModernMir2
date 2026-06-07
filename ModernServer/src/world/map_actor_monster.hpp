@@ -2472,7 +2472,27 @@ bool MapActor::legacy_monster_special_run(Monster& monster, RuntimeDispatch& dis
       monster.set_appear_time_ms(now_ms);
       monster.select_target(target->id(), now_ms);
       refresh_moving_object_state(monster, now_ms);
-      sync_all_player_visibility(dispatch, now_ms);
+      for (const auto watcher_id : legacy_ref_target_player_ids(monster, now_ms)) {
+        auto* watcher = find_player(watcher_id);
+        if (watcher == nullptr || !in_legacy_view_range(watcher->x(), watcher->y(),
+                                                        monster.x(), monster.y())) {
+          continue;
+        }
+        queue_packet(dispatch, watcher->session_id(),
+                     make_dig_up_packet(watcher->session_id(), monster));
+        queue_packet(dispatch, watcher->session_id(),
+                     make_username_packet(watcher->session_id(), monster.id(),
+                                          actor_name(monster), actor_name_color(monster)));
+        if (watcher_id == monster.id()) {
+          continue;
+        }
+        auto& visibility = visibility_[watcher_id];
+        visibility.actors.insert(monster.id());
+        if (std::find(visibility.actor_order.begin(), visibility.actor_order.end(), monster.id()) ==
+            visibility.actor_order.end()) {
+          visibility.actor_order.push_back(monster.id());
+        }
+      }
       ActorMail trace_mail;
       trace_mail.kind = ActorMailKind::turn;
       trace_mail.map_id = config_.id;
@@ -2507,10 +2527,23 @@ bool MapActor::legacy_monster_special_run(Monster& monster, RuntimeDispatch& dis
         std::abs(target->y() - monster.y()) > down_range) {
       // 目标离开范围或死亡 -> 钻回地下
       monster.lose_target();
+      for (const auto watcher_id : ordered_player_ids()) {
+        auto visibility_it = visibility_.find(watcher_id);
+        if (visibility_it == visibility_.end() ||
+            !visibility_it->second.actors.contains(monster.id())) {
+          continue;
+        }
+        if (auto* watcher = find_player(watcher_id); watcher != nullptr) {
+          queue_packet(dispatch, watcher->session_id(),
+                       make_dig_down_packet(watcher->session_id(), monster));
+        }
+        visibility_it->second.actors.erase(monster.id());
+        erase_ordered_id(visibility_it->second.actor_order, monster.id());
+      }
+      legacy_ref_target_cache_.erase(monster.id());
       monster.set_hide_mode(true);
       monster.set_appear_time_ms(now_ms);
       refresh_moving_object_state(monster, now_ms);
-      remove_actor_from_visibility(monster.id(), dispatch);
       ActorMail trace_mail;
       trace_mail.kind = ActorMailKind::turn;
       trace_mail.map_id = config_.id;

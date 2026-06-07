@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 
+#include "protocol/legacy_game_codec.hpp"
 #include "world/logic_runtime.hpp"
 
 namespace {
@@ -85,6 +86,13 @@ void enter(mir2::LogicRuntime& runtime, std::uint64_t session_id, std::string na
   static_cast<void>(runtime.route_logic_command(command));
 }
 
+void logout(mir2::LogicRuntime& runtime, std::uint64_t session_id) {
+  mir2::LogicCommand command;
+  command.kind = mir2::LogicCommandKind::logout;
+  command.session_id = session_id;
+  static_cast<void>(runtime.route_logic_command(command));
+}
+
 mir2::RuntimeDispatch run_until(mir2::LogicRuntime& runtime, std::uint64_t start_ms,
                                 std::uint64_t end_ms, std::uint64_t step_ms = 20) {
   mir2::RuntimeDispatch aggregate;
@@ -148,6 +156,52 @@ bool has_trace_value(const mir2::RuntimeDispatch& dispatch, std::string_view sta
                               trace.value == value &&
                               (label.empty() || trace.label == label);
                      });
+}
+
+bool has_legacy_packet(const mir2::RuntimeDispatch& dispatch,
+                       std::uint64_t session_id,
+                       std::uint16_t ident,
+                       std::uint64_t recog) {
+  return std::any_of(dispatch.session_events.begin(), dispatch.session_events.end(),
+                     [&](const mir2::SessionEvent& event) {
+                       if (event.kind != mir2::SessionEventKind::send_packet ||
+                           event.session_id != session_id) {
+                         return false;
+                       }
+                       const auto decoded = mir2::decode_legacy_game_packet(event.packet);
+                       return decoded.has_value() && decoded->message.ident == ident &&
+                              static_cast<std::uint64_t>(
+                                  static_cast<std::uint32_t>(decoded->message.recog)) == recog;
+                     });
+}
+
+struct TraceRunResult {
+  mir2::RuntimeDispatch dispatch;
+  std::optional<std::uint64_t> matched_ms;
+};
+
+TraceRunResult run_until_trace(mir2::LogicRuntime& runtime, std::uint64_t start_ms,
+                               std::uint64_t end_ms, std::string_view stage,
+                               std::string_view action, std::string_view label = {},
+                               std::uint64_t step_ms = 20) {
+  TraceRunResult result;
+  for (auto now = start_ms; now <= end_ms; now += step_ms) {
+    auto dispatch = runtime.tick(now);
+    if (!result.matched_ms.has_value() && has_trace(dispatch, stage, action, label)) {
+      result.matched_ms = now;
+    }
+    result.dispatch.legacy_traces.insert(result.dispatch.legacy_traces.end(),
+                                         dispatch.legacy_traces.begin(),
+                                         dispatch.legacy_traces.end());
+    result.dispatch.session_events.insert(
+        result.dispatch.session_events.end(),
+        std::make_move_iterator(dispatch.session_events.begin()),
+        std::make_move_iterator(dispatch.session_events.end()));
+    if (result.matched_ms.has_value()) {
+      break;
+    }
+  }
+  return result;
 }
 
 mir2::HostConfig base_config(std::string map_name) {
@@ -327,6 +381,32 @@ int main() {
     CHECK(has_trace(dispatch, "MonsterSpecial", "dig_up", "RM_DIGUP"));
     CHECK(!runtime.find_legacy_event("0", 10, 10,
                                      mir2::LegacyEventType::digout_zombi).has_value());
+  }
+
+  {
+    auto config = base_config("StickHideCache");
+    config.monsters.push_back(make_monster("Herb", 85));
+    config.spawns.push_back(make_spawn("Herb", 10, 10));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    const auto spawn_dispatch = spawn_legacy_groups(runtime, config.spawns.size());
+    const auto herb_id = spawned_actor_id(spawn_dispatch);
+    CHECK(herb_id.has_value());
+
+    enter(runtime, 7, "Hero", 10, 13);
+    auto first_dig_up = run_until_trace(runtime, 1020, 1800,
+                                        "MonsterSpecial", "dig_up", "RM_DIGUP");
+    CHECK(first_dig_up.matched_ms.has_value());
+    CHECK(has_legacy_packet(first_dig_up.dispatch, 7, mir2::kSmDigUp, *herb_id));
+    CHECK(has_legacy_packet(first_dig_up.dispatch, 7, mir2::kSmUsername, *herb_id));
+    CHECK(runtime.legacy_ref_target_cache_contains("0", *herb_id));
+
+    logout(runtime, 7);
+    auto dig_down = run_until_trace(runtime, *first_dig_up.matched_ms + 20,
+                                    *first_dig_up.matched_ms + 300,
+                                    "MonsterSpecial", "dig_down", "RM_DIGDOWN");
+    CHECK(dig_down.matched_ms.has_value());
+    CHECK(!runtime.legacy_ref_target_cache_contains("0", *herb_id));
   }
 
   {

@@ -917,6 +917,32 @@ struct AuditEvent {
   std::string session_key{};   ///< 关联的会话键（用于溯源）
 };
 
+/**
+ * @brief 跨服广播范围
+ *
+ * @details 目前仅承载 Delphi `@!` GM 跨服公告语义。
+ */
+enum class InterserverBroadcastScope {
+  sysop_global_interserver  ///< GM 跨服全局公告
+};
+
+/**
+ * @brief 跨服广播消息
+ *
+ * @details 既可作为 RuntimeDispatch 的输出，也可通过本地总线在
+ *          WorldService 与 InterserverBroadcastService 之间传递。
+ *          `local_only=true` 表示消息来自远端服，只做本地 fanout，
+ *          不再回传到其他 peer，避免环路。
+ */
+struct InterserverBroadcast {
+  std::string message_id{};                      ///< 广播唯一 ID（用于去重/追踪）
+  InterserverBroadcastScope scope{
+      InterserverBroadcastScope::sysop_global_interserver};  ///< 广播范围
+  std::string text{};                            ///< 广播正文
+  std::string source_server_tag{};               ///< 源服务器标识
+  bool local_only{false};                        ///< 是否仅在本机分发
+};
+
 // ======================== 统一消息类型 ========================
 
 /**
@@ -938,6 +964,7 @@ struct AuditEvent {
  *       同时需要更新所有使用 std::visit 处理消息的模块。
  */
 using BusMessage =
-    std::variant<SessionEvent, LogicCommand, ActorMail, PersistRequest, PersistResult, AuditEvent>;
+    std::variant<SessionEvent, LogicCommand, ActorMail, PersistRequest, PersistResult, AuditEvent,
+                 InterserverBroadcast>;
 
 }  // namespace mir2

@@ -258,6 +258,40 @@ std::vector<std::uint64_t> MapActor::legacy_ref_target_player_ids(const GameObje
   return watcher_ids;
 }
 
+bool MapActor::legacy_ref_target_cache_contains(std::uint64_t actor_id) const {
+  return legacy_ref_target_cache_.contains(actor_id);
+}
+
+std::vector<std::uint64_t> MapActor::legacy_ref_target_player_ids_at(
+    const std::int32_t x, const std::int32_t y) const {
+  std::vector<std::uint64_t> watcher_ids;
+  for (std::int32_t scan_x = x - 12; scan_x <= x + 12; ++scan_x) {
+    for (std::int32_t scan_y = y - 12; scan_y <= y + 12; ++scan_y) {
+      const auto* cell = environment_.cell(scan_x, scan_y);
+      if (cell == nullptr) {
+        continue;
+      }
+      for (const auto& entry : cell->obj_list) {
+        if (entry.shape != LegacyMapObjectShape::moving_object ||
+            std::find(watcher_ids.begin(), watcher_ids.end(), entry.object_id) !=
+                watcher_ids.end()) {
+          continue;
+        }
+        const auto object_it = objects_.find(entry.object_id);
+        if (object_it == objects_.end()) {
+          continue;
+        }
+        if (const auto* watcher = as_player(object_it->second.get());
+            watcher != nullptr && !watcher->legacy_ghost() &&
+            in_legacy_view_range(watcher->x(), watcher->y(), x, y)) {
+          watcher_ids.push_back(watcher->id());
+        }
+      }
+    }
+  }
+  return watcher_ids;
+}
+
 /**
  * @brief 同步指定玩家的视野可见性（角色、物品、事件）
  * @param player 目标玩家

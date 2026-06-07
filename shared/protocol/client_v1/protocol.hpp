@@ -23,7 +23,7 @@
 
 namespace mir2::client_v1 {
 
-constexpr std::uint32_t kProtocolVersion = 5;
+constexpr std::uint32_t kProtocolVersion = 6;
 
 constexpr std::uint16_t kFrameFlagLegacyBundle = 0x0001U;
 
@@ -406,6 +406,7 @@ struct WorldActor {
   std::int32_t status{0};
   ActorType actor_type{ActorType::player};
   std::uint16_t level{1};
+  std::uint8_t light{0};
 };
 
 /// 世界快照：进入世界后服务端发送的完整场景状态
@@ -444,6 +445,7 @@ constexpr std::uint8_t kActorIdentityName = 1U;
 constexpr std::uint8_t kActorIdentityNameColor = 2U;
 constexpr std::uint8_t kActorIdentityFeature = 4U;
 constexpr std::uint8_t kActorIdentityStatus = 8U;
+constexpr std::uint8_t kActorIdentityLight = 16U;
 
 struct ActorIdentityUpdate {
   std::uint64_t actor_id{0};
@@ -452,6 +454,7 @@ struct ActorIdentityUpdate {
   std::uint32_t name_color{0xFFFFFFFFU};
   std::int32_t feature{0};
   std::int32_t status{0};
+  std::uint8_t light{0};
 };
 
 struct MapDescription {
@@ -581,6 +584,7 @@ struct ActorVitals {
   bool magic{false};
   std::uint16_t legacy_ident{0};
   std::uint16_t actor_level{0};
+  std::int32_t health_gauge_visible{-1};  ///< -1=不变, 0=关闭, 1=打开
 };
 
 /// 角色死亡事件
@@ -1476,6 +1480,7 @@ inline void encode(ByteWriter& writer, const WorldActor& value) {
   writer.write_i32(value.status);
   writer.write_u8(static_cast<std::uint8_t>(value.actor_type));
   writer.write_u16(value.level);
+  writer.write_u8(value.light);
 }
 
 inline bool decode(ByteReader& reader, WorldActor& value) {
@@ -1484,7 +1489,7 @@ inline bool decode(ByteReader& reader, WorldActor& value) {
   if (!(reader.read_u64(value.actor_id) && reader.read_string(value.name) &&
         reader.read_i32(value.x) && reader.read_i32(value.y) && reader.read_u8(value.dir) &&
         reader.read_i32(value.feature) && reader.read_i32(value.status) &&
-        reader.read_u8(actor_type) && reader.read_u16(level))) {
+        reader.read_u8(actor_type) && reader.read_u16(level) && reader.read_u8(value.light))) {
     return false;
   }
   value.actor_type = static_cast<ActorType>(actor_type);
@@ -1891,12 +1896,14 @@ inline void encode(ByteWriter& writer, const ActorIdentityUpdate& value) {
   writer.write_u32(value.name_color);
   writer.write_i32(value.feature);
   writer.write_i32(value.status);
+  writer.write_u8(value.light);
 }
 
 inline bool decode(ByteReader& reader, ActorIdentityUpdate& value) {
   return reader.read_u64(value.actor_id) && reader.read_u8(value.mask) &&
          reader.read_string(value.name) && reader.read_u32(value.name_color) &&
-         reader.read_i32(value.feature) && reader.read_i32(value.status);
+         reader.read_i32(value.feature) && reader.read_i32(value.status) &&
+         reader.read_u8(value.light);
 }
 
 inline void encode(ByteWriter& writer, const MapDescription& value) {
@@ -2114,6 +2121,7 @@ inline void encode(ByteWriter& writer, const ActorVitals& value) {
   writer.write_bool(value.magic);
   writer.write_u16(value.legacy_ident);
   writer.write_u16(value.actor_level);
+  writer.write_i32(value.health_gauge_visible);
 }
 
 inline bool decode(ByteReader& reader, ActorVitals& value) {
@@ -2121,7 +2129,8 @@ inline bool decode(ByteReader& reader, ActorVitals& value) {
          reader.read_i32(value.max_hp) && reader.read_i32(value.mp) &&
          reader.read_i32(value.max_mp) && reader.read_i32(value.damage) &&
          reader.read_u64(value.source_actor_id) && reader.read_bool(value.magic) &&
-         reader.read_u16(value.legacy_ident) && reader.read_u16(value.actor_level);
+         reader.read_u16(value.legacy_ident) && reader.read_u16(value.actor_level) &&
+         reader.read_i32(value.health_gauge_visible);
 }
 
 inline void encode(ByteWriter& writer, const ActorDeath& value) {

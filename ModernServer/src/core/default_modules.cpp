@@ -22,6 +22,7 @@
 #include "services/client_v1_game_gateway_service.hpp"
 #include "services/client_v1_login_gateway_service.hpp"
 #include "services/game_gateway_service.hpp"
+#include "services/interserver_broadcast_service.hpp"
 #include "services/log_service.hpp"
 #include "services/login_gateway_service.hpp"
 #include "services/persistence_service.hpp"
@@ -64,6 +65,7 @@ void register_default_modules(HostRuntime& runtime) {
   runtime.register_module(std::make_unique<PersistenceService>());
   runtime.register_module(std::make_unique<AuthService>());
   runtime.register_module(std::make_unique<WorldService>());
+  runtime.register_module(std::make_unique<InterserverBroadcastService>());
 
   // ---- 第二阶段：旧版网关服务（按需启用） ----
   if (runtime.context().config.runtime.enable_legacy_gateways) {

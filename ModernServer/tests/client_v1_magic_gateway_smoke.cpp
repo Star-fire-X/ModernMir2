@@ -154,6 +154,11 @@ mir2::LegacyPacket make_char_status_changed_packet(std::uint64_t session_id) {
       mir2::make_default_message(mir2::kSmCharStatusChanged, 42, 0x0008, 0x0000, 0));
 }
 
+mir2::LegacyPacket make_change_light_packet(std::uint64_t session_id) {
+  return mir2::make_legacy_game_packet(
+      session_id, 0, 0, mir2::make_default_message(mir2::kSmChangeLight, 42, 7, 0, 0));
+}
+
 mir2::LegacyPacket make_door_packet(std::uint64_t session_id, std::uint16_t ident) {
   return mir2::make_legacy_game_packet(
       session_id, 0, 0, mir2::make_default_message(ident, 0, 12, 13, 0));
@@ -366,6 +371,20 @@ int main() {
   assert(map_entered->self_actor_id == 42);
   assert(map_entered->x == 14 && map_entered->y == 15);
   assert(map_entered->dir == 3);
+
+  messages.clear();
+  service.translate_legacy_packet_for_test(kSessionId, make_change_light_packet(kSessionId),
+                                           messages);
+  assert(messages.size() == 1);
+  const auto* light =
+      std::get_if<mir2::client_v1::ActorIdentityUpdate>(&messages.front());
+  assert(light != nullptr);
+  assert(light->actor_id == 42);
+  assert(light->mask == mir2::client_v1::kActorIdentityLight);
+  assert(light->light == 7);
+  character = service.session_character_for_test(kSessionId);
+  assert(character.has_value());
+  assert(character->light == 7);
 
   messages.clear();
   service.translate_legacy_packet_for_test(

@@ -147,6 +147,21 @@ int main() {
   assert(decoded_snapshot->actors.size() == 1);
   assert(decoded_snapshot->actors.front().name == "Hero");
   assert(decoded_snapshot->actors.front().feature == 1);
+  assert(decoded_snapshot->actors.front().light == 0);
+
+  const auto identity = round_trip(
+      ActorIdentityUpdate{42,
+                          static_cast<std::uint8_t>(kActorIdentityNameColor |
+                                                    kActorIdentityLight),
+                          {},
+                          249,
+                          0,
+                          0,
+                          7},
+      801);
+  assert(identity.actor_id == 42);
+  assert(identity.name_color == 249);
+  assert(identity.light == 7);
 
   SelectServerRequest select_server;
   select_server.name = "ModernServer";
@@ -387,6 +402,10 @@ int main() {
   assert(decoded_vitals->damage == 5);
   assert(decoded_vitals->magic);
   assert(decoded_vitals->actor_level == 0);
+
+  const auto open_health = round_trip(
+      ActorVitals{42, 18, 30, -1, -1, 0, 0, false, 0, 0, 1}, 802);
+  assert(open_health.health_gauge_visible == 1);
 
   const auto death_frame = encode_frame(make_frame(ActorDeath{42, 330, 270, 4}, 21));
   buffer = death_frame;

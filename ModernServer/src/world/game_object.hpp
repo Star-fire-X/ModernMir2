@@ -214,6 +214,7 @@ struct LegacyBatchMoveRequest {
  *          - audit_events: 审计追踪事件
  *          - persist_requests: 持久化保存请求
  *          - cross_map_mails: 跨地图传递的 ActorMail
+ *          - interserver_broadcasts: 跨服广播请求
  *          - legacy_event_creates: 需创建的地图事件
  *          - legacy_holy_curtain_groups: 圣言帷幕组状态更新
  *          - legacy_random_space_moves: 随机空间移动请求
@@ -226,6 +227,7 @@ struct RuntimeDispatch {
   std::vector<AuditEvent> audit_events{};                        ///< 审计事件
   std::vector<PersistRequest> persist_requests{};                ///< 持久化请求
   std::vector<ActorMail> cross_map_mails{};                      ///< 跨地图邮件
+  std::vector<InterserverBroadcast> interserver_broadcasts{};    ///< 跨服广播
   std::vector<LegacyEventRecord> legacy_event_creates{};         ///< 待创建的地图事件
   std::vector<LegacyHolyCurtainGroup> legacy_holy_curtain_groups{}; ///< 圣言帷幕组
   std::vector<LegacyRandomSpaceMoveRequest> legacy_random_space_moves{}; ///< 随机空间移动
@@ -942,6 +944,7 @@ class Player : public GameObject {
     return legacy_open_health_expire_tick_;
   }
   void activate_legacy_open_health(std::uint64_t expire_tick);
+  [[nodiscard]] bool clear_expired_legacy_open_health(std::uint64_t current_tick);
   [[nodiscard]] std::uint32_t legacy_magic_lvexp_generation(std::int32_t magic_id) const;
   std::uint32_t advance_legacy_magic_lvexp_generation(std::int32_t magic_id);
   //@}
@@ -1275,6 +1278,7 @@ class Monster : public GameObject {
   [[nodiscard]] bool legacy_open_health_active(std::uint64_t current_tick) const;
   [[nodiscard]] std::uint64_t legacy_open_health_expire_tick() const;
   void activate_legacy_open_health(std::uint64_t expire_tick);
+  [[nodiscard]] bool clear_expired_legacy_open_health(std::uint64_t current_tick);
   [[nodiscard]] std::uint64_t last_hitter_id() const { return last_hitter_id_; }
   [[nodiscard]] std::uint64_t last_hit_time_ms() const { return last_hit_time_ms_; }
   [[nodiscard]] std::uint64_t exp_hitter_id() const { return exp_hitter_id_; }
