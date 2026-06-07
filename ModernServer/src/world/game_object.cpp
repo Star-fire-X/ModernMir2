@@ -3155,6 +3155,14 @@ void Player::activate_legacy_open_health(std::uint64_t expire_tick) {
   legacy_open_health_expire_tick_ = std::max(legacy_open_health_expire_tick_, expire_tick);
 }
 
+bool Player::clear_expired_legacy_open_health(std::uint64_t current_tick) {
+  if (legacy_open_health_expire_tick_ == 0 || current_tick <= legacy_open_health_expire_tick_) {
+    return false;
+  }
+  legacy_open_health_expire_tick_ = 0;
+  return true;
+}
+
 /** ==================== Player：魔法等级经验代次 ==================== */
 
 /**
@@ -4012,6 +4020,14 @@ std::uint64_t Monster::legacy_open_health_expire_tick() const {
 
 void Monster::activate_legacy_open_health(std::uint64_t expire_tick) {
   legacy_open_health_expire_tick_ = std::max(legacy_open_health_expire_tick_, expire_tick);
+}
+
+bool Monster::clear_expired_legacy_open_health(std::uint64_t current_tick) {
+  if (legacy_open_health_expire_tick_ == 0 || current_tick <= legacy_open_health_expire_tick_) {
+    return false;
+  }
+  legacy_open_health_expire_tick_ = 0;
+  return true;
 }
 
 const std::vector<std::uint64_t>& Monster::child_actor_ids() const { return child_actor_ids_; }

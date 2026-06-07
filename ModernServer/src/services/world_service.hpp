@@ -174,6 +174,8 @@ class WorldService : public Module {
   [[nodiscard]] RuntimeDispatch handle_session_event(const SessionEvent& event);
   [[nodiscard]] RuntimeDispatch handle_logic_command(const LogicCommand& command);
   [[nodiscard]] RuntimeDispatch handle_persist_result(const PersistResult& result);
+  [[nodiscard]] RuntimeDispatch handle_interserver_broadcast(
+      const InterserverBroadcast& broadcast);
   [[nodiscard]] bool should_defer_persist_result(const PersistResult& result) const;
   void enqueue_deferred_server_message(WorldIngressMessage message);
   void apply_persist_result(RuntimeDispatch& dispatch, const PersistResult& result);

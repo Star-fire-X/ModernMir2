@@ -5900,8 +5900,10 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         const auto expire_tick = current_tick + static_cast<std::uint64_t>(std::max(mail.power, 1));
         if (auto* player_target = as_player(&target); player_target != nullptr) {
           player_target->activate_legacy_open_health(expire_tick);
+          broadcast_legacy_open_health(dispatch, *player_target);
         } else if (auto* monster_target = as_monster(&target); monster_target != nullptr) {
           monster_target->activate_legacy_open_health(expire_tick);
+          broadcast_legacy_open_health(dispatch, *monster_target);
         }
         add_legacy_trace(dispatch, "LegacySpell", "open_health_apply", mail, current_tick,
                          now_ms, true, mail.magic_id, mail.power, "RM_DOOPENHEALTH");

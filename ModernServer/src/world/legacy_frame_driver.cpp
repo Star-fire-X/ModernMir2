@@ -34,6 +34,7 @@ namespace {
 [[nodiscard]] std::size_t dispatch_count(const RuntimeDispatch& dispatch) {
   return dispatch.session_events.size() + dispatch.audit_events.size() +
          dispatch.persist_requests.size() + dispatch.cross_map_mails.size() +
+         dispatch.interserver_broadcasts.size() +
          dispatch.legacy_time_recall_requests.size() + dispatch.legacy_traces.size();
 }
 
@@ -57,6 +58,10 @@ void append_dispatch(RuntimeDispatch& target, RuntimeDispatch source) {
   target.cross_map_mails.insert(target.cross_map_mails.end(),
                                 std::make_move_iterator(source.cross_map_mails.begin()),
                                 std::make_move_iterator(source.cross_map_mails.end()));
+  target.interserver_broadcasts.insert(
+      target.interserver_broadcasts.end(),
+      std::make_move_iterator(source.interserver_broadcasts.begin()),
+      std::make_move_iterator(source.interserver_broadcasts.end()));
   target.legacy_time_recall_requests.insert(
       target.legacy_time_recall_requests.end(),
       std::make_move_iterator(source.legacy_time_recall_requests.begin()),

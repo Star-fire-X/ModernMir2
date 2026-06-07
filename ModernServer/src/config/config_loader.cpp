@@ -2125,6 +2125,30 @@ HostConfig ConfigLoader::load(const std::filesystem::path& root) const {
         value_or<std::string>(*game, "address", "127.0.0.1");
     config.ports.client_v1_game_gateway.port = value_or<int>(*game, "port", 7100);
   }
+  if (auto interserver = ports["interserver"].as_table()) {
+    config.interserver.enabled = value_or<bool>(*interserver, "enabled", false);
+    config.interserver.server_tag =
+        value_or<std::string>(*interserver, "server_tag", "server");
+    if (auto listen = (*interserver)["listen"].as_table()) {
+      config.interserver.listen.address =
+          value_or<std::string>(*listen, "address", "127.0.0.1");
+      config.interserver.listen.port = value_or<int>(*listen, "port", 0);
+    }
+    if (auto peers = (*interserver)["peers"].as_array()) {
+      for (const auto& peer_node : *peers) {
+        const auto* peer = peer_node.as_table();
+        if (peer == nullptr) {
+          continue;
+        }
+        PortBinding binding;
+        binding.address = value_or<std::string>(*peer, "address", "127.0.0.1");
+        binding.port = value_or<int>(*peer, "port", 0);
+        if (binding.port != 0) {
+          config.interserver.peers.push_back(std::move(binding));
+        }
+      }
+    }
+  }
 
   // 读取 runtime/logic.toml —— 逻辑预算配置
   config.budgets.tick_ms = value_or<int>(logic, "tick_ms", 10);

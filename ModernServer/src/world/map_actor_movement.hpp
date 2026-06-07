@@ -29,13 +29,14 @@ void MapActor::broadcast_open_doors(
     const std::vector<std::pair<std::int32_t, std::int32_t>>& tiles,
     RuntimeDispatch& dispatch) {
   for (const auto& [x, y] : tiles) {
-    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
-      if (!in_legacy_view_range(watcher.x(), watcher.y(), x, y)) {
-        return;
+    for (const auto watcher_id : legacy_ref_target_player_ids_at(x, y)) {
+      const auto* watcher = find_player(watcher_id);
+      if (watcher == nullptr) {
+        continue;
       }
-      queue_packet(dispatch, watcher.session_id(),
-                   make_open_door_packet(watcher.session_id(), x, y));
-    });
+      queue_packet(dispatch, watcher->session_id(),
+                   make_open_door_packet(watcher->session_id(), x, y));
+    }
   }
 }
 
@@ -50,13 +51,14 @@ void MapActor::broadcast_close_doors(
     const std::vector<std::pair<std::int32_t, std::int32_t>>& tiles,
     RuntimeDispatch& dispatch) {
   for (const auto& [x, y] : tiles) {
-    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
-      if (!in_legacy_view_range(watcher.x(), watcher.y(), x, y)) {
-        return;
+    for (const auto watcher_id : legacy_ref_target_player_ids_at(x, y)) {
+      const auto* watcher = find_player(watcher_id);
+      if (watcher == nullptr) {
+        continue;
       }
-      queue_packet(dispatch, watcher.session_id(),
-                   make_close_door_packet(watcher.session_id(), x, y));
-    });
+      queue_packet(dispatch, watcher->session_id(),
+                   make_close_door_packet(watcher->session_id(), x, y));
+    }
   }
 }
 

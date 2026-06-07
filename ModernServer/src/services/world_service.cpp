@@ -104,6 +104,10 @@ void append_dispatch(RuntimeDispatch& target, RuntimeDispatch source) {
   target.cross_map_mails.insert(target.cross_map_mails.end(),
                                 std::make_move_iterator(source.cross_map_mails.begin()),
                                 std::make_move_iterator(source.cross_map_mails.end()));
+  target.interserver_broadcasts.insert(
+      target.interserver_broadcasts.end(),
+      std::make_move_iterator(source.interserver_broadcasts.begin()),
+      std::make_move_iterator(source.interserver_broadcasts.end()));
   target.legacy_traces.insert(target.legacy_traces.end(),
                               std::make_move_iterator(source.legacy_traces.begin()),
                               std::make_move_iterator(source.legacy_traces.end()));
@@ -772,6 +776,8 @@ RuntimeDispatch WorldService::process_ingress_batch(WorldIngressBatch& batch) {
       }
     } else if (auto mail = std::get_if<ActorMail>(&message)) {
       append_dispatch(combined, runtime_->route_actor_mail(*mail));
+    } else if (auto broadcast = std::get_if<InterserverBroadcast>(&message)) {
+      append_dispatch(combined, handle_interserver_broadcast(*broadcast));
     }
   }
   batch.messages.clear();
@@ -1315,6 +1321,14 @@ RuntimeDispatch WorldService::handle_logic_command(const LogicCommand& command) 
     }
   }
   return dispatch;
+}
+
+RuntimeDispatch WorldService::handle_interserver_broadcast(
+    const InterserverBroadcast& broadcast) {
+  if (runtime_ == nullptr) {
+    return {};
+  }
+  return runtime_->broadcast_interserver_notice(broadcast);
 }
 
 /**

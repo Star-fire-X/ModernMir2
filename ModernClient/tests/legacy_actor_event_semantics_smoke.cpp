@@ -391,6 +391,26 @@ void test_authoritative_actor_update_clears_pending_remove() {
   assert(state.world.actors.find(2) != state.world.actors.end());
 }
 
+void test_actor_queue_remove_waits_for_digdown_action() {
+  auto state = make_store();
+  std::vector<Message> messages;
+  messages.emplace_back(ActorAction{2, ActorActionKind::turn, 11, 10, 4, 0, 0,
+                                    legacy::kSmDigDown, 0, false, 0});
+  messages.emplace_back(ActorRemove{2, legacy::kSmDigDown});
+  state.enqueue_legacy_actor_bundle(std::move(messages));
+
+  state.process_legacy_actor_queues(1000);
+  assert(state.world.actors.find(2) != state.world.actors.end());
+  assert(state.world.actors[2].legacy_action_ident == legacy::kSmDigDown);
+  assert(state.world.actors[2].action_duration_ms == 510);
+  assert(state.world.actors[2].pending_remove);
+
+  state.prune_pending_actor_removals(1509);
+  assert(state.world.actors.find(2) != state.world.actors.end());
+  state.prune_pending_actor_removals(1510);
+  assert(state.world.actors.find(2) == state.world.actors.end());
+}
+
 void test_independent_visual_state_events() {
   auto state = make_store();
   state.apply(ActorIdentityUpdate{2,
@@ -444,6 +464,7 @@ int main() {
   test_grouped_flags_refresh_from_group_members();
   test_pending_remove_expires_after_legacy_minute();
   test_authoritative_actor_update_clears_pending_remove();
+  test_actor_queue_remove_waits_for_digdown_action();
   test_independent_visual_state_events();
   test_actor_action_queue_does_not_drop_fifo_after_64_messages();
   return 0;

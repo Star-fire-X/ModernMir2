@@ -1260,6 +1260,16 @@ bool LogicRuntime::handle_legacy_chat_command(const LogicCommand& command,
         for (const auto& [_, target] : session_index_) {
           queue_system_to(target, message);
         }
+        dispatch.interserver_broadcasts.push_back(InterserverBroadcast{
+            (config_.interserver.server_tag.empty() ? std::string{"server"}
+                                                    : config_.interserver.server_tag) +
+                ":" + std::to_string(now_ms) + ":" + std::to_string(locator.actor_id) + ":" +
+                std::to_string(command.session_id),
+            InterserverBroadcastScope::sysop_global_interserver,
+            message,
+            config_.interserver.server_tag.empty() ? std::string{"server"}
+                                                   : config_.interserver.server_tag,
+            false});
         if (command_definition != nullptr) {
           audit_gm_command("gm.command.ok", *command_definition, "broadcast");
         }
@@ -2208,6 +2218,22 @@ RuntimeDispatch LogicRuntime::route_actor_mail(const ActorMail& mail) {
     } else {
       map_it->second->enqueue_mail(mail);
     }
+  }
+  return dispatch;
+}
+
+RuntimeDispatch LogicRuntime::broadcast_interserver_notice(
+    const InterserverBroadcast& broadcast) {
+  RuntimeDispatch dispatch;
+  for (const auto& [_, target] : session_index_) {
+    ActorMail mail;
+    mail.kind = ActorMailKind::legacy_chat_delivery;
+    mail.map_id = target.map_id;
+    mail.actor_id = target.actor_id;
+    mail.target_actor_id = target.actor_id;
+    mail.legacy_chat_kind = LegacyChatDeliveryKind::system;
+    mail.payload = broadcast.text;
+    append_dispatch(dispatch, route_actor_mail(mail));
   }
   return dispatch;
 }
@@ -3666,6 +3692,12 @@ std::optional<MonsterSnapshot> LogicRuntime::legacy_monster_snapshot(
   return map_it->second->legacy_monster_snapshot(actor_id);
 }
 
+bool LogicRuntime::legacy_ref_target_cache_contains(std::string_view map_id,
+                                                    std::uint64_t actor_id) const {
+  const auto map_it = maps_.find(std::string(map_id));
+  return map_it != maps_.end() && map_it->second->legacy_ref_target_cache_contains(actor_id);
+}
+
 std::optional<LegacyPlayerState> LogicRuntime::legacy_session_state(
     std::uint64_t session_id) const {
   const auto locator_it = session_index_.find(session_id);
@@ -3736,6 +3768,10 @@ void LogicRuntime::append_dispatch(RuntimeDispatch& target, RuntimeDispatch sour
   target.cross_map_mails.insert(target.cross_map_mails.end(),
                                 std::make_move_iterator(source.cross_map_mails.begin()),
                                 std::make_move_iterator(source.cross_map_mails.end()));
+  target.interserver_broadcasts.insert(
+      target.interserver_broadcasts.end(),
+      std::make_move_iterator(source.interserver_broadcasts.begin()),
+      std::make_move_iterator(source.interserver_broadcasts.end()));
   target.legacy_event_creates.insert(
       target.legacy_event_creates.end(),
       std::make_move_iterator(source.legacy_event_creates.begin()),

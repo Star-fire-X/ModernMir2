@@ -83,6 +83,10 @@ void append_runtime_dispatch(RuntimeDispatch& target, RuntimeDispatch source) {
   target.cross_map_mails.insert(target.cross_map_mails.end(),
                                 std::make_move_iterator(source.cross_map_mails.begin()),
                                 std::make_move_iterator(source.cross_map_mails.end()));
+  target.interserver_broadcasts.insert(
+      target.interserver_broadcasts.end(),
+      std::make_move_iterator(source.interserver_broadcasts.begin()),
+      std::make_move_iterator(source.interserver_broadcasts.end()));
   target.legacy_event_creates.insert(
       target.legacy_event_creates.end(),
       std::make_move_iterator(source.legacy_event_creates.begin()),
@@ -1336,12 +1340,7 @@ bool try_legacy_revival_impl(
   queue_packet(dispatch, player.session_id(),
                make_sub_ability_packet(player.session_id(), player));
   if (player.character().status != previous_status) {
-    queue_packet(dispatch, player.session_id(),
-                 make_char_status_changed_packet(player.session_id(), player));
-    for_each_player(objects, [&](std::uint64_t actor_id, const Player& watcher) {
-      if (actor_id == player.id() || !is_legacy_visible_to(watcher, player)) {
-        return;
-      }
+    queue_actor_origin_packet(objects, dispatch, player, true, [&](const Player& watcher) {
       queue_packet(dispatch, watcher.session_id(),
                    make_char_status_changed_packet(watcher.session_id(), player));
     });
@@ -1390,12 +1389,7 @@ void queue_player_status_tick_result(
                  make_health_spell_changed_packet(player.session_id(), player));
   }
   if (result.legacy_status_changed) {
-    queue_packet(dispatch, player.session_id(),
-                 make_char_status_changed_packet(player.session_id(), player));
-    for_each_player(objects, [&](std::uint64_t actor_id, const Player& watcher) {
-      if (actor_id == player.id() || !is_legacy_visible_to(watcher, player)) {
-        return;
-      }
+    queue_actor_origin_packet(objects, dispatch, player, true, [&](const Player& watcher) {
       queue_packet(dispatch, watcher.session_id(),
                    make_char_status_changed_packet(watcher.session_id(), player));
     });
@@ -2646,6 +2640,12 @@ RuntimeDispatch MapActor::legacy_process_player(std::uint64_t actor_id,
     default:
       break;
   }
+  if (objects_.contains(actor_id)) {
+    player = find_player(actor_id);
+    if (player != nullptr && player->clear_expired_legacy_open_health(current_tick)) {
+      broadcast_legacy_close_health(dispatch, *player);
+    }
+  }
   return dispatch;
 }
 
@@ -2742,6 +2742,9 @@ RuntimeDispatch MapActor::legacy_process_monster(std::uint64_t actor_id,
       monster->on_tick(context);
     }
     trace.action = run_due ? "run" : "status";
+  }
+  if (objects_.contains(actor_id) && monster->clear_expired_legacy_open_health(current_tick)) {
+    broadcast_legacy_close_health(dispatch, *monster);
   }
   trace.elapsed_ms = static_cast<std::uint64_t>(
       std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -3489,6 +3492,56 @@ void MapActor::dispatch_player_status_tick_result(Player& player,
   queue_player_status_tick_result(objects_, dispatch, player, result, include_health);
 }
 
+void MapActor::broadcast_legacy_feature_changed(RuntimeDispatch& dispatch,
+                                                const GameObject& object) const {
+  queue_actor_origin_packet(objects_, dispatch, object, true, [&](const Player& watcher) {
+    queue_packet(dispatch, watcher.session_id(),
+                 make_feature_changed_packet(watcher.session_id(), object.id(),
+                                             actor_feature(object)));
+  });
+}
+
+void MapActor::broadcast_legacy_username(RuntimeDispatch& dispatch,
+                                         const GameObject& object) const {
+  queue_actor_origin_packet(objects_, dispatch, object, true, [&](const Player& watcher) {
+    queue_packet(dispatch, watcher.session_id(),
+                 make_username_packet(watcher.session_id(), object.id(), actor_name(object),
+                                      actor_name_color(object)));
+  });
+}
+
+void MapActor::broadcast_legacy_name_color_changed(RuntimeDispatch& dispatch,
+                                                   const GameObject& object) const {
+  queue_actor_origin_packet(objects_, dispatch, object, true, [&](const Player& watcher) {
+    queue_packet(dispatch, watcher.session_id(),
+                 make_change_name_color_packet(watcher.session_id(), object));
+  });
+}
+
+void MapActor::broadcast_legacy_light_changed(RuntimeDispatch& dispatch,
+                                              const GameObject& object) const {
+  queue_actor_origin_packet(objects_, dispatch, object, true, [&](const Player& watcher) {
+    queue_packet(dispatch, watcher.session_id(),
+                 make_change_light_packet(watcher.session_id(), object));
+  });
+}
+
+void MapActor::broadcast_legacy_open_health(RuntimeDispatch& dispatch,
+                                            const GameObject& object) const {
+  queue_actor_origin_packet(objects_, dispatch, object, true, [&](const Player& watcher) {
+    queue_packet(dispatch, watcher.session_id(),
+                 make_open_health_packet(watcher.session_id(), object));
+  });
+}
+
+void MapActor::broadcast_legacy_close_health(RuntimeDispatch& dispatch,
+                                             const GameObject& object) const {
+  queue_actor_origin_packet(objects_, dispatch, object, true, [&](const Player& watcher) {
+    queue_packet(dispatch, watcher.session_id(),
+                 make_close_health_packet(watcher.session_id(), object));
+  });
+}
+
 /**
  * @brief 广播角色状态变化给所有可见玩家
  *
@@ -3497,12 +3550,7 @@ void MapActor::dispatch_player_status_tick_result(Player& player,
  */
 void MapActor::broadcast_legacy_char_status_changed(RuntimeDispatch& dispatch,
                                                     const Player& player) const {
-  queue_packet(dispatch, player.session_id(),
-               make_char_status_changed_packet(player.session_id(), player));
-  for_each_player(objects_, [&](std::uint64_t actor_id, const Player& watcher) {
-    if (actor_id == player.id() || !is_legacy_visible_to(watcher, player)) {
-      return;
-    }
+  queue_actor_origin_packet(objects_, dispatch, player, true, [&](const Player& watcher) {
     queue_packet(dispatch, watcher.session_id(),
                  make_char_status_changed_packet(watcher.session_id(), player));
   });
@@ -4627,13 +4675,7 @@ bool MapActor::handle_weapon_upgrade_start(Player& player, Npc& npc,
   queue_packet(dispatch, player.session_id(),
                make_weight_changed_packet(player.session_id(), player.character()));
   if (player.character().feature != previous_feature) {
-    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
-      if (is_legacy_visible_to(watcher, player)) {
-        queue_packet(dispatch, watcher.session_id(),
-                     make_feature_changed_packet(watcher.session_id(), player.id(),
-                                                 player.character().feature));
-      }
-    });
+    broadcast_legacy_feature_changed(dispatch, player);
   }
   if (player.character().status != previous_status) {
     broadcast_legacy_char_status_changed(dispatch, player);
@@ -4829,13 +4871,7 @@ bool MapActor::apply_pending_weapon_upgrade_result(Player& attacker,
   queue_packet(dispatch, attacker.session_id(),
                make_use_items_packet(attacker.session_id(), attacker, item_configs_));
   if (attacker.character().feature != previous_feature) {
-    for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
-      if (is_legacy_visible_to(watcher, attacker)) {
-        queue_packet(dispatch, watcher.session_id(),
-                     make_feature_changed_packet(watcher.session_id(), attacker.id(),
-                                                 attacker.character().feature));
-      }
-    });
+    broadcast_legacy_feature_changed(dispatch, attacker);
   }
   queue_save_character(dispatch, attacker);
   add_legacy_trace(dispatch, "LegacyWeaponUpgrade", "identify_result", ActorMail{},
@@ -4970,10 +5006,7 @@ void MapActor::apply_bad_kill_penalty(Player& killer, const Player& victim,
     weapon_changed = apply_legacy_weapon_unlock(killer, dispatch, current_tick, now_ms,
                                                 std::move(stage));
   }
-  queue_packet(dispatch, killer.session_id(),
-               make_username_packet(killer.session_id(), killer.id(),
-                                    killer.character().character_name,
-                                    actor_name_color(killer)));
+  broadcast_legacy_name_color_changed(dispatch, killer);
   if (!weapon_changed) {
     queue_packet(dispatch, killer.session_id(),
                  make_ability_packet(killer.session_id(), killer.character()));
@@ -5163,13 +5196,7 @@ bool MapActor::settle_player_death(Player& player, RuntimeDispatch& dispatch,
     queue_packet(dispatch, player.session_id(),
                  make_sub_ability_packet(player.session_id(), player));
     if (player.character().feature != previous_feature) {
-      for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
-        if (is_legacy_visible_to(watcher, player)) {
-          queue_packet(dispatch, watcher.session_id(),
-                       make_feature_changed_packet(watcher.session_id(), player.id(),
-                                                   player.character().feature));
-        }
-      });
+      broadcast_legacy_feature_changed(dispatch, player);
     }
     if (player.character().status != previous_status) {
       broadcast_legacy_char_status_changed(dispatch, player);

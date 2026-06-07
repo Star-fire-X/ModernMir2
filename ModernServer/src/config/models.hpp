@@ -182,6 +182,17 @@ struct PortConfig {
 };
 
 /**
+ * @brief 跨服广播配置
+ * @details 定义跨服 GM 广播监听端点和目标 peer 列表。
+ */
+struct InterserverConfig {
+  bool enabled{false};                         ///< @brief 是否启用跨服广播服务
+  std::string server_tag{"server"};           ///< @brief 当前服务器标识
+  PortBinding listen{};                        ///< @brief 本地监听地址/端口
+  std::vector<PortBinding> peers{};            ///< @brief 远端 peer 列表
+};
+
+/**
  * @brief 逻辑预算配置
  * @details 定义服务端各子系统在每个 tick 内的最大执行时间预算。
  *           用于在单线程逻辑循环中公平分配 CPU 时间，防止某个子系统
@@ -666,6 +677,7 @@ struct MapQuestConfig {
 struct HostConfig {
   RuntimeConfig runtime{};                        ///< @brief 运行时参数
   PortConfig ports{};                             ///< @brief 端口配置
+  InterserverConfig interserver{};               ///< @brief 跨服广播配置
   LogicBudgetConfig budgets{};                    ///< @brief 逻辑预算配置
   std::vector<MapConfig> maps{};                  ///< @brief 地图配置列表
   std::vector<SpawnConfig> spawns{};              ///< @brief 刷怪配置列表

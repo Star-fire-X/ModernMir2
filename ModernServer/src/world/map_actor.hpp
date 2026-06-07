@@ -598,6 +598,7 @@ class MapActor {
    */
   [[nodiscard]] std::optional<MonsterSnapshot> legacy_monster_snapshot(
       std::uint64_t actor_id) const;
+  [[nodiscard]] bool legacy_ref_target_cache_contains(std::uint64_t actor_id) const;
 
   /**
    * @brief 设置玩家奴隶为放松状态
@@ -924,6 +925,18 @@ class MapActor {
   void dispatch_player_status_tick_result(Player& player, const StatusTickResult& result,
                                           RuntimeDispatch& dispatch,
                                           bool include_health) const;
+  void broadcast_legacy_feature_changed(RuntimeDispatch& dispatch,
+                                        const GameObject& object) const;
+  void broadcast_legacy_username(RuntimeDispatch& dispatch,
+                                 const GameObject& object) const;
+  void broadcast_legacy_name_color_changed(RuntimeDispatch& dispatch,
+                                           const GameObject& object) const;
+  void broadcast_legacy_light_changed(RuntimeDispatch& dispatch,
+                                      const GameObject& object) const;
+  void broadcast_legacy_open_health(RuntimeDispatch& dispatch,
+                                    const GameObject& object) const;
+  void broadcast_legacy_close_health(RuntimeDispatch& dispatch,
+                                     const GameObject& object) const;
   void broadcast_legacy_char_status_changed(RuntimeDispatch& dispatch,
                                             const Player& player) const;
 
@@ -1192,6 +1205,8 @@ class MapActor {
 
   [[nodiscard]] std::vector<std::uint64_t> legacy_ref_target_player_ids(
       const GameObject& origin, std::uint64_t now_ms);
+  [[nodiscard]] std::vector<std::uint64_t> legacy_ref_target_player_ids_at(
+      std::int32_t x, std::int32_t y) const;
 
   /// @}
 

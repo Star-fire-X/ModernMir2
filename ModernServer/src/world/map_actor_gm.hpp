@@ -247,9 +247,7 @@ void gm_broadcast_name_color(
     RuntimeDispatch& dispatch, const Player& player) {
   queue_actor_origin_packet(objects, dispatch, player, true, [&](const Player& watcher) {
     queue_packet(dispatch, watcher.session_id(),
-                 make_username_packet(watcher.session_id(), player.id(),
-                                      player.character().character_name,
-                                      actor_name_color(player)));
+                 make_change_name_color_packet(watcher.session_id(), player));
   });
 }
 

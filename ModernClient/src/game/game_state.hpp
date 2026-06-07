@@ -132,6 +132,7 @@ struct LegacyActorMessage {
 struct LegacyActorBundleMessage {
   std::vector<client_v1::Message> staged_state{};
   std::vector<LegacyActorMessage> actor_messages{};
+  std::vector<client_v1::ActorRemove> removals{};
 };
 
 struct ActorState {
@@ -142,6 +143,7 @@ struct ActorState {
   int from_x{0};         ///< 移动起始 X（用于帧间平滑插值）
   int from_y{0};         ///< 移动起始 Y
   std::uint8_t dir{0};   ///< 面向方向（0-7：0=上, 1=右上, 2=右, ..., 7=左上）
+  std::uint8_t light{0}; ///< 角色自身发光等级
   std::int32_t feature{0};  ///< 外观特征编码（包含 race/dress/weapon/hair 编码在一个 32 位值中）
   std::int32_t status{0};
   client_v1::ActorType actor_type{client_v1::ActorType::player};  ///< 角色类型（玩家/怪物/NPC）
@@ -187,6 +189,7 @@ struct ActorState {
   std::uint32_t saying_back_color{0x00000000U};
   std::uint64_t saying_started_ms{0};   ///< 头顶说话开始时间，4 秒后隐藏
   std::uint32_t name_color{0xFFFFFFFFU};
+  bool health_gauge_visible{false};
   bool grouped{false};
   bool pending_remove{false};
   std::uint64_t pending_remove_started_ms{0};
@@ -1015,6 +1018,7 @@ struct GameStateStore {
                                std::is_same_v<T, client_v1::ActorMagicFire> ||
                                std::is_same_v<T, client_v1::ActorMagicFireFail> ||
                                std::is_same_v<T, client_v1::ActorVitals> ||
+                               std::is_same_v<T, client_v1::ActorRemove> ||
                                std::is_same_v<T, client_v1::ActorDeath>) {
             return value.actor_id;
           } else {
@@ -1089,6 +1093,9 @@ struct GameStateStore {
                                std::is_same_v<T, client_v1::ActorVitals>) {
             bundle.staged_state.push_back(std::move(message));
             return true;
+          } else if constexpr (std::is_same_v<T, client_v1::ActorRemove>) {
+            bundle.removals.push_back(value);
+            return true;
           } else {
             return false;
           }
@@ -1106,7 +1113,8 @@ struct GameStateStore {
       append_legacy_actor_bundle_message(bundle, std::move(message));
     }
     if (actor_id == 0 ||
-        (bundle.staged_state.empty() && bundle.actor_messages.empty())) {
+        (bundle.staged_state.empty() && bundle.actor_messages.empty() &&
+         bundle.removals.empty())) {
       return;
     }
     auto& actor = world.actors[actor_id];
@@ -1132,6 +1140,9 @@ struct GameStateStore {
   static std::uint64_t action_duration_ms(client_v1::ActorActionKind kind,
                                           std::uint16_t legacy_ident,
                                           const std::uint16_t level = 1) {
+    if (legacy_ident == legacy::kSmDigUp || legacy_ident == legacy::kSmDigDown) {
+      return 510;
+    }
     switch (kind) {
       case client_v1::ActorActionKind::walk:
         return 540;    // 行走动画总时长
@@ -1313,6 +1324,7 @@ struct GameStateStore {
     }
     actor.feature = message.actor.feature;
     actor.status = message.actor.status;
+    actor.light = message.actor.light;
     actor.actor_type = message.actor.actor_type;
     actor.level = message.actor.level;
     if (actor.dead && actor.hp > 0) {
@@ -1336,6 +1348,19 @@ struct GameStateStore {
         message);
   }
 
+  void mark_actor_pending_remove(const client_v1::ActorRemove& message,
+                                 const std::uint64_t now_ms) {
+    if (message.actor_id == 0 || message.actor_id == world.self_actor_id) {
+      return;
+    }
+    auto it = world.actors.find(message.actor_id);
+    if (it == world.actors.end()) {
+      return;
+    }
+    it->second.pending_remove = true;
+    it->second.pending_remove_started_ms = now_ms;
+  }
+
   void apply_legacy_actor_bundle(ActorState& actor,
                                  const LegacyActorBundleMessage& bundle,
                                  const std::uint64_t now_ms) {
@@ -1344,6 +1369,9 @@ struct GameStateStore {
     }
     for (const auto& message : bundle.actor_messages) {
       apply_legacy_actor_message(actor, message, now_ms);
+    }
+    for (const auto& removal : bundle.removals) {
+      mark_actor_pending_remove(removal, now_ms);
     }
   }
 
@@ -2021,8 +2049,9 @@ struct GameStateStore {
     world.pending_self_dir = 0;
     for (const auto& actor : message.actors) {
       world.actors[actor.actor_id] = ActorState{actor.actor_id, actor.name, actor.x, actor.y,
-                                                actor.x, actor.y, actor.dir, actor.feature,
-                                                actor.status, actor.actor_type, actor.level};
+                                                actor.x, actor.y, actor.dir, actor.light,
+                                                actor.feature, actor.status,
+                                                actor.actor_type, actor.level};
       world.actor_draw_order.push_back(actor.actor_id);
     }
     world.map_clear_waiting_for_change = false;
@@ -2117,6 +2146,7 @@ struct GameStateStore {
       actor.from_y = message.actor.y;
       actor.dir = message.actor.dir;
     }
+    actor.light = message.actor.light;
     actor.feature = message.actor.feature;
     actor.status = message.actor.status;
     actor.actor_type = message.actor.actor_type;
@@ -2148,6 +2178,9 @@ struct GameStateStore {
     }
     if ((message.mask & client_v1::kActorIdentityStatus) != 0U) {
       actor.status = message.status;
+    }
+    if ((message.mask & client_v1::kActorIdentityLight) != 0U) {
+      actor.light = message.light;
     }
   }
 
@@ -2248,6 +2281,9 @@ struct GameStateStore {
     }
     if (message.actor_level > 0) {
       actor.level = message.actor_level;
+    }
+    if (message.health_gauge_visible >= 0) {
+      actor.health_gauge_visible = message.health_gauge_visible != 0;
     }
     actor.last_damage = message.damage;
     actor.last_hitter_id = message.source_actor_id;

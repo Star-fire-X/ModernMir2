@@ -149,6 +149,10 @@ class LogicRuntime {
   /// @brief 路由角色邮件到目标地图
   [[nodiscard]] RuntimeDispatch route_actor_mail(const ActorMail& mail);
 
+  /// @brief 将跨服公告在本机所有在线会话上分发
+  [[nodiscard]] RuntimeDispatch broadcast_interserver_notice(
+      const InterserverBroadcast& broadcast);
+
   /**
    * @brief 将就绪用户加入等待队列
    * @param ready_user 就绪用户信息
@@ -218,6 +222,8 @@ class LogicRuntime {
   /// @brief 获取指定怪物的快照
   [[nodiscard]] std::optional<MonsterSnapshot> legacy_monster_snapshot(
       std::string_view map_id, std::uint64_t actor_id) const;
+  [[nodiscard]] bool legacy_ref_target_cache_contains(std::string_view map_id,
+                                                      std::uint64_t actor_id) const;
 
   /// @brief 添加禁言记录
   void add_legacy_shut_up(std::string_view character_name, std::uint64_t duration_ms,
