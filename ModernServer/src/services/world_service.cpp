@@ -1523,9 +1523,6 @@ void WorldService::flush_dispatch(RuntimeDispatch dispatch) {
   for (auto& mail : dispatch.cross_map_mails) {
     context_->bus->post(name(), std::move(mail));
   }
-  for (auto& broadcast : dispatch.interserver_broadcasts) {
-    context_->bus->post("interserver_broadcast_service", std::move(broadcast));
-  }
 }
 
 }  // namespace mir2

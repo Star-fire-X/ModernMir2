@@ -96,7 +96,6 @@ set(MIR2_HOST_SOURCES
   src/services/client_v1_login_gateway_service.cpp
   src/services/game_gateway_service.cpp
   src/services/gateway_service_base.cpp
-  src/services/interserver_broadcast_service.cpp
   src/services/log_service.cpp
   src/services/login_gateway_service.cpp
   src/services/persistence_service.cpp

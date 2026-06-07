@@ -929,8 +929,8 @@ enum class InterserverBroadcastScope {
 /**
  * @brief 跨服广播消息
  *
- * @details 既可作为 RuntimeDispatch 的输出，也可通过本地总线在
- *          WorldService 与 InterserverBroadcastService 之间传递。
+ * @details 既可作为 RuntimeDispatch 的输出，也可通过本地总线传入
+ *          WorldService 做本服 fanout。
  *          `local_only=true` 表示消息来自远端服，只做本地 fanout，
  *          不再回传到其他 peer，避免环路。
  */
