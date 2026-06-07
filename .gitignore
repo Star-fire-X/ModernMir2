@@ -11,6 +11,8 @@
 !ModernServer/**
 !ModernClient/
 !ModernClient/**
+!docs/
+!docs/trade_system_migration_audit.md
 
 # ModernServer generated artifacts
 ModernServer/build/

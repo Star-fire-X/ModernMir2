@@ -29,10 +29,13 @@
         {"seq": 9, "direction": "server_to_client", "actor": "A", "message": "SM_DEALREMOTECHGGOLD", "ident": 686, "recog": 7, "param": 0, "tag": 0, "series": 0, "body": ""},
         {"seq": 10, "direction": "client_to_server", "actor": "A", "message": "CM_DEALEND", "ident": 1030, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""},
         {"seq": 11, "direction": "client_to_server", "actor": "B", "message": "CM_DEALEND", "ident": 1030, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""},
-        {"seq": 12, "direction": "server_to_client", "actor": "B", "message": "SM_ADDITEM", "ident": 200, "body": "TClientItem(Ruby,MakeIndex=1001)"},
-        {"seq": 13, "direction": "server_to_client", "actor": "A", "message": "SM_GOLDCHANGED", "ident": 653, "recog": "A.Gold"},
-        {"seq": 14, "direction": "server_to_client", "actor": "B", "message": "SM_DEALSUCCESS", "ident": 687, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""},
-        {"seq": 15, "direction": "server_to_client", "actor": "A", "message": "SM_DEALSUCCESS", "ident": 687, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""}
+        {"seq": 12, "direction": "server_to_client", "actor": "B", "message": "SM_ADDITEM", "ident": 200, "recog": "actor_pointer_B", "param": 0, "tag": 0, "series": 1, "body": "TClientItem(Ruby,MakeIndex=1001)"},
+        {"seq": 13, "direction": "server_to_client", "actor": "A", "message": "SM_GOLDCHANGED", "ident": 653, "recog": "A.Gold", "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 14, "direction": "server_to_client", "actor": "B", "message": "SM_GOLDCHANGED", "ident": 653, "recog": "B.Gold", "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 15, "direction": "server_to_client", "actor": "A", "message": "SM_WEIGHTCHANGED", "ident": 622, "recog": "A.Weight", "param": "A.WearWeight", "tag": "A.HandWeight", "series": "A.WeightChecksum", "body": ""},
+        {"seq": 16, "direction": "server_to_client", "actor": "B", "message": "SM_WEIGHTCHANGED", "ident": 622, "recog": "B.Weight", "param": "B.WearWeight", "tag": "B.HandWeight", "series": "B.WeightChecksum", "body": ""},
+        {"seq": 17, "direction": "server_to_client", "actor": "B", "message": "SM_DEALSUCCESS", "ident": 687, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""},
+        {"seq": 18, "direction": "server_to_client", "actor": "A", "message": "SM_DEALSUCCESS", "ident": 687, "recog": 0, "param": 0, "tag": 0, "series": 0, "body": ""}
       ]
     },
     {
@@ -81,6 +84,7 @@
   "notes": [
     "System messages are intentionally omitted from this trace until their exact encoded text and order are captured.",
     "SM_DEALREMOTEADDITEM and SM_DEALREMOTEDELITEM use a Delphi object pointer in recog; C++ should use the legacy-compatible actor id already used for object recog fields.",
-    "The successful_item_and_gold_deal case omits B-to-A item movement because the minimal trace covers one item from A and gold from B. A symmetric item-plus-item case should be added when the packet encoder test is implemented."
+    "The successful_item_and_gold_deal case omits B-to-A item movement because the minimal trace covers one item from A and gold from B. A symmetric item-plus-item case should be added when the packet encoder test is implemented.",
+    "Static Delphi review confirms SendAddItem, GoldChanged, and WeightChanged happen before SM_DEALSUCCESS; ModernServer currently emits SM_GOLDCHANGED for both sides at commit, so the golden smoke locks the current C++ packet order while preserving the Delphi-confirmed before-success boundary."
   ]
 }

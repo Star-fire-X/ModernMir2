@@ -24,6 +24,7 @@ struct TradeEvent {
   std::int32_t recog{0};
   std::int32_t param{0};
   std::int32_t tag{0};
+  std::uint16_t series{0};
   std::int32_t item_make_index{0};
   std::string body_text{};
 };
@@ -111,11 +112,22 @@ std::optional<mir2::LegacyClientItem> decode_client_item(std::string_view body) 
   return item;
 }
 
-void collect_trade_events(const mir2::RuntimeDispatch& dispatch, std::vector<TradeEvent>& events) {
+bool is_deal_event(std::uint16_t ident) {
+  return ident >= mir2::kSmDealMenu && ident <= mir2::kSmDealSuccess;
+}
+
+bool is_success_refresh_event(std::uint16_t ident) {
+  return ident == mir2::kSmAddItem || ident == mir2::kSmGoldChanged ||
+         ident == mir2::kSmWeightChanged;
+}
+
+void collect_trade_events(const mir2::RuntimeDispatch& dispatch, std::vector<TradeEvent>& events,
+                          bool include_success_refresh = false) {
   for (const auto& event : dispatch.session_events) {
     const auto decoded = mir2::decode_legacy_game_packet(event.packet);
-    if (!decoded.has_value() || decoded->message.ident < mir2::kSmDealMenu ||
-        decoded->message.ident > mir2::kSmDealSuccess) {
+    if (!decoded.has_value() ||
+        (!is_deal_event(decoded->message.ident) &&
+         !(include_success_refresh && is_success_refresh_event(decoded->message.ident)))) {
       continue;
     }
     TradeEvent trace;
@@ -124,9 +136,11 @@ void collect_trade_events(const mir2::RuntimeDispatch& dispatch, std::vector<Tra
     trace.recog = decoded->message.recog;
     trace.param = decoded->message.param;
     trace.tag = decoded->message.tag;
+    trace.series = decoded->message.series;
     if (trace.ident == mir2::kSmDealMenu) {
       trace.body_text = mir2::legacy_decode_string(decoded->body);
-    } else if (trace.ident == mir2::kSmDealRemoteAddItem) {
+    } else if (trace.ident == mir2::kSmDealRemoteAddItem ||
+               trace.ident == mir2::kSmAddItem) {
       const auto item = decode_client_item(decoded->body);
       if (item.has_value()) {
         trace.item_make_index = item->make_index;
@@ -139,8 +153,8 @@ void collect_trade_events(const mir2::RuntimeDispatch& dispatch, std::vector<Tra
 bool same_event(const TradeEvent& actual, const TradeEvent& expected) {
   return actual.session_id == expected.session_id && actual.ident == expected.ident &&
          actual.recog == expected.recog && actual.param == expected.param &&
-         actual.tag == expected.tag && actual.item_make_index == expected.item_make_index &&
-         actual.body_text == expected.body_text;
+         actual.tag == expected.tag && actual.series == expected.series &&
+         actual.item_make_index == expected.item_make_index && actual.body_text == expected.body_text;
 }
 
 }  // namespace
@@ -182,17 +196,22 @@ int main() {
 
   static_cast<void>(runtime.route_logic_command(
       trade_command(mir2::LogicCommandKind::trade_accept, 8)));
-  collect_trade_events(tick_players(runtime), actual);
+  collect_trade_events(tick_players(runtime), actual, true);
 
   const std::vector<TradeEvent> expected{
-      {7, mir2::kSmDealMenu, 0, 0, 0, 0, "HeroB"},
-      {8, mir2::kSmDealMenu, 0, 0, 0, 0, "HeroA"},
-      {7, mir2::kSmDealAddItemOk, 0, 0, 0, 0, {}},
-      {8, mir2::kSmDealRemoteAddItem, 1, 0, 0, 1001, {}},
-      {8, mir2::kSmDealChangeGoldOk, 7, 43, 0, 0, {}},
-      {7, mir2::kSmDealRemoteChangeGold, 7, 0, 0, 0, {}},
-      {8, mir2::kSmDealSuccess, 0, 0, 0, 0, {}},
-      {7, mir2::kSmDealSuccess, 0, 0, 0, 0, {}},
+      {7, mir2::kSmDealMenu, 0, 0, 0, 0, 0, "HeroB"},
+      {8, mir2::kSmDealMenu, 0, 0, 0, 0, 0, "HeroA"},
+      {7, mir2::kSmDealAddItemOk, 0, 0, 0, 0, 0, {}},
+      {8, mir2::kSmDealRemoteAddItem, 1, 0, 0, 1, 1001, {}},
+      {8, mir2::kSmDealChangeGoldOk, 7, 43, 0, 0, 0, {}},
+      {7, mir2::kSmDealRemoteChangeGold, 7, 0, 0, 0, 0, {}},
+      {8, mir2::kSmAddItem, 2, 0, 0, 1, 1001, {}},
+      {7, mir2::kSmGoldChanged, 107, 0, 0, 0, 0, {}},
+      {8, mir2::kSmGoldChanged, 43, 0, 0, 0, 0, {}},
+      {7, mir2::kSmWeightChanged, 0, 0, 0, 36683, 0, {}},
+      {8, mir2::kSmWeightChanged, 2, 0, 0, 36681, 0, {}},
+      {8, mir2::kSmDealSuccess, 0, 0, 0, 0, 0, {}},
+      {7, mir2::kSmDealSuccess, 0, 0, 0, 0, 0, {}},
   };
 
   if (actual.size() != expected.size()) {
