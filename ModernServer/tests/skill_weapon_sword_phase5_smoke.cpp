@@ -35,10 +35,14 @@ mir2::MagicConfig make_sword_magic(std::int32_t id) {
   magic.legacy.need_level = {1, 1, 1, 1};
   magic.legacy.max_train = {2, 500, 1000, 1000};
   magic.legacy.max_train_level = 3;
-  if (id == 26) {
+  if (id == 25) {
+    magic.legacy.def_spell = 3;
+  } else if (id == 26) {
     magic.legacy.def_spell = 7;
   } else if (id == 27) {
     magic.legacy.spell = 15;
+  } else if (id == 34) {
+    magic.legacy.def_spell = 4;
   }
   return magic;
 }
@@ -215,6 +219,17 @@ std::int32_t count_packet_ident_delay(const mir2::RuntimeDispatch& dispatch,
       }));
 }
 
+std::int32_t first_packet_index(const mir2::RuntimeDispatch& dispatch, std::uint16_t ident) {
+  for (std::int32_t index = 0; index < static_cast<std::int32_t>(dispatch.session_events.size());
+       ++index) {
+    const auto decoded = mir2::decode_legacy_game_packet(dispatch.session_events[index].packet);
+    if (decoded.has_value() && decoded->message.ident == ident) {
+      return index;
+    }
+  }
+  return -1;
+}
+
 std::vector<std::pair<std::int32_t, std::int32_t>> packet_recogs_and_delays(
     const mir2::RuntimeDispatch& dispatch, std::uint16_t ident) {
   std::vector<std::pair<std::int32_t, std::int32_t>> values;
@@ -280,11 +295,16 @@ int main() {
     append(dispatch, runtime.route_logic_command(attack(1511, 10, 9, mir2::kCmCrossHit)));
     append(dispatch, runtime.tick());
     assert(has_packet_ident(dispatch, mir2::legacy::kSmCrossHit));
+    assert(has_packet_ident(dispatch, mir2::kSmHealthSpellChanged));
+    const auto cross_after = runtime.snapshot_character_actor("Cross34");
+    assert(cross_after.has_value() && cross_after->ability.mp == 116);
     assert(count_trace(dispatch, "struck") >= 2);
     const auto struck = packet_recogs_and_delays(dispatch, mir2::kSmStruck);
     assert(struck.size() >= 2);
     assert(struck[0] == std::make_pair(2, 500));
     assert(struck[1] == std::make_pair(1, 200));
+    assert(first_packet_index(dispatch, mir2::kSmStruck) <
+           first_packet_index(dispatch, mir2::legacy::kSmCrossHit));
     assert(has_trace(dispatch, "train_skill"));
     assert(has_trace(dispatch, "train_skill", 1));
 
@@ -314,6 +334,27 @@ int main() {
     assert(count_trace(dispatch, "struck") == 1);
     assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 200) == 0);
     assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 500) == 1);
+  }
+
+  {
+    auto config = base_config();
+    config.spawns.push_back(spawn("CrossLowMpTarget", 10, 9, 200));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto record = character("CrossLowMp", {34, 3});
+    record.ability.mp = 3;
+    static_cast<void>(runtime.route_logic_command(enter(1515, std::move(record))));
+    static_cast<void>(runtime.tick());
+    auto dispatch = runtime.route_logic_command(spell(1515, 34));
+    append(dispatch, runtime.tick());
+    assert(has_raw_prefix(dispatch, "+CRS/"));
+    append(dispatch, runtime.route_logic_command(attack(1515, 10, 9, mir2::kCmCrossHit)));
+    append(dispatch, runtime.tick());
+    assert(has_trace(dispatch, "sword_mp_downgrade"));
+    assert(has_packet_ident(dispatch, mir2::legacy::kSmHit));
+    assert(!has_packet_ident(dispatch, mir2::legacy::kSmCrossHit));
+    const auto low_mp = runtime.snapshot_character_actor("CrossLowMp");
+    assert(low_mp.has_value() && low_mp->ability.mp == 3);
   }
 
   {

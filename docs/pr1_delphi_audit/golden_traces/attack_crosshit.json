@@ -32,10 +32,9 @@
       "note": "Client sends attacker position; cross targets are resolved server-side."
     },
     {
-      "stage": "server_motion",
-      "message_type": "SM_CROSSHIT",
-      "message_id": 35,
-      "receivers": "all visible players"
+      "stage": "server_mp_check",
+      "action": "HitHit checks CrossHit MP before resolving target; if MP is present, DamageSpell(GetSWSpell(PCrossHitSkill)+DefSpell) and HealthSpellChanged run, otherwise hitmode downgrades to RM_HIT.",
+      "delphi_line": "ObjBase.pas:5628-5635"
     },
     {
       "stage": "server_damage",
@@ -62,6 +61,19 @@
           "note": "DirectAttack queues visible struck after 500ms; non-human targets also receive immediate internal RM_STRUCK for AI reaction."
         }
       ]
+    },
+    {
+      "stage": "training",
+      "rule": "Train cross-hit sword skill on successful monster/animal hit path.",
+      "delphi_line": "ObjBase.pas:5520-5527"
+    },
+    {
+      "stage": "server_motion",
+      "message_type": "SM_CROSSHIT",
+      "message_id": 35,
+      "receivers": "all visible players",
+      "delphi_line": "ObjBase.pas:5687-5692",
+      "note": "HitMotion runs after _Attack returns; visible SM_STRUCK messages were already queued with their delays."
     }
   ],
   "cplusplus_mapping": {

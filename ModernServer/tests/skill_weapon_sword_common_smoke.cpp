@@ -34,7 +34,11 @@ mir2::MagicConfig make_sword_magic(std::int32_t id) {
   magic.legacy.max_train = {2, 500, 1000, 1000};
   magic.legacy.max_train_level = 3;
   magic.legacy.delay_time = 0;
-  magic.legacy.def_spell = id == 26 ? 7 : 0;
+  if (id == 25) {
+    magic.legacy.def_spell = 3;
+  } else if (id == 26) {
+    magic.legacy.def_spell = 7;
+  }
   return magic;
 }
 
@@ -217,6 +221,17 @@ std::int32_t count_packet_ident(const mir2::RuntimeDispatch& dispatch, std::uint
         const auto decoded = mir2::decode_legacy_game_packet(event.packet);
         return decoded.has_value() && decoded->message.ident == ident;
       }));
+}
+
+std::int32_t first_packet_index(const mir2::RuntimeDispatch& dispatch, std::uint16_t ident) {
+  for (std::int32_t index = 0; index < static_cast<std::int32_t>(dispatch.session_events.size());
+       ++index) {
+    const auto decoded = mir2::decode_legacy_game_packet(dispatch.session_events[index].packet);
+    if (decoded.has_value() && decoded->message.ident == ident) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 std::vector<std::pair<std::int32_t, std::int32_t>> packet_recogs_and_delays(
@@ -424,9 +439,14 @@ int main() {
     append(dispatch, runtime.route_logic_command(attack(1221, 10, 9, mir2::kCmWideHit)));
     append(dispatch, runtime.tick(3000));
     assert(has_packet_ident(dispatch, mir2::legacy::kSmWideHit));
+    assert(has_packet_ident(dispatch, mir2::kSmHealthSpellChanged));
+    const auto wide_after = runtime.snapshot_character_actor("Wide");
+    assert(wide_after.has_value() && wide_after->ability.mp == 97);
     assert(count_trace(dispatch, "struck") == 3);
     assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 200) == 1);
     assert(count_packet_ident_delay(dispatch, mir2::kSmStruck, 500) == 2);
+    assert(first_packet_index(dispatch, mir2::kSmStruck) <
+           first_packet_index(dispatch, mir2::legacy::kSmWideHit));
     assert(count_trace(dispatch, "train_skill") == 1);
   }
 
@@ -494,6 +514,27 @@ int main() {
     assert(has_packet_ident(dispatch, mir2::legacy::kSmWideHit));
     assert(count_trace(dispatch, "struck") == 1);
     assert(count_trace(dispatch, "train_skill") == 1);
+  }
+
+  {
+    auto config = base_config();
+    config.spawns.push_back(spawn("WideLowMpTarget", 10, 9));
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    auto record = character("WideLowMp", {25, 3});
+    record.ability.mp = 2;
+    static_cast<void>(runtime.route_logic_command(enter(1228, std::move(record))));
+    static_cast<void>(runtime.tick(1000));
+    auto dispatch = runtime.route_logic_command(spell(1228, 25));
+    append(dispatch, runtime.tick(2000));
+    assert(has_raw_prefix(dispatch, "+WID/"));
+    append(dispatch, runtime.route_logic_command(attack(1228, 10, 9, mir2::kCmWideHit)));
+    append(dispatch, runtime.tick(3000));
+    assert(has_trace(dispatch, "sword_mp_downgrade"));
+    assert(has_packet_ident(dispatch, mir2::legacy::kSmHit));
+    assert(!has_packet_ident(dispatch, mir2::legacy::kSmWideHit));
+    const auto low_mp = runtime.snapshot_character_actor("WideLowMp");
+    assert(low_mp.has_value() && low_mp->ability.mp == 2);
   }
 
   {
@@ -579,6 +620,23 @@ int main() {
     assert(has_packet_ident(dispatch, mir2::legacy::kSmHit));
     assert(has_trace(dispatch, "struck"));
     assert(has_trace(dispatch, "train_skill"));
+  }
+
+  {
+    auto config = base_config();
+    mir2::LogicRuntime runtime(config);
+    runtime.initialize();
+    static_cast<void>(runtime.route_logic_command(enter(1242, character("BasicNoTarget", {3}))));
+    static_cast<void>(runtime.tick(1000));
+    const auto rng_before = runtime.legacy_random_state();
+    auto dispatch = runtime.route_logic_command(attack(1242, 1, 1));
+    append(dispatch, runtime.tick(2000));
+    assert(runtime.legacy_random_state() != rng_before);
+    assert(has_packet_ident(dispatch, mir2::legacy::kSmHit));
+    assert(has_trace(dispatch, "no_target"));
+    const auto* attack_roll = find_trace(dispatch, "attack_power_roll");
+    assert(attack_roll != nullptr && attack_roll->target_actor_id == 0);
+    assert(!has_trace(dispatch, "train_skill"));
   }
 
   return 0;
