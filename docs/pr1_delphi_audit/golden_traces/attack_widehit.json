@@ -31,16 +31,15 @@
       "note": "Client sends attacker position; fan targets are resolved server-side."
     },
     {
+      "stage": "server_mp_check",
+      "action": "HitHit checks WideHit MP before resolving target; if MP is present, DamageSpell(GetSWSpell(PWideHitSkill)+DefSpell) and HealthSpellChanged run, otherwise hitmode downgrades to RM_HIT.",
+      "delphi_line": "ObjBase.pas:5618-5625"
+    },
+    {
       "stage": "server_targeting",
       "action": "SwordWideAttack uses direction offsets 7, 1, 2 relative to facing direction.",
       "delphi_line": "ObjBase.pas:5285-5304",
       "shape": "three-cell fan"
-    },
-    {
-      "stage": "server_motion",
-      "message_type": "SM_WIDEHIT",
-      "message_id": 24,
-      "receivers": "all visible players"
     },
     {
       "stage": "server_damage",
@@ -68,6 +67,14 @@
       "stage": "training",
       "rule": "Train sword skill on successful hit path.",
       "delphi_line": "ObjBase.pas:5470-5527"
+    },
+    {
+      "stage": "server_motion",
+      "message_type": "SM_WIDEHIT",
+      "message_id": 24,
+      "receivers": "all visible players",
+      "delphi_line": "ObjBase.pas:5687-5692",
+      "note": "HitMotion runs after _Attack returns; visible SM_STRUCK messages were already queued with their delays."
     }
   ],
   "cplusplus_mapping": {

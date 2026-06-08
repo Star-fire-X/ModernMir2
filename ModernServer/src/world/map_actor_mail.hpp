@@ -2804,6 +2804,28 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
         }
       }
 
+      if (effective_ident == kCmWideHit || effective_ident == kCmCrossHit) {
+        const auto magic_it = magic_configs_.find(sword_magic_id);
+        auto* user_magic = attacker->learned_magic_mutable(sword_magic_id);
+        const auto spell_point =
+            magic_it != magic_configs_.end() && user_magic != nullptr
+                ? legacy_spell_point(magic_it->second.legacy,
+                                     static_cast<std::int32_t>(user_magic->level))
+                : 0;
+        if (spell_point > 0 && !attacker->spend_mp(spell_point)) {
+          add_legacy_trace(dispatch, "LegacySkill", "sword_mp_downgrade",
+                           effective_mail, current_tick, now_ms, false,
+                           spell_point, 0, "GetSpellPoint");
+          effective_ident = kCmHit;
+          effective_mail.game_message.ident = effective_ident;
+          sword_magic_id = attacker->learned_magic(3) != nullptr ? 3 : 0;
+        } else if (spell_point > 0) {
+          queue_packet(dispatch, attacker->session_id(),
+                       make_health_spell_changed_packet(attacker->session_id(),
+                                                        *attacker));
+        }
+      }
+
       attacker->on_mail(effective_mail, context);
 
       const auto attack_range = resolve_attack_range(effective_ident);
@@ -2913,16 +2935,23 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       add_legacy_trace(dispatch, "LegacyCombat", "ack", effective_mail, current_tick, now_ms, true, 0, 0,
                        "attack");
 
-      // 广播攻击动画
-      for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
-        if (watcher.id() != attacker->id() && !is_legacy_visible_to(watcher, *attacker)) {
+      auto attack_broadcasted = false;
+      auto broadcast_attack = [&]() {
+        if (attack_broadcasted) {
           return;
         }
-        queue_packet(dispatch, watcher.session_id(),
-                     make_hit_packet(watcher.session_id(), *attacker, effective_ident));
-      });
-      add_legacy_trace(dispatch, "LegacyCombat", "attack_broadcast", effective_mail, current_tick, now_ms,
-                       true, 0, 0, "SM_HIT");
+        attack_broadcasted = true;
+        for_each_player(objects_, [&](std::uint64_t, const Player& watcher) {
+          if (watcher.id() != attacker->id() && !is_legacy_visible_to(watcher, *attacker)) {
+            return;
+          }
+          queue_packet(dispatch, watcher.session_id(),
+                       make_hit_packet(watcher.session_id(), *attacker, effective_ident));
+        });
+        add_legacy_trace(dispatch, "LegacyCombat", "attack_broadcast",
+                         effective_mail, current_tick, now_ms, true, 0, 0,
+                         "SM_HIT");
+      };
 
       // 攻杀剑术蓄力进度处理
       auto advance_power_hit_proc = [&]() {
@@ -2960,7 +2989,55 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       };
       advance_power_hit_proc();
 
+      auto roll_attack_power_for_target = [&](std::uint64_t target_actor_id) {
+        const auto dc_min = packed_min(attacker->character().ability.dc);
+        const auto dc_max =
+            std::max(dc_min, packed_max(attacker->character().ability.dc) +
+                                 attacker->legacy_dc_up_bonus());
+        const auto range = std::max(0, dc_max - dc_min);
+        const auto luck = attacker->legacy_luck();
+        auto raw = dc_min;
+        if (luck > 0) {
+          const auto gate_range = std::max(1, 10 - std::min(9, luck));
+          const auto gate = legacy_random_value(dispatch, "LegacyCombat",
+                                                "attack_luck_gate", gate_range,
+                                                attacker->id(), target_actor_id,
+                                                "attack", now_ms, current_tick);
+          if (gate == 0) {
+            raw = dc_min + range;
+          } else {
+            const auto roll = legacy_random_value(dispatch, "LegacyCombat",
+                                                  "attack_power_roll", range + 1,
+                                                  attacker->id(), target_actor_id,
+                                                  "attack", now_ms, current_tick);
+            raw = dc_min + std::clamp(roll, 0, range);
+          }
+        } else {
+          const auto roll = legacy_random_value(dispatch, "LegacyCombat",
+                                                "attack_power_roll", range + 1,
+                                                attacker->id(), target_actor_id,
+                                                "attack", now_ms, current_tick);
+          raw = dc_min + std::clamp(roll, 0, range);
+          if (luck < 0) {
+            const auto gate_range = 10 - std::max(0, -luck);
+            const auto gate =
+                gate_range <= 0
+                    ? 0
+                    : legacy_random_value(dispatch, "LegacyCombat",
+                                          "attack_luck_gate", gate_range,
+                                          attacker->id(), target_actor_id,
+                                          "attack", now_ms, current_tick);
+            if (gate == 0) {
+              raw = dc_min;
+            }
+          }
+        }
+        return std::max(0, raw);
+      };
+
       if (target == nullptr && direct_attack_targets.empty()) {
+        static_cast<void>(roll_attack_power_for_target(0));
+        broadcast_attack();
         add_legacy_trace(dispatch, "LegacyCombat", "no_target", effective_mail, current_tick, now_ms,
                          false, 0, 0, "attack");
         break;
@@ -2969,14 +3046,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
                                                             current_tick, now_ms));
 
       // 伤害计算
-      const auto attack_roll_ident =
-          sword_magic_id == 4 || sword_magic_id == 7 || sword_magic_id == 12 ||
-                  sword_magic_id == 25 || sword_magic_id == 26 || sword_magic_id == 34
-              ? kCmHit
-              : effective_ident;
-      auto attack_power =
-          roll_legacy_player_attack_power(*attacker, *target, attack_roll_ident, dispatch,
-                                          "LegacyCombat", "attack", current_tick, now_ms);
+      auto attack_power = roll_attack_power_for_target(target->id());
       auto direct_attack_power = attack_power;
 
       // 攻杀剑术伤害加成
@@ -3225,6 +3295,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
       if (!legacy_hit_roll_succeeds(legacy_accuracy_point(*attacker), hit_roll)) {
         add_legacy_trace(dispatch, "LegacyCombat", "miss", effective_mail, current_tick, now_ms, false,
                          hit_roll, 0, "AccuracyPoint<=Random(SpeedPoint)");
+        broadcast_attack();
         break;
       }
 
@@ -3323,6 +3394,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
             }
           }
         }
+        broadcast_attack();
         break;
       }
 
@@ -3585,6 +3657,7 @@ void MapActor::handle_mail(const ActorMail& mail, RuntimeDispatch& dispatch,
           }
         }
       }
+      broadcast_attack();
       break;
     }
     /**@}*/

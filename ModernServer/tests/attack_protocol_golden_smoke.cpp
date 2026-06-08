@@ -170,13 +170,13 @@ mir2::MapActor make_map(bool fight_zone = false) {
   return mir2::MapActor(map_config, budgets, {}, {});
 }
 
-void assert_hit_before_struck(const mir2::RuntimeDispatch& dispatch, std::uint64_t session_id,
-                              std::int32_t attacker_id, std::int32_t target_id) {
+void assert_hit_after_struck(const mir2::RuntimeDispatch& dispatch, std::uint64_t session_id,
+                             std::int32_t attacker_id, std::int32_t target_id) {
   const auto hit = packet_for_recog(dispatch, session_id, mir2::kSmHit, attacker_id);
   const auto struck = packet_for_recog(dispatch, session_id, mir2::kSmStruck, target_id);
   assert(hit.has_value());
   assert(struck.has_value());
-  assert(hit->index < struck->index);
+  assert(struck->index < hit->index);
   assert(hit->delay_ms == 0);
   assert(struck->delay_ms == kMainStruckDelayMs);
 }
@@ -200,8 +200,8 @@ int main() {
     assert(map.enqueue_legacy_player_command(make_attack(player_id, session_id, monster_id), 20));
     const auto dispatch = map.legacy_process_player(player_id, 2, 20, false);
 
-    assert_hit_before_struck(dispatch, session_id, static_cast<std::int32_t>(player_id),
-                             static_cast<std::int32_t>(monster_id));
+    assert_hit_after_struck(dispatch, session_id, static_cast<std::int32_t>(player_id),
+                            static_cast<std::int32_t>(monster_id));
     const auto hit = packet_for_recog(dispatch, session_id, mir2::kSmHit,
                                       static_cast<std::int32_t>(player_id));
     assert(hit->decoded.message.param == 10);
@@ -273,8 +273,8 @@ int main() {
         make_attack(attacker_id, attacker_session_id, target_id), 20));
     const auto dispatch = map.legacy_process_player(attacker_id, 2, 20, false);
 
-    assert_hit_before_struck(dispatch, target_session_id, static_cast<std::int32_t>(attacker_id),
-                             static_cast<std::int32_t>(target_id));
+    assert_hit_after_struck(dispatch, target_session_id, static_cast<std::int32_t>(attacker_id),
+                            static_cast<std::int32_t>(target_id));
     const auto struck = packet_for_recog(dispatch, target_session_id, mir2::kSmStruck,
                                          static_cast<std::int32_t>(target_id));
     const auto struck_body = decode_body<mir2::LegacyMessageBodyWL>(struck->decoded.body);
@@ -324,8 +324,8 @@ int main() {
     assert(map.enqueue_legacy_player_command(make_attack(player_id, session_id, monster_id), 20));
     const auto dispatch = map.legacy_process_player(player_id, 2, 20, false);
 
-    assert_hit_before_struck(dispatch, session_id, static_cast<std::int32_t>(player_id),
-                             static_cast<std::int32_t>(monster_id));
+    assert_hit_after_struck(dispatch, session_id, static_cast<std::int32_t>(player_id),
+                            static_cast<std::int32_t>(monster_id));
     const auto* hit_check = find_trace(dispatch, "LegacyCombat", "hit_check");
     assert(hit_check != nullptr);
     assert(hit_check->label == "range=0");
